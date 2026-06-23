@@ -70,8 +70,7 @@ export class SocialAgentActivitySearchService {
         matchScore: activity.matchScore,
       })),
       candidateCount: activityResults.length,
-      emptyReason:
-        activityResults.length === 0 ? 'no_real_candidates' : null,
+      emptyReason: activityResults.length === 0 ? 'no_real_candidates' : null,
       nextStep:
         activityResults.length > 0
           ? '等待用户选择活动或继续筛选'
@@ -293,7 +292,8 @@ function resolveActivitySearchCriteria(
 function readConversationHistoryFromTaskContext(
   taskContext?: Record<string, unknown>,
 ): Array<Record<string, unknown>> | null {
-  const history = taskContext?.conversationHistory ?? taskContext?.recentMessages;
+  const history =
+    taskContext?.conversationHistory ?? taskContext?.recentMessages;
   if (!Array.isArray(history)) return null;
   const records = history.filter((item): item is Record<string, unknown> =>
     isRecord(item),
@@ -316,7 +316,9 @@ function readActivitySearchTaskContextSlotValues(
   };
 }
 
-function readActivitySearchTaskSlotValues(task: AgentTask): Record<string, string> {
+function readActivitySearchTaskSlotValues(
+  task: AgentTask,
+): Record<string, string> {
   const memory = readSocialAgentTaskMemory(task);
   const taskSlots = isRecord(memory.taskSlots) ? memory.taskSlots : {};
   return {

@@ -642,7 +642,9 @@ describe('SocialAgentChatLlmService', () => {
     });
     await Promise.resolve();
 
-    await jest.advanceTimersByTimeAsync(SOCIAL_AGENT_QUALITY_CHAT_TIMEOUT_MS - 1);
+    await jest.advanceTimersByTimeAsync(
+      SOCIAL_AGENT_QUALITY_CHAT_TIMEOUT_MS - 1,
+    );
     expect(aborts).toHaveLength(0);
     await jest.advanceTimersByTimeAsync(1);
     const fallbackAnswer = await answer;
@@ -731,7 +733,9 @@ describe('SocialAgentChatLlmService', () => {
       body?: string;
     };
     expect(JSON.parse(request.body ?? '{}').model).toBe('deepseek-v4-pro');
-    await jest.advanceTimersByTimeAsync(SOCIAL_AGENT_QUALITY_TOOL_TIMEOUT_MS - 1);
+    await jest.advanceTimersByTimeAsync(
+      SOCIAL_AGENT_QUALITY_TOOL_TIMEOUT_MS - 1,
+    );
     expect(aborts).toHaveLength(0);
     await jest.advanceTimersByTimeAsync(1);
     await expect(extraction).resolves.toEqual({});
@@ -853,7 +857,9 @@ describe('SocialAgentChatLlmService', () => {
     });
     await Promise.resolve();
 
-    await jest.advanceTimersByTimeAsync(SOCIAL_AGENT_QUALITY_CHAT_FIRST_CHUNK_TIMEOUT_MS);
+    await jest.advanceTimersByTimeAsync(
+      SOCIAL_AGENT_QUALITY_CHAT_FIRST_CHUNK_TIMEOUT_MS,
+    );
     await expect(completion).resolves.toBe('我已经接上上下文');
     expect(global.fetch).toHaveBeenCalledTimes(2);
     expect(aborts).toHaveLength(1);
@@ -1037,10 +1043,14 @@ describe('SocialAgentChatLlmService', () => {
       cache,
     );
 
-    await expect(service.extractProfileFieldsWithLlm(makeTask(), '我在青岛。')).resolves.toEqual({
+    await expect(
+      service.extractProfileFieldsWithLlm(makeTask(), '我在青岛。'),
+    ).resolves.toEqual({
       city: '青岛',
     });
-    await expect(service.extractProfileFieldsWithLlm(makeTask(), '我在青岛。')).resolves.toEqual({
+    await expect(
+      service.extractProfileFieldsWithLlm(makeTask(), '我在青岛。'),
+    ).resolves.toEqual({
       city: '青岛',
     });
 

@@ -63,8 +63,6 @@ const validEnv = {
   AGENT_OBSERVABILITY_ALERT_WEBHOOK_URL: '',
   AGENT_OBSERVABILITY_ALERT_WEBHOOK_TOKEN: '',
   AGENT_OBSERVABILITY_ALERT_COOLDOWN_MS: '300000',
-  KAFKA_BROKERS: 'kafka:29092',
-  ENABLE_KAFKA: 'true',
 };
 
 describe('production-env-readiness', () => {
@@ -391,7 +389,9 @@ describe('production-env-readiness', () => {
         expect.objectContaining({
           key: 'SOCIAL_AGENT_FINAL_RESPONSE_FIRST_CHUNK_TIMEOUT_MS',
         }),
-        expect.objectContaining({ key: 'SOCIAL_AGENT_FINAL_RESPONSE_MAX_TOKENS' }),
+        expect.objectContaining({
+          key: 'SOCIAL_AGENT_FINAL_RESPONSE_MAX_TOKENS',
+        }),
         expect.objectContaining({ key: 'SOCIAL_AGENT_PLANNER_TIMEOUT_MS' }),
         expect.objectContaining({ key: 'SOCIAL_AGENT_INTENT_TIMEOUT_MS' }),
         expect.objectContaining({
@@ -509,8 +509,8 @@ describe('production-env-readiness', () => {
     const report = buildProductionEnvReport({
       ...validEnv,
       FITMEET_LIFE_GRAPH_AGENT_WORKER_MODEL: 'deepseek-chat',
-      FITMEET_SOCIAL_MATCH_AGENT_WORKER_MODEL: 'deepseek-v4-flash',
-      FITMEET_MEET_LOOP_AGENT_WORKER_MODEL: 'deepseek-v4',
+      FITMEET_MATCH_AGENT_WORKER_MODEL: 'deepseek-v4-flash',
+      FITMEET_AGENT_BRAIN_WORKER_MODEL: 'deepseek-v4',
       FITMEET_SUBAGENT_WORKER_MODEL: 'deepseek-fast-worker',
     });
 
@@ -521,10 +521,10 @@ describe('production-env-readiness', () => {
           key: 'FITMEET_LIFE_GRAPH_AGENT_WORKER_MODEL',
         }),
         expect.objectContaining({
-          key: 'FITMEET_SOCIAL_MATCH_AGENT_WORKER_MODEL',
+          key: 'FITMEET_MATCH_AGENT_WORKER_MODEL',
         }),
         expect.objectContaining({
-          key: 'FITMEET_MEET_LOOP_AGENT_WORKER_MODEL',
+          key: 'FITMEET_AGENT_BRAIN_WORKER_MODEL',
         }),
         expect.objectContaining({
           key: 'FITMEET_SUBAGENT_WORKER_MODEL',

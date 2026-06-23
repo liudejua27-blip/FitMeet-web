@@ -113,9 +113,7 @@ export class SocialAgentEventStore {
   ) {
     const rows = await this.eventRepo.find({
       where:
-        typeof ownerUserId === 'number'
-          ? { taskId, ownerUserId }
-          : { taskId },
+        typeof ownerUserId === 'number' ? { taskId, ownerUserId } : { taskId },
       order: { createdAt: 'ASC', id: 'ASC' },
       take: Math.max(1, Math.min(options.take ?? 1000, 2000)),
     });
@@ -131,7 +129,7 @@ export class SocialAgentEventStore {
       )
       .map((event) => this.sanitizeReplayEvent(event))
       .filter((event) => this.isReplayVisible(event.visibility, options));
-    return this.filterReplayCursor(events, options);
+    return this.filterReplayCursor(this.sortReplayEvents(events), options);
   }
 
   async buildReplayPackage(
@@ -139,19 +137,25 @@ export class SocialAgentEventStore {
     ownerUserId?: number | null,
     options: SocialCodexReplayOptions = {},
   ): Promise<SocialCodexReplayPackage> {
-    const allEvents = await this.listSocialCodexEventsByTask(taskId, ownerUserId, {
-      ...options,
-      afterSeq: null,
-      afterEventId: null,
-    });
+    const allEvents = await this.listSocialCodexEventsByTask(
+      taskId,
+      ownerUserId,
+      {
+        ...options,
+        afterSeq: null,
+        afterEventId: null,
+      },
+    );
     const events = this.filterReplayCursor(allEvents, options);
     const terminalEvent = [...allEvents]
       .reverse()
       .find(
-        (event) => event.type === 'run.completed' || event.type === 'run.failed',
+        (event) =>
+          event.type === 'run.completed' || event.type === 'run.failed',
       );
     const terminalType: 'run.completed' | 'run.failed' | null =
-      terminalEvent?.type === 'run.completed' || terminalEvent?.type === 'run.failed'
+      terminalEvent?.type === 'run.completed' ||
+      terminalEvent?.type === 'run.failed'
         ? terminalEvent.type
         : null;
     const summary = summarizeSocialCodexRun(allEvents);
@@ -293,6 +297,28 @@ export class SocialAgentEventStore {
     };
   }
 
+  private sortReplayEvents(events: SocialAgentEventV2[]): SocialAgentEventV2[] {
+    return events
+      .map((event, index) => ({ event, index }))
+      .sort((left, right) => {
+        const leftTime = Date.parse(left.event.createdAt);
+        const rightTime = Date.parse(right.event.createdAt);
+        const leftComparable = Number.isFinite(leftTime) ? leftTime : 0;
+        const rightComparable = Number.isFinite(rightTime) ? rightTime : 0;
+        if (leftComparable !== rightComparable) {
+          return leftComparable - rightComparable;
+        }
+        if (
+          left.event.runId === right.event.runId &&
+          left.event.seq !== right.event.seq
+        ) {
+          return left.event.seq - right.event.seq;
+        }
+        return left.index - right.index;
+      })
+      .map(({ event }) => event);
+  }
+
   private displayState(
     value: SocialAgentEventV2DisplayState | undefined,
   ): SocialAgentEventV2DisplayState {
@@ -323,7 +349,10 @@ export class SocialAgentEventStore {
       );
       if (index >= 0) return events.slice(index + 1);
     }
-    if (typeof options.afterSeq === 'number' && Number.isFinite(options.afterSeq)) {
+    if (
+      typeof options.afterSeq === 'number' &&
+      Number.isFinite(options.afterSeq)
+    ) {
       return events.filter((event) => event.seq > Number(options.afterSeq));
     }
     return events;

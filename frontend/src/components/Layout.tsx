@@ -2,7 +2,7 @@ import { type ReactNode, useState } from 'react';
 import clsx from 'clsx';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { usesFullBleedExperience } from '../routes/routeBoundaries';
-import { useAuthStore, useMessageStore, useNotificationStore } from '../stores';
+import { useAuthStore, useMessageStore } from '../stores';
 import { navigateToDiscoverWithScrollReset } from '../lib/scrollNavigation';
 import { SiteLink } from './navigation/SiteLink';
 import { BackToTop } from './ui';
@@ -14,7 +14,7 @@ const bottomTabs = [
   { id: 'nearby', to: '/discover', label: '发现', icon: 'discover' as const },
   { id: 'agent', to: '/agent', label: 'Agent', icon: 'create' as const, isCreate: true },
   { id: 'messages', to: '/messages', label: '消息', icon: 'messages' as const, protected: true },
-  { id: 'profile', to: '/profile', label: '我的', icon: 'profile' as const, protected: true },
+  { id: 'profile', to: '/agent/profile', label: '我的', icon: 'profile' as const, protected: true },
 ];
 
 const icpText = import.meta.env.VITE_ICP_TEXT || '鲁ICP备2026015946号-2';
@@ -26,7 +26,6 @@ const Navbar = () => {
   const [mobileOpen, setMobileOpen] = useState(false);
   const { isLoggedIn, user, openLogin, logout } = useAuthStore();
   const totalUnread = useMessageStore((s) => s.totalUnread);
-  const unreadNotifs = useNotificationStore((s) => s.unreadCount);
 
   const isActive = (path: string) =>
     location.pathname === path || (path !== '/' && location.pathname.startsWith(`${path}/`));
@@ -58,9 +57,9 @@ const Navbar = () => {
           </div>
         </div>
 
-        <button className="site-shell-search hidden lg:flex" onClick={() => navigate('/search')}>
+        <button className="site-shell-search hidden lg:flex" onClick={() => navigate('/discover')}>
           <SearchIcon />
-          搜索运动、地点或用户
+          浏览发现页
         </button>
 
         <div className="hidden items-center gap-2 md:flex">
@@ -69,17 +68,10 @@ const Navbar = () => {
               <button className="site-shell-primary" onClick={() => navigate('/agent')}>
                 告诉 Agent
               </button>
-              <IconButton
-                label="通知"
-                count={unreadNotifs}
-                onClick={() => navigate('/notifications')}
-              >
-                <BellIcon />
-              </IconButton>
               <IconButton label="消息" count={totalUnread} onClick={() => navigate('/messages')}>
                 <MessageIcon />
               </IconButton>
-              <Link to="/profile" className="site-shell-user">
+              <Link to="/agent/profile" className="site-shell-user">
                 <span style={{ background: user?.color || '#ff6a00' }}>
                   {user?.avatar || user?.name?.[0] || 'U'}
                 </span>
@@ -94,11 +86,8 @@ const Navbar = () => {
               <button className="site-shell-ghost" onClick={openLogin}>
                 登录
               </button>
-              <button
-                className="site-shell-primary"
-                onClick={() => navigateToDiscoverWithScrollReset(navigate)}
-              >
-                发布约练
+              <button className="site-shell-primary" onClick={() => navigate('/agent')}>
+                体验 Agent
               </button>
             </>
           )}
@@ -142,11 +131,8 @@ const Navbar = () => {
                 <button className="site-shell-mobile__button" onClick={openLogin}>
                   登录
                 </button>
-                <button
-                  className="site-shell-mobile__primary"
-                  onClick={() => navigateToDiscoverWithScrollReset(navigate)}
-                >
-                  发布约练
+                <button className="site-shell-mobile__primary" onClick={() => navigate('/agent')}>
+                  体验 Agent
                 </button>
               </>
             )}
@@ -195,7 +181,10 @@ const BottomTabBar = () => {
     <div className="site-shell-tabbar md:hidden">
       <div className="grid h-16 grid-cols-5">
         {bottomTabs.map((tab) => {
-          const active = location.pathname === tab.to || location.pathname.startsWith(`${tab.to}/`);
+          const active =
+            tab.id === 'agent'
+              ? location.pathname === '/agent' || location.pathname.startsWith('/agent/chat')
+              : location.pathname === tab.to || location.pathname.startsWith(`${tab.to}/`);
           return (
             <button
               key={tab.id}
@@ -223,9 +212,10 @@ const Footer = () => (
       <nav className="flex flex-wrap justify-center gap-5" aria-label="合规链接">
         <SiteLink to="/discover">发现</SiteLink>
         <Link to="/agent">FitMeet Agent</Link>
-        <Link to="/agent/settings">权限控制</Link>
-        <Link to="/developers/social-skills">Agent API</Link>
+        <Link to="/messages">消息</Link>
         <Link to="/safety">安全中心</Link>
+        <Link to="/download">下载 App</Link>
+        <Link to="/about">关于我们</Link>
         <Link to="/terms">用户协议</Link>
         <Link to="/privacy">隐私政策</Link>
       </nav>
@@ -270,23 +260,6 @@ const SearchIcon = () => (
   >
     <circle cx="11" cy="11" r="6.5" />
     <path d="M16 16L21 21" strokeLinecap="round" />
-  </svg>
-);
-
-const BellIcon = () => (
-  <svg
-    aria-hidden="true"
-    className="h-4 w-4"
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="1.8"
-  >
-    <path
-      d="M6.5 9.5a5.5 5.5 0 1 1 11 0v3.1l1.6 2.8a.8.8 0 0 1-.7 1.2H4.6a.8.8 0 0 1-.7-1.2l1.6-2.8z"
-      strokeLinejoin="round"
-    />
-    <path d="M9.5 18.5a2.5 2.5 0 0 0 5 0" strokeLinecap="round" />
   </svg>
 );
 

@@ -390,7 +390,10 @@ export class SocialAgentBrainService {
           shouldReplan: fallback.route.shouldReplan,
           shouldUpdateProfile: false,
           shouldExecuteAction: false,
-          confidence: Math.max(input.route.confidence, fallback.route.confidence),
+          confidence: Math.max(
+            input.route.confidence,
+            fallback.route.confidence,
+          ),
         }),
         'search',
         [...degradedNotes, 'rules_fallback_preserved_for_search'],
@@ -421,7 +424,10 @@ export class SocialAgentBrainService {
           shouldReplan: false,
           shouldUpdateProfile: false,
           shouldExecuteAction: true,
-          confidence: Math.max(input.route.confidence, fallback.route.confidence),
+          confidence: Math.max(
+            input.route.confidence,
+            fallback.route.confidence,
+          ),
         }),
         'action',
         [...degradedNotes, 'rules_fallback_preserved_for_approval_action'],
@@ -449,23 +455,16 @@ export class SocialAgentBrainService {
       confidence: Math.max(input.route.confidence, 0.86),
     });
 
-    return this.decision(
-      route,
-      'answer',
-      degradedNotes,
-      false,
-      false,
-      {
-        plannerSource: 'rules',
-        userIntent: fallback.route.intent,
-        reason:
-          'Planner did not return a reliable plan; preserved context instead of executing rule-based tools.',
-        responseGoal:
-          '先承认已保留用户刚才的上下文，说明当前没有继续执行搜索或动作，并邀请用户重试或继续补充。',
-        needUserConfirmation: false,
-        tools: [],
-      },
-    );
+    return this.decision(route, 'answer', degradedNotes, false, false, {
+      plannerSource: 'rules',
+      userIntent: fallback.route.intent,
+      reason:
+        'Planner did not return a reliable plan; preserved context instead of executing rule-based tools.',
+      responseGoal:
+        '先承认已保留用户刚才的上下文，说明当前没有继续执行搜索或动作，并邀请用户重试或继续补充。',
+      needUserConfirmation: false,
+      tools: [],
+    });
   }
 
   private shouldUseLlmPlanner(
@@ -499,9 +498,9 @@ export class SocialAgentBrainService {
   }
 
   private brainPlannerWorkflowShortcutsEnabled(): boolean {
-    const value = `${this.config?.get<string>(
-      'SOCIAL_AGENT_BRAIN_WORKFLOW_SHORTCUTS',
-    ) ?? ''}`
+    const value = `${
+      this.config?.get<string>('SOCIAL_AGENT_BRAIN_WORKFLOW_SHORTCUTS') ?? ''
+    }`
       .trim()
       .toLowerCase();
     return !['0', 'false', 'off', 'disabled'].includes(value);
@@ -509,7 +508,11 @@ export class SocialAgentBrainService {
 
   private hasHydratedSearchContext(value: unknown): boolean {
     const taskContext = this.isRecord(value) ? value : {};
-    if (hasExistingSocialExecutionContext({ taskContext } as SocialAgentBrainTurnInput)) {
+    if (
+      hasExistingSocialExecutionContext({
+        taskContext,
+      } as SocialAgentBrainTurnInput)
+    ) {
       return true;
     }
     if (this.hasMeaningfulSlots(taskContext.taskSlots)) return true;
@@ -527,7 +530,9 @@ export class SocialAgentBrainService {
       : [];
     return knownSlots.some((slot) => {
       if (!this.isRecord(slot)) return false;
-      return Boolean(cleanDisplayText(slot.key, '') && cleanDisplayText(slot.value, ''));
+      return Boolean(
+        cleanDisplayText(slot.key, '') && cleanDisplayText(slot.value, ''),
+      );
     });
   }
 
@@ -747,7 +752,9 @@ export class SocialAgentBrainService {
   }
 
   private brainPlannerCacheTtlMs(): number {
-    const raw = this.config?.get<string>('SOCIAL_AGENT_BRAIN_PLANNER_CACHE_TTL_MS');
+    const raw = this.config?.get<string>(
+      'SOCIAL_AGENT_BRAIN_PLANNER_CACHE_TTL_MS',
+    );
     if (raw === '0') return 0;
     const parsed = Number(raw);
     if (Number.isFinite(parsed) && parsed >= 0) {

@@ -77,6 +77,61 @@ describe('buildCandidatePoolResolvedQuery', () => {
     );
   });
 
+  it('prefers current task slots over a linked request when resolving card context', () => {
+    const query = buildCandidatePoolResolvedQuery({
+      query: {
+        ownerUserId: 1,
+        taskId: 88,
+        rawText: '继续帮我找人',
+      },
+      socialRequestId: 302,
+      request: {
+        city: '上海',
+        activityType: '咖啡',
+        interestTags: ['咖啡', 'Citywalk'],
+        rawText: '上海周末咖啡局',
+        title: '上海咖啡',
+      } as UserSocialRequest,
+      task: {
+        goal: '今天晚上在青岛大学附近散步',
+        memory: {
+          taskSlots: {
+            geo_area: {
+              value: '青岛',
+              state: 'completed',
+              source: 'user_message',
+            },
+            location_text: {
+              value: '青岛大学附近',
+              state: 'completed',
+              source: 'user_message',
+            },
+            time_window: {
+              value: '今天晚上',
+              state: 'completed',
+              source: 'user_message',
+            },
+            activity: {
+              value: '散步',
+              state: 'completed',
+              source: 'user_message',
+            },
+          },
+        },
+      } as unknown as AgentTask,
+    });
+
+    expect(query).toMatchObject({
+      city: '青岛',
+      activityType: '散步',
+      timePreference: '今天晚上',
+      locationPreference: '青岛大学附近',
+      rawText: '继续帮我找人',
+    });
+    expect(query.interestTags).toEqual(expect.arrayContaining(['散步']));
+    expect(query.interestTags).not.toEqual(expect.arrayContaining(['咖啡']));
+  });
+
   it('extracts city, activity, tags, and time from task goal raw text', () => {
     const query = buildCandidatePoolResolvedQuery({
       query: { ownerUserId: 1, taskId: 88 },

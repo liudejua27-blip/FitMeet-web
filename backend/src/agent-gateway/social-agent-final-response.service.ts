@@ -36,6 +36,11 @@ import {
 import { SocialAgentLlmOutputCacheService } from './social-agent-llm-output-cache.service';
 import { SocialAgentMetricsService } from './social-agent-metrics.service';
 import { SocialAgentSemanticResponseCacheService } from './social-agent-semantic-response-cache.service';
+import {
+  explicitlyRejectsSocialExecution,
+  isConversationOnlySocialMention,
+  isSocialAdviceQuestion,
+} from './social-agent-social-intent-gate';
 
 export interface SocialAgentFinalResponseInput {
   userMessage: string;
@@ -102,7 +107,10 @@ export class SocialAgentFinalResponseService {
     options: SocialAgentFinalResponseGenerateOptions = {},
   ): Promise<string> {
     const fallback = this.contextAwareFallbackReply(input);
-    const deterministicFallback = this.deterministicFallbackReply(input, fallback);
+    const deterministicFallback = this.deterministicFallbackReply(
+      input,
+      fallback,
+    );
     if (deterministicFallback) {
       await options.onDelta?.(deterministicFallback);
       this.metrics?.recordDeterministicRouteReply(
@@ -226,7 +234,8 @@ export class SocialAgentFinalResponseService {
     });
     const outputCacheTtlMs = this.llmOutputCacheTtlMs();
     if (outputCacheTtlMs > 0) {
-      const cached = await this.llmOutputCacheService().getAsync(outputCacheKey);
+      const cached =
+        await this.llmOutputCacheService().getAsync(outputCacheKey);
       this.metrics?.recordLlmOutputCache({
         cacheName: 'final_response_exact',
         hit: cached !== null,
@@ -494,7 +503,9 @@ export class SocialAgentFinalResponseService {
     };
   }
 
-  private contextAwareFallbackReply(input: SocialAgentFinalResponseInput): string {
+  private contextAwareFallbackReply(
+    input: SocialAgentFinalResponseInput,
+  ): string {
     const fallback = cleanDisplayText(input.fallbackReply, '').trim();
     const slots = this.tokenBudgetContextPacker().knownSlots(input);
     if (
@@ -504,6 +515,7 @@ export class SocialAgentFinalResponseService {
     ) {
       return fallback;
     }
+    if (!this.canUseTaskSlotContinuationFallback(input)) return fallback;
     const knownValues = [
       slots.activity,
       slots.time_window,
@@ -515,6 +527,44 @@ export class SocialAgentFinalResponseService {
       `我记得你已经补充了：${knownValues.slice(0, 4).join('、')}。`,
       '我会基于这些继续处理，不再重复追问；如果要修改，直接告诉我新的时间、地点或偏好。',
     ].join('');
+  }
+
+  private canUseTaskSlotContinuationFallback(
+    input: SocialAgentFinalResponseInput,
+  ): boolean {
+    const intent = this.intentOf(input);
+    const socialTaskIntent = [
+      'social_search',
+      'activity_search',
+      'candidate_followup',
+      'action_request',
+    ].includes(intent);
+    if (!socialTaskIntent) return false;
+
+    const message = cleanDisplayText(input.userMessage, '').trim();
+    if (
+      explicitlyRejectsSocialExecution(message) ||
+      isConversationOnlySocialMention(message) ||
+      isSocialAdviceQuestion(message)
+    ) {
+      return false;
+    }
+
+    if (this.isRecord(input.route)) {
+      const replyStrategy = cleanDisplayText(
+        input.route.replyStrategy,
+        '',
+      ).trim();
+      const hasExecutionSignal =
+        input.route.shouldSearch === true ||
+        input.route.shouldExecuteAction === true ||
+        input.route.shouldReplan === true;
+      if (replyStrategy === 'conversational_answer' && !hasExecutionSignal) {
+        return false;
+      }
+    }
+
+    return true;
   }
 
   private isStaleSlotClarification(
@@ -555,10 +605,10 @@ export class SocialAgentFinalResponseService {
     if (!fallback) return false;
     const hasActionableSocialContext = Boolean(
       slots.activity ||
-        slots.time_window ||
-        slots.location_text ||
-        slots.geo_area ||
-        slots.candidate_preference,
+      slots.time_window ||
+      slots.location_text ||
+      slots.geo_area ||
+      slots.candidate_preference,
     );
     if (!hasActionableSocialContext) return false;
     return /(?:保留(?:了)?当前对话|保留(?:了)?你的需求|稍后再试|稍后再试一次|可以稍后|稍后继续|连接中断|重试)/i.test(
@@ -573,9 +623,10 @@ export class SocialAgentFinalResponseService {
   ): boolean {
     if (!fallback) return false;
     if (!this.hasActionableSocialSlots(slots)) return false;
-    const socialIntent = /social_search|activity_search|candidate_followup|action_request/i.test(
-      cleanDisplayText(intent, ''),
-    );
+    const socialIntent =
+      /social_search|activity_search|candidate_followup|action_request/i.test(
+        cleanDisplayText(intent, ''),
+      );
     const asksForAlreadyStartedProfile =
       /(先|继续|可以)?(帮你|帮我)?(补齐|完善|填写|整理).{0,12}(画像|基础信息|资料)|告诉我.{0,18}(城市|兴趣|可约时间|活动|地点|区域|想认识|边界)|还缺.{0,18}(关键信息|基础信息|画像|城市|时间|地点|活动)/i.test(
         fallback,
@@ -586,10 +637,10 @@ export class SocialAgentFinalResponseService {
   private hasActionableSocialSlots(slots: Record<string, string>): boolean {
     return Boolean(
       slots.activity ||
-        slots.time_window ||
-        slots.location_text ||
-        slots.geo_area ||
-        slots.candidate_preference,
+      slots.time_window ||
+      slots.location_text ||
+      slots.geo_area ||
+      slots.candidate_preference,
     );
   }
 
@@ -622,7 +673,11 @@ export class SocialAgentFinalResponseService {
   }
 
   private isLowRiskCardActionFallback(fallback: string): boolean {
-    if (/(需要|等待|请你|请先).{0,10}(确认|同意)|确认后|发送前|发布前/.test(fallback)) {
+    if (
+      /(需要|等待|请你|请先).{0,10}(确认|同意)|确认后|发送前|发布前/.test(
+        fallback,
+      )
+    ) {
       return false;
     }
     return /(?:已记录|已收藏|已保存|已生成.{0,8}开场白|开场白草稿|暂不发布|这个操作来自旧卡片|旧卡片|暂时不可用|暂不可用)/.test(
@@ -787,7 +842,9 @@ export class SocialAgentFinalResponseService {
     input: SocialAgentFinalResponseInput,
   ): boolean {
     const intent = this.intentOf(input);
-    if (!['product_help', 'workflow_help', 'safety_or_boundary'].includes(intent)) {
+    if (
+      !['product_help', 'workflow_help', 'safety_or_boundary'].includes(intent)
+    ) {
       return false;
     }
     if (this.taskIdOf(input) != null) return false;
@@ -806,9 +863,13 @@ export class SocialAgentFinalResponseService {
     return !this.isDirectSocialExecutionRequest(input.userMessage);
   }
 
-  private contextBudgetMode(useCase: 'final_response'): SocialAgentTokenBudgetMode {
+  private contextBudgetMode(
+    useCase: 'final_response',
+  ): SocialAgentTokenBudgetMode {
     const configured = cleanDisplayText(
-      this.config?.get<string>('SOCIAL_AGENT_FINAL_RESPONSE_CONTEXT_BUDGET_MODE') ??
+      this.config?.get<string>(
+        'SOCIAL_AGENT_FINAL_RESPONSE_CONTEXT_BUDGET_MODE',
+      ) ??
         this.config?.get<string>('SOCIAL_AGENT_DEEPSEEK_CONTEXT_BUDGET_MODE') ??
         '',
       '',
@@ -865,7 +926,11 @@ export class SocialAgentFinalResponseService {
   private isDirectSocialExecutionRequest(message: string): boolean {
     const text = cleanDisplayText(message, '').trim();
     if (!text) return false;
-    if (/(怎么|如何|流程|步骤|介绍|说明).{0,12}(找|约|发布|邀请|加好友)/i.test(text)) {
+    if (
+      /(怎么|如何|流程|步骤|介绍|说明).{0,12}(找|约|发布|邀请|加好友)/i.test(
+        text,
+      )
+    ) {
       return false;
     }
     return /(帮我|给我|我要|我想|想|找|推荐|匹配|约|发布|发送|邀请|加好友|私信).{0,18}(搭子|人|女生|男生|活动|约练|朋友|候选|发现|邀请|消息|私信|好友)/i.test(

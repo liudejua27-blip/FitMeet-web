@@ -236,10 +236,11 @@ export class SocialAgentRunRecommendationService {
             FitMeetAgentToolStatus.Running,
             { taskId: task.id },
           );
-          const draftResult = await this.draftSearch.generateDraftWithTool(
-            task,
-            executionGoal,
-          );
+          const draftResult =
+            this.draftSearch.generateDeterministicDraftFromTask(
+              task,
+              executionGoal,
+            );
           await progress.recordTool(
             'fitmeet_create_social_intent',
             FitMeetAgentToolStatus.Succeeded,
@@ -260,11 +261,7 @@ export class SocialAgentRunRecommendationService {
             task.id,
             input.ownerUserId,
           );
-          this.restoreHydratedContextOnTask(
-            task,
-            hydratedContext,
-            input.goal,
-          );
+          this.restoreHydratedContextOnTask(task, hydratedContext, input.goal);
           draft = buildSocialAgentRequestDraft({
             agentTaskId: task.id,
             draft: draftResult.draft,
@@ -277,11 +274,7 @@ export class SocialAgentRunRecommendationService {
             task.id,
             input.ownerUserId,
           );
-          this.restoreHydratedContextOnTask(
-            task,
-            hydratedContext,
-            input.goal,
-          );
+          this.restoreHydratedContextOnTask(task, hydratedContext, input.goal);
           draftPublication = await this.draftSearch.autoPublishDraftIfAllowed(
             task,
             draft,
@@ -390,11 +383,7 @@ export class SocialAgentRunRecommendationService {
             task.id,
             input.ownerUserId,
           );
-          this.restoreHydratedContextOnTask(
-            task,
-            hydratedContext,
-            input.goal,
-          );
+          this.restoreHydratedContextOnTask(task, hydratedContext, input.goal);
           await progress.completeStep(
             'search',
             '正在检索附近候选人',

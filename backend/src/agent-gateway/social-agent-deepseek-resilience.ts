@@ -51,7 +51,11 @@ export function isRetryableSocialAgentDeepSeekFailure(
   if (options.includeTimeoutFailures && /deepseek_timeout/i.test(reason)) {
     return true;
   }
-  if (/fetch failed|network|econnreset|etimedout|eai_again|socket|terminated|connection/i.test(reason)) {
+  if (
+    /fetch failed|network|econnreset|etimedout|eai_again|socket|terminated|connection/i.test(
+      reason,
+    )
+  ) {
     return true;
   }
   if (!options.includeJsonFormatErrors) return false;

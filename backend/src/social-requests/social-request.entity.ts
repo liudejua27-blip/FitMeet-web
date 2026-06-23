@@ -13,7 +13,7 @@ import { AgentConnection } from '../agent-gateway/entities/agent-connection.enti
 
 export enum SocialRequestSource {
   Manual = 'manual',
-  OpenClaw = 'openclaw',
+  FitMeetAgent = 'fitmeet_agent',
   Codex = 'codex',
   Claude = 'claude',
   CustomAgent = 'custom_agent',

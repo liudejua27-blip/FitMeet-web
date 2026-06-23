@@ -9,6 +9,7 @@ import type {
 import type { SocialAgentIntentRouterResult } from './social-agent-intent-router.service';
 import type { FitMeetAlphaAgentName } from './fitmeet-alpha-agent.types';
 import { AgentL5RuntimeService } from './agent-l5-runtime.service';
+import { fitMeetAlphaAgentRuntimeBoundary } from './fitmeet-alpha-agent-topology';
 
 type RunSubagentInput = {
   loop: AgentLoopRun;
@@ -28,6 +29,7 @@ type RunSubagentResult = {
 type HandoffFromObservationInput = Omit<RunSubagentInput, 'loop'>;
 
 type SubagentRuntimeConfig = {
+  memoryScope: string;
   maxToolCalls: number;
   maxRetries: number;
   scratchpadPolicy: string;
@@ -47,14 +49,18 @@ export class FitMeetSubagentRuntimeService {
     const agent = this.agentForDecision(input.route, input.brainDecision);
     let loop = this.agentLoop.tool(input.loop, {
       agent,
-      toolName: handoff.toolCalls[0]?.toolName ?? this.defaultToolName(agent),
+      toolName:
+        handoff.toolCalls[0]?.toolName ??
+        this.defaultToolName(agent, input.route),
       toolInput: handoff.plannerInput ?? handoff.input,
       critique: `${agent} owns this turn before handing back to the main agent.`,
       nextPhase: 'observe',
     });
     loop = this.agentLoop.observe(loop, {
       agent,
-      toolName: handoff.toolCalls[0]?.toolName ?? this.defaultToolName(agent),
+      toolName:
+        handoff.toolCalls[0]?.toolName ??
+        this.defaultToolName(agent, input.route),
       observation: handoff.observation,
       critique: handoff.critique,
       nextPhase: 'replan',
@@ -83,7 +89,7 @@ export class FitMeetSubagentRuntimeService {
       intent: input.route.intent,
       replyStrategy: input.route.replyStrategy,
       plannerSource: input.brainDecision?.plannerSource ?? input.route.source,
-      memoryScope: this.memoryScope(agent),
+      memoryScope: runtime.memoryScope,
       toolBudget: {
         maxToolCalls: runtime.maxToolCalls,
         maxRetries: runtime.maxRetries,
@@ -110,7 +116,7 @@ export class FitMeetSubagentRuntimeService {
     const critique = this.critique(agent, observation, runtime);
     const handoff = this.agentLoop.buildHandoff({
       agent,
-      memoryScope: this.memoryScope(agent),
+      memoryScope: runtime.memoryScope,
       input: subagentInput,
       toolNames: executableTools.map((tool) => tool.name),
       observation,
@@ -150,7 +156,7 @@ export class FitMeetSubagentRuntimeService {
         ownerUserId: input.ownerUserId,
         agentTaskId: input.taskId ?? null,
         agentName: agent,
-        memoryScope: handoff.memoryScope ?? this.memoryScope(agent),
+        memoryScope: handoff.memoryScope ?? runtime.memoryScope,
         input: handoff.input,
         plannerInput: handoff.plannerInput ?? handoff.input,
         toolCalls: handoff.toolCalls,
@@ -177,14 +183,14 @@ export class FitMeetSubagentRuntimeService {
     ) {
       return 'Life Graph Agent';
     }
-    if (route.intent === 'fitness_math') return 'Math Agent';
-    if (route.intent === 'action_request') return 'Meet Loop Agent';
+    if (route.intent === 'fitness_math') return 'Agent Brain';
+    if (route.intent === 'action_request') return 'Match Agent';
     if (
       route.intent === 'social_search' ||
       route.intent === 'activity_search' ||
       route.intent === 'candidate_followup'
     ) {
-      return 'Social Match Agent';
+      return 'Match Agent';
     }
     return 'Agent Brain';
   }
@@ -195,24 +201,23 @@ export class FitMeetSubagentRuntimeService {
   ): SocialAgentBrainPlannedTool[] {
     const tools = input.brainDecision?.tools ?? [];
     if (tools.length > 0) return tools;
-    return [{ name: this.defaultToolName(agent), arguments: {} }];
+    return [{ name: this.defaultToolName(agent, input.route), arguments: {} }];
   }
 
-  private defaultToolName(agent: FitMeetAlphaAgentName): string {
+  private defaultToolName(
+    agent: FitMeetAlphaAgentName,
+    route?: SocialAgentIntentRouterResult,
+  ): string {
     if (agent === 'Life Graph Agent')
       return 'update_profile_from_agent_context';
-    if (agent === 'Social Match Agent') return 'search_real_candidates';
-    if (agent === 'Meet Loop Agent') return 'meet_loop_state_transition';
-    if (agent === 'Math Agent') return 'fitness_math_calculator';
-    return 'agent_brain_plan';
-  }
-
-  private memoryScope(agent: FitMeetAlphaAgentName): string {
-    if (agent === 'Life Graph Agent') return 'life_graph.profile_memory';
-    if (agent === 'Social Match Agent') return 'matching.candidate_memory';
-    if (agent === 'Meet Loop Agent') return 'meet_loop.state_machine';
-    if (agent === 'Math Agent') return 'math.tool_contract';
-    return 'agent_brain.turn_memory';
+    if (agent === 'Match Agent') {
+      return route?.intent === 'action_request'
+        ? 'meet_loop_state_transition'
+        : 'search_real_candidates';
+    }
+    return route?.intent === 'fitness_math'
+      ? 'fitness_math_calculator'
+      : 'agent_brain_plan';
   }
 
   private critique(
@@ -230,85 +235,13 @@ export class FitMeetSubagentRuntimeService {
   private answerBoundary(agent: FitMeetAlphaAgentName): string {
     if (agent === 'Life Graph Agent')
       return 'Explain memory changes and ask before sensitive merges.';
-    if (agent === 'Social Match Agent')
-      return 'Explain ranking evidence without inventing candidates.';
-    if (agent === 'Meet Loop Agent')
-      return 'Expose every side effect as a confirmable state transition.';
-    if (agent === 'Math Agent')
-      return 'Return deterministic calculation output.';
+    if (agent === 'Match Agent')
+      return 'Explain match evidence and expose every side effect as a confirmable state transition.';
     return 'Answer naturally and keep tool state internal.';
   }
 
   private runtimeFor(agent: FitMeetAlphaAgentName): SubagentRuntimeConfig {
-    if (agent === 'Life Graph Agent') {
-      return {
-        maxToolCalls: 2,
-        maxRetries: 1,
-        scratchpadPolicy:
-          'Private scratchpad may compare old/new profile facts; never expose sensitive inference.',
-        critiqueEvaluator: 'life_graph_conflict_sensitive_merge_v1',
-        evalHints: {
-          needsConflictDetection: true,
-          needsUserConfirmedMerge: true,
-          sensitiveInfoClassification: true,
-          supportsVersionRollback: true,
-        },
-      };
-    }
-    if (agent === 'Social Match Agent') {
-      return {
-        maxToolCalls: 3,
-        maxRetries: 1,
-        scratchpadPolicy:
-          'Private scratchpad may score candidates but final answer must cite observations only.',
-        critiqueEvaluator: 'social_match_ranking_explanation_v1',
-        evalHints: {
-          needsRankingExperiment: true,
-          needsRecallFailureReview: true,
-          needsExplanationConsistencyEval: true,
-          qualityMetric: 'match_satisfaction',
-        },
-      };
-    }
-    if (agent === 'Meet Loop Agent') {
-      return {
-        maxToolCalls: 2,
-        maxRetries: 2,
-        scratchpadPolicy:
-          'Private scratchpad tracks idempotency keys and external reply callbacks.',
-        critiqueEvaluator: 'meet_loop_state_machine_v1',
-        evalHints: {
-          needsExternalCallback: true,
-          needsIdempotency: true,
-          needsTimeoutReminder: true,
-          needsPostMeetWriteback: true,
-        },
-      };
-    }
-    if (agent === 'Math Agent') {
-      return {
-        maxToolCalls: 1,
-        maxRetries: 0,
-        scratchpadPolicy:
-          'Deterministic calculations only; no private social or profile reads.',
-        critiqueEvaluator: 'math_tool_contract_boundary_v1',
-        evalHints: {
-          deterministicOnly: true,
-          forbidsPrivacyReadWrite: true,
-          needsUnitConversionTests: true,
-          needsInvalidInputTests: true,
-        },
-      };
-    }
-    return {
-      maxToolCalls: 2,
-      maxRetries: 1,
-      scratchpadPolicy: 'Main agent scratchpad keeps planning notes internal.',
-      critiqueEvaluator: 'agent_brain_unified_loop_v1',
-      evalHints: {
-        needsUnifiedPlannerLoop: true,
-      },
-    };
+    return fitMeetAlphaAgentRuntimeBoundary(agent);
   }
 
   private privateScratchpad(

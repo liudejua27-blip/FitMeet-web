@@ -24,14 +24,12 @@ export class MeetsController {
   findAll(
     @Query('type') type?: string,
     @Query('city') city?: string,
-    @Query('clubId') clubId?: string,
     @Query('lat') lat?: string,
     @Query('lng') lng?: string,
   ) {
     return this.meetsService.findAll({
       type,
       city,
-      clubId: clubId ? Number(clubId) : undefined,
       origin: {
         lat: lat ? Number(lat) : undefined,
         lng: lng ? Number(lng) : undefined,

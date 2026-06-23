@@ -194,7 +194,10 @@ export class SocialAgentTaskMemoryStateMachineService {
   requiredSlotsForTaskType(
     taskType: SocialAgentSlotTaskType = 'social_match',
   ): SocialAgentSlotKey[] {
-    return REQUIRED_SOCIAL_SLOTS_BY_TASK_TYPE[taskType] ?? REQUIRED_SOCIAL_SLOTS_BY_TASK_TYPE.social_match;
+    return (
+      REQUIRED_SOCIAL_SLOTS_BY_TASK_TYPE[taskType] ??
+      REQUIRED_SOCIAL_SLOTS_BY_TASK_TYPE.social_match
+    );
   }
 
   getMissingRequiredSlots(
@@ -246,8 +249,9 @@ export class SocialAgentTaskMemoryStateMachineService {
     const boundaries = this.isRecord(taskMemory.boundaries)
       ? taskMemory.boundaries
       : {};
-    const publicActivityAllowed =
-      this.publicActivityAllowedFromVisibility(slots.visibility?.value);
+    const publicActivityAllowed = this.publicActivityAllowedFromVisibility(
+      slots.visibility?.value,
+    );
     const nextBoundaries =
       publicActivityAllowed === null
         ? boundaries
@@ -307,9 +311,7 @@ export class SocialAgentTaskMemoryStateMachineService {
   ): boolean {
     return Boolean(
       slot?.value &&
-        ['answered', 'confirmed', 'completed', 'modified'].includes(
-          slot.state,
-        ),
+      ['answered', 'confirmed', 'completed', 'modified'].includes(slot.state),
     );
   }
 
@@ -351,10 +353,32 @@ export class SocialAgentTaskMemoryStateMachineService {
     const named = text.match(
       /((?:崂山区|市南区|市北区|李沧区|黄岛区|青岛大学|五四广场|奥帆中心|大学城|附近)[\u4e00-\u9fa5A-Za-z0-9·-]{0,12})/,
     );
-    if (!named) return null;
-    const value = named[1];
+    const rawValue =
+      named?.[1] ??
+      text.match(
+        /(青岛|北京|上海|深圳|广州|杭州|南京|成都|武汉|西安|重庆|苏州|厦门|天津|长沙|郑州|济南|宁波|合肥)/,
+      )?.[1];
+    if (!rawValue) return null;
+    const value = this.cleanLocationText(rawValue);
     const area = value.match(/(崂山区|市南区|市北区|李沧区|黄岛区)/)?.[1];
     return { value, area };
+  }
+
+  private cleanLocationText(value: string): string {
+    return cleanDisplayText(value, '')
+      .replace(
+        /(附近|周边)(?:找|约|想找|一起|跑步|慢跑|散步|健身|羽毛球|篮球|轻松|低强度).*$/,
+        '$1',
+      )
+      .replace(
+        /(大学|公园|广场|中心|大学城)(?:找|约|想找|一起|跑步|慢跑|散步|健身|羽毛球|篮球|轻松|低强度).*$/,
+        '$1',
+      )
+      .replace(
+        /((?:崂山区|市南区|市北区|李沧区|黄岛区|青岛大学|五四广场|奥帆中心|大学城|附近)(?:附近|周边)?)(?:同校|校友|女生|男生|学生|大学生).*$/,
+        '$1',
+      )
+      .trim();
   }
 
   private extractIntensity(text: string): string | null {
@@ -377,9 +401,9 @@ export class SocialAgentTaskMemoryStateMachineService {
     return null;
   }
 
-  private publicActivityAllowedFromVisibility(value: string | undefined):
-    | boolean
-    | null {
+  private publicActivityAllowedFromVisibility(
+    value: string | undefined,
+  ): boolean | null {
     const text = cleanDisplayText(value, '');
     if (!text) return null;
     if (/暂不公开|不公开/.test(text)) return false;
@@ -415,8 +439,10 @@ export class SocialAgentTaskMemoryStateMachineService {
     const publicInterestPreference =
       this.extractPublicInterestCandidatePreference(text);
     if (publicInterestPreference) parts.push(publicInterestPreference);
-    if (/(同校|校友|青岛大学学生|大学生|学生)/.test(text)) parts.push('同校/学生');
-    if (/(附近|同城|崂山区|市南区|市北区|李沧区|黄岛区)/.test(text)) parts.push('附近同城');
+    if (/(同校|校友|青岛大学学生|大学生|学生)/.test(text))
+      parts.push('同校/学生');
+    if (/(附近|同城|崂山区|市南区|市北区|李沧区|黄岛区)/.test(text))
+      parts.push('附近同城');
     const explicit = text.match(
       /(理想型是|偏好是|希望认识|想认识|更想认识|最好是)([^，。；.!?]{2,32})/,
     );
@@ -428,10 +454,16 @@ export class SocialAgentTaskMemoryStateMachineService {
           .trim(),
       );
     }
-    return Array.from(new Set(parts.filter(Boolean))).slice(0, 4).join('、') || null;
+    return (
+      Array.from(new Set(parts.filter(Boolean)))
+        .slice(0, 4)
+        .join('、') || null
+    );
   }
 
-  private extractPublicInterestCandidatePreference(text: string): string | null {
+  private extractPublicInterestCandidatePreference(
+    text: string,
+  ): string | null {
     const hasPreferenceContext =
       /(喜欢|兴趣|爱好|公开资料|标签|理想型|偏好|希望认识|想认识|更想认识|最好是|会|学|专业|从事)/.test(
         text,
@@ -471,9 +503,7 @@ export class SocialAgentTaskMemoryStateMachineService {
     const rootTaskMemory = this.isRecord(root.taskMemory)
       ? root.taskMemory
       : {};
-    const currentTask = this.isRecord(root.currentTask)
-      ? root.currentTask
-      : {};
+    const currentTask = this.isRecord(root.currentTask) ? root.currentTask : {};
     const taskMemoryCurrentTask = this.isRecord(rootTaskMemory.currentTask)
       ? rootTaskMemory.currentTask
       : {};
@@ -482,11 +512,11 @@ export class SocialAgentTaskMemoryStateMachineService {
         ? currentTask.type
         : typeof taskMemoryCurrentTask.type === 'string'
           ? taskMemoryCurrentTask.type
-        : typeof root.taskType === 'string'
-          ? root.taskType
-          : typeof rootTaskMemory.taskType === 'string'
-            ? rootTaskMemory.taskType
-          : task.taskType;
+          : typeof root.taskType === 'string'
+            ? root.taskType
+            : typeof rootTaskMemory.taskType === 'string'
+              ? rootTaskMemory.taskType
+              : task.taskType;
     if (rawType === 'publish_social_request') return 'publish_social_request';
     if (rawType === 'send_invite' || rawType === 'send_message')
       return 'send_invite';

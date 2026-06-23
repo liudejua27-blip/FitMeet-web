@@ -65,10 +65,6 @@ export class CreateMeetDto {
   creatorType?: string;
 
   @IsOptional()
-  @IsNumber()
-  clubId?: number;
-
-  @IsOptional()
   @IsString()
   city?: string;
 

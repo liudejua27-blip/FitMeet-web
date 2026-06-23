@@ -19,9 +19,7 @@ import {
 import { FitMeetAlphaAgentSdkService } from './fitmeet-alpha-agent-sdk.service';
 import type { FitMeetAlphaTurnDecision } from './fitmeet-alpha-agent.types';
 import { SocialAgentFinalResponseService } from './social-agent-final-response.service';
-import {
-  buildRecommendationAssistantMessage,
-} from './social-agent-chat-result.presenter';
+import { buildRecommendationAssistantMessage } from './social-agent-chat-result.presenter';
 import {
   buildSocialAgentLlmConversationHistory,
   summarizeSocialAgentTaskMemoryForLlm,
@@ -190,14 +188,18 @@ export class SocialAgentRecommendationResultService {
         candidates,
         searchResult,
       });
-    const shouldUseDeterministicEmptyCandidateReply =
+    const shouldUseDeterministicRecommendationReply = true;
+    if (
+      shouldUseDeterministicRecommendationReply ||
       this.shouldUseDeterministicEmptyCandidateReply({
         candidates,
         searchResult,
-      });
-    if (shouldUseDeterministicEmptyCandidateReply) {
+      })
+    ) {
       this.metrics?.recordDeterministicRouteReply(
-        'candidate_search.empty_candidates',
+        candidates.length > 0
+          ? 'candidate_search.recommendations_ready'
+          : 'candidate_search.empty_candidates',
         { estimatedAvoidedLlmCalls: 1 },
       );
     }
@@ -214,7 +216,7 @@ export class SocialAgentRecommendationResultService {
     };
     const assistantMessage =
       this.tonePolicy?.safeAssistantMessage(
-        shouldUseDeterministicEmptyCandidateReply
+        shouldUseDeterministicRecommendationReply
           ? fallbackAssistantMessage
           : await this.generateRecommendationAssistantMessage({
               task,
@@ -246,7 +248,7 @@ export class SocialAgentRecommendationResultService {
       status: task.status,
       visibleSteps,
       assistantMessage,
-      ...(shouldUseDeterministicEmptyCandidateReply
+      ...(shouldUseDeterministicRecommendationReply
         ? { assistantMessageSource: 'deterministic_route' as const }
         : {}),
       emptyReason: searchResult.emptyReason,
@@ -256,9 +258,9 @@ export class SocialAgentRecommendationResultService {
       candidates,
       approvalRequiredActions,
       events: events.map((event) => input.toEventDto(event)),
-      cards: (
-        this.alphaAgent ?? this.fallbackAlphaAgent
-      ).buildResultCards(resultCardInput),
+      cards: (this.alphaAgent ?? this.fallbackAlphaAgent).buildResultCards(
+        resultCardInput,
+      ),
       safety: alphaTurn?.safety,
       traceId: alphaTurn?.traceId,
       agentTrace: alphaTurn?.agentTrace,
@@ -267,7 +269,7 @@ export class SocialAgentRecommendationResultService {
         runId:
           input.runId !== null && input.runId !== undefined
             ? String(input.runId)
-            : alphaTurn?.traceId ?? null,
+            : (alphaTurn?.traceId ?? null),
         messageId: assistantMessageId,
       },
     };
@@ -305,57 +307,70 @@ export class SocialAgentRecommendationResultService {
     taskContext?: Record<string, unknown>;
   }): Promise<string> {
     if (!this.finalResponses) return input.fallbackReply;
-    return this.finalResponses.generate(
-      {
-        userMessage: cleanDisplayText(input.draft.rawText, input.task.goal),
-        intent: 'candidate_search',
-        agentState: readSocialAgentCurrentAgentState(input.task),
-        conversationHistory:
-          readConversationHistoryFromTaskContext(input.taskContext) ??
-          buildSocialAgentLlmConversationHistory(input.task),
-        memoryContext: input.buildMemoryContext(input.task) as Record<
-          string,
-          unknown
-        >,
-        taskContext:
-          input.taskContext ?? summarizeSocialAgentTaskMemoryForLlm(input.task),
-        plannerDecision: readSocialAgentConversationBrainDecision(input.task),
-        toolResults: [
-          {
-            tool: 'search_real_candidates',
-            success: true,
-            candidateCount: input.candidates.length,
+    try {
+      return await this.finalResponses.generate(
+        {
+          userMessage: cleanDisplayText(input.draft.rawText, input.task.goal),
+          intent: 'candidate_search',
+          agentState: readSocialAgentCurrentAgentState(input.task),
+          conversationHistory:
+            readConversationHistoryFromTaskContext(input.taskContext) ??
+            buildSocialAgentLlmConversationHistory(input.task),
+          memoryContext: input.buildMemoryContext(input.task) as Record<
+            string,
+            unknown
+          >,
+          taskContext:
+            input.taskContext ??
+            summarizeSocialAgentTaskMemoryForLlm(input.task),
+          plannerDecision: readSocialAgentConversationBrainDecision(input.task),
+          toolResults: [
+            {
+              tool: 'search_real_candidates',
+              success: true,
+              candidateCount: input.candidates.length,
+              emptyReason: input.searchResult.emptyReason,
+              message: input.searchResult.message,
+              debugReasons: input.searchResult.debugReasons,
+            },
+          ],
+          searchResults: {
+            socialRequestDraft: this.safeDraftForEvent(input.draft),
+            candidates: input.candidates.map((candidate) => ({
+              userId: candidate.userId,
+              candidateUserId: candidate.candidateUserId ?? candidate.userId,
+              nickname: candidate.nickname,
+              score: candidate.score,
+              reasons: candidate.reasons,
+              commonTags: candidate.commonTags,
+              risk: candidate.risk,
+              source: candidate.source,
+            })),
             emptyReason: input.searchResult.emptyReason,
-            message: input.searchResult.message,
-            debugReasons: input.searchResult.debugReasons,
           },
-        ],
-        searchResults: {
-          socialRequestDraft: this.safeDraftForEvent(input.draft),
-          candidates: input.candidates.map((candidate) => ({
-            userId: candidate.userId,
-            candidateUserId: candidate.candidateUserId ?? candidate.userId,
-            nickname: candidate.nickname,
-            score: candidate.score,
-            reasons: candidate.reasons,
-            commonTags: candidate.commonTags,
-            risk: candidate.risk,
-            source: candidate.source,
-          })),
-          emptyReason: input.searchResult.emptyReason,
+          safetyRules: socialAgentFinalResponseSafetyRules(),
+          responseGoal:
+            input.candidates.length > 0
+              ? '自然说明搜索结果，突出最相关候选人，并提醒下一步动作需要用户确认。'
+              : '自然说明当前没有找到真实候选人，并给出放宽条件、补充信息或发布需求的下一步。',
+          fallbackReply: input.fallbackReply,
         },
-        safetyRules: socialAgentFinalResponseSafetyRules(),
-        responseGoal:
-          input.candidates.length > 0
-            ? '自然说明搜索结果，突出最相关候选人，并提醒下一步动作需要用户确认。'
-            : '自然说明当前没有找到真实候选人，并给出放宽条件、补充信息或发布需求的下一步。',
-        fallbackReply: input.fallbackReply,
-      },
-      {
-        ...(input.onDelta ? { onDelta: input.onDelta } : {}),
-        signal: input.signal,
-      },
-    );
+        {
+          ...(input.onDelta ? { onDelta: input.onDelta } : {}),
+          signal: input.signal,
+        },
+      );
+    } catch (error) {
+      this.logger.warn(
+        JSON.stringify({
+          event: 'social_agent.recommendation_final_message_fallback',
+          taskId: input.task.id,
+          candidateCount: input.candidates.length,
+          message: error instanceof Error ? error.message : String(error),
+        }),
+      );
+      return input.fallbackReply;
+    }
   }
 
   private buildRecommendationFallbackAssistantMessage(input: {
@@ -400,7 +415,9 @@ export class SocialAgentRecommendationResultService {
       draft.city,
       metadata.candidatePreference,
       metadata.intensity,
-      ...(Array.isArray(draft.interestTags) ? draft.interestTags.slice(0, 3) : []),
+      ...(Array.isArray(draft.interestTags)
+        ? draft.interestTags.slice(0, 3)
+        : []),
     ]
       .map((value) => cleanDisplayText(value, ''))
       .filter((value): value is string => value.length > 0);
@@ -569,7 +586,8 @@ export class SocialAgentRecommendationResultService {
 function readConversationHistoryFromTaskContext(
   taskContext?: Record<string, unknown>,
 ): Array<Record<string, unknown>> | null {
-  const history = taskContext?.conversationHistory ?? taskContext?.recentMessages;
+  const history =
+    taskContext?.conversationHistory ?? taskContext?.recentMessages;
   if (!Array.isArray(history)) return null;
   const records = history.filter((item): item is Record<string, unknown> =>
     isRecord(item),

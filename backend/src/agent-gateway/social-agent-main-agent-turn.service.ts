@@ -162,6 +162,7 @@ export class SocialAgentMainAgentTurnService {
           {
             agent: 'Agent Brain',
             toolName: 'main_agent_prepare_turn',
+            requiresApproval: false,
             input: {
               flow: input.flow,
               permissionMode: input.permissionMode,

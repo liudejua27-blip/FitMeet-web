@@ -113,7 +113,8 @@ describe('social agent tool audit helpers', () => {
     const input = getSocialAgentToolInputSummary(
       SocialAgentToolName.SendMessage,
       {
-        message: '我的微信是 fitmeet-test，手机号 15253005312，青岛大学附近可以',
+        message:
+          '我的微信是 fitmeet-test，手机号 15253005312，青岛大学附近可以',
         exactLocation: '青岛大学 3 号宿舍 401',
         nested: {
           phone: '13812345678',

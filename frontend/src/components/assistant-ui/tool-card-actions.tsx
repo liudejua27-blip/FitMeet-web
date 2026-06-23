@@ -1,5 +1,17 @@
 import { useAuiState } from '@assistant-ui/react';
-import { CheckCircle2, Loader2, RefreshCcw, Send, ShieldCheck } from 'lucide-react';
+import {
+  CheckCircle2,
+  Edit3,
+  ExternalLink,
+  Eye,
+  Loader2,
+  MessageCircle,
+  RefreshCcw,
+  Send,
+  ShieldCheck,
+  UserPlus,
+  X,
+} from 'lucide-react';
 import { useSyncExternalStore } from 'react';
 
 import { cn } from '../../lib/utils';
@@ -8,7 +20,7 @@ import type {
   UserFacingAgentResponse,
 } from '../../api/socialAgentApi';
 import { agentApprovalUserFacingText } from '../../lib/agentApprovalCopy';
-import { useAssistantMessageRuntime } from './message-runtime-context';
+import { useAssistantMessageRuntime } from './message-runtime-store';
 import { sanitizePublicProcessText as sanitizePublicText } from './public-process-text';
 import { TOOL_UI_CARD_ACTION_COPY } from './tool-ui-action-copy';
 import { useFitMeetToolUIActions } from './tool-ui-actions';
@@ -115,26 +127,21 @@ export function UnifiedActionCard({
     };
     const messageId = custom.fitmeetMessageId ?? state.message.id;
     return cardActionRuntimeScope({
-      threadId:
-        custom.fitmeetThreadId ??
-        custom.threadId ??
-        custom.fitmeetTaskId ??
-        custom.taskId,
+      threadId: custom.fitmeetThreadId ?? custom.threadId ?? custom.fitmeetTaskId ?? custom.taskId,
       runId: custom.fitmeetRunId ?? custom.runId,
       messageId,
     });
   });
   const [runtimeKey, actionState] = useCardActionRuntimeState(runtimeScope, card.id);
   const { busyKey, completedKey, failedKey, error } = actionState;
-  const allActions = visibleCardActions(card, actions).slice(0, 5);
+  const rawActions = visibleCardActions(card, actions);
+  const allActions = visualActionsForCard(card, rawActions);
   const inlineApproval = actionState.inlineApproval;
   const inlineDraft = actionState.inlineDraft;
   const inlineOutcome = actionState.inlineOutcome;
   const hasInlineCardState = Boolean(inlineApproval || inlineDraft || inlineOutcome);
   const candidateActions =
-    isLatestAssistantMessage || completedKey || failedKey || hasInlineCardState
-      ? allActions
-      : [];
+    isLatestAssistantMessage || completedKey || failedKey || hasInlineCardState ? allActions : [];
   const keepActionGroupAfterCompletion =
     isLatestAssistantMessage && card.schemaType === 'social_match.candidate';
   const visible =
@@ -142,7 +149,7 @@ export function UnifiedActionCard({
       ? candidateActions.filter((action) => cardActionKey(action) === completedKey)
       : candidateActions;
   const completedAction = completedKey
-    ? visible.find((action) => cardActionKey(action) === completedKey) ?? null
+    ? (visible.find((action) => cardActionKey(action) === completedKey) ?? null)
     : null;
   const failedAction = failedKey
     ? visible.find((action) => cardActionKey(action) === failedKey)
@@ -263,7 +270,8 @@ export function UnifiedActionCard({
         busyKey: null,
         completedKey: null,
         failedKey: key,
-        error: nextError instanceof Error ? nextError.message : '当前动作可以重试，不会重复触达对方。',
+        error:
+          nextError instanceof Error ? nextError.message : '当前动作可以重试，不会重复触达对方。',
         inlineApproval: null,
         inlineDraft: actionState.inlineDraft,
         inlineOutcome: actionState.inlineOutcome,
@@ -336,7 +344,10 @@ export function UnifiedActionCard({
           ...actionState,
           busyKey: null,
           failedKey: inlineApproval.actionKey,
-          error: nextError instanceof Error ? nextError.message : '当前确认可以重试，不会重复执行真实动作。',
+          error:
+            nextError instanceof Error
+              ? nextError.message
+              : '当前确认可以重试，不会重复执行真实动作。',
         });
       }
       return;
@@ -393,7 +404,10 @@ export function UnifiedActionCard({
         ...actionState,
         busyKey: null,
         failedKey: inlineApproval.actionKey,
-        error: nextError instanceof Error ? nextError.message : '当前确认可以重试，不会重复执行真实动作。',
+        error:
+          nextError instanceof Error
+            ? nextError.message
+            : '当前确认可以重试，不会重复执行真实动作。',
       });
     }
   };
@@ -406,7 +420,15 @@ export function UnifiedActionCard({
       data-card-schema-type={card.schemaType}
     >
       {visible.length > 0 ? (
-        <div className="flex flex-wrap gap-1.5">
+        <div
+          className={cn(
+            card.schemaType === 'social_match.activity'
+              ? 'grid gap-3 sm:grid-cols-2'
+              : card.schemaType === 'social_match.candidate'
+                ? 'grid gap-2 sm:grid-cols-3'
+                : 'flex flex-wrap gap-1.5',
+          )}
+        >
           {visible.map((action) => {
             const key = cardActionKey(action);
             const isBusy = busyKey === key;
@@ -422,11 +444,14 @@ export function UnifiedActionCard({
             );
             const executable = Boolean(
               (isLatestAssistantMessage || hasInlineCardState || canRetryFailedAction) &&
-                ((toolActions.onCardAction && action.schemaAction) ||
-                  isLocalOnlyAction ||
-                  hasReplayedInlineApproval),
+              ((toolActions.onCardAction && action.schemaAction) ||
+                isLocalOnlyAction ||
+                hasReplayedInlineApproval),
             );
             const actionStateLabel = cardActionStateLabel(action, isBusy, isCompleted, isFailed);
+            const visualLabel = visualCardActionLabel(card, action, actionStateLabel);
+            const Icon = visualCardActionIcon(card, action, isBusy, isCompleted, isFailed);
+            const isPrimaryVisualAction = isPrimaryVisualCardAction(card, action);
             return (
               <button
                 key={`${action.label}-${action.schemaAction ?? action.action ?? 'action'}`}
@@ -452,33 +477,45 @@ export function UnifiedActionCard({
                   isLockedByAnotherAction
                 }
                 onClick={() => void runAction(action)}
+                aria-label={action.label ?? visualLabel ?? undefined}
                 className={cn(
-                  'inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs ring-1 transition',
+                  card.schemaType === 'social_match.activity' ||
+                    card.schemaType === 'social_match.candidate'
+                    ? 'inline-flex min-h-12 items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-semibold ring-1 transition sm:text-base'
+                    : 'inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs ring-1 transition',
                   executable
-                    ? 'hover:-translate-y-px hover:shadow-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-black/20'
+                    ? 'hover:-translate-y-px hover:shadow-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-teal-500/25'
                     : 'cursor-default',
-                  action.requiresConfirmation
-                    ? 'bg-amber-50 text-amber-800 ring-amber-100'
-                    : 'bg-[#f7f7f8] text-[#52525b] ring-black/5',
-                  isCompleted && 'bg-emerald-50 text-emerald-700 ring-emerald-100',
+                  isPrimaryVisualAction
+                    ? 'bg-teal-600 text-white ring-teal-600 hover:bg-teal-700'
+                    : 'bg-white text-teal-700 ring-teal-500/70 hover:bg-teal-50',
+                  card.schemaType !== 'social_match.activity' &&
+                    card.schemaType !== 'social_match.candidate' &&
+                    (action.requiresConfirmation
+                      ? 'bg-amber-50 text-amber-800 ring-amber-100'
+                      : 'bg-[#f7f7f8] text-[#52525b] ring-black/5'),
+                  isCompleted &&
+                    (card.schemaType === 'social_match.activity' ||
+                    card.schemaType === 'social_match.candidate'
+                      ? 'bg-emerald-50 text-emerald-700 ring-emerald-100'
+                      : 'bg-emerald-50 text-emerald-700 ring-emerald-100'),
                   isFailed && 'bg-red-50 text-red-700 ring-red-100',
                   isBusy && 'cursor-wait opacity-70',
                   isLockedByAnotherAction && 'opacity-50',
                   !isLatestAssistantMessage && 'opacity-60',
                 )}
               >
-                {isBusy ? (
-                  <Loader2 className="h-3 w-3 animate-spin" aria-hidden="true" />
-                ) : isCompleted ? (
-                  <CheckCircle2 className="h-3 w-3" aria-hidden="true" />
-                ) : isFailed ? (
-                  <RefreshCcw className="h-3 w-3" aria-hidden="true" />
-                ) : action.requiresConfirmation ? (
-                  <ShieldCheck className="h-3 w-3" aria-hidden="true" />
-                ) : (
-                  <Send className="h-3 w-3" aria-hidden="true" />
-                )}
-                {actionStateLabel}
+                <Icon
+                  className={cn(
+                    card.schemaType === 'social_match.activity' ||
+                      card.schemaType === 'social_match.candidate'
+                      ? 'h-5 w-5'
+                      : 'h-3 w-3',
+                    isBusy && 'animate-spin',
+                  )}
+                  aria-hidden="true"
+                />
+                {visualLabel}
               </button>
             );
           })}
@@ -579,7 +616,11 @@ function InlineApprovalPanel({
           disabled={Boolean(busyKey)}
           className="inline-flex items-center gap-1.5 rounded-full bg-[#18181b] px-2.5 py-1 text-xs text-white ring-1 ring-black/10 transition hover:bg-black disabled:opacity-60"
         >
-          {approving ? <Loader2 className="h-3 w-3 animate-spin" /> : <ShieldCheck className="h-3 w-3" />}
+          {approving ? (
+            <Loader2 className="h-3 w-3 animate-spin" />
+          ) : (
+            <ShieldCheck className="h-3 w-3" />
+          )}
           {approving ? approval.confirmBusyLabel : approval.confirmLabel}
         </button>
       </div>
@@ -670,9 +711,7 @@ export function visibleCardActions(
       .filter((action) => action.label)
       .filter((action) => !shouldHideVisibleCardAction(card.schemaType, card, action)),
   );
-  const seen = new Set(
-    normalized.map((action) => visibleActionGroupKey(card.schemaType, action)),
-  );
+  const seen = new Set(normalized.map((action) => visibleActionGroupKey(card.schemaType, action)));
   const defaults = defaultCardActions(card).filter((action) => {
     const key = visibleActionGroupKey(card.schemaType, action);
     if (!key || seen.has(key)) return false;
@@ -680,6 +719,148 @@ export function visibleCardActions(
     return true;
   });
   return sortVisibleCardActions(card.schemaType, [...normalized, ...defaults]);
+}
+
+function visualActionsForCard(
+  card: SchemaDrivenAssistantCard,
+  actions: VisibleCardAction[],
+): VisibleCardAction[] {
+  if (card.schemaType === 'social_match.activity') {
+    const published = isPublishedActivityCard(card);
+    const modify = actions.find(
+      (action) =>
+        action.schemaAction === 'activity.modify_time' ||
+        action.schemaAction === 'activity.modify_location',
+    );
+    const publish = actions.find((action) => action.schemaAction === 'publish_to_discover');
+    const close = actions.find((action) => action.schemaAction === 'activity.skip_publish');
+    const detail = actions.find((action) => action.schemaAction === 'activity.view_detail');
+    return published
+      ? compactVisualActions([modify, close, detail]).slice(0, 2)
+      : compactVisualActions([publish, modify, close]);
+  }
+  if (card.schemaType === 'social_match.candidate') {
+    const preferredOrder: ToolUISchemaAction[] = [
+      'candidate.view_detail',
+      'candidate.like',
+      'candidate.generate_opener',
+      'opener.confirm_send',
+      'candidate.connect',
+    ];
+    return preferredOrder
+      .map((schemaAction) => actions.find((action) => action.schemaAction === schemaAction))
+      .filter((action): action is VisibleCardAction => Boolean(action));
+  }
+  return actions.slice(0, 5);
+}
+
+function compactVisualActions(actions: Array<VisibleCardAction | null | undefined>) {
+  const seen = new Set<string>();
+  const result: VisibleCardAction[] = [];
+  for (const action of actions) {
+    if (!action) continue;
+    const key = cardActionKey(action);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(action);
+  }
+  return result;
+}
+
+function visualCardActionLabel(
+  card: SchemaDrivenAssistantCard,
+  action: VisibleCardAction,
+  fallbackLabel: string | null,
+) {
+  if (card.schemaType === 'social_match.activity') {
+    const published = isPublishedActivityCard(card);
+    if (action.schemaAction === 'publish_to_discover') return published ? '已发布' : '发布卡片';
+    if (
+      action.schemaAction === 'activity.modify_time' ||
+      action.schemaAction === 'activity.modify_location'
+    ) {
+      return published ? '修改卡片' : '修改信息';
+    }
+    if (action.schemaAction === 'activity.skip_publish') return published ? '关闭卡片' : '暂不发布';
+    if (action.schemaAction === 'activity.view_detail') return '查看详情';
+  }
+  if (card.schemaType === 'social_match.candidate') {
+    if (action.schemaAction === 'candidate.view_detail') return '查看详情';
+    if (action.schemaAction === 'candidate.like') return '收藏';
+    if (action.schemaAction === 'candidate.generate_opener') return '发消息';
+    if (action.schemaAction === 'opener.confirm_send') return '邀请Ta';
+    if (action.schemaAction === 'candidate.connect') return '加好友并聊天';
+  }
+  return fallbackLabel ?? action.label ?? '继续';
+}
+
+function visualCardActionIcon(
+  card: SchemaDrivenAssistantCard,
+  action: VisibleCardAction,
+  isBusy: boolean,
+  isCompleted: boolean,
+  isFailed: boolean,
+) {
+  if (isBusy) return Loader2;
+  if (isFailed) return RefreshCcw;
+  if (isCompleted) return CheckCircle2;
+  if (card.schemaType === 'social_match.activity') {
+    if (
+      action.schemaAction === 'activity.modify_time' ||
+      action.schemaAction === 'activity.modify_location'
+    ) {
+      return Edit3;
+    }
+    if (action.schemaAction === 'activity.skip_publish') return X;
+    if (action.schemaAction === 'activity.view_detail') return Eye;
+    return ShieldCheck;
+  }
+  if (card.schemaType === 'social_match.candidate') {
+    if (action.schemaAction === 'candidate.view_detail') return ExternalLink;
+    if (action.schemaAction === 'candidate.like') return CheckCircle2;
+    if (action.schemaAction === 'candidate.generate_opener') return MessageCircle;
+    if (action.schemaAction === 'opener.confirm_send') return Send;
+    if (action.schemaAction === 'candidate.connect') return UserPlus;
+  }
+  if (action.requiresConfirmation) return ShieldCheck;
+  return Send;
+}
+
+function isPrimaryVisualCardAction(card: SchemaDrivenAssistantCard, action: VisibleCardAction) {
+  if (card.schemaType === 'social_match.activity') {
+    return action.schemaAction === 'publish_to_discover';
+  }
+  if (card.schemaType === 'social_match.candidate') {
+    return (
+      action.schemaAction === 'opener.confirm_send' || action.schemaAction === 'candidate.connect'
+    );
+  }
+  return action.requiresConfirmation;
+}
+
+function isPublishedActivityCard(card: SchemaDrivenAssistantCard) {
+  const statusText = [
+    publicString(card.data.status),
+    publicString(card.data.publishStatus),
+    publicString(card.data.visibilityStatus),
+    publicString(card.title),
+    publicString(card.body),
+  ]
+    .filter(Boolean)
+    .join(' ');
+  return (
+    card.data.autoPublished === true ||
+    Boolean(
+      firstPublicPrimitive(card.data.publicIntentId, card.data.socialRequestId) ??
+      firstSafeInternalHref(
+        card.data.discoverHref,
+        card.data.detailHref,
+        card.data.activityHref,
+        card.data.href,
+      ),
+    ) ||
+    /已发布|published|public/i.test(statusText)
+  );
 }
 
 function dedupeVisibleCardActions(
@@ -769,7 +950,9 @@ function canonicalVisibleActionKey(
     if (/^(generate_opener|draft_opener|candidate\.generate_opener)$/.test(rawAction)) {
       return 'candidate.generate_opener';
     }
-    if (/^(send_invite|send_message|send_message_to_candidate|opener\.confirm_send)$/.test(rawAction)) {
+    if (
+      /^(send_invite|send_message|send_message_to_candidate|opener\.confirm_send)$/.test(rawAction)
+    ) {
       return 'opener.confirm_send';
     }
     if (/^(connect_candidate|add_friend|candidate\.connect)$/.test(rawAction)) {
@@ -955,7 +1138,8 @@ function sortVisibleCardActions(
     .map((action, index) => ({ action, index }))
     .sort((left, right) => {
       const leftRank = rank.get(actionSortKey(schemaType, left.action)) ?? Number.MAX_SAFE_INTEGER;
-      const rightRank = rank.get(actionSortKey(schemaType, right.action)) ?? Number.MAX_SAFE_INTEGER;
+      const rightRank =
+        rank.get(actionSortKey(schemaType, right.action)) ?? Number.MAX_SAFE_INTEGER;
       return leftRank === rightRank ? left.index - right.index : leftRank - rightRank;
     })
     .map((item) => item.action);
@@ -1056,9 +1240,7 @@ function inlineApprovalFromResponse(
   if (!approvalCard) return null;
   const approvalData = isRecord(approvalCard.data?.approval) ? approvalCard.data.approval : {};
   const actionType =
-    publicString(approvalData.actionType) ??
-    publicString(approvalData.action) ??
-    semanticActionKey;
+    publicString(approvalData.actionType) ?? publicString(approvalData.action) ?? semanticActionKey;
   const summary =
     publicDetail(approvalData.summary) ??
     publicDetail(approvalData.boundary) ??
@@ -1066,9 +1248,7 @@ function inlineApprovalFromResponse(
     publicDetail(approvalCard.title) ??
     '确认前不会触达对方或公开敏感信息。';
   const riskLevel =
-    publicString(approvalData.riskLevel) ??
-    publicString(approvalCard.data?.riskLevel) ??
-    'medium';
+    publicString(approvalData.riskLevel) ?? publicString(approvalCard.data?.riskLevel) ?? 'medium';
   const confirmAction = inlineApprovalConfirmActionFromCard(approvalCard);
   const approvalId = firstPublicPrimitive(
     approvalCard.data?.approvalId,
@@ -1185,8 +1365,7 @@ function inlineOutcomeFromActionResponse(
     body,
     actionKey,
     href: inlineOutcomeHrefFromResponse(response, action.schemaAction),
-    hrefLabel:
-      action.schemaAction === 'publish_to_discover' ? '查看发现详情' : null,
+    hrefLabel: action.schemaAction === 'publish_to_discover' ? '查看发现详情' : null,
   };
 }
 
@@ -1283,9 +1462,7 @@ function inlineOutcomeFromApprovalResponse(
   if (decision === 'rejected') {
     return {
       title: '已取消',
-      body:
-        publicDetail(response?.assistantMessage) ??
-        '这个动作不会继续执行，也不会触达对方。',
+      body: publicDetail(response?.assistantMessage) ?? '这个动作不会继续执行，也不会触达对方。',
       actionKey: approval.actionKey,
     };
   }
@@ -1348,11 +1525,11 @@ function inlineOutcomeHrefFromResponse(
     if (direct) return direct;
     const publicIntentId = firstPublicPrimitive(card.data?.publicIntentId);
     if (publicIntentId !== null) {
-      return `/public-intent/${encodeURIComponent(String(publicIntentId))}`;
+      return `/discover?publicIntentId=${encodeURIComponent(String(publicIntentId))}`;
     }
     const socialRequestId = firstPublicPrimitive(card.data?.socialRequestId);
     if (socialRequestId !== null) {
-      return `/social-request/${encodeURIComponent(String(socialRequestId))}`;
+      return `/discover?socialRequestId=${encodeURIComponent(String(socialRequestId))}`;
     }
   }
   return null;
@@ -1410,10 +1587,7 @@ function inlineApprovalFromCardData(
     }
     if (preferredAction) {
       const semanticActionKey =
-        preferredAction.schemaAction ??
-        preferredAction.action ??
-        preferredActionKey ??
-        'approval';
+        preferredAction.schemaAction ?? preferredAction.action ?? preferredActionKey ?? 'approval';
       for (const [key, mapped] of Object.entries(rawMap)) {
         if (!isRecord(mapped)) continue;
         if (!rawInlineApprovalMatchesAction(mapped, semanticActionKey, key)) continue;
@@ -1501,11 +1675,7 @@ function confirmationMatchesActionKey(
   confirmation: UserFacingAgentPendingConfirmation,
   actionKey: string,
 ) {
-  const actionText = [
-    confirmation.actionType,
-    confirmation.type,
-    confirmation.summary,
-  ]
+  const actionText = [confirmation.actionType, confirmation.type, confirmation.summary]
     .filter(Boolean)
     .join(' ')
     .toLowerCase();
@@ -1555,28 +1725,20 @@ function approvalConfirmBusyLabelForAction(actionKey: string, actionType: string
 }
 
 function approvalSummaryForAction(actionType: string, rawSummary: string | null | undefined) {
-  const summary = rawSummary
-    ? agentApprovalUserFacingText(sanitizePublicText(rawSummary))
-    : null;
+  const summary = rawSummary ? agentApprovalUserFacingText(sanitizePublicText(rawSummary)) : null;
   const technical =
     !summary ||
     /risk|medium|high|low|checkpoint|dry[- ]?run|audit|approval|风险等级|状态已保存|等待保存点|审计|保存点|审批/i.test(
       summary,
     );
   if (/send|message|invite/i.test(actionType)) {
-    return technical
-      ? '确认后才会发送邀请内容；发送前不会联系对方。'
-      : summary;
+    return technical ? '确认后才会发送邀请内容；发送前不会联系对方。' : summary;
   }
   if (/connect|friend|candidate\.connect/i.test(actionType)) {
-    return technical
-      ? '确认后才会向对方发起连接；你可以先查看详情或取消。'
-      : summary;
+    return technical ? '确认后才会向对方发起连接；你可以先查看详情或取消。' : summary;
   }
   if (/publish|social_request/i.test(actionType)) {
-    return technical
-      ? '确认后这张约练卡才会出现在发现页；你可以先修改或暂不发布。'
-      : summary;
+    return technical ? '确认后这张约练卡才会出现在发现页；你可以先修改或暂不发布。' : summary;
   }
   if (/activity|meet|create/i.test(actionType)) {
     return technical ? '确认后才会创建线下约练；你可以先修改或取消。' : summary;
@@ -1826,12 +1988,7 @@ function defaultCardActions(card: SchemaDrivenAssistantCard): VisibleCardAction[
 }
 
 function meetLoopCurrentStepKey(card: SchemaDrivenAssistantCard) {
-  const stageText = [
-    card.data.loopStage,
-    card.data.stage,
-    card.data.status,
-    card.status,
-  ]
+  const stageText = [card.data.loopStage, card.data.stage, card.data.status, card.status]
     .map((item) => publicString(item)?.toLowerCase())
     .filter(Boolean)
     .join(' ');
@@ -1854,7 +2011,8 @@ function meetLoopCurrentStepKey(card: SchemaDrivenAssistantCard) {
   return null;
 }
 
-function isLocalOnlyCardAction(_action: VisibleCardAction) {
+function isLocalOnlyCardAction(action: VisibleCardAction) {
+  void action;
   return false;
 }
 
@@ -1943,28 +2101,32 @@ function cardActionNavigationHref(
       cardOpportunityProfile.id,
       cardOpportunityProfile.userId,
     );
-    return targetUserId === null
-      ? null
-      : `/user/${encodeURIComponent(String(targetUserId))}`;
+    return targetUserId === null ? null : `/user/${encodeURIComponent(String(targetUserId))}`;
   }
   if (action.schemaAction === 'activity.view_detail') {
     const direct = firstSafeInternalHref(
-      payload.discoverHref,
+      payload.publicIntentHref,
       payload.detailHref,
       payload.activityHref,
       payload.href,
-      card.data.discoverHref,
+      payload.discoverHref,
+      card.data.publicIntentHref,
       card.data.detailHref,
       card.data.activityHref,
       card.data.href,
+      card.data.discoverHref,
     );
     if (direct) return direct;
     const publicIntentId = firstPublicPrimitive(payload.publicIntentId, card.data.publicIntentId);
-    if (publicIntentId !== null) return `/public-intent/${encodeURIComponent(String(publicIntentId))}`;
-    const socialRequestId = firstPublicPrimitive(payload.socialRequestId, card.data.socialRequestId);
-    if (socialRequestId !== null) return `/social-request/${encodeURIComponent(String(socialRequestId))}`;
-    const activityId = firstPublicPrimitive(payload.activityId, card.data.activityId);
-    return activityId === null ? null : `/activity/${encodeURIComponent(String(activityId))}`;
+    if (publicIntentId !== null)
+      return `/public-intent/${encodeURIComponent(String(publicIntentId))}`;
+    const socialRequestId = firstPublicPrimitive(
+      payload.socialRequestId,
+      card.data.socialRequestId,
+    );
+    if (socialRequestId !== null)
+      return `/discover?socialRequestId=${encodeURIComponent(String(socialRequestId))}`;
+    return null;
   }
   return null;
 }
@@ -1982,9 +2144,8 @@ function isSafeInternalHref(href: string) {
   return (
     href.startsWith('/user/') ||
     href.startsWith('/public-intent/') ||
-    href.startsWith('/social-request/') ||
-    href.startsWith('/activity/') ||
-    href === '/discover'
+    href === '/discover' ||
+    href.startsWith('/discover?')
   );
 }
 
@@ -2041,12 +2202,7 @@ function defaultCardActionPayload(card: SchemaDrivenAssistantCard): Record<strin
       opportunity.profileId,
       opportunityProfile.id,
       opportunityProfile.userId,
-      firstActionPayloadPrimitive(card, [
-        'targetUserId',
-        'userId',
-        'candidateUserId',
-        'profileId',
-      ]),
+      firstActionPayloadPrimitive(card, ['targetUserId', 'userId', 'candidateUserId', 'profileId']),
     ),
     candidateUserId: firstPublicPrimitive(
       card.data.candidateUserId,
@@ -2067,12 +2223,7 @@ function defaultCardActionPayload(card: SchemaDrivenAssistantCard): Record<strin
       opportunity.profileId,
       opportunityProfile.userId,
       opportunityProfile.id,
-      firstActionPayloadPrimitive(card, [
-        'candidateUserId',
-        'targetUserId',
-        'userId',
-        'profileId',
-      ]),
+      firstActionPayloadPrimitive(card, ['candidateUserId', 'targetUserId', 'userId', 'profileId']),
     ),
     socialRequestId: firstPublicPrimitive(card.data.socialRequestId, opportunity.socialRequestId),
     publicIntentId: firstPublicPrimitive(card.data.publicIntentId, opportunity.publicIntentId),
@@ -2168,9 +2319,7 @@ function lifeGraphHasConflicts(
   return fields.some((field) => {
     if (!isRecord(field)) return false;
     return (
-      field.conflict === true ||
-      field.status === 'conflict' ||
-      field.status === 'revoked_conflict'
+      field.conflict === true || field.status === 'conflict' || field.status === 'revoked_conflict'
     );
   });
 }

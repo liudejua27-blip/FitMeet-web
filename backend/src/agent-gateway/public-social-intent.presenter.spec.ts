@@ -13,7 +13,7 @@ function makeIntent(
     id: 'public-intent-1',
     userId: null,
     linkedSocialRequestId: null,
-    source: 'public_social_skills',
+    source: 'public_intent',
     mode: 'public',
     requestType: 'fitness_partner',
     title: '寻找附近约练搭子',
@@ -49,7 +49,7 @@ function makeIntent(
 }
 
 describe('serializePublicSocialIntent', () => {
-  it('preserves the public feed response contract', () => {
+  it('preserves the public intent response contract', () => {
     const createdAt = new Date('2026-06-07T10:00:00.000Z');
     const intent = makeIntent({ createdAt, updatedAt: createdAt });
 
@@ -57,7 +57,7 @@ describe('serializePublicSocialIntent', () => {
       id: 'public-intent-1',
       userId: null,
       linkedSocialRequestId: null,
-      source: 'public_social_skills',
+      source: 'public_intent',
       mode: 'public',
       requestType: 'fitness_partner',
       title: '寻找附近约练搭子',

@@ -313,7 +313,9 @@ describe('SocialAgentActivitySearchService', () => {
       recordDeterministicRouteReply: jest.fn(),
     };
     const finalResponses = {
-      generate: jest.fn().mockResolvedValue('我按刚才的信息找到了 1 个公开机会。'),
+      generate: jest
+        .fn()
+        .mockResolvedValue('我按刚才的信息找到了 1 个公开机会。'),
     };
     const service = new SocialAgentActivitySearchService(
       candidatePool as never,
@@ -394,9 +396,7 @@ describe('SocialAgentActivitySearchService', () => {
         memoryContext: { memory: 'hydrated' },
       }),
     );
-    expect(result.assistantMessage).toBe(
-      '我按刚才的信息找到了 1 个公开机会。',
-    );
+    expect(result.assistantMessage).toBe('我按刚才的信息找到了 1 个公开机会。');
   });
 
   it('returns an empty activity response when the candidate pool fails', async () => {
@@ -495,8 +495,7 @@ describe('SocialAgentActivitySearchService', () => {
         lastSearchIntent: 'activity_search',
         lastSearchCandidateCount: 0,
         lastSearchEmptyReason: 'no_real_candidates',
-        lastSearchNextStep:
-          '换城市、时间或活动类型，或确认发布约练卡到发现',
+        lastSearchNextStep: '换城市、时间或活动类型，或确认发布约练卡到发现',
       },
       taskMemory: {
         currentTask: {

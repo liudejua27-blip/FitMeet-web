@@ -122,7 +122,8 @@ export class SocialAgentTasksController {
       this.taskRepo.create({
         ownerUserId: req.user.id,
         agentConnectionId,
-        taskType: optionalString(body.taskType) || DEFAULT_SOCIAL_AGENT_TASK_TYPE,
+        taskType:
+          optionalString(body.taskType) || DEFAULT_SOCIAL_AGENT_TASK_TYPE,
         title:
           cleanDisplayText(optionalString(body.title), '') ||
           DEFAULT_SOCIAL_AGENT_TASK_TITLE,
@@ -599,11 +600,13 @@ export class SocialAgentTasksController {
           (event.visibility === 'debug_only' && options.includeDebug === true),
       );
     const events = this.filterReplayCursor(allEvents, options);
-    const terminalEvent = [...allEvents]
-      .reverse()
-      .find(
-        (event) => event.type === 'run.completed' || event.type === 'run.failed',
-      ) ?? null;
+    const terminalEvent =
+      [...allEvents]
+        .reverse()
+        .find(
+          (event) =>
+            event.type === 'run.completed' || event.type === 'run.failed',
+        ) ?? null;
     const terminalType = terminalEvent?.type ?? null;
     const summary = summarizeSocialCodexRun(allEvents);
     const replayEvents = this.attachReplaySummaryToTerminalEvent(
@@ -655,7 +658,10 @@ export class SocialAgentTasksController {
       );
       if (index >= 0) return events.slice(index + 1);
     }
-    if (typeof options.afterSeq === 'number' && Number.isFinite(options.afterSeq)) {
+    if (
+      typeof options.afterSeq === 'number' &&
+      Number.isFinite(options.afterSeq)
+    ) {
       return events.filter((event) => event.seq > Number(options.afterSeq));
     }
     return events;

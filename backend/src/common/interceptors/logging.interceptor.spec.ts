@@ -38,8 +38,8 @@ describe('LoggingInterceptor', () => {
     const interceptor = new LoggingInterceptor(50, logger);
     const context = createContext({
       method: 'POST',
-      path: '/api/feed',
-      url: '/api/feed',
+      path: '/api/public/social-intents',
+      url: '/api/public/social-intents',
       statusCode: 201,
     });
     jest.spyOn(Date, 'now').mockReturnValueOnce(100).mockReturnValueOnce(190);
@@ -50,7 +50,7 @@ describe('LoggingInterceptor', () => {
     expect(JSON.parse(logger.warn.mock.calls[0][0])).toEqual({
       event: 'backend.http.slow_request',
       method: 'POST',
-      path: '/api/feed',
+      path: '/api/public/social-intents',
       status: 201,
       durationMs: 90,
       userId: null,
@@ -62,7 +62,7 @@ describe('LoggingInterceptor', () => {
     const interceptor = new LoggingInterceptor(1000, logger);
     const context = createContext({
       method: 'GET',
-      url: '/api/feed?Authorization=Bearer%20secret',
+      url: '/api/public/social-intents?Authorization=Bearer%20secret',
       statusCode: 200,
     });
     jest.spyOn(Date, 'now').mockReturnValueOnce(100).mockReturnValueOnce(105);
@@ -70,7 +70,7 @@ describe('LoggingInterceptor', () => {
     await lastValueFrom(interceptor.intercept(context, okHandler()));
 
     expect(JSON.parse(logger.log.mock.calls[0][0])).toMatchObject({
-      path: '/api/feed',
+      path: '/api/public/social-intents',
     });
     expect(logger.log.mock.calls[0][0]).not.toContain('secret');
   });

@@ -52,6 +52,7 @@ export function buildCandidatePoolResolvedQuery(input: {
   const { query, request, task } = input;
   const taskSlots = readCandidatePoolTaskSlotValues(task);
   const taskBoundaries = readCandidatePoolTaskBoundaryValues(task);
+  const hasCurrentTaskSlotContext = hasCandidatePoolTaskSlotContext(taskSlots);
   const inputCity = sanitizeCity(query.city);
   const inputActivityType = cleanDisplayText(query.activityType, '');
   const inputTimePreference = cleanDisplayText(query.timePreference, '');
@@ -68,7 +69,10 @@ export function buildCandidatePoolResolvedQuery(input: {
     'public_discoverable_profiles_and_user_consented_public_tags_only',
   );
   const rawText = cleanDisplayText(
-    query.rawText ?? request?.rawText ?? request?.title ?? task?.goal,
+    query.rawText ??
+      (hasCurrentTaskSlotContext
+        ? task?.goal
+        : (request?.rawText ?? request?.title ?? task?.goal)),
     '',
   );
   const slotRawText = candidatePoolSlotRawText(taskSlots);
@@ -82,14 +86,18 @@ export function buildCandidatePoolResolvedQuery(input: {
   });
   const activityType = cleanDisplayText(
     inputActivityType ||
-      request?.activityType ||
       taskSlots.activity ||
+      request?.activityType ||
       extractCandidateActivity(rawText || slotRawText),
     '',
   );
   const interestTags = uniqueCandidatePoolStrings([
     ...(Array.isArray(query.interestTags) ? query.interestTags : []),
-    ...(Array.isArray(request?.interestTags) ? request.interestTags : []),
+    ...(hasCurrentTaskSlotContext
+      ? []
+      : Array.isArray(request?.interestTags)
+        ? request.interestTags
+        : []),
     ...extractCandidateTags(rawText),
     ...extractCandidateTags(slotRawText),
     ...candidatePreferenceQueryTags(candidatePreference),
@@ -147,14 +155,16 @@ function resolveCandidatePoolCity(input: {
 }): string {
   const explicit = sanitizeCity(input.explicitCity);
   if (explicit) return explicit;
-  const requestCity = sanitizeCity(input.requestCity);
-  if (requestCity) return requestCity;
-  const known = extractKnownCity(`${input.rawText} ${input.slotRawText}`);
-  if (known) return known;
+  const slotKnown = extractKnownCity(input.slotRawText);
+  if (slotKnown) return slotKnown;
   const inferred = inferCandidatePoolCityFromArea(
     `${input.geoArea ?? ''} ${input.locationPreference ?? ''}`,
   );
   if (inferred) return inferred;
+  const rawKnown = extractKnownCity(input.rawText);
+  if (rawKnown) return rawKnown;
+  const requestCity = sanitizeCity(input.requestCity);
+  if (requestCity) return requestCity;
   return sanitizeCity(input.geoArea);
 }
 
@@ -268,9 +278,9 @@ function readCandidatePoolTaskSlotValues(
   return out;
 }
 
-function readCandidatePoolTaskBoundaryValues(
-  task?: AgentTask | null,
-): { acceptsStrangers: boolean | null } {
+function readCandidatePoolTaskBoundaryValues(task?: AgentTask | null): {
+  acceptsStrangers: boolean | null;
+} {
   if (!task) return { acceptsStrangers: null };
   const memory = readSocialAgentTaskMemory(task);
   return {
@@ -310,6 +320,18 @@ function candidatePoolSlotRawText(taskSlots: Record<string, string>): string {
   ]
     .filter(Boolean)
     .join(' ');
+}
+
+function hasCandidatePoolTaskSlotContext(
+  taskSlots: Record<string, string>,
+): boolean {
+  return [
+    taskSlots.geo_area,
+    taskSlots.location_text,
+    taskSlots.time_window,
+    taskSlots.activity,
+    taskSlots.candidate_preference,
+  ].some(Boolean);
 }
 
 function isCandidatePoolRecord(

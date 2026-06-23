@@ -7,11 +7,8 @@ export function PlatformPage({
     | 'home'
     | 'features'
     | 'download'
-    | 'developers'
     | 'safety'
     | 'about'
-    | 'contact'
-    | 'lifeGraph'
     | 'demo';
 }) {
   return <WebsitePlatform page={page} />;

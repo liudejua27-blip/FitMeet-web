@@ -141,7 +141,9 @@ describe('candidate score breakdown', () => {
         null,
       ),
     ).toBe(1);
-    expect(publicIntentSocialBoundaryScore(query({ acceptsStrangers: true }))).toBe(8);
+    expect(
+      publicIntentSocialBoundaryScore(query({ acceptsStrangers: true })),
+    ).toBe(8);
     expect(candidateRelationshipGoalScore(query(), ['跑步'])).toBe(9);
     expect(candidateSafetyRiskScore('critical')).toBe(0);
     expect(candidateSafetyRiskScore('high')).toBe(3);

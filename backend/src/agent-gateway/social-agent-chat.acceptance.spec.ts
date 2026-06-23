@@ -364,7 +364,9 @@ function makeHarness(options: Record<string, unknown> = {}) {
     update: jest.fn().mockResolvedValue({ id: 1 }),
   };
   const messages = {
-    createAgentInboxEvent: jest.fn().mockResolvedValue({ id: 'inbox-event-1' }),
+    createAgentMessageEvent: jest
+      .fn()
+      .mockResolvedValue({ id: 'message center-event-1' }),
   };
   const approvals = {
     create: jest.fn().mockImplementation((input: Record<string, unknown>) =>
@@ -416,6 +418,7 @@ function makeHarness(options: Record<string, unknown> = {}) {
     recordFallback: jest.fn(),
     recordLatency: jest.fn(),
     observeRouteLatency: jest.fn(),
+    recordDeterministicAction: jest.fn(),
     recordDeterministicRouteReply: jest.fn(),
     snapshot: jest.fn().mockReturnValue({}),
   };
@@ -711,6 +714,25 @@ function makeHarness(options: Record<string, unknown> = {}) {
       | SocialAgentChatSessionFacadeService
       | undefined) ??
     new SocialAgentChatSessionFacadeService(sessionQueries as never);
+  const agentLoop = (options.agentLoop as
+    | { execute: jest.Mock }
+    | undefined) ?? {
+    execute: jest.fn(async (input: Record<string, unknown>) => {
+      const runner = input.runner as
+        | (() => Promise<Record<string, unknown>>)
+        | undefined;
+      if (runner) await runner();
+      return {
+        loop: {
+          runId: 'loop:101:acceptance',
+          traceId: 'trace:acceptance',
+          taskId: 101,
+          status: 'completed',
+          steps: [],
+        },
+      };
+    }),
+  };
   const cardActionRouter =
     (options.cardActionRouter as
       | SocialAgentCardActionRouterService
@@ -726,6 +748,9 @@ function makeHarness(options: Record<string, unknown> = {}) {
           eventRepo as never,
           options.lifeGraph as never,
         )) as never,
+      agentLoop as never,
+      draftPublication as never,
+      metrics as never,
     );
   const replanFacade =
     (options.replanFacade as SocialAgentReplanFacadeService | undefined) ??
@@ -843,8 +868,8 @@ describe('SocialAgentChat acceptance flow', () => {
       cards: [],
       taskId: 101,
     });
-    expect(result.assistantMessage).toContain('明确说要找人');
-    expect(result.assistantMessage).toContain('我再开始搜索');
+    expect(result.assistantMessage).toContain('FitMeet 的 AI 社交助理');
+    expect(result.assistantMessage).toContain('城市、兴趣、可约时间');
     expect(savedEvents).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -865,7 +890,6 @@ describe('SocialAgentChat acceptance flow', () => {
 
   it('downgrades Brain social-search guesses when the user explicitly wants ordinary chat', async () => {
     const brain = {
-      // eslint-disable-next-line @typescript-eslint/require-await
       planTurn: jest.fn(async ({ route }: Record<string, unknown>) => ({
         route: {
           ...(route as Record<string, unknown>),
@@ -903,8 +927,8 @@ describe('SocialAgentChat acceptance flow', () => {
       activityResults: [],
       pendingApproval: null,
     });
-    expect(result.assistantMessage).toContain('明确说要找人');
-    expect(result.assistantMessage).toContain('我再开始搜索');
+    expect(result.assistantMessage).toContain('FitMeet 的 AI 社交助理');
+    expect(result.assistantMessage).toContain('城市、兴趣、可约时间');
     expect(executor.executeToolAction).not.toHaveBeenCalledWith(
       expect.any(Number),
       SocialAgentToolName.SearchMatches,
@@ -953,8 +977,8 @@ describe('SocialAgentChat acceptance flow', () => {
       pendingApproval: null,
       cards: [],
     });
-    expect(result.assistantMessage).toContain('还没有候选人上下文');
-    expect(result.assistantMessage).toContain('先说清楚想找什么样的人');
+    expect(result.assistantMessage).toContain('还没有可参考的候选人');
+    expect(result.assistantMessage).toContain('先告诉我想找谁或找什么活动');
     expect(approvals.create).not.toHaveBeenCalled();
     expect(executor.executeToolAction).not.toHaveBeenCalled();
   });
@@ -981,11 +1005,9 @@ describe('SocialAgentChat acceptance flow', () => {
 
   it('executes safe read tools planned by Agent Brain before final reply', async () => {
     const finalResponses = {
-      // eslint-disable-next-line @typescript-eslint/require-await
       generate: jest.fn(async () => '我看了你的画像，现在还缺可约时间。'),
     };
     const brain = {
-      // eslint-disable-next-line @typescript-eslint/require-await
       planTurn: jest.fn(async ({ route }: Record<string, unknown>) => ({
         route: {
           ...(route as Record<string, unknown>),
@@ -1014,7 +1036,7 @@ describe('SocialAgentChat acceptance flow', () => {
       message: '我的画像现在缺什么？',
     });
 
-    expect(result.assistantMessage).toContain('可以先帮你梳理');
+    expect(result.assistantMessage).toContain('我看了你的画像');
     expect(executor.executeToolAction).toHaveBeenCalledWith(
       101,
       SocialAgentToolName.GetMyProfile,
@@ -1059,7 +1081,7 @@ describe('SocialAgentChat acceptance flow', () => {
       shouldQueueRun: false,
     });
     expect(result.assistantMessage).toContain('画像信息');
-    expect(result.assistantMessage).toContain('不会直接搜索候选人');
+    expect(result.assistantMessage).toContain('先不直接搜索候选人');
     expect(executor.executeToolAction).not.toHaveBeenCalled();
   });
 
@@ -1123,7 +1145,7 @@ describe('SocialAgentChat acceptance flow', () => {
       confirmationRequired: true,
     });
     expect(result.assistantMessage).toContain('画像信息');
-    expect(result.assistantMessage).toContain('不会直接搜索候选人');
+    expect(result.assistantMessage).toContain('是否保存到你的个人信息');
     expect(executor.executeToolAction).not.toHaveBeenCalledWith(
       expect.any(Number),
       SocialAgentToolName.UpdateProfileFromAgentContext,
@@ -1182,7 +1204,7 @@ describe('SocialAgentChat acceptance flow', () => {
       intent: 'action_request',
       action: 'reply',
       profileUpdated: true,
-      assistantMessage: expect.stringContaining('已保存 1 条 Life Graph 信息'),
+      assistantMessage: expect.stringContaining('已保存 1 条 画像信息'),
     });
     const savedTask = taskRepo.save.mock.calls.at(-1)?.[0] as AgentTask;
     expect(savedTask.memory).toMatchObject({
@@ -1234,8 +1256,8 @@ describe('SocialAgentChat acceptance flow', () => {
     expect(result.intent).toBe('profile_enrichment_request');
     expect(result.shouldSearch).toBe(false);
     expect(result.profileUpdated).toBe(true);
-    expect(result.assistantMessage).toContain('画像信息');
-    expect(result.assistantMessage).toContain('不会直接搜索候选人');
+    expect(result.assistantMessage).toContain('写入 AI 画像');
+    expect(result.assistantMessage).toContain('现在开始搜索');
     expect(executor.executeToolAction).toHaveBeenCalledWith(
       101,
       SocialAgentToolName.UpdateProfileFromAgentContext,
@@ -1359,20 +1381,19 @@ describe('SocialAgentChat acceptance flow', () => {
 
     expect(result).toMatchObject({
       intent: 'social_search',
-      action: 'queue_search',
-      shouldQueueRun: true,
-      runMode: 'initial',
+      action: 'reply',
+      shouldQueueRun: false,
+      runMode: null,
       pendingApproval: null,
     });
-    expect(result.assistantMessage).toContain('不会自动发送消息');
+    expect(result.assistantMessage).toContain('约练卡片');
     expect(approvals.create).not.toHaveBeenCalled();
     await flushAsync();
-    expect(executor.executeToolAction).toHaveBeenCalledWith(
-      result.taskId,
+    expect(executor.executeToolAction).not.toHaveBeenCalledWith(
+      expect.any(Number),
       SocialAgentToolName.SearchMatches,
-      expect.objectContaining({ limit: 10 }),
-      7,
-      { signal: null },
+      expect.any(Object),
+      expect.any(Number),
     );
     expect(executor.executeToolAction).not.toHaveBeenCalledWith(
       expect.any(Number),
@@ -1410,7 +1431,7 @@ describe('SocialAgentChat acceptance flow', () => {
     );
   });
 
-  it('starts candidate search once core search slots are clear', async () => {
+  it('creates an OpportunityCard before candidate search once core search slots are clear', async () => {
     const { service, approvals, executor } = makeHarness();
 
     const result = await service.routeMessage(7, {
@@ -1419,20 +1440,208 @@ describe('SocialAgentChat acceptance flow', () => {
 
     expect(result).toMatchObject({
       intent: 'social_search',
-      action: 'queue_search',
-      shouldQueueRun: true,
-      runMode: 'initial',
+      action: 'reply',
+      shouldQueueRun: false,
+      runMode: null,
       pendingApproval: null,
     });
-    expect(result.assistantMessage).toContain('不会自动发送消息');
+    expect(result.assistantMessage).toContain('我先帮你整理成一张约练卡片');
+    expect(result.cards).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: 'activity_plan',
+          actions: expect.arrayContaining([
+            expect.objectContaining({
+              label: '发布卡片',
+              action: 'publish_to_discover',
+              schemaAction: expect.stringMatching(
+                /^(publish_to_discover|activity\.confirm_create)$/,
+              ),
+              requiresConfirmation: true,
+            }),
+            expect.objectContaining({
+              label: '修改信息',
+              requiresConfirmation: false,
+            }),
+            expect.objectContaining({
+              label: '暂不发布',
+              schemaAction: 'activity.skip_publish',
+              requiresConfirmation: false,
+            }),
+          ]),
+        }),
+      ]),
+    );
     expect(approvals.create).not.toHaveBeenCalled();
     await flushAsync();
+    expect(executor.executeToolAction).not.toHaveBeenCalledWith(
+      expect.any(Number),
+      SocialAgentToolName.SearchMatches,
+      expect.any(Object),
+      expect.any(Number),
+    );
+  });
+
+  it('turns the tested QDU running-partner request into a publishable draft card, not candidate cards', async () => {
+    const { service, executor } = makeHarness();
+
+    const result = await service.routeMessage(7, {
+      message:
+        '我想今天晚上在青岛大学附近找一个轻松跑步搭子，找1人，先站内沟通。',
+    });
+
+    expect(result).toMatchObject({
+      intent: 'social_search',
+      action: 'reply',
+      shouldQueueRun: false,
+      runMode: null,
+      pendingApproval: null,
+    });
+    expect(result.assistantMessage).toContain('约练卡片');
+    expect(result.cards).toEqual([
+      expect.objectContaining({
+        type: 'activity_plan',
+        schemaType: 'social_match.activity',
+        status: 'waiting_confirmation',
+        data: expect.objectContaining({
+          schemaName: 'OpportunityCard',
+          opportunityCard: true,
+          opportunityTitle: '青岛大学晚跑步搭子',
+          activityType: '跑步',
+          time: '今天晚上',
+          locationName: '青岛大学附近',
+          capacityLabel: '找 1 人',
+          safetyBoundary: expect.stringContaining('站内沟通'),
+          publishStatus: 'draft',
+        }),
+        actions: [
+          expect.objectContaining({
+            label: '发布卡片',
+            schemaAction: 'publish_to_discover',
+          }),
+          expect.objectContaining({
+            label: '修改信息',
+            schemaAction: 'activity.modify_time',
+          }),
+          expect.objectContaining({
+            label: '暂不发布',
+            schemaAction: 'activity.skip_publish',
+          }),
+        ],
+      }),
+    ]);
+    await flushAsync();
+    expect(executor.executeToolAction).not.toHaveBeenCalledWith(
+      expect.any(Number),
+      SocialAgentToolName.SearchMatches,
+      expect.any(Object),
+      expect.any(Number),
+    );
+
+    const publish = await service.routeMessage(7, {
+      taskId: result.taskId,
+      message: '帮我发布这张约练卡片',
+    });
+
+    expect(publish).toMatchObject({
+      intent: 'action_request',
+      action: 'await_confirmation',
+      shouldQueueRun: false,
+      runMode: null,
+      pendingApproval: null,
+      taskId: result.taskId,
+    });
+    expect(publish.assistantMessage).toContain('发布确认卡');
+    expect(publish.cards).toEqual([
+      expect.objectContaining({
+        type: 'activity_plan',
+        schemaType: 'social_match.activity',
+        status: 'waiting_confirmation',
+        data: expect.objectContaining({
+          schemaName: 'OpportunityCard',
+          opportunityCard: true,
+          activityType: '跑步',
+          time: '今天晚上',
+          locationName: '青岛大学附近',
+          safetyBoundary: expect.stringContaining('站内沟通'),
+          publishStatus: 'draft',
+        }),
+        actions: expect.arrayContaining([
+          expect.objectContaining({
+            label: '发布卡片',
+            schemaAction: 'publish_to_discover',
+            requiresConfirmation: true,
+          }),
+          expect.objectContaining({
+            label: '修改信息',
+            schemaAction: 'activity.modify_time',
+            requiresConfirmation: false,
+          }),
+          expect.objectContaining({
+            label: '暂不发布',
+            schemaAction: 'activity.skip_publish',
+            requiresConfirmation: false,
+          }),
+        ]),
+      }),
+    ]);
+    expect(executor.executeToolAction).not.toHaveBeenCalledWith(
+      expect.any(Number),
+      SocialAgentToolName.SearchMatches,
+      expect.any(Object),
+      expect.any(Number),
+    );
+
+    const publishCard = publish.cards?.[0];
+    const publishAction = publishCard?.actions?.find(
+      (action) => action.schemaAction === 'publish_to_discover',
+    );
+    expect(publishAction).toBeTruthy();
+
+    const published = await service.performCardAction(
+      7,
+      result.taskId as number,
+      {
+        action: 'publish_to_discover',
+        payload: {
+          ...(publishAction?.payload as Record<string, unknown>),
+          confirmedPublish: true,
+          approved: true,
+          confirmed: true,
+        },
+      },
+    );
+
+    expect(published.assistantMessage).toContain('已发布到发现页');
+    expect(published.cards).toEqual([
+      expect.objectContaining({
+        type: 'activity_status',
+        schemaType: 'social_match.activity',
+        status: 'completed',
+        data: expect.objectContaining({
+          publicIntentId: 'social_request_301',
+          socialRequestId: 301,
+          discoverHref: '/discover?publicIntentId=social_request_301',
+          publicIntentHref: '/public-intent/social_request_301',
+          publishStatus: 'published',
+        }),
+      }),
+    ]);
     expect(executor.executeToolAction).toHaveBeenCalledWith(
       result.taskId,
-      SocialAgentToolName.SearchMatches,
-      expect.objectContaining({ limit: 10 }),
+      SocialAgentToolName.CreateSocialRequest,
+      expect.objectContaining({
+        mode: 'publish',
+        publish: true,
+        syncPublicIntent: true,
+      }),
       7,
-      { signal: null },
+    );
+    expect(executor.executeToolAction).not.toHaveBeenCalledWith(
+      expect.any(Number),
+      SocialAgentToolName.SearchMatches,
+      expect.any(Object),
+      expect.any(Number),
     );
   });
 
@@ -1465,60 +1674,27 @@ describe('SocialAgentChat acceptance flow', () => {
 
     expect(second).toMatchObject({
       intent: 'social_search',
-      action: 'queue_search',
-      shouldQueueRun: true,
-      runMode: 'initial',
+      action: 'reply',
+      shouldQueueRun: false,
+      runMode: null,
       pendingApproval: null,
       taskId: first.taskId,
     });
-    expect(second.assistantMessage).toContain('不会自动发送消息');
+    expect(second.assistantMessage).toContain('约练卡片');
     expect(approvals.create).not.toHaveBeenCalled();
 
     await flushAsync();
 
-    expect(executor.executeToolAction).toHaveBeenCalledWith(
-      second.taskId,
+    expect(executor.executeToolAction).not.toHaveBeenCalledWith(
+      expect.any(Number),
       SocialAgentToolName.SearchMatches,
-      expect.objectContaining({ limit: 10 }),
-      7,
-      { signal: null },
-    );
-    const searchRun = await service.getRunStatus(
-      7,
-      second.taskId as number,
-      second.queuedRun?.runId ?? '',
-    );
-    const opportunityCards = (searchRun.result?.cards ?? []).filter(
-      (card) => card.data?.['opportunityCard'] === true,
-    );
-
-    expect(searchRun.status).toBe('completed');
-    expect(searchRun.result?.candidates?.[0]).toMatchObject({
-      userId: 22,
-      nickname: '小林',
-    });
-    expect(opportunityCards).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          schemaVersion: 'fitmeet.tool-ui.v1',
-          schemaType: 'social_match.candidate',
-          data: expect.objectContaining({
-            schemaName: 'OpportunityCard',
-            opportunityCard: true,
-          }),
-          actions: expect.arrayContaining([
-            expect.objectContaining({
-              schemaAction: 'candidate.connect',
-              requiresConfirmation: true,
-            }),
-          ]),
-        }),
-      ]),
+      expect.any(Object),
+      expect.any(Number),
     );
   });
 
-  it('runs the friendship main chain from clarification to opener confirmation and Meet Loop', async () => {
-    const { service, approvals, executor, messages } = makeHarness();
+  it('keeps the friendship main chain at the OpportunityCard confirmation step before recommending candidates', async () => {
+    const { service, approvals, executor } = makeHarness();
 
     const clarification = await service.routeMessage(7, {
       message: '我想找个周末能一起跑步的新朋友',
@@ -1540,268 +1716,59 @@ describe('SocialAgentChat acceptance flow', () => {
 
     expect(search).toMatchObject({
       intent: 'social_search',
-      shouldQueueRun: true,
+      action: 'reply',
+      shouldQueueRun: false,
+      runMode: null,
       pendingApproval: null,
       taskId: clarification.taskId,
     });
-    expect(['queue_search', 'queue_replan']).toContain(search.action);
     expect(approvals.create).not.toHaveBeenCalled();
-
-    await flushAsync();
-
-    const runStatus = await service.getRunStatus(
-      7,
-      search.taskId as number,
-      search.queuedRun?.runId ?? '',
-    );
-    expect(runStatus.status).toBe('completed');
-
-    const candidateCard = (runStatus.result?.cards ?? []).find(
-      (card) =>
-        card.schemaType === 'social_match.candidate' &&
-        card.data?.['opportunityCard'] === true,
-    );
-    expect(candidateCard).toEqual(
+    expect(search.assistantMessage).toContain('约练卡片');
+    expect(search.cards).toEqual([
       expect.objectContaining({
         schemaVersion: 'fitmeet.tool-ui.v1',
+        schemaType: 'social_match.activity',
+        status: 'waiting_confirmation',
         data: expect.objectContaining({
           schemaName: 'OpportunityCard',
           opportunityCard: true,
+          activityType: '跑步',
+          time: '周末下午',
+          locationName: '青岛大学附近',
+          publishStatus: 'draft',
         }),
-        actions: expect.arrayContaining([
+        actions: [
           expect.objectContaining({
-            schemaAction: 'candidate.generate_opener',
+            label: '发布卡片',
+            schemaAction: 'publish_to_discover',
+            requiresConfirmation: true,
+          }),
+          expect.objectContaining({
+            label: '修改信息',
+            schemaAction: 'activity.modify_time',
             requiresConfirmation: false,
           }),
           expect.objectContaining({
-            schemaAction: 'candidate.connect',
-            requiresConfirmation: true,
+            label: '暂不发布',
+            schemaAction: 'activity.skip_publish',
+            requiresConfirmation: false,
           }),
-        ]),
+        ],
       }),
+    ]);
+    await flushAsync();
+    expect(executor.executeToolAction).not.toHaveBeenCalledWith(
+      expect.any(Number),
+      SocialAgentToolName.SearchMatches,
+      expect.any(Object),
+      expect.any(Number),
     );
-
-    const generateOpenerAction = candidateCard?.actions?.find(
-      (action) => action.schemaAction === 'candidate.generate_opener',
-    );
-    const opener = await service.performCardAction(7, search.taskId as number, {
-      action: 'candidate.generate_opener',
-      payload: generateOpenerAction?.payload ?? {
-        taskId: search.taskId,
-        targetUserId: 22,
-      },
-    });
-
-    expect(opener).toMatchObject({
-      intent: 'action_request',
-      action: 'reply',
-      pendingApproval: null,
-      cards: [
-        expect.objectContaining({
-          schemaType: 'social_match.candidate',
-          title: expect.stringContaining('开场白草稿'),
-          data: expect.objectContaining({
-            schemaName: 'OpportunityCard',
-            openerDraftReady: true,
-            targetUserId: 22,
-          }),
-          actions: expect.arrayContaining([
-            expect.objectContaining({
-              schemaAction: 'opener.confirm_send',
-              requiresConfirmation: true,
-            }),
-            expect.objectContaining({
-              schemaAction: 'opener.reject',
-              requiresConfirmation: false,
-            }),
-          ]),
-        }),
-      ],
-    });
-    expect(messages.createAgentInboxEvent).not.toHaveBeenCalled();
-
-    const confirmOpenerAction = opener.cards?.[0]?.actions?.find(
-      (action) => action.schemaAction === 'opener.confirm_send',
-    );
-    const openerApproval = await service.performCardAction(
-      7,
-      search.taskId as number,
-      {
-        action: 'opener.confirm_send',
-        idempotencyKey: 'friendship-main-chain-confirm-1',
-        payload: confirmOpenerAction?.payload ?? {},
-      },
-    );
-
-    expect(openerApproval).toMatchObject({
-      intent: 'action_request',
-      action: 'await_confirmation',
-      pendingApproval: expect.objectContaining({
-        id: 9001,
-        actionType: 'send_invite',
-      }),
-      cards: [
-        expect.objectContaining({
-          schemaType: 'social_match.candidate',
-          title: expect.stringContaining('开场白草稿'),
-          actions: expect.arrayContaining([
-            expect.objectContaining({
-              schemaAction: 'opener.confirm_send',
-              requiresConfirmation: true,
-            }),
-          ]),
-        }),
-      ],
-    });
-
-    const confirmed = await service.performCardAction(
-      7,
-      search.taskId as number,
-      {
-        action: 'opener.confirm_send',
-        idempotencyKey: 'friendship-main-chain-confirm-1',
-        payload: {
-          taskId: search.taskId,
-          approvalId: 9001,
-        },
-      },
-    );
-
-    expect(approvals.approve).toHaveBeenCalledWith(9001, 7);
-    expect(executor.executeToolAction).toHaveBeenCalledWith(
-      search.taskId,
+    expect(executor.executeToolAction).not.toHaveBeenCalledWith(
+      expect.any(Number),
       SocialAgentToolName.SendMessageToCandidate,
-      expect.objectContaining({
-        targetUserId: 22,
-        candidateUserId: 22,
-        candidateRecordId: 501,
-        socialRequestId: 301,
-        idempotencyKey: 'friendship-main-chain-confirm-1',
-        metadata: expect.objectContaining({
-          confirmationSource: 'agent_card_action',
-          pendingApprovalId: 9001,
-          schemaAction: 'opener.confirm_send',
-        }),
-      }),
-      7,
-      { signal: null },
+      expect.any(Object),
+      expect.any(Number),
     );
-    expect(approvals.approve.mock.invocationCallOrder[0]).toBeLessThan(
-      executor.executeToolAction.mock.invocationCallOrder.at(-1) ??
-        Number.MAX_SAFE_INTEGER,
-    );
-    expect(confirmed).toMatchObject({
-      action: 'reply',
-      pendingApproval: null,
-      cards: [
-        expect.objectContaining({
-          schemaVersion: 'fitmeet.tool-ui.v1',
-          schemaType: 'meet_loop.timeline',
-          data: expect.objectContaining({
-            schemaName: 'MeetLoopTimelineCard',
-            loopStage: 'message_sent',
-            candidateUserId: 22,
-            timeline: expect.objectContaining({
-              nextAction: expect.stringContaining('等待对方回复'),
-            }),
-          }),
-          actions: expect.arrayContaining([
-            expect.objectContaining({
-              schemaAction: 'meet_loop.resume',
-              requiresConfirmation: true,
-            }),
-          ]),
-        }),
-      ],
-      assistantMessage: expect.stringContaining('已确认发送给小林'),
-    });
-
-    const resumeAfterReplyAction = confirmed.cards?.[0]?.actions?.find(
-      (action) => action.schemaAction === 'meet_loop.resume',
-    );
-    const replyReceived = await service.performCardAction(
-      7,
-      search.taskId as number,
-      {
-        action: 'meet_loop.resume',
-        payload: {
-          ...(resumeAfterReplyAction?.payload ?? {}),
-          source: 'counterpart_reply',
-          replyStatus: 'replied',
-          replyIntent: 'accepted',
-          replyPreview: '可以呀，周末下午先轻松跑一圈。',
-        },
-      },
-    );
-
-    expect(replyReceived).toMatchObject({
-      action: 'reply',
-      pendingApproval: null,
-      assistantMessage: expect.stringContaining('对方已经回复'),
-      cards: expect.arrayContaining([
-        expect.objectContaining({
-          schemaVersion: 'fitmeet.tool-ui.v1',
-          schemaType: 'meet_loop.timeline',
-          data: expect.objectContaining({
-            schemaName: 'MeetLoopTimelineCard',
-            loopStage: 'reply_received',
-            connectionState: 'reply_received',
-            counterpartIntent: 'accepted',
-            replyIntentLabel: '对方愿意继续',
-            nextSafeStep: expect.stringContaining('创建约练或连接对方'),
-            candidateUserId: 22,
-            timeline: expect.objectContaining({
-              nextAction: expect.stringContaining('创建约练或连接对方'),
-            }),
-          }),
-          actions: expect.arrayContaining([
-            expect.objectContaining({
-              schemaAction: 'activity.confirm_create',
-              requiresConfirmation: true,
-              payload: expect.objectContaining({
-                approvalRequired: true,
-                checkpointRequired: true,
-                counterpartIntent: 'accepted',
-              }),
-            }),
-            expect.objectContaining({
-              schemaAction: 'meet_loop.reschedule',
-              requiresConfirmation: true,
-            }),
-          ]),
-        }),
-        expect.objectContaining({
-          schemaVersion: 'fitmeet.tool-ui.v1',
-          schemaType: 'life_graph.diff',
-          data: expect.objectContaining({
-            schemaName: 'LifeGraphDiffCard',
-            source: 'counterpart_reply',
-            loopStage: 'reply_received',
-            diff: expect.objectContaining({
-              title: expect.stringContaining('低压力开场'),
-              privacyBoundary: expect.stringContaining('不会写入精确位置'),
-              sourceSignals: expect.arrayContaining(['对方已回复']),
-            }),
-            canCorrect: true,
-            canRevoke: true,
-          }),
-          actions: expect.arrayContaining([
-            expect.objectContaining({
-              schemaAction: 'life_graph.accept_update',
-              payload: expect.objectContaining({
-                source: 'counterpart_reply',
-              }),
-            }),
-            expect.objectContaining({
-              schemaAction: 'life_graph.reject_update',
-              payload: expect.objectContaining({
-                source: 'counterpart_reply',
-              }),
-            }),
-          ]),
-        }),
-      ]),
-    });
   });
 
   it('routes gendered search requests as searches rather than boundaries', async () => {
@@ -1814,8 +1781,8 @@ describe('SocialAgentChat acceptance flow', () => {
 
     expect(result).toMatchObject({
       intent: 'social_search',
-      action: 'queue_search',
-      shouldQueueRun: true,
+      action: 'reply',
+      shouldQueueRun: false,
     });
   });
 
@@ -1837,40 +1804,54 @@ describe('SocialAgentChat acceptance flow', () => {
     [
       '户外搭子',
       '帮我找青岛周末下午户外搭子，轻松一点，公共场所先站内聊，接受陌生人，不公开发起',
+      false,
     ],
     [
       '篮球搭子',
       '我想找青岛今晚一起打篮球的搭子，轻松一点，公共场所先站内聊，接受陌生人，不公开发起',
+      false,
     ],
     [
       '约练搭子',
       '帮我找青岛周末下午约练搭子，中等强度，公共场所先站内聊，接受陌生人，不公开发起',
+      false,
     ],
     [
       '认识新朋友',
       '我想在青岛周末下午轻松认识新朋友，公共场所先站内聊，接受陌生人，不公开发起',
+      true,
     ],
   ] as const)(
-    'queues a search for complete %s requests after safety context is present',
-    async (_label, message) => {
+    'routes complete %s requests through the correct confirmation path after safety context is present',
+    async (_label, message, shouldQueue) => {
       const { service, executor } = makeHarness();
 
       const result = await service.routeMessage(7, { message });
 
       expect(result).toMatchObject({
         intent: 'social_search',
-        action: 'queue_search',
-        shouldQueueRun: true,
-        runMode: 'initial',
+        action: shouldQueue ? 'queue_search' : 'reply',
+        shouldQueueRun: shouldQueue,
+        runMode: shouldQueue ? 'initial' : null,
         pendingApproval: null,
       });
-      expect(result.assistantMessage).not.toContain('还差');
+      if (shouldQueue) {
+        expect(result.assistantMessage).not.toContain('还差');
+      }
       expect(executor.executeToolAction).not.toHaveBeenCalledWith(
         expect.any(Number),
         SocialAgentToolName.SendMessageToCandidate,
         expect.any(Object),
         expect.any(Number),
       );
+      if (!shouldQueue) {
+        expect(executor.executeToolAction).not.toHaveBeenCalledWith(
+          expect.any(Number),
+          SocialAgentToolName.SearchMatches,
+          expect.any(Object),
+          expect.any(Number),
+        );
+      }
     },
   );
 
@@ -1936,10 +1917,8 @@ describe('SocialAgentChat acceptance flow', () => {
 
     expect(result.intent).toBe('social_search');
     expect(result.shouldQueueRun).toBe(false);
+    expect(result.assistantMessage).toContain('城市/大致区域');
     expect(result.assistantMessage).toContain('时间');
-    expect(result.assistantMessage).toContain(
-      '安全边界和是否发布到发现，会在真正发送邀请或公开前再让你确认',
-    );
   });
 
   it('routes action requests to explicit confirmation instead of execution', async () => {
@@ -1989,8 +1968,8 @@ describe('SocialAgentChat acceptance flow', () => {
       replyStrategy: 'conversational_answer',
       shouldQueueRun: false,
     });
-    expect(result.assistantMessage).toContain('继续聊天');
-    expect(result.assistantMessage).toContain('开始找人');
+    expect(result.assistantMessage).toContain('FitMeet 的 AI 社交助理');
+    expect(result.assistantMessage).toContain('城市、兴趣、可约时间');
     expect(executor.executeToolAction).not.toHaveBeenCalled();
   });
 
@@ -2068,7 +2047,7 @@ describe('SocialAgentChat acceptance flow', () => {
           type: 'activity_plan',
           actions: expect.arrayContaining([
             expect.objectContaining({
-              schemaAction: 'publish_to_discover',
+              schemaAction: 'activity.confirm_create',
               requiresConfirmation: true,
             }),
             expect.objectContaining({
@@ -2154,13 +2133,13 @@ describe('SocialAgentChat acceptance flow', () => {
         opportunityCard: true,
         socialRequestId: 301,
         publicIntentId: 'social_request_301',
-        discoverHref: '/public-intent/social_request_301',
+        discoverHref: '/discover?publicIntentId=social_request_301',
       }),
       actions: expect.arrayContaining([
         expect.objectContaining({
-          label: '发布到发现',
+          label: '发布卡片',
           action: 'publish_to_discover',
-          schemaAction: 'publish_to_discover',
+          schemaAction: 'activity.confirm_create',
           requiresConfirmation: true,
         }),
         expect.objectContaining({
@@ -2290,7 +2269,7 @@ describe('SocialAgentChat acceptance flow', () => {
       type: 'activity_plan',
       actions: expect.arrayContaining([
         expect.objectContaining({
-          schemaAction: 'publish_to_discover',
+          schemaAction: 'activity.confirm_create',
           requiresConfirmation: true,
         }),
         expect.objectContaining({
@@ -2423,6 +2402,10 @@ describe('SocialAgentChat acceptance flow', () => {
     const alphaAgent = {
       prepareTurn: jest.fn().mockResolvedValue(null),
       buildResultCards: jest.fn((input: Record<string, unknown>) => {
+        const taskId =
+          typeof input.taskId === 'string' || typeof input.taskId === 'number'
+            ? input.taskId
+            : 101;
         const candidates = Array.isArray(input.candidates)
           ? (input.candidates as Array<Record<string, unknown>>)
           : [];
@@ -2441,7 +2424,7 @@ describe('SocialAgentChat acceptance flow', () => {
             title: '和 小林 低压力认识',
             status: 'waiting_confirmation',
             data: {
-              taskId: input.taskId,
+              taskId,
               schemaName: 'OpportunityCard',
               schemaVersion: 'fitmeet.tool-ui.v1',
               schemaType: 'social_match.candidate',
@@ -2469,7 +2452,7 @@ describe('SocialAgentChat acceptance flow', () => {
                 ],
                 suggestedOpener:
                   candidate.suggestedMessage ?? '这周末方便一起慢跑一圈吗？',
-                recommendedNextAction: '先生成邀请开场白，确认后再发送。',
+                recommendedNextAction: '先生成开场白，确认后再发送。',
                 safetyBoundary: '第一次建议选择校园操场或公共公园。',
                 confirmedContext: ['青岛大学附近', '今晚', '跑步', '公共场所'],
               },
@@ -2490,16 +2473,16 @@ describe('SocialAgentChat acceptance flow', () => {
                 action: 'candidate.generate_opener',
                 schemaAction: 'candidate.generate_opener',
                 requiresConfirmation: false,
-                payload: { taskId: input.taskId, candidate },
+                payload: { taskId, candidate },
               },
               {
                 id: 'connect_candidate',
-                label: '加好友并聊天',
+                label: '确认后邀请Ta',
                 action: 'candidate.connect',
                 schemaAction: 'candidate.connect',
                 requiresConfirmation: true,
                 payload: {
-                  taskId: input.taskId,
+                  taskId,
                   targetUserId: candidate.targetUserId ?? candidate.userId,
                   candidateRecordId: candidate.candidateRecordId ?? null,
                   socialRequestId: candidate.socialRequestId ?? null,
@@ -2511,7 +2494,7 @@ describe('SocialAgentChat acceptance flow', () => {
                 label: '创建约练',
                 action: 'create_activity',
                 requiresConfirmation: true,
-                payload: { taskId: input.taskId, candidate },
+                payload: { taskId, candidate },
               },
             ],
           },
@@ -2628,7 +2611,7 @@ describe('SocialAgentChat acceptance flow', () => {
                 schemaAction: 'activity.confirm_create',
                 requiresConfirmation: true,
                 payload: {
-                  taskId: input.taskId,
+                  taskId,
                   draft,
                   candidate,
                   actionType: 'create_activity',
@@ -2636,7 +2619,7 @@ describe('SocialAgentChat acceptance flow', () => {
                   approvalRequired: true,
                   checkpointRequired: true,
                   resumeMode: 'resume_after_approval',
-                  idempotencyKey: `activity-create:${input.taskId}`,
+                  idempotencyKey: `activity-create:${taskId}`,
                 },
               },
             ],
@@ -2704,7 +2687,7 @@ describe('SocialAgentChat acceptance flow', () => {
               type: 'person',
               name: '小林',
               title: '和 小林 低压力认识',
-              recommendedNextAction: expect.stringContaining('生成邀请开场白'),
+              recommendedNextAction: expect.stringContaining('生成开场白'),
               confirmedContext: expect.arrayContaining([
                 '青岛大学附近',
                 '今晚',
@@ -3035,7 +3018,7 @@ describe('SocialAgentChat acceptance flow', () => {
         profileUpdated: false,
       });
       expect(d.assistantMessage).toContain('画像信息');
-      expect(d.assistantMessage).toContain('不会直接搜索候选人');
+      expect(d.assistantMessage).toContain('先不直接搜索候选人');
       expect(executor.executeToolAction).toHaveBeenCalledTimes(
         toolCallsBeforeChat,
       );
@@ -3047,7 +3030,7 @@ describe('SocialAgentChat acceptance flow', () => {
       expect(e.intent).toBe('correction_or_clarification');
       expect(e.shouldSearch).toBe(false);
       expect(e.assistantMessage).toContain('画像信息');
-      expect(e.assistantMessage).toContain('不会直接搜索候选人');
+      expect(e.assistantMessage).toContain('我先不搜索');
       expect(e.assistantMessage).not.toContain('人物画像是 FitMeet');
       expect(executor.executeToolAction).toHaveBeenCalledTimes(
         toolCallsBeforeChat,
@@ -3075,8 +3058,8 @@ describe('SocialAgentChat acceptance flow', () => {
         }),
         7,
       );
-      expect(f.assistantMessage).toContain('画像信息');
-      expect(f.assistantMessage).toContain('不会直接搜索候选人');
+      expect(f.assistantMessage).toContain('写入 AI 画像');
+      expect(f.assistantMessage).toContain('现在开始搜索');
 
       const g = await service.routeMessage(7, {
         message: '那我还缺什么？',
@@ -3094,92 +3077,53 @@ describe('SocialAgentChat acceptance flow', () => {
       });
       expect(h).toMatchObject({
         intent: 'social_search',
-        shouldQueueRun: true,
-      });
-      expect(['queue_search', 'queue_replan']).toContain(h.action);
-      await flushAsync();
-      expect(executor.executeToolAction).toHaveBeenCalledWith(
-        h.taskId,
-        SocialAgentToolName.SearchMatches,
-        expect.objectContaining({ limit: 10 }),
-        7,
-        { signal: null },
-      );
-      const searchRun = await service.getRunStatus(
-        7,
-        h.taskId as number,
-        h.queuedRun?.runId ?? '',
-      );
-      expect(searchRun.status).toBe('completed');
-      expect(searchRun.result?.candidates?.[0]).toMatchObject({
-        userId: 22,
-        nickname: '小林',
-      });
-      expect(searchRun.result?.assistantMessage).toContain('小林');
-
-      const i = await service.routeMessage(7, {
-        message: '帮我给第一个人发消息。',
-        taskId: h.taskId,
-      });
-      expect(i).toMatchObject({
-        intent: 'action_request',
-        action: 'await_confirmation',
-        shouldQueueRun: false,
-      });
-      expect(i.assistantMessage).toContain('开场白');
-      expect(i.assistantMessage).toContain('确认前我不会发送');
-      expect(i.assistantMessage).not.toContain('待确认动作');
-      expect(
-        executor.executeToolAction.mock.calls.some(
-          (call) => call[1] === SocialAgentToolName.SendMessageToCandidate,
-        ),
-      ).toBe(false);
-
-      const j = await service.routeMessage(7, {
-        message: '确认发送。',
-        taskId: h.taskId,
-      });
-      expect(j).toMatchObject({
-        intent: 'action_request',
         action: 'reply',
+        shouldQueueRun: false,
+        runMode: null,
+        pendingApproval: null,
       });
-      expect(executor.executeToolAction).toHaveBeenCalledWith(
-        h.taskId,
-        SocialAgentToolName.SendMessageToCandidate,
+      expect(h.assistantMessage).toContain('约练卡片');
+      expect(h.cards).toEqual([
         expect.objectContaining({
-          targetUserId: 22,
-          message: expect.any(String),
-        }),
-        7,
-      );
-      expect(j.assistantMessage).toContain('已确认发送');
-      expect(j.cards).toEqual([
-        expect.objectContaining({
-          type: 'meet_loop_timeline',
-          schemaVersion: 'fitmeet.tool-ui.v1',
-          schemaType: 'meet_loop.timeline',
+          schemaType: 'social_match.activity',
+          status: 'waiting_confirmation',
           data: expect.objectContaining({
-            schemaName: 'MeetLoopTimelineCard',
-            schemaVersion: 'fitmeet.tool-ui.v1',
-            schemaType: 'meet_loop.timeline',
-            candidateUserId: 22,
-            loopStage: 'message_sent',
-            timeline: expect.objectContaining({
-              nextAction: expect.stringContaining('等待对方回复'),
-            }),
+            schemaName: 'OpportunityCard',
+            opportunityCard: true,
+            activityType: '跑步',
+            time: '周末下午',
+            locationName: '青岛大学',
+            publishStatus: 'draft',
           }),
-          actions: expect.arrayContaining([
+          actions: [
             expect.objectContaining({
-              schemaAction: 'meet_loop.resume',
+              schemaAction: 'publish_to_discover',
               requiresConfirmation: true,
             }),
             expect.objectContaining({
-              schemaAction: 'meet_loop.reschedule',
-              requiresConfirmation: true,
+              schemaAction: 'activity.modify_time',
+              requiresConfirmation: false,
             }),
-          ]),
+            expect.objectContaining({
+              schemaAction: 'activity.skip_publish',
+              requiresConfirmation: false,
+            }),
+          ],
         }),
       ]);
+      await flushAsync();
+      expect(executor.executeToolAction).not.toHaveBeenCalledWith(
+        expect.any(Number),
+        SocialAgentToolName.SearchMatches,
+        expect.any(Object),
+        expect.any(Number),
+      );
+      expect(executor.executeToolAction).not.toHaveBeenCalledWith(
+        expect.any(Number),
+        SocialAgentToolName.SendMessageToCandidate,
+        expect.any(Object),
+        expect.any(Number),
+      );
 
       const finalTask = taskRepo.save.mock.calls.at(-1)?.[0] as AgentTask;
       expect(finalTask.memory).toBeTruthy();
@@ -3308,13 +3252,24 @@ describe('SocialAgentChat acceptance flow', () => {
 
       expect(filled).toMatchObject({
         intent: 'social_search',
-        shouldQueueRun: true,
+        action: 'reply',
+        shouldQueueRun: false,
+        runMode: null,
         taskId: clarification.taskId,
       });
-      expect(['queue_search', 'queue_replan']).toContain(filled.action);
-      expect(filled.assistantMessage).toContain('已确认的');
-      expect(filled.assistantMessage).toContain('时间：今天晚上');
-      expect(filled.assistantMessage).toContain('地点：青岛大学附近');
+      expect(filled.assistantMessage).toContain('约练卡片');
+      expect(filled.cards).toEqual([
+        expect.objectContaining({
+          schemaType: 'social_match.activity',
+          data: expect.objectContaining({
+            schemaName: 'OpportunityCard',
+            opportunityCard: true,
+            time: '今天晚上',
+            locationName: '青岛大学附近',
+            activityType: '散步',
+          }),
+        }),
+      ]);
       expect(filled.assistantMessage).not.toMatch(
         /还差|只差|今晚.*还是.*周末|周末.*还是.*今晚|你更想.*今晚|你更想.*周末/,
       );
@@ -3336,36 +3291,12 @@ describe('SocialAgentChat acceptance flow', () => {
       });
 
       await flushAsync();
-      executor.executeToolAction.mockClear();
-
-      const continued = await service.routeMessage(7, {
-        taskId: clarification.taskId,
-        message: '可以，帮我找人',
-      });
-
-      expect(continued.taskId).toBe(clarification.taskId);
-      expect(continued.intent).toMatch(/social_search|candidate_followup/);
-      expect(continued.assistantMessage).toContain('已确认的');
-      expect(continued.assistantMessage).toContain('时间：今天晚上');
-      expect(continued.assistantMessage).toContain('地点：青岛大学附近');
-      expect(continued.assistantMessage).not.toMatch(
-        /还差|只差|今晚.*还是.*周末|周末.*还是.*今晚|活动地点或大致区域|运动或见面场景/,
-      );
-      expect(continued.shouldQueueRun).toBe(true);
-
-      await flushAsync();
-      expect(executor.executeToolAction).toHaveBeenCalledWith(
-        continued.taskId,
+      expect(executor.executeToolAction).not.toHaveBeenCalledWith(
+        expect.any(Number),
         SocialAgentToolName.SearchMatches,
-        expect.objectContaining({ limit: 10 }),
-        7,
-        { signal: null },
+        expect.any(Object),
+        expect.any(Number),
       );
-
-      const slotsAfterContinue = readTaskSlots(taskRepo);
-      expect(slotsAfterContinue.time_window?.value).toContain('今天晚上');
-      expect(slotsAfterContinue.location_text?.value).toContain('青岛大学');
-      expect(slotsAfterContinue.activity?.value).toContain('散步');
     });
 
     it('records a pending action when an action_request creates an approval', async () => {
@@ -3941,7 +3872,7 @@ describe('SocialAgentChat acceptance flow', () => {
       });
       expect(approvals.create).not.toHaveBeenCalled();
       expect(executor.executeToolAction).not.toHaveBeenCalled();
-      expect(messages.createAgentInboxEvent).not.toHaveBeenCalled();
+      expect(messages.createAgentMessageEvent).not.toHaveBeenCalled();
       memory = readTaskMemory(taskRepo) as CandidateActionMemory;
       expect(memory.pendingActions).toEqual([]);
 
@@ -3999,7 +3930,7 @@ describe('SocialAgentChat acceptance flow', () => {
         }),
       );
       expect(executor.executeToolAction).not.toHaveBeenCalled();
-      expect(messages.createAgentInboxEvent).not.toHaveBeenCalled();
+      expect(messages.createAgentMessageEvent).not.toHaveBeenCalled();
       memory = readTaskMemory(taskRepo) as CandidateActionMemory;
       expect(memory.pendingActions.at(-1)).toMatchObject({
         actionType: 'send_invite',
@@ -4115,7 +4046,7 @@ describe('SocialAgentChat acceptance flow', () => {
         ],
         assistantMessage: expect.stringContaining('加好友并聊天前还需要你确认'),
       });
-      expect(messages.createAgentInboxEvent).not.toHaveBeenCalled();
+      expect(messages.createAgentMessageEvent).not.toHaveBeenCalled();
     });
 
     it('keeps candidate.connect behind pending approval when AddFriend requires confirmation', async () => {

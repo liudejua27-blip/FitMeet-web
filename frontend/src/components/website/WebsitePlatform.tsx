@@ -13,31 +13,15 @@ const CONTACT_EMAIL = '15253005312@163.com';
 export type WebsitePage =
   | 'home'
   | 'features'
-  | 'ecosystem'
   | 'download'
-  | 'app'
-  | 'developers'
   | 'safety'
   | 'about'
-  | 'contact'
-  | 'lifeGraph'
   | 'demo';
 
 type Action = {
   label: string;
   to: string;
   variant?: 'primary' | 'secondary';
-};
-
-type InfoPage = {
-  title: string;
-  body: string;
-  actions: Action[];
-  sections: {
-    label: string;
-    title: string;
-    body: string;
-  }[];
 };
 
 const navItems = [
@@ -57,34 +41,17 @@ const seo: Record<WebsitePage, { title: string; description: string; path: strin
       'FitMeet 是面向真实生活的 Agent 社交产品。用户说出场景，Agent 理解需求、推荐合适的人或活动，并在关键动作前等待用户确认。',
     path: '/',
   },
-  ecosystem: {
-    title: 'FitMeet | 从信息流到需求流社交',
-    description:
-      '了解 FitMeet 如何把同城社交、约练和找搭子的真实需求变成可解释、可确认、可执行的连接流程。',
-    path: '/ecosystem',
-  },
   features: {
     title: 'FitMeet 产品功能 | Social World 怎么帮助用户社交',
     description:
       '了解 FitMeet Social World 如何用兴趣场景、附近机会、站内聊天、Agent 推荐和确认机制帮助用户自然认识真正聊得来的人。',
     path: '/features',
   },
-  app: {
-    title: 'FitMeet App | Beta 预约',
-    description:
-      '预约 FitMeet App Beta，体验移动端 5 Tab、附近机会、Agent 发起需求、安全确认和活动闭环。',
-    path: '/app',
-  },
   download: {
     title: '下载 FitMeet App | Social World Beta',
     description:
       '下载或预约 FitMeet App Beta。iOS 与 Android 入口、二维码占位、Beta 预约和 Agent 体验入口。',
     path: '/download',
-  },
-  developers: {
-    title: 'FitMeet Developers | Agent 接入预告',
-    description: 'FitMeet 开发者能力将围绕权限、确认、审计和真实生活社交工具开放。',
-    path: '/developers',
   },
   safety: {
     title: 'FitMeet Safety Center | 隐私、确认、审计与撤回',
@@ -96,18 +63,6 @@ const seo: Record<WebsitePage, { title: string; description: string; path: strin
     title: '关于 FitMeet | Social World',
     description: 'FitMeet 希望让社交回到真实生活，从刷信息流转向由用户需求驱动的真实连接。',
     path: '/about',
-  },
-  contact: {
-    title: '联系 FitMeet | 商务合作、媒体与安全反馈',
-    description:
-      '联系 FitMeet 团队，了解 Social World、商务合作、媒体采访、安全反馈和 App Beta 体验。',
-    path: '/contact',
-  },
-  lifeGraph: {
-    title: 'FitMeet Life Graph | 用户可控画像',
-    description:
-      'Life Graph 在用户授权下帮助 Agent 理解节奏、偏好和边界，并保持可编辑、可撤回、可审计。',
-    path: '/life-graph',
   },
   demo: {
     title: 'FitMeet 30 秒 Demo | 免登录理解产品',
@@ -124,7 +79,7 @@ const homeSeo = {
 
 const safetyItems = [
   ['隐私', '精确位置、身体信息、联系方式默认隐藏，只在用户本人界面可见。'],
-  ['确认', '发邀请、加入活动、共享位置、写入 Life Graph 前都需要用户确认。'],
+  ['确认', '发邀请、加入活动、共享位置、更新敏感个人信息前都需要用户确认。'],
   ['审计', 'Agent 的关键判断、工具调用和权限变化保留可回看记录。'],
   ['撤回', '授权、画像信号、活动申请和推荐偏好都可以撤回或关闭。'],
   ['举报', '用户、活动、消息和推荐卡片都提供举报与拉黑入口。'],
@@ -147,7 +102,7 @@ const featurePillars = [
 ];
 
 const agentCapabilities = [
-  ['发现人', '结合兴趣、距离、时间和 Life Graph，给出更合适的人选。'],
+  ['发现人', '结合兴趣、距离、时间和个人偏好，给出更合适的人选。'],
   ['发现场景', '把“想出门走走”拆成散步、咖啡、Citywalk 或轻运动等可执行场景。'],
   ['发现话题', '根据对方公开资料和你的边界，生成轻松、不冒犯的开场方式。'],
 ];
@@ -163,111 +118,8 @@ const appTabs = [
   ['附近', '人、活动和地点按场景组织'],
   ['Agent', '一句话发起需求和确认动作'],
   ['消息', '低压力开场、邀请、活动确认'],
-  ['我的', 'Life Graph、隐私开关和安全记录'],
+  ['我的', '个人信息、隐私开关和安全记录'],
 ];
-
-const infoPages: Partial<Record<WebsitePage, InfoPage>> = {
-  ecosystem: {
-    title: '从刷信息流，变成说出真实需求。',
-    body: 'FitMeet 的核心不是展示更多模块，而是把用户的真实场景变成 Agent 可以完成的社交任务。',
-    actions: [
-      { label: '看 30 秒 Demo', to: '/demo', variant: 'primary' },
-      { label: '进入 Agent', to: '/agent' },
-    ],
-    sections: [
-      {
-        label: '用户场景',
-        title: '用户不想研究功能，只想完成一件事。',
-        body: '想跑步、想参加活动、想认识附近同频的人，这些才是产品入口。',
-      },
-      {
-        label: 'Agent 完成',
-        title: 'Agent 负责理解、筛选、解释和准备下一步。',
-        body: 'FitMeet 把时间、地点、运动类型、社交偏好和安全边界整理成可执行动作。',
-      },
-      {
-        label: '为什么安全',
-        title: '关键动作不自动执行。',
-        body: 'Agent 可以建议，但发邀请、加入活动、共享敏感信息都必须由用户确认。',
-      },
-    ],
-  },
-  about: {
-    title: 'FitMeet 让社交回到真实生活。',
-    body: '我们不想做一个让人停留更久的信息流，而是做一个让合适的人更自然见面的 Social World。',
-    actions: [
-      { label: '了解 Safety Center', to: '/safety', variant: 'primary' },
-      { label: '预约 App Beta', to: '/download#waitlist' },
-    ],
-    sections: [
-      {
-        label: '方向',
-        title: '需求流社交',
-        body: '用户先说出真实需求，系统围绕需求组织人、活动和地点。',
-      },
-      {
-        label: '边界',
-        title: 'Agent 不是替你社交',
-        body: 'Agent 只帮助你更好地做决定，最终动作仍由你确认。',
-      },
-      {
-        label: '长期',
-        title: 'Social World',
-        body: '让真实世界里的关系、活动和城市生活被更好地连接。',
-      },
-    ],
-  },
-  lifeGraph: {
-    title: 'Life Graph 是用户可控的后台画像。',
-    body: '它帮助 Agent 理解你的节奏、偏好和边界，但不把敏感数据直接暴露给别人。',
-    actions: [
-      { label: '查看安全原则', to: '/safety', variant: 'primary' },
-      { label: '进入 Agent', to: '/agent' },
-    ],
-    sections: [
-      {
-        label: '可编辑',
-        title: '画像不是黑箱。',
-        body: '兴趣、节奏、区域偏好和社交边界都应该可查看、可调整。',
-      },
-      {
-        label: '需确认',
-        title: '写入重要画像前先确认。',
-        body: '当 Agent 需要更新用户画像，应该弹出确认，不应静默写入数据库。',
-      },
-      {
-        label: '可撤回',
-        title: '用户可以关闭或删除画像信号。',
-        body: 'FitMeet 的画像价值来自信任，而不是不可控的数据积累。',
-      },
-    ],
-  },
-  developers: {
-    title: '开发者能力会围绕安全边界开放。',
-    body: '未来外部 Agent 或工具接入 FitMeet 时，必须遵守权限、确认、审计和撤回机制。',
-    actions: [
-      { label: '查看开发者页', to: '/developers/social-skills', variant: 'primary' },
-      { label: '看 Safety Center', to: '/safety' },
-    ],
-    sections: [
-      {
-        label: '权限',
-        title: '工具能力按范围开放。',
-        body: '读取候选、生成建议、发送邀请和创建活动需要不同授权级别。',
-      },
-      {
-        label: '审计',
-        title: '每次关键调用都有记录。',
-        body: '开发者工具不能成为越权执行的捷径。',
-      },
-      {
-        label: '撤回',
-        title: '授权必须可撤回。',
-        body: '用户和平台都需要能中止不合适的工具访问。',
-      },
-    ],
-  },
-};
 
 export function WebsitePlatform({ page }: { page: WebsitePage }) {
   const location = useLocation();
@@ -295,22 +147,11 @@ export function WebsitePlatform({ page }: { page: WebsitePage }) {
       <WebsiteNavbar />
       <main>
         {page === 'home' ? <HomePage /> : null}
-        {page === 'features' || page === 'ecosystem' ? <FeaturesPage /> : null}
+        {page === 'features' ? <FeaturesPage /> : null}
         {page === 'safety' ? <SafetyCenterPage /> : null}
-        {page === 'download' || page === 'app' ? <DownloadPage /> : null}
-        {page === 'about' || page === 'contact' ? <AboutContactPage /> : null}
+        {page === 'download' ? <DownloadPage /> : null}
+        {page === 'about' ? <AboutContactPage /> : null}
         {page === 'demo' ? <PublicDemoPage /> : null}
-        {page !== 'home' &&
-        page !== 'features' &&
-        page !== 'ecosystem' &&
-        page !== 'safety' &&
-        page !== 'download' &&
-        page !== 'app' &&
-        page !== 'about' &&
-        page !== 'contact' &&
-        page !== 'demo' ? (
-          <InfoPageView page={page} />
-        ) : null}
       </main>
       <WebsiteFooter />
     </div>
@@ -593,7 +434,7 @@ function SafetyCenterPage() {
       </Section>
       <Section label="敏感数据" title="默认隐藏，只在本人界面可见。" tone="deep">
         <div className="fm-policy-panel">
-          {['身体信息', '精确位置', '联系方式', '活动轨迹', 'Life Graph 信号'].map((item) => (
+          {['身体信息', '精确位置', '联系方式', '活动轨迹', '个人偏好信号'].map((item) => (
             <span key={item}>{item}</span>
           ))}
         </div>
@@ -617,7 +458,7 @@ function DownloadPage() {
     <>
       <PageHero
         title="下载 Social World App。"
-        body="移动端承载真实生活场景：附近机会、Agent 发起需求、消息确认、个人隐私与 Life Graph 管理。"
+        body="移动端承载真实生活场景：附近机会、Agent 发起需求、消息确认、个人信息和隐私管理。"
         actions={[
           { label: '预约 Beta', to: '#waitlist', variant: 'primary' },
           { label: '先体验 Agent', to: '/agent' },
@@ -823,27 +664,6 @@ function PublicDemoPage() {
           </div>
         </div>
       </section>
-    </>
-  );
-}
-
-function InfoPageView({ page }: { page: WebsitePage }) {
-  const content = infoPages[page] ?? infoPages.ecosystem!;
-
-  return (
-    <>
-      <PageHero title={content.title} body={content.body} actions={content.actions} />
-      <Section label="FitMeet" title="从真实场景开始，而不是从功能列表开始。">
-        <div className="fm-flow-grid">
-          {content.sections.map((section) => (
-            <article key={section.title} className="fm-card">
-              <span>{section.label}</span>
-              <h3>{section.title}</h3>
-              <p>{section.body}</p>
-            </article>
-          ))}
-        </div>
-      </Section>
     </>
   );
 }

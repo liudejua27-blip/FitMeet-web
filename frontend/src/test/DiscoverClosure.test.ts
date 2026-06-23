@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest';
 import {
   detailHrefForDiscoverMeet,
   publicIntentToDiscoverMeet,
-} from '../pages/DiscoverPage';
+} from '../pages/discoverMeetPresenter';
 import type { PublicSocialIntent } from '../types';
 
 describe('Discover closure links', () => {
@@ -26,14 +26,12 @@ describe('Discover closure links', () => {
     );
 
     expect(detailHrefForDiscoverMeet(linked)).toBe('/public-intent/intent%3Alinked-run');
-    expect(detailHrefForDiscoverMeet(standalone)).toBe(
-      '/public-intent/intent%3Astandalone-run',
-    );
+    expect(detailHrefForDiscoverMeet(standalone)).toBe('/public-intent/intent%3Astandalone-run');
     expect(detailHrefForDiscoverMeet(linked)).not.toContain('focusScene');
     expect(detailHrefForDiscoverMeet(standalone)).not.toContain('focusScene');
   });
 
-  it('keeps real activity and meet cards on their detail pages', () => {
+  it('does not revive retired activity or meet detail routes for legacy cards', () => {
     expect(
       detailHrefForDiscoverMeet({
         id: 88,
@@ -41,14 +39,14 @@ describe('Discover closure links', () => {
         title: '周末羽毛球',
         sourceKind: 'meet',
       } as never),
-    ).toBe('/activity/9');
+    ).toBe('/agent/chat?scene=%E5%91%A8%E6%9C%AB%E7%BE%BD%E6%AF%9B%E7%90%83');
     expect(
       detailHrefForDiscoverMeet({
         id: 88,
         title: '周末羽毛球',
         sourceKind: 'meet',
       } as never),
-    ).toBe('/meet/88');
+    ).toBe('/agent/chat?scene=%E5%91%A8%E6%9C%AB%E7%BE%BD%E6%AF%9B%E7%90%83');
   });
 
   it('does not keep built-in fallback Discover cards in the production page source', () => {
@@ -107,9 +105,7 @@ describe('Discover closure links', () => {
   });
 });
 
-function publicIntent(
-  overrides: Partial<PublicSocialIntent> = {},
-): PublicSocialIntent {
+function publicIntent(overrides: Partial<PublicSocialIntent> = {}): PublicSocialIntent {
   return {
     id: 'intent:qingdao-run',
     userId: 7,

@@ -142,12 +142,25 @@ export function useAgentSessionRestore({
     if (!isRealAgent || !isLoggedIn) return;
     const stored = readStoredAgentThread(currentUserId);
     if (!stored || (stored.messages.length === 0 && !stored.userResult)) return;
+    if (!routeTaskId && stored.activeTaskId && shouldCollapseStoredPreviousTask(stored)) {
+      setActiveTaskId((current) => current ?? stored.activeTaskId);
+      setActiveThreadId(
+        (current) =>
+          current ?? stored.activeThreadId ?? socialCodexThreadIdForTask(stored.activeTaskId),
+      );
+      setRecovery(
+        (current) =>
+          current ??
+          createLightweightPreviousTaskRecovery(
+            publicText(stored.userResult?.assistantMessage, ''),
+          ),
+      );
+      return;
+    }
     setActiveTaskId((current) => current ?? stored.activeTaskId);
     setActiveThreadId(
       (current) =>
-        current ??
-        stored.activeThreadId ??
-        socialCodexThreadIdForTask(stored.activeTaskId),
+        current ?? stored.activeThreadId ?? socialCodexThreadIdForTask(stored.activeTaskId),
     );
     const usefulStoredResult =
       stored.userResult && restoredResponseHasUsefulSurface(stored.userResult)
@@ -175,10 +188,13 @@ export function useAgentSessionRestore({
     isRealAgent,
     readStoredAgentThread,
     restoredResponseHasUsefulSurface,
+    routeTaskId,
+    publicText,
     setActiveTaskId,
     setActiveThreadId,
     setBranchSelections,
     setMessages,
+    setRecovery,
     setUserResult,
   ]);
 
@@ -257,8 +273,31 @@ export function useAgentSessionRestore({
     })
       .then((restored) => {
         if (cancelled || !restored) return;
+        const rawRestoredResponse = restored.response;
         const restoredResponse = sanitizeRestoredResponse(restored.response);
         const restoredTaskId = restored.taskId ?? null;
+        const routeTaskExplicit = Boolean(routeTaskId);
+        if (
+          !routeTaskExplicit &&
+          restoredTaskId &&
+          shouldCollapseRestoredPreviousTask(
+            rawRestoredResponse,
+            restored.taskStatus,
+            restored.messages,
+          )
+        ) {
+          setActiveTaskId(restoredTaskId);
+          setActiveThreadId(socialCodexThreadIdForTask(restoredTaskId));
+          setActiveTaskStatus(restored.taskStatus ?? null);
+          setUserResult(null);
+          setRecovery(
+            createLightweightPreviousTaskRecovery(
+              publicText(restoredResponse.assistantMessage, ''),
+            ),
+          );
+          setMessages((current) => current);
+          return;
+        }
         setActiveTaskId(restoredTaskId);
         setActiveThreadId(socialCodexThreadIdForTask(restoredTaskId));
         setActiveTaskStatus(restored.taskStatus ?? null);
@@ -337,10 +376,7 @@ export function useAgentSessionRestore({
                         status: 'done',
                         content: restoredIsGeneric
                           ? ''
-                          : publicText(
-                              restoredResponse.assistantMessage,
-                              '我已经恢复了这段对话。',
-                            ),
+                          : publicText(restoredResponse.assistantMessage, '我已经恢复了这段对话。'),
                         result: usefulRestoredResponse,
                         taskId: restoredTaskId,
                         conversationIntent: replayIntent,
@@ -471,6 +507,82 @@ async function restoreSessionWithMessages(input: {
     : null;
 }
 
+function createLightweightPreviousTaskRecovery(
+  lastAssistantMessage: string,
+): FitMeetAssistantRecovery {
+  const hint = (sanitizePublicProcessText(lastAssistantMessage) ?? '').slice(0, 48);
+  return {
+    kind: 'stopped',
+    title: '你有一个未完成的约练任务',
+    message: '普通聊天不会自动展开旧任务。需要时可以继续上次任务。',
+    prompt: '继续上次约练任务',
+    retryable: true,
+    ...(hint ? { message: `普通聊天不会自动展开旧任务。上次进度：${hint}` } : {}),
+  };
+}
+
+function shouldCollapseStoredPreviousTask(snapshot: AgentThreadSnapshot) {
+  if (isTaskRestoreResponse(snapshot.userResult)) return true;
+  return snapshot.messages.some((message) => {
+    if (message.conversationIntent === 'social' || message.conversationIntent === 'approval') {
+      return true;
+    }
+    if (message.showSocialResult) return true;
+    return isTaskRestoreResponse(message.result);
+  });
+}
+
+function shouldCollapseRestoredPreviousTask(
+  response: UserFacingAgentResponse,
+  taskStatus: string | null,
+  messages: AgentThreadMessage[],
+) {
+  if (isCollapsiblePreviousTaskStatus(taskStatus)) return true;
+  if (isTaskRestoreResponse(response)) return true;
+  return messages.some((message) => {
+    if (message.conversationIntent === 'social' || message.conversationIntent === 'approval') {
+      return true;
+    }
+    if (message.showSocialResult) return true;
+    return isTaskRestoreResponse(message.result);
+  });
+}
+
+function isCollapsiblePreviousTaskStatus(status: string | null | undefined) {
+  const normalized = (status ?? '').trim().toLowerCase();
+  return (
+    normalized === 'awaiting_confirmation' ||
+    normalized === 'awaiting_feedback' ||
+    normalized === 'awaiting_approval' ||
+    normalized === 'interrupted' ||
+    normalized === 'running' ||
+    normalized === 'queued' ||
+    normalized === 'pending'
+  );
+}
+
+function isTaskRestoreResponse(response: UserFacingAgentResponse | null | undefined) {
+  if (!response) return false;
+  if (response.pendingConfirmations.length > 0) return true;
+  if (response.cards.some(isBusinessTaskCard)) return true;
+  if (response.runtime?.interrupt || response.runtime?.resumeCursor) return true;
+  if (response.runtime?.canResume || response.runtime?.checkpointAction) return true;
+  const assistantMessage = response.assistantMessage.trim();
+  return /从已保存的步骤继续|原始目标|等待你确认|需要你确认/.test(assistantMessage);
+}
+
+function isBusinessTaskCard(card: UserFacingAgentResponse['cards'][number]) {
+  const schemaType = typeof card.schemaType === 'string' ? card.schemaType : '';
+  const dataSchemaType =
+    card.data && typeof card.data.schemaType === 'string' ? card.data.schemaType : '';
+  return (
+    schemaType.startsWith('social_match.') ||
+    dataSchemaType.startsWith('social_match.') ||
+    schemaType.includes('approval') ||
+    dataSchemaType.includes('approval')
+  );
+}
+
 function progressEventFromReplaySummary(
   replay: SocialCodexReplayPackage,
 ): Extract<AgentStreamEvent, { type: 'progress' }> | null {
@@ -515,7 +627,10 @@ function replaySummaryTitle(
   state: Extract<AgentStreamEvent, { type: 'progress' }>['state'],
 ) {
   const sanitized = summary.title ? sanitizePublicProcessText(summary.title) : null;
-  const stageTitle = socialCodexStageTitle(summary.currentStage, socialCodexStateFromProgress(state));
+  const stageTitle = socialCodexStageTitle(
+    summary.currentStage,
+    socialCodexStateFromProgress(state),
+  );
   if (!sanitized) return stageTitle;
   const rawTitle = summary.title.trim();
   if (isGenericSocialCodexProcessTitle(sanitized) || isInternalReplaySummaryTitle(rawTitle)) {

@@ -53,7 +53,7 @@ if (-not $SkipFrontend) {
   Invoke-Step "Frontend focused tests" {
     Push-Location (Join-Path $root "frontend")
     try {
-      Invoke-Native pnpm test -- AppWaitlistPage Layout LifeGraphPage
+      Invoke-Native pnpm test -- AgentWorkspacePage AgentRouteIsolation DiscoverPage routeBoundaries
     } finally {
       Pop-Location
     }

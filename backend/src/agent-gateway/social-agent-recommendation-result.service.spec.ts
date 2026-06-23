@@ -254,23 +254,9 @@ describe('SocialAgentRecommendationResultService', () => {
       ]),
     );
     expect(lifeGraph.getUnifiedMatchSignals).toHaveBeenCalledWith(7);
-    expect(finalResponses.generate).toHaveBeenCalledWith(
-      expect.objectContaining({
-        intent: 'candidate_search',
-        memoryContext: { memory: 'context' },
-        toolResults: [
-          expect.objectContaining({
-            tool: 'search_real_candidates',
-            candidateCount: 1,
-          }),
-        ],
-      }),
-      expect.objectContaining({
-        onDelta: expect.any(Function),
-      }),
-    );
+    expect(finalResponses.generate).not.toHaveBeenCalled();
     expect(tonePolicy.safeAssistantMessage).toHaveBeenCalledWith(
-      '最终推荐回复',
+      '找到 1 位候选人',
       '找到 1 位候选人',
     );
     expect(alphaAgent.buildResultCards).toHaveBeenCalledWith(
@@ -286,14 +272,14 @@ describe('SocialAgentRecommendationResultService', () => {
     );
     expect(agentQuality.evaluate).toHaveBeenCalledWith(
       expect.objectContaining({
-        assistantMessage: '最终推荐回复',
+        assistantMessage: '找到 1 位候选人',
         candidates: [expect.objectContaining({ userId: 22 })],
       }),
     );
     expect(result).toMatchObject({
       taskId: 101,
       status: AgentTaskStatus.AwaitingConfirmation,
-      assistantMessage: '最终推荐回复',
+      assistantMessage: '找到 1 位候选人',
       candidates: [expect.objectContaining({ userId: 22 })],
       approvalRequiredActions: [],
       cards: [expect.objectContaining({ type: 'candidate_card' })],
@@ -310,7 +296,10 @@ describe('SocialAgentRecommendationResultService', () => {
   it('streams recommendation text with a run-scoped assistant message id', async () => {
     const { finalResponses, service, task } = makeHarness();
     finalResponses.generate.mockImplementationOnce(
-      async (_input: unknown, options: { onDelta?: (delta: string) => void }) => {
+      async (
+        _input: unknown,
+        options: { onDelta?: (delta: string) => void },
+      ) => {
         options.onDelta?.('最终');
         options.onDelta?.('推荐');
         return '最终推荐回复';
@@ -341,14 +330,6 @@ describe('SocialAgentRecommendationResultService', () => {
     expect(emitted).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          type: 'assistant_delta',
-          messageId: 'agent-message:101:run-abc',
-        }),
-        expect.objectContaining({
-          type: 'assistant_done',
-          messageId: 'agent-message:101:run-abc',
-        }),
-        expect.objectContaining({
           type: 'result',
           result: expect.objectContaining({
             runtime: expect.objectContaining({
@@ -357,6 +338,12 @@ describe('SocialAgentRecommendationResultService', () => {
           }),
         }),
       ]),
+    );
+    expect(emitted.some((event) => event.type === 'assistant_delta')).toBe(
+      false,
+    );
+    expect(emitted.some((event) => event.type === 'assistant_done')).toBe(
+      false,
     );
   });
 
@@ -408,14 +395,7 @@ describe('SocialAgentRecommendationResultService', () => {
       toEventDto: (event) => ({ id: event.id }),
     });
 
-    expect(finalResponses.generate).toHaveBeenCalledWith(
-      expect.objectContaining({
-        conversationHistory: taskContext.conversationHistory,
-        memoryContext: { memory: 'hydrated' },
-        taskContext,
-      }),
-      expect.any(Object),
-    );
+    expect(finalResponses.generate).not.toHaveBeenCalled();
   });
 
   it('uses the recommendation fallback when final response service is absent', async () => {

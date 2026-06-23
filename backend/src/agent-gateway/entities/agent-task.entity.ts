@@ -20,7 +20,7 @@ import { AgentConnection } from './agent-connection.entity';
  * all stored as JSONB on the task row to keep the runtime self-contained.
  *
  * `agent_task_events` is the append-only timeline used for replay, audit, and
- * driving UI (Agent Inbox / activity feed).
+ * driving UI (messages, reminders, and activity timelines).
  *
  * This is the canonical Agent Runtime write model. The older fine-grained
  * `agent_runtime_*` tables are deprecated/read-only compatibility tables and

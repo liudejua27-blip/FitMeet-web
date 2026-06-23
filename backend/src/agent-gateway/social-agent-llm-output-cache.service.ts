@@ -104,7 +104,10 @@ export class SocialAgentLlmOutputCacheService {
       answer,
       createdAt: now,
       expiresAt: now + this.normalizeTtl(options.ttlMs),
-      approxChars: this.normalizeApproxChars(options.approxPromptChars, answer.length),
+      approxChars: this.normalizeApproxChars(
+        options.approxPromptChars,
+        answer.length,
+      ),
     });
     this.writes += 1;
     return answer;
@@ -252,7 +255,10 @@ export class SocialAgentLlmOutputCacheService {
     return Math.max(1, Math.floor(ttlMs));
   }
 
-  private normalizeApproxChars(value: number | undefined, fallback: number): number {
+  private normalizeApproxChars(
+    value: number | undefined,
+    fallback: number,
+  ): number {
     if (!Number.isFinite(value) || value === undefined || value <= 0) {
       return Math.max(0, Math.floor(fallback));
     }

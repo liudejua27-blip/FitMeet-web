@@ -219,7 +219,7 @@ describe('SocialAgentRouteAgentLoopRunnerService', () => {
       execute: jest.fn(async (input) => {
         forcedObservations.push(
           await input.runner({
-            agent: 'Social Match Agent',
+            agent: 'Match Agent',
             toolName: 'route_search_turn',
             input: {},
             attempt: 0,
@@ -227,7 +227,7 @@ describe('SocialAgentRouteAgentLoopRunnerService', () => {
         );
         forcedObservations.push(
           await input.runner({
-            agent: 'Meet Loop Agent',
+            agent: 'Match Agent',
             toolName: 'route_action_turn',
             input: {},
             attempt: 0,
@@ -833,7 +833,7 @@ describe('SocialAgentRouteAgentLoopRunnerService', () => {
     );
   });
 
-  it('executes Social Match search through the subagent worker by default', async () => {
+  it('executes Match Agent search through the subagent worker by default', async () => {
     const { service, deps } = makeService();
     const taskContext = {
       currentTask: {
@@ -874,7 +874,7 @@ describe('SocialAgentRouteAgentLoopRunnerService', () => {
 
     expect(deps.subagentWorker.run).toHaveBeenCalledWith(
       expect.objectContaining({
-        agent: 'Social Match Agent',
+        agent: 'Match Agent',
         memoryScope: 'matching.worker_search_turn',
         plannerInput: expect.objectContaining({
           taskContext,
@@ -886,9 +886,8 @@ describe('SocialAgentRouteAgentLoopRunnerService', () => {
                 'activity',
                 'candidate_preference',
               ]),
-              candidatePreferencePolicy: expect.stringContaining(
-                '公开可发现资料',
-              ),
+              candidatePreferencePolicy:
+                expect.stringContaining('公开可发现资料'),
               knownSlots: expect.arrayContaining([
                 expect.objectContaining({
                   key: 'geo_area',
@@ -950,7 +949,7 @@ describe('SocialAgentRouteAgentLoopRunnerService', () => {
     expect(result.subagentHandoffs).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          agent: 'Social Match Agent',
+          agent: 'Match Agent',
           evalHints: expect.objectContaining({ independentWorker: true }),
         }),
       ]),
@@ -1036,7 +1035,7 @@ describe('SocialAgentRouteAgentLoopRunnerService', () => {
     expect(result.subagentHandoffs).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          agent: 'Social Match Agent',
+          agent: 'Match Agent',
           observation: expect.objectContaining({ resumeContext }),
         }),
       ]),
@@ -1236,7 +1235,7 @@ describe('SocialAgentRouteAgentLoopRunnerService', () => {
 
     expect(deps.subagentWorker.run).toHaveBeenCalledWith(
       expect.objectContaining({
-        agent: 'Meet Loop Agent',
+        agent: 'Match Agent',
         memoryScope: 'meet_loop.worker_action_turn',
         signal: controller.signal,
         plannerInput: expect.objectContaining({

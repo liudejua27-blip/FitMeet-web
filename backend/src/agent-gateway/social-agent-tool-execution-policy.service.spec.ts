@@ -377,7 +377,10 @@ describe('SocialAgentToolExecutionPolicyService', () => {
   it('builds stable idempotency keys for the same Social Codex action', () => {
     const service = makePolicyService();
     const task = makeTask();
-    const input = { message: '周末下午一起散步吗？', publiclyDiscoverable: true };
+    const input = {
+      message: '周末下午一起散步吗？',
+      publiclyDiscoverable: true,
+    };
 
     const first = service.buildPolicyMetadata(
       task,
@@ -451,7 +454,9 @@ describe('SocialAgentToolExecutionPolicyService', () => {
         },
       }),
     });
-    expect(JSON.stringify(policy.socialCodexAudit)).not.toContain('fitmeet-test');
+    expect(JSON.stringify(policy.socialCodexAudit)).not.toContain(
+      'fitmeet-test',
+    );
   });
 
   it('redacts sensitive fields from Social Codex audit metadata', () => {

@@ -757,7 +757,7 @@ function MeetLoopPanel({
         </select>
       }
       count={items.length}
-      description="观察发起邀请、对方回复、改期、见面、评价和回写 Life Graph 的状态推进。"
+      description="观察发起邀请、对方回复、改期、见面、评价和回写长期偏好的状态推进。"
       title="Meet-loop State"
     >
       <div className="grid gap-4">

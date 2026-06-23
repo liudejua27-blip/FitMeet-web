@@ -1670,7 +1670,7 @@ export function normalizeActivityOpportunityView(
     lifeGraphUpdatePreview:
       publicDetail(opportunity.lifeGraphUpdatePreview) ??
       publicDetail(card.data.lifeGraphUpdatePreview) ??
-      '只有你确认后，活动结果才会作为 Life Graph 的长期记忆候选。',
+      '只有你确认后，活动结果才会作为长期偏好的更新建议。',
     trustScoreUpdatePreview:
       publicDetail(opportunity.trustScoreUpdatePreview) ??
       publicDetail(card.data.trustScoreUpdatePreview) ??

@@ -9,8 +9,8 @@ function buildCommand(overrides: Record<string, unknown> = {}) {
   return buildFitMeetSubagentWorkerCommand({
     runId: 'run-worker-cli-1',
     traceId: 'trace-worker-cli-1',
-    agentName: 'Social Match Agent',
-    queueName: 'fitmeet.subagent.social-match-agent',
+    agentName: 'Match Agent',
+    queueName: 'fitmeet.subagent.match-agent',
     ownerUserId: 7,
     taskId: 101,
     threadId: 'agent-task:101',
@@ -29,7 +29,7 @@ function buildCommand(overrides: Record<string, unknown> = {}) {
     route: { intent: 'find_partner' } as never,
     workerRuntime: {
       mode: 'queue_worker_ready',
-      queueName: 'fitmeet.subagent.social-match-agent',
+      queueName: 'fitmeet.subagent.match-agent',
       timeoutMs: 17000,
       modelUseCase: 'candidate_summary',
       model: 'deepseek-worker-cli-test',
@@ -38,11 +38,13 @@ function buildCommand(overrides: Record<string, unknown> = {}) {
   });
 }
 
-function buildJob(payload: Record<string, unknown> = buildCommand()): SubagentWorkerJob {
+function buildJob(
+  payload: Record<string, unknown> = buildCommand(),
+): SubagentWorkerJob {
   return {
     id: 77,
-    agentName: 'Social Match Agent',
-    queueName: 'fitmeet.subagent.social-match-agent',
+    agentName: 'Match Agent',
+    queueName: 'fitmeet.subagent.match-agent',
     status: 'running',
     priority: 0,
     payload,
@@ -88,9 +90,9 @@ describe('subagent-worker.cli', () => {
     expect(context).toEqual(
       expect.objectContaining({
         workerId: 'worker-cli-test',
-        agent: 'Social Match Agent',
+        agent: 'Match Agent',
         mode: 'queue_worker_ready',
-        queueName: 'fitmeet.subagent.social-match-agent',
+        queueName: 'fitmeet.subagent.match-agent',
         timeoutMs: 30000,
         crashIsolation: true,
         scalable: true,
@@ -106,7 +108,7 @@ describe('subagent-worker.cli', () => {
     const command = buildCommand({
       workerRuntime: {
         mode: 'queue_worker_ready',
-        queueName: 'fitmeet.subagent.social-match-agent',
+        queueName: 'fitmeet.subagent.match-agent',
         timeoutMs: 2500,
         modelUseCase: 'candidate_summary',
         model: 'deepseek-worker-cli-test',
@@ -132,7 +134,7 @@ describe('subagent-worker.cli', () => {
     const command = buildCommand({
       workerRuntime: {
         mode: 'queue_worker_ready',
-        queueName: 'fitmeet.subagent.social-match-agent',
+        queueName: 'fitmeet.subagent.match-agent',
         timeoutMs: 17000,
         modelUseCase: 'candidate_summary',
         model: 'deepseek-v4-flash',
@@ -157,7 +159,7 @@ describe('subagent-worker.cli', () => {
     const legacyAlias = buildCommand({
       workerRuntime: {
         mode: 'queue_worker_ready',
-        queueName: 'fitmeet.subagent.social-match-agent',
+        queueName: 'fitmeet.subagent.match-agent',
         timeoutMs: 17000,
         modelUseCase: 'candidate_summary',
         model: 'deepseek-chat',
@@ -166,7 +168,7 @@ describe('subagent-worker.cli', () => {
     const bareAlias = buildCommand({
       workerRuntime: {
         mode: 'queue_worker_ready',
-        queueName: 'fitmeet.subagent.social-match-agent',
+        queueName: 'fitmeet.subagent.match-agent',
         timeoutMs: 17000,
         modelUseCase: 'candidate_summary',
         model: 'deepseek-v4',
@@ -204,7 +206,7 @@ describe('subagent-worker.cli', () => {
     const command = buildCommand({
       workerRuntime: {
         mode: 'queue_worker_ready',
-        queueName: 'fitmeet.subagent.social-match-agent',
+        queueName: 'fitmeet.subagent.match-agent',
         timeoutMs: 17000,
         modelUseCase: 'candidate_summary',
         model: 'deepseek-v4-flash',
@@ -230,7 +232,7 @@ describe('subagent-worker.cli', () => {
     const command = buildCommand({
       workerRuntime: {
         mode: 'queue_worker_ready',
-        queueName: 'fitmeet.subagent.social-match-agent',
+        queueName: 'fitmeet.subagent.match-agent',
         timeoutMs: 17000,
         modelUseCase: 'candidate_summary',
         model: 'deepseek-v4-flash',
@@ -272,8 +274,8 @@ describe('subagent-worker.cli', () => {
     expect(worker.executeQueuedJob).toHaveBeenCalledWith({
       job: expect.objectContaining({
         id: 77,
-        agentName: 'Social Match Agent',
-        queueName: 'fitmeet.subagent.social-match-agent',
+        agentName: 'Match Agent',
+        queueName: 'fitmeet.subagent.match-agent',
       }),
       context: expect.objectContaining({
         mode: 'queue_worker_ready',
@@ -288,7 +290,7 @@ describe('subagent-worker.cli', () => {
     expect(queue.heartbeat).toHaveBeenCalledWith(
       expect.objectContaining({
         workerId: 'worker-cli-test',
-        queueName: 'fitmeet.subagent.social-match-agent',
+        queueName: 'fitmeet.subagent.match-agent',
         status: 'running',
         activeJobId: 77,
       }),
@@ -296,7 +298,7 @@ describe('subagent-worker.cli', () => {
     expect(queue.heartbeat).toHaveBeenCalledWith(
       expect.objectContaining({
         workerId: 'worker-cli-test',
-        queueName: 'fitmeet.subagent.social-match-agent',
+        queueName: 'fitmeet.subagent.match-agent',
         status: 'idle',
         activeJobId: null,
       }),
@@ -326,18 +328,18 @@ describe('subagent-worker.cli', () => {
       retryable: true,
       context: {
         processId: process.pid,
-        queueName: 'fitmeet.subagent.social-match-agent',
+        queueName: 'fitmeet.subagent.match-agent',
       },
     });
     expect(queue.heartbeat).toHaveBeenCalledWith(
       expect.objectContaining({
         workerId: 'worker-cli-test',
-        queueName: 'fitmeet.subagent.social-match-agent',
+        queueName: 'fitmeet.subagent.match-agent',
         status: 'failed',
         activeJobId: null,
         metadata: expect.objectContaining({
           mode: 'db_queue',
-          agent: 'Social Match Agent',
+          agent: 'Match Agent',
           error: 'dispatcher unavailable',
         }),
       }),
@@ -347,13 +349,11 @@ describe('subagent-worker.cli', () => {
   it('marks malformed worker payload failures as non-retryable', async () => {
     const queue = createQueueMock();
     const worker = {
-      executeQueuedJob: jest
-        .fn()
-        .mockRejectedValue(
-          Object.assign(new Error('Unsupported subagent worker payload.'), {
-            retryable: false,
-          }),
-        ),
+      executeQueuedJob: jest.fn().mockRejectedValue(
+        Object.assign(new Error('Unsupported subagent worker payload.'), {
+          retryable: false,
+        }),
+      ),
     };
 
     await processSubagentWorkerJob({
@@ -375,7 +375,7 @@ describe('subagent-worker.cli', () => {
       retryable: false,
       context: {
         processId: process.pid,
-        queueName: 'fitmeet.subagent.social-match-agent',
+        queueName: 'fitmeet.subagent.match-agent',
       },
     });
   });

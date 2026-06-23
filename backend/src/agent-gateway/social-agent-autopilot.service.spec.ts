@@ -11,7 +11,7 @@ import {
   AgentTaskPermissionMode,
   AgentTaskStatus,
 } from './entities/agent-task.entity';
-/* eslint-disable @typescript-eslint/require-await */
+
 import { SocialAgentAutopilotService } from './social-agent-autopilot.service';
 import { SocialAgentToolName } from './social-agent-tool-executor.service';
 

@@ -272,9 +272,7 @@ export class SocialAgentToolResultCacheService {
       ?.get<string>('SOCIAL_AGENT_TOOL_RESULT_CACHE_BACKEND')
       ?.toLowerCase();
     return (
-      backend === 'redis' ||
-      backend === 'hybrid' ||
-      toolBackend === 'redis'
+      backend === 'redis' || backend === 'hybrid' || toolBackend === 'redis'
     );
   }
 

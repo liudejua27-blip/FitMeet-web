@@ -55,7 +55,9 @@ describe('SocialAgentStreamingResponseService', () => {
       shouldStreamFallbackAssistantText('已从刚才的确认点继续处理。'),
     ).toBe(false);
     expect(
-      shouldStreamFallbackAssistantText('我已经保留当前方向，等连接恢复后可以继续。'),
+      shouldStreamFallbackAssistantText(
+        '我已经保留当前方向，等连接恢复后可以继续。',
+      ),
     ).toBe(false);
     expect(
       shouldStreamFallbackAssistantText(

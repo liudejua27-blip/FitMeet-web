@@ -18,7 +18,7 @@ import {
   getSocialAgentToolSceneActionType,
   isConfirmableSocialAgentTool,
   requiresMandatorySocialAgentApproval,
-  shouldWriteSocialAgentActionResultInbox,
+  shouldWriteSocialAgentActionResultMessageEvent,
   SOCIAL_AGENT_HIGH_RISK_TOOL_DAILY_LIMITS,
 } from './social-agent-tool-policy';
 import { SocialAgentToolName } from './social-agent-tool.types';
@@ -99,20 +99,24 @@ describe('social agent tool policy', () => {
     expect(getSocialAgentToolRiskLevel(SocialAgentToolName.DraftOpener)).toBe(
       AgentActionRiskLevel.Low,
     );
-    expect(getSocialAgentToolRiskLevel(SocialAgentToolName.PublishSocialRequest)).toBe(
-      AgentActionRiskLevel.Medium,
-    );
-    expect(getSocialAgentToolRiskLevel(SocialAgentToolName.SendMessageToCandidate)).toBe(
-      AgentActionRiskLevel.Medium,
-    );
-    expect(getSocialAgentToolRiskLevel(SocialAgentToolName.ConnectCandidate)).toBe(
-      AgentActionRiskLevel.Medium,
-    );
     expect(
-      shouldWriteSocialAgentActionResultInbox(SocialAgentToolName.SendMessage),
+      getSocialAgentToolRiskLevel(SocialAgentToolName.PublishSocialRequest),
+    ).toBe(AgentActionRiskLevel.Medium);
+    expect(
+      getSocialAgentToolRiskLevel(SocialAgentToolName.SendMessageToCandidate),
+    ).toBe(AgentActionRiskLevel.Medium);
+    expect(
+      getSocialAgentToolRiskLevel(SocialAgentToolName.ConnectCandidate),
+    ).toBe(AgentActionRiskLevel.Medium);
+    expect(
+      shouldWriteSocialAgentActionResultMessageEvent(
+        SocialAgentToolName.SendMessage,
+      ),
     ).toBe(true);
     expect(
-      shouldWriteSocialAgentActionResultInbox(SocialAgentToolName.GetMyProfile),
+      shouldWriteSocialAgentActionResultMessageEvent(
+        SocialAgentToolName.GetMyProfile,
+      ),
     ).toBe(false);
   });
 
@@ -169,7 +173,10 @@ describe('social agent tool policy', () => {
       ],
       [SocialAgentToolName.CreateSocialRequest, { publicIntentEnabled: true }],
       [SocialAgentToolName.CreateSocialRequest, { visibility: 'discoverable' }],
-      [SocialAgentToolName.CreateSocialRequest, { discoverability: 'recommendable' }],
+      [
+        SocialAgentToolName.CreateSocialRequest,
+        { discoverability: 'recommendable' },
+      ],
       [
         SocialAgentToolName.CreateSocialRequest,
         { mode: 'public_discoverable' },
@@ -204,7 +211,11 @@ describe('social agent tool policy', () => {
       ],
       [
         SocialAgentToolName.UpdateAiProfileFromAnswers,
-        { answers: [{ path: ['visibility', 'agent_can_recommend_me'], value: true }] },
+        {
+          answers: [
+            { path: ['visibility', 'agent_can_recommend_me'], value: true },
+          ],
+        },
       ],
       [
         SocialAgentToolName.UpdateAiProfileFromAnswers,

@@ -88,13 +88,7 @@ export function useAgentReminderRuntime({
         setReminderLoading(false);
       }
     })();
-  }, [
-    isLoggedIn,
-    isRealAgent,
-    setReminderError,
-    setReminderLoading,
-    setReminderPreference,
-  ]);
+  }, [isLoggedIn, isRealAgent, setReminderError, setReminderLoading, setReminderPreference]);
 
   const appendRunNextCards = useCallback(
     async (taskId: number, messageId: string, options: { force?: boolean } = {}) => {
@@ -110,8 +104,8 @@ export function useAgentReminderRuntime({
         setMessages((current) => {
           if (current.some((message) => message.id === messageId)) return current;
           const existingCardKeys = new Set(
-            current.flatMap((message) =>
-              message.result?.cards.flatMap((card) => agentCardDedupKeys(card)) ?? [],
+            current.flatMap(
+              (message) => message.result?.cards.flatMap((card) => agentCardDedupKeys(card)) ?? [],
             ),
           );
           if (
@@ -175,10 +169,7 @@ export function useAgentReminderRuntime({
     }
     pendingOpportunityClarificationRef.current = true;
     setMessages((current) => {
-      const content = publicText(
-        reminder.message,
-        '你之前有提醒，要继续看看吗？',
-      );
+      const content = publicText(reminder.message, '你之前有提醒，要继续看看吗？');
       if (current.some((message) => message.id === `reminder-${reminderKey}`)) {
         return current;
       }
@@ -221,11 +212,7 @@ export function useAgentReminderRuntime({
     const refreshWhenVisible = () => {
       if (document.visibilityState !== 'visible') return;
       void refreshThreads();
-      if (
-        activeTaskId &&
-        !sessionRestoring &&
-        isRunNextRestorableTaskStatus(activeTaskStatus)
-      ) {
+      if (activeTaskId && !sessionRestoring && isRunNextRestorableTaskStatus(activeTaskStatus)) {
         void appendRunNextCards(activeTaskId, `focus-run-next-${activeTaskId}-${Date.now()}`);
       }
     };
@@ -336,10 +323,7 @@ export function useAgentReminderRuntime({
   };
 }
 
-function defaultReminderSettings(
-  current: SocialAgentReminderPreference | null,
-  enabled: boolean,
-) {
+function defaultReminderSettings(current: SocialAgentReminderPreference | null, enabled: boolean) {
   return {
     enabled,
     frequency: current?.frequency ?? 'weekly',
@@ -360,6 +344,7 @@ function reminderScenesFromPreference(
   return scenes.length
     ? scenes
     : [
+        'new_match',
         'weekend_opportunities',
         'past_social_goal',
         'activity_follow_up',
@@ -369,6 +354,7 @@ function reminderScenesFromPreference(
 
 function isReminderScene(value: unknown): value is SocialAgentReminderScene {
   return (
+    value === 'new_match' ||
     value === 'weekend_opportunities' ||
     value === 'past_social_goal' ||
     value === 'activity_follow_up' ||

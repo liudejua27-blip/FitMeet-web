@@ -4,7 +4,7 @@ import { performance } from 'node:perf_hooks';
 const DEFAULT_ENDPOINTS = [
   '/api/health',
   '/api/ready',
-  '/api/feed?page=1&limit=5',
+  '/api/public/social-intents?page=1&limit=5',
   '/api/openapi/fitmeet-core.json',
 ];
 

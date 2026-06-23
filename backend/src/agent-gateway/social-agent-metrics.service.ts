@@ -483,14 +483,12 @@ export class SocialAgentMetricsService {
       if (parts.length !== 3) continue;
       const [cacheName, kind, hash] = parts;
       if (!cacheName || !hash) continue;
-      const bucket =
-        buckets.get(cacheName) ??
-        {
-          prefixObservations: 0,
-          dynamicObservations: 0,
-          promptPrefixHashes: new Set<string>(),
-          dynamicContextHashes: new Set<string>(),
-        };
+      const bucket = buckets.get(cacheName) ?? {
+        prefixObservations: 0,
+        dynamicObservations: 0,
+        promptPrefixHashes: new Set<string>(),
+        dynamicContextHashes: new Set<string>(),
+      };
       if (kind === 'prefix') {
         bucket.prefixObservations += count;
         bucket.promptPrefixHashes.add(hash);
@@ -509,9 +507,8 @@ export class SocialAgentMetricsService {
       ).reduce(
         (sum, hash) =>
           sum +
-          (this.llmPromptFingerprintTotal.get(
-            `${cacheName}|prefix|${hash}`,
-          ) ?? 0),
+          (this.llmPromptFingerprintTotal.get(`${cacheName}|prefix|${hash}`) ??
+            0),
         0,
       );
       const distinctPromptPrefixHashes = bucket.promptPrefixHashes.size;
@@ -526,8 +523,7 @@ export class SocialAgentMetricsService {
         promptPrefixReuseRate:
           promptPrefixObservations > 0
             ? Math.round(
-                (1 -
-                  distinctPromptPrefixHashes / promptPrefixObservations) *
+                (1 - distinctPromptPrefixHashes / promptPrefixObservations) *
                   10000,
               ) / 10000
             : 0,
@@ -574,18 +570,23 @@ export class SocialAgentMetricsService {
 
   private serializeDeterministicActionEfficiencySummary(): DeterministicActionEfficiencySummary {
     const byAction = this.serialize(this.deterministicActionTotal);
-    const total = Object.values(byAction).reduce((sum, value) => sum + value, 0);
+    const total = Object.values(byAction).reduce(
+      (sum, value) => sum + value,
+      0,
+    );
     return {
       total,
-      estimatedAvoidedLlmCalls:
-        this.deterministicActionAvoidedLlmCallsTotal,
+      estimatedAvoidedLlmCalls: this.deterministicActionAvoidedLlmCallsTotal,
       byAction,
     };
   }
 
   private serializeDeterministicRouteEfficiencySummary(): DeterministicRouteEfficiencySummary {
     const byIntent = this.serialize(this.deterministicRouteReplyTotal);
-    const total = Object.values(byIntent).reduce((sum, value) => sum + value, 0);
+    const total = Object.values(byIntent).reduce(
+      (sum, value) => sum + value,
+      0,
+    );
     return {
       total,
       estimatedAvoidedLlmCalls:

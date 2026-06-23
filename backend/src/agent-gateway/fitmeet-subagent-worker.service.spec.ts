@@ -30,7 +30,7 @@ describe('FitMeetSubagentWorkerService', () => {
     const result = await service.run({
       ownerUserId: 7,
       taskId: 101,
-      agent: 'Social Match Agent',
+      agent: 'Match Agent',
       goal: '找低压力跑步搭子',
       plannerInput: { city: '青岛', activityType: '跑步' },
       memoryScope: 'matching.worker_memory',
@@ -47,7 +47,7 @@ describe('FitMeetSubagentWorkerService', () => {
 
     expect(runner).toHaveBeenCalledWith(
       expect.objectContaining({
-        agent: 'Social Match Agent',
+        agent: 'Match Agent',
         toolName: 'search_real_candidates',
         input: { city: '青岛' },
         attempt: 0,
@@ -61,15 +61,16 @@ describe('FitMeetSubagentWorkerService', () => {
     );
     expect(result.handoff).toEqual(
       expect.objectContaining({
-        agent: 'Social Match Agent',
+        agent: 'Match Agent',
         memoryScope: 'matching.worker_memory',
         evalHints: expect.objectContaining({
           independentWorker: true,
           usedToolCalls: 1,
-          evalRunner: 'social_match_recall_ranking_eval_v1',
-          failureReviewPolicy: 'cluster_recall_or_ranking_failures',
+          evalRunner: 'match_recall_ranking_and_meet_loop_eval_v1',
+          failureReviewPolicy:
+            'cluster_recall_ranking_or_state_transition_failures',
           workerRuntime: expect.objectContaining({
-            queueName: 'fitmeet.subagent.social-match-agent',
+            queueName: 'fitmeet.subagent.match-agent',
             timeoutMs: 30000,
             crashIsolation: false,
             scalable: false,
@@ -83,10 +84,10 @@ describe('FitMeetSubagentWorkerService', () => {
       expect.objectContaining({
         ownerUserId: 7,
         agentTaskId: 101,
-        agentName: 'Social Match Agent',
+        agentName: 'Match Agent',
         memoryScope: 'matching.worker_memory',
         evalHints: expect.objectContaining({
-          evalRunner: 'social_match_recall_ranking_eval_v1',
+          evalRunner: 'match_recall_ranking_and_meet_loop_eval_v1',
           failureReview: expect.objectContaining({
             nextStep: 'store_as_successful_subagent_trace',
           }),
@@ -123,7 +124,7 @@ describe('FitMeetSubagentWorkerService', () => {
     await service.run({
       ownerUserId: 7,
       taskId: 101,
-      agent: 'Social Match Agent',
+      agent: 'Match Agent',
       goal: '找今晚青岛大学散步搭子',
       plannerInput: {
         route: { intent: 'social_search' },
@@ -246,7 +247,7 @@ describe('FitMeetSubagentWorkerService', () => {
     const runner = jest.fn();
 
     const result = await service.run({
-      agent: 'Meet Loop Agent',
+      agent: 'Match Agent',
       goal: '直接发送邀请',
       plannerInput: { candidateUserId: 22 },
       tools: [
@@ -298,10 +299,10 @@ describe('FitMeetSubagentWorkerService', () => {
     const workerRuntime = {
       submit: jest.fn(({ agent, runId, signal, job }) =>
         job({
-          workerId: 'subagent:social-match-agent:resident',
+          workerId: 'subagent:match-agent:resident',
           agent,
           mode: 'resident_in_process',
-          queueName: 'fitmeet.subagent.social-match-agent',
+          queueName: 'fitmeet.subagent.match-agent',
           timeoutMs: 15000,
           crashIsolation: false,
           scalable: false,
@@ -319,7 +320,7 @@ describe('FitMeetSubagentWorkerService', () => {
     );
 
     const result = await service.run({
-      agent: 'Social Match Agent',
+      agent: 'Match Agent',
       goal: '找一个周末咖啡搭子',
       plannerInput: { city: '上海', activityType: '咖啡' },
       tools: [
@@ -333,17 +334,17 @@ describe('FitMeetSubagentWorkerService', () => {
 
     expect(workerRuntime.submit).toHaveBeenCalledWith(
       expect.objectContaining({
-        agent: 'Social Match Agent',
-        runId: expect.stringContaining('subagent:social-match-agent'),
+        agent: 'Match Agent',
+        runId: expect.stringContaining('subagent:match-agent'),
       }),
     );
     expect(result.handoff.evalHints).toEqual(
       expect.objectContaining({
         residentWorker: true,
         workerRuntime: expect.objectContaining({
-          workerId: 'subagent:social-match-agent:resident',
+          workerId: 'subagent:match-agent:resident',
           mode: 'resident_in_process',
-          queueName: 'fitmeet.subagent.social-match-agent',
+          queueName: 'fitmeet.subagent.match-agent',
           crashIsolation: false,
           scalable: false,
           modelUseCase: 'candidate_summary',
@@ -354,7 +355,7 @@ describe('FitMeetSubagentWorkerService', () => {
     expect(result.handoff.handoffOutput).toEqual(
       expect.objectContaining({
         workerRuntime: expect.objectContaining({
-          workerId: 'subagent:social-match-agent:resident',
+          workerId: 'subagent:match-agent:resident',
         }),
       }),
     );
@@ -364,10 +365,10 @@ describe('FitMeetSubagentWorkerService', () => {
     const workerRuntime = {
       submit: jest.fn(({ agent, runId, signal, job }) =>
         job({
-          workerId: 'subagent:social-match-agent:resident',
+          workerId: 'subagent:match-agent:resident',
           agent,
           mode: 'resident_in_process',
-          queueName: 'fitmeet.subagent.social-match-agent',
+          queueName: 'fitmeet.subagent.match-agent',
           timeoutMs: 30000,
           crashIsolation: false,
           scalable: false,
@@ -414,7 +415,7 @@ describe('FitMeetSubagentWorkerService', () => {
     const result = await service.run({
       ownerUserId: 7,
       taskId: 101,
-      agent: 'Social Match Agent',
+      agent: 'Match Agent',
       goal: '可以，帮我找人',
       plannerInput: {
         route: { intent: 'social_search' },
@@ -433,15 +434,15 @@ describe('FitMeetSubagentWorkerService', () => {
     const submitPayload = workerRuntime.submit.mock.calls[0]?.[0] as {
       serializedPayload?: Record<string, unknown>;
     };
-    expect(isFitMeetSubagentWorkerCommand(submitPayload.serializedPayload)).toBe(
-      true,
-    );
+    expect(
+      isFitMeetSubagentWorkerCommand(submitPayload.serializedPayload),
+    ).toBe(true);
     expect(submitPayload.serializedPayload).toEqual(
       expect.objectContaining({
         contract: 'fitmeet.subagent.worker.command',
         commandType: 'route_branch.execute',
-        agentName: 'Social Match Agent',
-        queueName: 'fitmeet.subagent.social-match-agent',
+        agentName: 'Match Agent',
+        queueName: 'fitmeet.subagent.match-agent',
         runtimeIdentity: expect.objectContaining({
           threadId: 'agent-task:101',
           taskId: 101,
@@ -473,12 +474,10 @@ describe('FitMeetSubagentWorkerService', () => {
               'activity',
               'candidate_preference',
             ]),
-            userVisibleSummary: expect.stringContaining(
-              '候选偏好：女生、舞蹈相关',
-            ),
-            candidatePreferencePolicy: expect.stringContaining(
-              '公开可发现资料',
-            ),
+            userVisibleSummary:
+              expect.stringContaining('候选偏好：女生、舞蹈相关'),
+            candidatePreferencePolicy:
+              expect.stringContaining('公开可发现资料'),
           }),
           pendingApprovals: hydratedContext.pendingApprovals,
           candidateActions: hydratedContext.candidateActions,
@@ -506,10 +505,10 @@ describe('FitMeetSubagentWorkerService', () => {
     const workerRuntime = {
       submit: jest.fn(({ agent, runId, signal, job }) =>
         job({
-          workerId: 'subagent:social-match-agent:resident',
+          workerId: 'subagent:match-agent:resident',
           agent,
           mode: 'resident_in_process',
-          queueName: 'fitmeet.subagent.social-match-agent',
+          queueName: 'fitmeet.subagent.match-agent',
           timeoutMs: 30000,
           crashIsolation: false,
           scalable: false,
@@ -533,7 +532,7 @@ describe('FitMeetSubagentWorkerService', () => {
     await service.run({
       ownerUserId: 7,
       taskId: 101,
-      agent: 'Social Match Agent',
+      agent: 'Match Agent',
       goal: '继续找人',
       plannerInput: {
         hydratedContext: {
@@ -553,14 +552,13 @@ describe('FitMeetSubagentWorkerService', () => {
     const submitPayload = workerRuntime.submit.mock.calls[0]?.[0] as {
       serializedPayload?: Record<string, unknown>;
     };
-    expect(isFitMeetSubagentWorkerCommand(submitPayload.serializedPayload)).toBe(
-      true,
-    );
+    expect(
+      isFitMeetSubagentWorkerCommand(submitPayload.serializedPayload),
+    ).toBe(true);
     const normalized = normalizeSubagentWorkerPayload(
       submitPayload.serializedPayload!,
     );
-    const submittedMessages =
-      normalized?.contextSnapshot?.recentMessages ?? [];
+    const submittedMessages = normalized?.contextSnapshot?.recentMessages ?? [];
     expect(submittedMessages).toHaveLength(SOCIAL_AGENT_DEFAULT_CONTEXT_TURNS);
     expect(submittedMessages[0]).toMatchObject({ content: 'turn-6' });
     expect(submittedMessages.at(-1)).toMatchObject({ content: 'turn-85' });
@@ -570,10 +568,10 @@ describe('FitMeetSubagentWorkerService', () => {
     const workerRuntime = {
       submit: jest.fn(({ agent, runId, signal, job }) =>
         job({
-          workerId: 'subagent:social-match-agent:resident',
+          workerId: 'subagent:match-agent:resident',
           agent,
           mode: 'resident_in_process',
-          queueName: 'fitmeet.subagent.social-match-agent',
+          queueName: 'fitmeet.subagent.match-agent',
           timeoutMs: 30000,
           crashIsolation: false,
           scalable: false,
@@ -600,7 +598,7 @@ describe('FitMeetSubagentWorkerService', () => {
     await service.run({
       ownerUserId: 7,
       taskId: 101,
-      agent: 'Social Match Agent',
+      agent: 'Match Agent',
       goal: '继续找人',
       plannerInput: {
         hydratedContext: {
@@ -620,14 +618,13 @@ describe('FitMeetSubagentWorkerService', () => {
     const submitPayload = workerRuntime.submit.mock.calls[0]?.[0] as {
       serializedPayload?: Record<string, unknown>;
     };
-    expect(isFitMeetSubagentWorkerCommand(submitPayload.serializedPayload)).toBe(
-      true,
-    );
+    expect(
+      isFitMeetSubagentWorkerCommand(submitPayload.serializedPayload),
+    ).toBe(true);
     const normalized = normalizeSubagentWorkerPayload(
       submitPayload.serializedPayload!,
     );
-    const submittedMessages =
-      normalized?.contextSnapshot?.recentMessages ?? [];
+    const submittedMessages = normalized?.contextSnapshot?.recentMessages ?? [];
     expect(submittedMessages).toHaveLength(80);
     expect(submittedMessages[0]).toMatchObject({ content: 'turn-10' });
     expect(submittedMessages.at(-1)).toMatchObject({ content: 'turn-89' });
@@ -637,10 +634,10 @@ describe('FitMeetSubagentWorkerService', () => {
     const workerRuntime = {
       submit: jest.fn(({ agent, runId, signal, job }) =>
         job({
-          workerId: 'subagent:social-match-agent:resident',
+          workerId: 'subagent:match-agent:resident',
           agent,
           mode: 'resident_in_process',
-          queueName: 'fitmeet.subagent.social-match-agent',
+          queueName: 'fitmeet.subagent.match-agent',
           timeoutMs: 30000,
           crashIsolation: false,
           scalable: false,
@@ -688,7 +685,7 @@ describe('FitMeetSubagentWorkerService', () => {
     await service.run({
       ownerUserId: 7,
       taskId: 101,
-      agent: 'Social Match Agent',
+      agent: 'Match Agent',
       goal: '可以，帮我找人',
       plannerInput: {
         route: { intent: 'social_search' },
@@ -706,9 +703,9 @@ describe('FitMeetSubagentWorkerService', () => {
     const submitPayload = workerRuntime.submit.mock.calls[0]?.[0] as {
       serializedPayload?: Record<string, unknown>;
     };
-    expect(isFitMeetSubagentWorkerCommand(submitPayload.serializedPayload)).toBe(
-      true,
-    );
+    expect(
+      isFitMeetSubagentWorkerCommand(submitPayload.serializedPayload),
+    ).toBe(true);
     const normalized = normalizeSubagentWorkerPayload(
       submitPayload.serializedPayload!,
     );
@@ -736,9 +733,8 @@ describe('FitMeetSubagentWorkerService', () => {
           candidateActions: hydratedContext.taskMemory.candidateState,
           lifeGraphSummary: hydratedContext.taskMemory.lifeGraphSummary,
           knownTaskSlotConstraints: expect.objectContaining({
-            userVisibleSummary: expect.stringContaining(
-              '候选偏好：女生、舞蹈相关',
-            ),
+            userVisibleSummary:
+              expect.stringContaining('候选偏好：女生、舞蹈相关'),
           }),
         }),
       }),
@@ -754,7 +750,7 @@ describe('FitMeetSubagentWorkerService', () => {
         kind: 'route_branch',
         ownerUserId: 7,
         taskId: 101,
-        agent: 'Social Match Agent',
+        agent: 'Match Agent',
         goal: '找跑步搭子',
         plannerInput: { route: { intent: 'find_partner' } },
         tools: [{ toolName: 'social_match_search_turn', input: {} }],
@@ -799,8 +795,8 @@ describe('FitMeetSubagentWorkerService', () => {
     };
     const payload = buildFitMeetSubagentWorkerCommand({
       runId: 'run-command-1',
-      agentName: 'Social Match Agent',
-      queueName: 'fitmeet.subagent.social-match-agent',
+      agentName: 'Match Agent',
+      queueName: 'fitmeet.subagent.match-agent',
       ownerUserId: 7,
       taskId: 101,
       goal: '找跑步搭子',
@@ -814,7 +810,7 @@ describe('FitMeetSubagentWorkerService', () => {
       taskContext,
       workerRuntime: {
         mode: 'queue_worker_ready',
-        queueName: 'fitmeet.subagent.social-match-agent',
+        queueName: 'fitmeet.subagent.match-agent',
         timeoutMs: 15000,
         modelUseCase: 'candidate_summary',
         model: 'deepseek-worker-test',
@@ -824,8 +820,8 @@ describe('FitMeetSubagentWorkerService', () => {
     const result = await service.executeQueuedJob({
       job: {
         id: 55,
-        agentName: 'Social Match Agent',
-        queueName: 'fitmeet.subagent.social-match-agent',
+        agentName: 'Match Agent',
+        queueName: 'fitmeet.subagent.match-agent',
         status: 'running',
         attempts: 1,
         maxAttempts: 3,
@@ -835,9 +831,9 @@ describe('FitMeetSubagentWorkerService', () => {
       } as never,
       context: {
         workerId: 'worker:process:1',
-        agent: 'Social Match Agent',
+        agent: 'Match Agent',
         mode: 'queue_worker_ready',
-        queueName: 'fitmeet.subagent.social-match-agent',
+        queueName: 'fitmeet.subagent.match-agent',
         timeoutMs: 15000,
         crashIsolation: true,
         scalable: true,
@@ -866,7 +862,7 @@ describe('FitMeetSubagentWorkerService', () => {
           commandId: payload.commandId,
           commandType: 'route_branch.execute',
           commandContract: 'fitmeet.subagent.worker.command',
-          queueName: 'fitmeet.subagent.social-match-agent',
+          queueName: 'fitmeet.subagent.match-agent',
           runId: 'run-command-1',
           traceId: 'run-command-1',
           knownTaskSlotConstraints: expect.objectContaining({
@@ -911,9 +907,8 @@ describe('FitMeetSubagentWorkerService', () => {
             mode: 'queue_worker_ready',
           }),
           knownTaskSlotConstraints: expect.objectContaining({
-            candidatePreferencePolicy: expect.stringContaining(
-              '公开可发现资料',
-            ),
+            candidatePreferencePolicy:
+              expect.stringContaining('公开可发现资料'),
           }),
         }),
       }),
@@ -933,7 +928,7 @@ describe('FitMeetSubagentWorkerService', () => {
       expect.objectContaining({
         ownerUserId: 7,
         agentTaskId: 101,
-        agentName: 'Social Match Agent',
+        agentName: 'Match Agent',
         evalHints: expect.objectContaining({
           workerTrace: expect.objectContaining({
             workerJobId: 55,
@@ -959,7 +954,10 @@ describe('FitMeetSubagentWorkerService', () => {
         }),
       }),
     );
-    const workerTrace = result.workerOutput?.workerTrace as Record<string, unknown>;
+    const workerTrace = result.workerOutput?.workerTrace as Record<
+      string,
+      unknown
+    >;
     const constraints = workerTrace.knownTaskSlotConstraints as Record<
       string,
       unknown
@@ -975,7 +973,7 @@ describe('FitMeetSubagentWorkerService', () => {
         kind: 'route_branch',
         ownerUserId: 7,
         taskId: 101,
-        agent: 'Social Match Agent',
+        agent: 'Match Agent',
         goal: '找跑步搭子',
         plannerInput: { route: { intent: 'find_partner' } },
         tools: [{ toolName: 'social_match_search_turn', input: {} }],
@@ -1005,15 +1003,15 @@ describe('FitMeetSubagentWorkerService', () => {
       service.executeQueuedJob({
         job: {
           id: 56,
-          agentName: 'Social Match Agent',
-          queueName: 'fitmeet.subagent.social-match-agent',
+          agentName: 'Match Agent',
+          queueName: 'fitmeet.subagent.match-agent',
           status: 'running',
           attempts: 1,
           maxAttempts: 3,
           payload: buildFitMeetSubagentWorkerCommand({
             runId: 'run-command-aborted',
-            agentName: 'Social Match Agent',
-            queueName: 'fitmeet.subagent.social-match-agent',
+            agentName: 'Match Agent',
+            queueName: 'fitmeet.subagent.match-agent',
             ownerUserId: 7,
             taskId: 101,
             goal: '找跑步搭子',
@@ -1026,7 +1024,7 @@ describe('FitMeetSubagentWorkerService', () => {
             route: { intent: 'find_partner' } as never,
             workerRuntime: {
               mode: 'queue_worker_ready',
-              queueName: 'fitmeet.subagent.social-match-agent',
+              queueName: 'fitmeet.subagent.match-agent',
               timeoutMs: 15000,
               modelUseCase: 'candidate_summary',
               model: 'deepseek-worker-test',
@@ -1037,9 +1035,9 @@ describe('FitMeetSubagentWorkerService', () => {
         } as never,
         context: {
           workerId: 'worker:process:1',
-          agent: 'Social Match Agent',
+          agent: 'Match Agent',
           mode: 'queue_worker_ready',
-          queueName: 'fitmeet.subagent.social-match-agent',
+          queueName: 'fitmeet.subagent.match-agent',
           timeoutMs: 15000,
           crashIsolation: true,
           scalable: true,

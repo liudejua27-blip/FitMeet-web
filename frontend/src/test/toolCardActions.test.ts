@@ -210,7 +210,9 @@ describe('tool-card-actions runtime identity', () => {
       label: '加好友并聊天',
       requiresConfirmation: true,
     });
-    expect(activityActions.find((action) => action.action === 'publish_social_request')).toMatchObject({
+    expect(
+      activityActions.find((action) => action.action === 'publish_social_request'),
+    ).toMatchObject({
       label: '发布到发现',
       requiresConfirmation: true,
     });
@@ -294,11 +296,7 @@ describe('tool-card-actions runtime identity', () => {
       ],
     );
 
-    expect(actions.map((action) => action.label)).toEqual([
-      '发布到发现',
-      '修改',
-      '暂不发布',
-    ]);
+    expect(actions.map((action) => action.label)).toEqual(['发布到发现', '修改', '暂不发布']);
     expect(actions).toHaveLength(3);
     expect(actions.find((action) => action.label === '发布到发现')).toMatchObject({
       requiresConfirmation: true,
@@ -323,13 +321,9 @@ describe('tool-card-actions runtime identity', () => {
           taskId: 77,
           opportunityId: 'walk-qdu',
         },
-        actions: [
-          { id: 'raw-location', label: '改地点', action: 'change_location' },
-        ],
+        actions: [{ id: 'raw-location', label: '改地点', action: 'change_location' }],
       },
-      [
-        { id: 'raw-location', label: '改地点', action: 'change_location' },
-      ],
+      [{ id: 'raw-location', label: '改地点', action: 'change_location' }],
     );
 
     expect(actions.find((action) => action.action === 'change_location')).toMatchObject({
@@ -395,9 +389,9 @@ describe('tool-card-actions runtime identity', () => {
       actions: [],
     };
 
-    expect(cardActionNavigationHrefForTests(profileCard, visibleCardActions(profileCard, [])[0])).toBe(
-      '/user/33',
-    );
+    expect(
+      cardActionNavigationHrefForTests(profileCard, visibleCardActions(profileCard, [])[0]),
+    ).toBe('/user/33');
     expect(
       cardActionNavigationHrefForTests(
         nestedCandidateCard,
@@ -416,7 +410,8 @@ describe('tool-card-actions runtime identity', () => {
       data: {
         taskId: 77,
         publicIntentId: 'intent_302',
-        discoverHref: '/public-intent/intent_302',
+        discoverHref: '/discover?publicIntentId=intent_302',
+        publicIntentHref: '/public-intent/intent_302',
       },
       actions: [
         {
@@ -428,7 +423,8 @@ describe('tool-card-actions runtime identity', () => {
           payload: {
             taskId: 77,
             publicIntentId: 'intent_302',
-            discoverHref: '/public-intent/intent_302',
+            discoverHref: '/discover?publicIntentId=intent_302',
+            publicIntentHref: '/public-intent/intent_302',
           },
         },
       ],

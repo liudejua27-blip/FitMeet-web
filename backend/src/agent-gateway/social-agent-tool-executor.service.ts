@@ -61,7 +61,7 @@ import { SocialAgentToolInputParserService } from './social-agent-tool-input-par
 import { SocialAgentPaymentIntentToolService } from './social-agent-payment-intent-tool.service';
 import { SocialAgentMessageToolService } from './social-agent-message-tool.service';
 import { SocialAgentActivityToolService } from './social-agent-activity-tool.service';
-import { SocialAgentInboxToolService } from './social-agent-inbox-tool.service';
+import { SocialAgentMessageEventToolService } from './social-agent-message-event-tool.service';
 import {
   SocialAgentConversationToolService,
   type SocialAgentConversationToolResult,
@@ -76,9 +76,9 @@ import { buildSocialAgentProfileContextPatch } from './social-agent-profile-cont
 import { buildSocialAgentSocialRequestToolInput } from './social-agent-social-request-tool-input';
 import { buildSocialAgentRunNextResult } from './social-agent-run-next-result';
 import {
-  buildSocialAgentInboxEventPayload,
-  type SocialAgentInboxEventInput,
-} from './social-agent-inbox-event-payload';
+  buildSocialAgentMessageEventPayload,
+  type SocialAgentMessageEventInput,
+} from './social-agent-message-event-payload';
 import { buildSocialAgentFriendActionResult } from './social-agent-friend-action-result';
 import {
   buildSocialAgentStepCompletedEvent,
@@ -210,7 +210,7 @@ export class SocialAgentToolExecutorService {
     private readonly paymentIntentTools: SocialAgentPaymentIntentToolService,
     private readonly messageTools: SocialAgentMessageToolService,
     private readonly activityTools: SocialAgentActivityToolService,
-    private readonly inboxTools: SocialAgentInboxToolService,
+    private readonly messageEventTools: SocialAgentMessageEventToolService,
     private readonly conversationTools: SocialAgentConversationToolService,
     private readonly decisionTools: SocialAgentDecisionToolService,
     private readonly taskMemory: SocialAgentTaskMemoryService,
@@ -328,7 +328,7 @@ export class SocialAgentToolExecutorService {
         reason: 'run-next must pass through the unified AgentLoop.',
         tools: [
           {
-            agent: 'Meet Loop Agent',
+            agent: 'Match Agent',
             toolName: 'run_next_execute',
             input: { ownerUserId: ownerUserId ?? null },
           },
@@ -889,7 +889,7 @@ export class SocialAgentToolExecutorService {
         SocialAgentToolName.GetCandidatePoolDebug,
       ].includes(toolName)
     ) {
-      return 'Social Match Agent';
+      return 'Match Agent';
     }
     if (
       [
@@ -912,7 +912,7 @@ export class SocialAgentToolExecutorService {
         SocialAgentToolName.RejectAction,
       ].includes(toolName)
     ) {
-      return 'Meet Loop Agent';
+      return 'Match Agent';
     }
     return 'FitMeet Main Agent';
   }
@@ -1647,13 +1647,13 @@ export class SocialAgentToolExecutorService {
       case SocialAgentToolName.SaveCandidate:
         return this.saveCandidate(task, input);
       case SocialAgentToolName.GetConversations:
-        return this.inboxTools.getConversations(task, input);
-      case SocialAgentToolName.GetAgentInbox:
-        return this.inboxTools.getAgentInbox(task, input);
-      case SocialAgentToolName.WriteInbox:
-        return this.inboxTools.writeInbox(task, input, stepId);
-      case SocialAgentToolName.ReadInbox:
-        return this.inboxTools.readInbox(task, input);
+        return this.messageEventTools.getConversations(task, input);
+      case SocialAgentToolName.GetAgentMessageEvents:
+        return this.messageEventTools.getAgentMessageEvents(task, input);
+      case SocialAgentToolName.WriteMessageEvent:
+        return this.messageEventTools.writeMessageEvent(task, input, stepId);
+      case SocialAgentToolName.ReadMessageEvents:
+        return this.messageEventTools.readMessageEvents(task, input);
       case SocialAgentToolName.GetPendingApprovals:
         return this.getPendingApprovals(task, input);
       case SocialAgentToolName.ApproveAction:
@@ -1730,6 +1730,10 @@ export class SocialAgentToolExecutorService {
     toolName: SocialAgentToolName,
     input: Record<string, unknown>,
   ): Promise<boolean> {
+    if (this.hasInlineConfirmedPublishCredential(toolName, input)) {
+      return true;
+    }
+
     const approvalId = this.toolInput.number(
       input.approvalId ?? input.approvalRequestId,
     );
@@ -1745,6 +1749,25 @@ export class SocialAgentToolExecutorService {
     if (approval.agentTaskId && approval.agentTaskId !== task.id) return false;
     if (!this.approvalMatchesTool(approval, toolName)) return false;
     return this.approvalPayloadMatchesInput(approval.payload ?? {}, input);
+  }
+
+  private hasInlineConfirmedPublishCredential(
+    toolName: SocialAgentToolName,
+    input: Record<string, unknown>,
+  ): boolean {
+    if (toolName !== SocialAgentToolName.CreateSocialRequest) return false;
+    if (this.toolInput.bool(input.confirmedPublish) !== true) return false;
+
+    const mode = this.toolInput.string(input.mode ?? input.intent);
+    const publishesToDiscover =
+      mode === 'publish' ||
+      this.toolInput.bool(input.publish) === true ||
+      this.toolInput.bool(input.syncPublicIntent) === true;
+    if (!publishesToDiscover) return false;
+
+    const metadata = this.toolInput.asRecord(input.metadata);
+    const publishSource = this.toolInput.string(metadata.publishSource);
+    return publishSource === 'agent_card_action';
   }
 
   private approvalMatchesTool(
@@ -2452,11 +2475,11 @@ export class SocialAgentToolExecutorService {
       this.taskMemory.rememberConversation(task, result.loopUpdates);
     if (result.sentMessage)
       this.taskMemory.rememberSentMessage(task, result.sentMessage);
-    if (result.inboxEvent) {
-      await this.writeSocialAgentInboxEvent(
+    if (result.messageEvent) {
+      await this.writeSocialAgentMessageEvent(
         task,
-        result.inboxEvent.eventType,
-        result.inboxEvent.input,
+        result.messageEvent.eventType,
+        result.messageEvent.input,
       );
     }
     return result.output;
@@ -2468,10 +2491,10 @@ export class SocialAgentToolExecutorService {
   ): Promise<unknown> {
     this.taskMemory.rememberConversation(task, result.loopUpdates);
     rememberSocialAgentShortTerm(task, result.shortTermUpdates);
-    await this.writeSocialAgentInboxEvent(
+    await this.writeSocialAgentMessageEvent(
       task,
-      result.inboxEvent.eventType,
-      result.inboxEvent.input,
+      result.messageEvent.eventType,
+      result.messageEvent.input,
     );
     return result.output;
   }
@@ -2500,11 +2523,11 @@ export class SocialAgentToolExecutorService {
         result.taskEvent.input,
       );
     }
-    if (result.inboxEvent) {
-      await this.writeSocialAgentInboxEvent(
+    if (result.messageEvent) {
+      await this.writeSocialAgentMessageEvent(
         task,
-        result.inboxEvent.eventType,
-        result.inboxEvent.input,
+        result.messageEvent.eventType,
+        result.messageEvent.input,
       );
     }
     return result.output;
@@ -2796,19 +2819,19 @@ export class SocialAgentToolExecutorService {
     }
   }
 
-  private async writeSocialAgentInboxEvent(
+  private async writeSocialAgentMessageEvent(
     task: AgentTask,
     eventType: string,
-    input: SocialAgentInboxEventInput,
+    input: SocialAgentMessageEventInput,
   ): Promise<void> {
-    const payload = buildSocialAgentInboxEventPayload({
+    const payload = buildSocialAgentMessageEventPayload({
       task,
       eventType,
-      inboxEvent: input,
+      messageEvent: input,
       preview: (value) => this.taskMemory.preview(value),
     });
     if (!payload) return;
-    await this.messages.createAgentInboxEvent(payload);
+    await this.messages.createAgentMessageEvent(payload);
   }
 
   private async recordActionSideEffects(

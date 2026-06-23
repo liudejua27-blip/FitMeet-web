@@ -15,20 +15,16 @@ describe('Agent user route isolation', () => {
     expect(appSource).not.toMatch(/\.\/debug|src\/debug/);
     expect(routeSource).not.toMatch(/SocialAgentConsolePage|agent-workbench|AgentRunTrace/);
     expect(routeSource).not.toMatch(/\.\/debug|src\/debug/);
-    expect(routeSource).toMatch(
-      /path="\/social-agent"[\s\S]*element=\{<Navigate to="\/agent" replace \/>}/,
-    );
+    expect(routeSource).not.toContain('path="/social-agent"');
   });
 
-  it('keeps legacy website aliases as redirects instead of duplicate product surfaces', () => {
+  it('does not register legacy website aliases as product surfaces', () => {
     const routeSource = readSource(join('routes', 'AppRoutes.tsx'));
 
-    expect(routeSource).toMatch(
-      /path="\/legacy-home"[\s\S]*element=\{<Navigate to="\/" replace \/>}/,
-    );
-    expect(routeSource).not.toMatch(
-      /path="\/legacy-home"[\s\S]*element=\{<PlatformPage page="home" \/>}/,
-    );
+    expect(routeSource).not.toContain('path="/legacy-home"');
+    expect(routeSource).not.toContain('path="/ecosystem"');
+    expect(routeSource).not.toContain('path="/developers"');
+    expect(routeSource).not.toContain('path="/contact"');
   });
 
   it('removes internal demo pages from the production route graph', () => {
@@ -38,7 +34,7 @@ describe('Agent user route isolation', () => {
     expect(routeSource).not.toMatch(/DemoAgentSocialLoopPage|DemoInvestorPage/);
     expect(existsSync(join(srcRoot, 'pages', 'DemoAgentSocialLoopPage.tsx'))).toBe(false);
     expect(existsSync(join(srcRoot, 'pages', 'DemoInvestorPage.tsx'))).toBe(false);
-    expect(routeSource).toContain('<Route path="/internal/demo/*" element={<Navigate to="/" replace />} />');
+    expect(routeSource).not.toContain('path="/internal/demo/*"');
     expect(routeSource).not.toMatch(/path="\/internal\/demo\/agent-social-loop"/);
     expect(routeSource).not.toMatch(/path="\/internal\/demo\/investor"/);
   });
@@ -53,9 +49,15 @@ describe('Agent user route isolation', () => {
     expect(existsSync(join(srcRoot, 'components', 'agent', 'ant-guide'))).toBe(false);
     expect(existsSync(join(srcRoot, 'assets', 'agent', 'ant-guide'))).toBe(false);
     expect(existsSync(join(srcRoot, 'components', 'ai-elements'))).toBe(false);
-    expect(existsSync(join(srcRoot, 'components', 'agent-loop', 'ActivityIcebreakerCard.tsx'))).toBe(false);
-    expect(existsSync(join(srcRoot, 'components', 'agent-loop', 'ActivityProofUploader.tsx'))).toBe(false);
-    expect(existsSync(join(srcRoot, 'components', 'agent-loop', 'AgentApprovalCard.tsx'))).toBe(false);
+    expect(
+      existsSync(join(srcRoot, 'components', 'agent-loop', 'ActivityIcebreakerCard.tsx')),
+    ).toBe(false);
+    expect(existsSync(join(srcRoot, 'components', 'agent-loop', 'ActivityProofUploader.tsx'))).toBe(
+      false,
+    );
+    expect(existsSync(join(srcRoot, 'components', 'agent-loop', 'AgentApprovalCard.tsx'))).toBe(
+      false,
+    );
 
     const debugSourceFiles = collectSourceFiles(join(srcRoot, 'debug')).map((file) =>
       relative(srcRoot, file).replace(/\\/g, '/'),
@@ -98,10 +100,7 @@ describe('Agent user route isolation', () => {
     const offenders = collectSourceFiles(srcRoot)
       .filter((file) => {
         const relativePath = relative(srcRoot, file).replace(/\\/g, '/');
-        return (
-          !relativePath.startsWith('test/') &&
-          relativePath !== 'api/socialAgentApi.ts'
-        );
+        return !relativePath.startsWith('test/') && relativePath !== 'api/socialAgentApi.ts';
       })
       .flatMap((file) => {
         const relativePath = relative(srcRoot, file).replace(/\\/g, '/');
@@ -136,8 +135,12 @@ describe('Agent user route isolation', () => {
 
     expect(socialAgentApiSource).toContain('fitMeetCoreEndpoints.socialAgentChat.streamUser');
     expect(socialAgentApiSource).toContain('fitMeetCoreEndpoints.socialAgentChat.messagesStream');
-    expect(socialAgentApiSource).toContain('fitMeetCoreEndpoints.socialAgentChat.routeMessageStream');
-    expect(socialAgentApiSource).toContain('fitMeetCoreEndpoints.socialAgentChat.taskMessagesStream');
+    expect(socialAgentApiSource).toContain(
+      'fitMeetCoreEndpoints.socialAgentChat.routeMessageStream',
+    );
+    expect(socialAgentApiSource).toContain(
+      'fitMeetCoreEndpoints.socialAgentChat.taskMessagesStream',
+    );
     expect(socialAgentApiSource).not.toContain('fitMeetCoreEndpoints.socialAgentChat.stream,');
 
     expect(productionAgentText).toContain('runUserFacingStream');
@@ -158,9 +161,7 @@ describe('Agent user route isolation', () => {
     const threadRuntimeSource = readSource(
       join('components', 'agent-workspace', 'useAgentThreadRuntime.ts'),
     );
-    const workspaceSource = readSource(
-      join('components', 'agent-workspace', 'AgentWorkspace.tsx'),
-    );
+    const workspaceSource = readSource(join('components', 'agent-workspace', 'AgentWorkspace.tsx'));
     const controllerSource = readSource(
       join('components', 'agent-workspace', 'useAgentWorkspaceController.ts'),
     );
@@ -168,8 +169,12 @@ describe('Agent user route isolation', () => {
       join('components', 'agent-workspace', 'buildAgentAssistantProps.ts'),
     );
 
-    expect(submitRuntimeSource).toContain('threadId: canonicalActiveThreadId');
-    expect(submitRuntimeSource).toContain('beginAbortableRun(controller, canonicalActiveThreadId)');
+    expect(submitRuntimeSource).toContain('const threadIdForRun =');
+    expect(submitRuntimeSource).toContain(
+      "conversationIntent === 'conversation' ? null : canonicalActiveThreadId",
+    );
+    expect(submitRuntimeSource).toContain('threadId: threadIdForRun');
+    expect(submitRuntimeSource).toContain('beginAbortableRun(controller, threadIdForRun)');
     expect(submitRuntimeSource).toContain('threadIdFromResponse(finalResult.response)');
     expect(submitRuntimeSource).toContain('observedRunThreadIdRef.current');
     expect(submitRuntimeSource).toContain('socialCodexThreadIdForTask(finalResult.taskId)');
@@ -196,18 +201,8 @@ describe('Agent user route isolation', () => {
       'agent-workspace',
       'agentAssistantMessageReducer.ts',
     );
-    const cardIdentityPath = join(
-      srcRoot,
-      'components',
-      'agent-workspace',
-      'agentCardIdentity.ts',
-    );
-    const textDedupePath = join(
-      srcRoot,
-      'components',
-      'agent-workspace',
-      'assistantTextDedupe.ts',
-    );
+    const cardIdentityPath = join(srcRoot, 'components', 'agent-workspace', 'agentCardIdentity.ts');
+    const textDedupePath = join(srcRoot, 'components', 'agent-workspace', 'assistantTextDedupe.ts');
     const messageStreamSource = readSource(
       join('components', 'agent-workspace', 'useAgentMessageStream.ts'),
     );
@@ -334,11 +329,7 @@ describe('Agent user route isolation', () => {
     expect(offenders).toEqual([]);
   });
 
-  it('keeps the mock Agent adapter isolated to development-only loading', () => {
-    const allowedFiles = new Set([
-      'components/agent-workspace/api/createAgentAdapter.ts',
-      'dev/agent/mockAgentAdapter.ts',
-    ]);
+  it('removes the runtime mock Agent adapter completely', () => {
     const offenders = collectSourceFiles(srcRoot)
       .filter((file) => !relative(srcRoot, file).replace(/\\/g, '/').startsWith('test/'))
       .flatMap((file) => {
@@ -350,21 +341,20 @@ describe('Agent user route isolation', () => {
           source.includes('mock-candidate') ||
           source.includes('mock-opportunity') ||
           source.includes('mock-thread-checkpoint');
-        if ((!mentionsMockAdapter && !mentionsMockRuntimeIds) || allowedFiles.has(relativePath)) {
-          return [];
-        }
+        if (!mentionsMockAdapter && !mentionsMockRuntimeIds) return [];
         return [relativePath];
       });
 
     const createAgentAdapterSource = readSource(
       join('components', 'agent-workspace', 'api', 'createAgentAdapter.ts'),
     );
-    expect(existsSync(join(srcRoot, 'components', 'agent-workspace', 'api', 'mockAgentAdapter.ts'))).toBe(false);
-    expect(existsSync(join(srcRoot, 'dev', 'agent', 'mockAgentAdapter.ts'))).toBe(true);
-    expect(createAgentAdapterSource).toContain('const loadDevelopmentMockAgentAdapter = import.meta.env.DEV');
-    expect(createAgentAdapterSource).toContain('if (IS_PRODUCTION_AGENT_BUNDLE) return createRealAgentAdapter();');
-    expect(createAgentAdapterSource).toContain("import('../../../dev/agent/mockAgentAdapter')");
-    expect(createAgentAdapterSource).toContain('Agent mock adapter is disabled in production builds.');
+    expect(
+      existsSync(join(srcRoot, 'components', 'agent-workspace', 'api', 'mockAgentAdapter.ts')),
+    ).toBe(false);
+    expect(existsSync(join(srcRoot, 'dev', 'agent', 'mockAgentAdapter.ts'))).toBe(false);
+    expect(createAgentAdapterSource).not.toContain('loadDevelopmentMockAgentAdapter');
+    expect(createAgentAdapterSource).not.toContain("import('../../../dev/agent/mockAgentAdapter')");
+    expect(createAgentAdapterSource).not.toContain('VITE_AGENT_MOCK_FLOW');
     expect(createAgentAdapterSource).not.toContain("from './mockAgentAdapter'");
     expect(offenders).toEqual([]);
   });
@@ -387,15 +377,15 @@ describe('Agent user route isolation', () => {
 
     expect(messageSource).toContain("import('./tool-fallback')");
     expect(messageSource).toContain('lazy(() =>');
-    expect(messageSource).not.toMatch(/import\s+\{[^}]*AssistantToolFallback[^}]*\}\s+from\s+['"]\.\/tool-fallback['"]/);
+    expect(messageSource).not.toMatch(
+      /import\s+\{[^}]*AssistantToolFallback[^}]*\}\s+from\s+['"]\.\/tool-fallback['"]/,
+    );
     expect(messageSource).not.toMatch(/from\s+['"]\.\/tool-fallback['"]/);
     expect(assistantShellSource).not.toContain('./tool-fallback');
   });
 
   it('keeps AgentWorkspace as a thin assistant-ui shell backed by controller hooks', () => {
-    const workspaceSource = readSource(
-      join('components', 'agent-workspace', 'AgentWorkspace.tsx'),
-    );
+    const workspaceSource = readSource(join('components', 'agent-workspace', 'AgentWorkspace.tsx'));
     const controllerPath = join(
       srcRoot,
       'components',
@@ -407,14 +397,20 @@ describe('Agent user route isolation', () => {
     expect(existsSync(controllerPath)).toBe(true);
     expect(workspaceSource).toContain('useAgentWorkspaceController');
     expect(workspaceSource).toContain('FitMeetAssistantUI');
-    expect(workspaceSource).not.toMatch(/useAgentSessionRestore|useAgentStreamingRun|useAgentApprovalRuntime|useAgentThreadBranches/);
-    expect(workspaceSource).not.toMatch(/SocialAgentConsolePage|agent-workbench|CodexAntPet|AntGuide/);
+    expect(workspaceSource).not.toMatch(
+      /useAgentSessionRestore|useAgentStreamingRun|useAgentApprovalRuntime|useAgentThreadBranches/,
+    );
+    expect(workspaceSource).not.toMatch(
+      /SocialAgentConsolePage|agent-workbench|CodexAntPet|AntGuide/,
+    );
 
     expect(controllerSource).toContain('useAgentSessionRestore');
     expect(controllerSource).toContain('useAgentStreamingRun');
     expect(controllerSource).toContain('useAgentApprovalRuntime');
     expect(controllerSource).toContain('useAgentThreadBranches');
-    expect(controllerSource).not.toMatch(/SocialAgentConsolePage|agent-workbench|CodexAntPet|AntGuide/);
+    expect(controllerSource).not.toMatch(
+      /SocialAgentConsolePage|agent-workbench|CodexAntPet|AntGuide/,
+    );
   });
 });
 

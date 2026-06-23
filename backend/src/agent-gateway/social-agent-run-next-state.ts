@@ -15,7 +15,10 @@ export function socialAgentRunNextReadReplyState(input: {
   if (input.skippedCode && input.retryable === false) {
     return runNextState(AgentTaskStatus.Failed, input.skippedCode);
   }
-  return runNextState(AgentTaskStatus.WaitingReply, input.newMessageCount === 0 ? 'no_new_reply' : 'reply_read_failed');
+  return runNextState(
+    AgentTaskStatus.WaitingReply,
+    input.newMessageCount === 0 ? 'no_new_reply' : 'reply_read_failed',
+  );
 }
 
 export function socialAgentRunNextSummaryFailedState(): SocialAgentRunNextTaskState {
@@ -30,7 +33,10 @@ export function socialAgentRunNextDecisionState(input: {
     return runNextState(AgentTaskStatus.WaitingReply, 'next_action_stop');
   }
   if (!input.hasExecutableTool) {
-    return runNextState(AgentTaskStatus.WaitingReply, 'next_action_not_executable');
+    return runNextState(
+      AgentTaskStatus.WaitingReply,
+      'next_action_not_executable',
+    );
   }
   return null;
 }
@@ -39,10 +45,19 @@ export function socialAgentRunNextActionState(input: {
   actionStatus: SocialAgentToolCallRecord['status'];
 }): SocialAgentRunNextTaskState {
   return input.actionStatus === 'succeeded'
-    ? runNextState(AgentTaskStatus.WaitingReply, 'next_action_executed_waiting_reply')
-    : runNextState(AgentTaskStatus.WaitingResult, 'next_action_needs_attention');
+    ? runNextState(
+        AgentTaskStatus.WaitingReply,
+        'next_action_executed_waiting_reply',
+      )
+    : runNextState(
+        AgentTaskStatus.WaitingResult,
+        'next_action_needs_attention',
+      );
 }
 
-function runNextState(status: AgentTaskStatus, statusReason: string): SocialAgentRunNextTaskState {
+function runNextState(
+  status: AgentTaskStatus,
+  statusReason: string,
+): SocialAgentRunNextTaskState {
   return { status, statusReason };
 }

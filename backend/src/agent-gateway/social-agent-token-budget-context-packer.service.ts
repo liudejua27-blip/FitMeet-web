@@ -268,7 +268,11 @@ export class SocialAgentTokenBudgetContextPackerService {
     };
   }
 
-  private trimNestedArrays(value: unknown, limit: number, depth: number): unknown {
+  private trimNestedArrays(
+    value: unknown,
+    limit: number,
+    depth: number,
+  ): unknown {
     if (value === null || value === undefined) return value;
     if (typeof value !== 'object') return value;
     if (depth >= COMPACT_DEPTH_LIMIT) return value;
@@ -391,7 +395,9 @@ export class SocialAgentTokenBudgetContextPackerService {
   private compactAgentContext<T>(value: T): T {
     if (!this.isRecord(value)) return this.compactModelContext(value);
     const out = this.compactModelContext(value) as Record<string, unknown>;
-    const taskMemory = this.isRecord(value.taskMemory) ? value.taskMemory : null;
+    const taskMemory = this.isRecord(value.taskMemory)
+      ? value.taskMemory
+      : null;
     if (taskMemory) {
       out.taskMemory = this.compactAgentContext(taskMemory);
     }
@@ -401,7 +407,9 @@ export class SocialAgentTokenBudgetContextPackerService {
       'longTermMemory',
       'memoryFacts',
     ]) {
-      const summary = this.compactLifeGraphContext(this.valueAtPath(value, key));
+      const summary = this.compactLifeGraphContext(
+        this.valueAtPath(value, key),
+      );
       if (summary) out[key] = summary;
     }
     const factSummaries = this.compactLifeGraphFactSummaries(
@@ -434,7 +442,9 @@ export class SocialAgentTokenBudgetContextPackerService {
       'timeline',
       'timelineCard',
     ]) {
-      const timeline = this.compactMeetLoopTimeline(this.valueAtPath(value, key));
+      const timeline = this.compactMeetLoopTimeline(
+        this.valueAtPath(value, key),
+      );
       if (timeline) out[key] = timeline;
     }
     return out as T;
@@ -530,7 +540,10 @@ export class SocialAgentTokenBudgetContextPackerService {
     value: Record<string, unknown>,
   ): Record<string, unknown> | null {
     const schemaType = this.firstText(value, ['schemaType', 'type']);
-    if (schemaType === 'life_graph.diff' || schemaType === 'life_graph_update') {
+    if (
+      schemaType === 'life_graph.diff' ||
+      schemaType === 'life_graph_update'
+    ) {
       const lifeGraph = this.compactLifeGraphContext(
         value.data ?? value.payload ?? value,
       );
@@ -575,7 +588,9 @@ export class SocialAgentTokenBudgetContextPackerService {
     return null;
   }
 
-  private compactLifeGraphContext(value: unknown): Record<string, unknown> | null {
+  private compactLifeGraphContext(
+    value: unknown,
+  ): Record<string, unknown> | null {
     if (!this.isRecord(value)) return null;
     const preferences = this.compactNamedValueRecord(
       this.firstRecord(value, ['preferences', 'stablePreferences', 'facts']),
@@ -618,7 +633,12 @@ export class SocialAgentTokenBudgetContextPackerService {
           key: this.firstValue(record, ['key', 'factKey', 'id']),
           title: this.firstText(record, ['title', 'label', 'name']),
           value: this.compactShortText(
-            this.firstValue(record, ['value', 'summary', 'text', 'description']),
+            this.firstValue(record, [
+              'value',
+              'summary',
+              'text',
+              'description',
+            ]),
             220,
           ),
           confidence: this.firstValue(record, ['confidence']),
@@ -656,7 +676,9 @@ export class SocialAgentTokenBudgetContextPackerService {
       .filter((item): item is Record<string, unknown> => Boolean(item));
   }
 
-  private compactApprovalSummary(value: unknown): Record<string, unknown> | null {
+  private compactApprovalSummary(
+    value: unknown,
+  ): Record<string, unknown> | null {
     const record = this.isRecord(value) ? value : {};
     const out = this.compactModelContext({
       approvalId: this.firstValue(record, ['approvalId', 'id']),
@@ -694,7 +716,9 @@ export class SocialAgentTokenBudgetContextPackerService {
     return Object.keys(out).length > 0 ? out : null;
   }
 
-  private compactMeetLoopTimeline(value: unknown): Record<string, unknown> | null {
+  private compactMeetLoopTimeline(
+    value: unknown,
+  ): Record<string, unknown> | null {
     const record = this.isRecord(value) ? value : {};
     const timelineSource =
       this.isRecord(record.timeline) || Array.isArray(record.timeline)
@@ -702,12 +726,10 @@ export class SocialAgentTokenBudgetContextPackerService {
         : value;
     const steps = Array.isArray(timelineSource)
       ? timelineSource
-      : this.readArrayField(this.isRecord(timelineSource) ? timelineSource : {}, [
-          'steps',
-          'items',
-          'events',
-          'timeline',
-        ]);
+      : this.readArrayField(
+          this.isRecord(timelineSource) ? timelineSource : {},
+          ['steps', 'items', 'events', 'timeline'],
+        );
     const compactSteps = steps.slice(0, 6).map((step) => {
       const item = this.isRecord(step) ? step : {};
       return this.compactModelContext({
@@ -793,7 +815,11 @@ export class SocialAgentTokenBudgetContextPackerService {
       matchScore: this.firstValue(record, ['matchScore', 'score']),
       level: this.firstValue(record, ['level', 'matchLevel']),
       interestTags: this.compactTextList([
-        ...this.readArrayField(record, ['interestTags', 'activityTags', 'tags']),
+        ...this.readArrayField(record, [
+          'interestTags',
+          'activityTags',
+          'tags',
+        ]),
         ...this.readArrayField(record, [
           'commonTags',
           'sharedInterests',
@@ -939,10 +965,7 @@ export class SocialAgentTokenBudgetContextPackerService {
     return this.compactShortText(this.firstValue(record, keys), 220);
   }
 
-  private firstValue(
-    record: Record<string, unknown>,
-    keys: string[],
-  ): unknown {
+  private firstValue(record: Record<string, unknown>, keys: string[]): unknown {
     for (const key of keys) {
       const value = this.valueAtPath(record, key);
       if (value === undefined || value === null || value === '') continue;
@@ -951,10 +974,7 @@ export class SocialAgentTokenBudgetContextPackerService {
     return undefined;
   }
 
-  private valueAtPath(
-    record: Record<string, unknown>,
-    path: string,
-  ): unknown {
+  private valueAtPath(record: Record<string, unknown>, path: string): unknown {
     let current: unknown = record;
     for (const part of path.split('.')) {
       if (!this.isRecord(current)) return undefined;
@@ -1028,7 +1048,9 @@ export class SocialAgentTokenBudgetContextPackerService {
       );
     }
     const configured = Number(
-      this.config?.get<string>('SOCIAL_AGENT_FINAL_RESPONSE_CONTEXT_TURN_LIMIT') ??
+      this.config?.get<string>(
+        'SOCIAL_AGENT_FINAL_RESPONSE_CONTEXT_TURN_LIMIT',
+      ) ??
         this.config?.get<string>('SOCIAL_AGENT_DEEPSEEK_CONTEXT_TURN_LIMIT') ??
         '',
     );
@@ -1061,7 +1083,9 @@ export class SocialAgentTokenBudgetContextPackerService {
       );
     }
     const configured = Number(
-      this.config?.get<string>('SOCIAL_AGENT_FINAL_RESPONSE_MAX_PROMPT_CHARS') ??
+      this.config?.get<string>(
+        'SOCIAL_AGENT_FINAL_RESPONSE_MAX_PROMPT_CHARS',
+      ) ??
         this.config?.get<string>('SOCIAL_AGENT_DEEPSEEK_MAX_PROMPT_CHARS') ??
         '',
     );
@@ -1076,7 +1100,9 @@ export class SocialAgentTokenBudgetContextPackerService {
 
   private defaultBudgetMode(): SocialAgentTokenBudgetMode {
     const configured = cleanDisplayText(
-      this.config?.get<string>('SOCIAL_AGENT_FINAL_RESPONSE_CONTEXT_BUDGET_MODE') ??
+      this.config?.get<string>(
+        'SOCIAL_AGENT_FINAL_RESPONSE_CONTEXT_BUDGET_MODE',
+      ) ??
         this.config?.get<string>('SOCIAL_AGENT_DEEPSEEK_CONTEXT_BUDGET_MODE') ??
         '',
       '',
@@ -1259,12 +1285,18 @@ export class SocialAgentTokenBudgetContextPackerService {
     if (Array.isArray(value)) {
       return `[${value.map((item) => this.stableStringify(item)).join(',')}]`;
     }
-    if (typeof value !== 'object') return JSON.stringify(String(value));
+    if (typeof value === 'symbol') {
+      return JSON.stringify(value.description ?? '[symbol]');
+    }
+    if (typeof value === 'function') return JSON.stringify('[function]');
+    if (typeof value !== 'object') return JSON.stringify(null);
     const entries = Object.entries(value as Record<string, unknown>).sort(
       ([left], [right]) => left.localeCompare(right),
     );
     return `{${entries
-      .map(([key, item]) => `${JSON.stringify(key)}:${this.stableStringify(item)}`)
+      .map(
+        ([key, item]) => `${JSON.stringify(key)}:${this.stableStringify(item)}`,
+      )
       .join(',')}}`;
   }
 }

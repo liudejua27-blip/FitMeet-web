@@ -55,10 +55,6 @@ const agentGatewayServicePath = path.resolve(
   __dirname,
   'agent-gateway.service.ts',
 );
-const agentGatewayControllerPath = path.resolve(
-  __dirname,
-  'agent-gateway.controller.ts',
-);
 const socialAgentTasksControllerPath = path.resolve(
   __dirname,
   'social-agent-tasks.controller.ts',
@@ -310,10 +306,6 @@ describe('SocialAgentChatService facade boundary', () => {
   );
   const agentGatewayServiceSource = fs.readFileSync(
     agentGatewayServicePath,
-    'utf8',
-  );
-  const agentGatewayControllerSource = fs.readFileSync(
-    agentGatewayControllerPath,
     'utf8',
   );
   const socialAgentTasksControllerSource = fs.readFileSync(
@@ -772,9 +764,6 @@ describe('SocialAgentChatService facade boundary', () => {
     expect(socialAgentTasksControllerSource).toContain(
       'return this.executor.runNext(id, req.user.id)',
     );
-    expect(agentGatewayControllerSource).toContain(
-      'return this.socialAgentExecutor.runNext(id, req.user.id)',
-    );
     expect(socialAgentTasksControllerSource).toContain(
       'return this.executor.executeToolAction(',
     );
@@ -782,7 +771,6 @@ describe('SocialAgentChatService facade boundary', () => {
     expect(socialAgentTasksControllerSource).not.toContain(
       'executeToolActionInternal(',
     );
-    expect(agentGatewayControllerSource).not.toContain('runNextInternal(');
     expect(toolExecutorSource).toMatch(
       /async runNext[\s\S]*?loopService\.execute\(/,
     );
@@ -1597,10 +1585,8 @@ describe('SocialAgentChatService facade boundary', () => {
     );
     expect(routeAgentLoopRunnerSource).toContain('this.subagentWorker.run');
     expect(routeAgentLoopRunnerSource).toContain("agent: 'Life Graph Agent'");
-    expect(routeAgentLoopRunnerSource).toContain(
-      "agent: 'Social Match Agent'",
-    );
-    expect(routeAgentLoopRunnerSource).toContain("agent: 'Meet Loop Agent'");
+    expect(routeAgentLoopRunnerSource).toContain("agent: 'Match Agent'");
+    expect(routeAgentLoopRunnerSource).toContain("agent: 'Match Agent'");
   });
 
   it('keeps chat turn entrypoints split from route-turn callback wiring', () => {

@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useAuthStore, useSocialStore } from '../stores';
 import * as dataService from '../services/dataService';
 import { socialAgentApi } from '../api/socialAgentApi';
-import type { Meet, Post, UserProfile } from '../types';
+import type { Meet, UserProfile } from '../types';
 
 interface ProfileView {
   id: number;
@@ -16,7 +16,7 @@ interface ProfileView {
   bio: string;
   followers: number;
   following: number;
-  posts: number;
+  meetCount: number;
   cert: boolean;
 }
 
@@ -32,8 +32,8 @@ function toProfileView(profile: UserProfile, userId: number): ProfileView {
     bio: profile.bio || '这位用户还没有填写简介',
     followers: profile.followers ?? 0,
     following: profile.following ?? 0,
-    posts: profile.posts ?? 0,
-    cert: Boolean(profile.singleCert || profile.verified || profile.isCoach),
+    meetCount: profile.meetCount ?? 0,
+    cert: Boolean(profile.singleCert || profile.verified),
   };
 }
 
@@ -44,7 +44,6 @@ export const UserProfilePage = () => {
   const { isFollowing, toggleFollow } = useSocialStore();
   const { isLoggedIn } = useAuthStore();
   const [user, setUser] = useState<ProfileView | null>(null);
-  const [posts, setPosts] = useState<Post[]>([]);
   const [meets, setMeets] = useState<Meet[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -59,17 +58,14 @@ export const UserProfilePage = () => {
     setLoading(true);
     setError('');
     try {
-      const [profile, feed, meetList] = await Promise.all([
+      const [profile, meetList] = await Promise.all([
         dataService.getUser(userId),
-        dataService.getFeed(),
         dataService.getMeets(),
       ]);
       setUser(toProfileView(profile, userId));
-      setPosts(feed.filter((post) => post.userId === userId));
       setMeets(meetList.filter((meet) => meet.userId === userId));
     } catch {
       setUser(null);
-      setPosts([]);
       setMeets([]);
       setError('加载用户主页失败，请重试');
     } finally {
@@ -179,8 +175,8 @@ export const UserProfilePage = () => {
 
             <div className="mb-4 flex gap-6">
               <div className="text-center">
-                <div className="text-lg font-bold text-white">{posts.length || user.posts}</div>
-                <div className="text-[11px] text-textSofter">动态</div>
+                <div className="text-lg font-bold text-white">{meets.length || user.meetCount}</div>
+                <div className="text-[11px] text-textSofter">公开约练</div>
               </div>
               <div className="text-center">
                 <div className="text-lg font-bold text-white">{user.followers}</div>
@@ -213,43 +209,14 @@ export const UserProfilePage = () => {
           </div>
         </div>
 
-        {posts.length > 0 && (
-          <section className="mb-8">
-            <h3 className="mb-4 font-display font-bold text-white">📝 TA 的动态</h3>
-            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-              {posts.map((post) => (
-                <div
-                  key={post.id}
-                  className="rounded-xl border border-border bg-surface p-4 transition hover:border-borderStrong"
-                >
-                  <div className="mb-2 flex items-center gap-3">
-                    <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-limeDim text-lg text-lime">{post.emoji}</span>
-                    <div>
-                      <div className="text-sm font-semibold text-white">{post.username}</div>
-                      <div className="text-[11px] text-textSofter">📍 {post.city} · {post.dist}</div>
-                    </div>
-                  </div>
-                  <p className="text-sm leading-relaxed text-textMuted">{post.text}</p>
-                  <div className="mt-2 flex gap-3 text-xs text-textSofter">
-                    <span>❤️ {post.likes}</span>
-                    <span>💬 {post.comments}</span>
-                    <span>👁️ {post.viewCount}</span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </section>
-        )}
-
         {meets.length > 0 && (
           <section className="mb-8">
             <h3 className="mb-4 font-display font-bold text-white">📍 TA 的约练</h3>
             <div className="space-y-3">
               {meets.map((meet) => (
-                <button
+                <article
                   key={meet.id}
-                  className="w-full cursor-pointer rounded-xl border border-border bg-surface p-4 text-left transition hover:border-borderStrong"
-                  onClick={() => navigate(`/meet/${meet.id}`)}
+                  className="w-full rounded-xl border border-border bg-surface p-4 text-left"
                 >
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
@@ -262,17 +229,17 @@ export const UserProfilePage = () => {
                   <div className="mt-1 text-xs text-textSofter">
                     ⏰ {meet.time} · 📍 {meet.loc}
                   </div>
-                </button>
+                </article>
               ))}
             </div>
           </section>
         )}
 
-        {posts.length === 0 && meets.length === 0 && (
+        {meets.length === 0 && (
           <div className="py-16 text-center">
             <div className="mb-3 text-5xl">📭</div>
             <div className="text-lg font-display font-bold text-textMuted">暂无内容</div>
-            <div className="mt-1 text-sm text-textSofter">这位用户还没有发布任何动态</div>
+            <div className="mt-1 text-sm text-textSofter">这位用户还没有公开约练信息</div>
           </div>
         )}
       </div>

@@ -12,7 +12,7 @@ export enum SocialAgentAction {
   DraftMessage = 'draft_message',
   SendInvite = 'send_invite',
   FavoriteCandidate = 'favorite_candidate',
-  WriteInbox = 'write_inbox',
+  WriteMessageEvent = 'write_message_event',
   OfflineMeet = 'offline_meet',
   Payment = 'payment',
 }
@@ -52,7 +52,7 @@ const ALL_SOCIAL_ACTIONS: readonly SocialAgentAction[] = [
   SocialAgentAction.GenerateContent,
   SocialAgentAction.DraftMessage,
   SocialAgentAction.FavoriteCandidate,
-  SocialAgentAction.WriteInbox,
+  SocialAgentAction.WriteMessageEvent,
   SocialAgentAction.SendMessage,
   SocialAgentAction.AddFriend,
   SocialAgentAction.SendInvite,

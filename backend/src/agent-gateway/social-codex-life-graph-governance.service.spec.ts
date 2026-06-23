@@ -117,12 +117,12 @@ describe('SocialCodexLifeGraphGovernanceService', () => {
       blockedCount: 1,
       sensitiveCount: 1,
     });
-    expect(JSON.stringify(service.toUserVisibleFactSummaries(facts))).not.toContain(
-      '宿舍',
-    );
-    expect(JSON.stringify(service.toUserVisibleFactSummaries(facts))).not.toContain(
-      '401',
-    );
+    expect(
+      JSON.stringify(service.toUserVisibleFactSummaries(facts)),
+    ).not.toContain('宿舍');
+    expect(
+      JSON.stringify(service.toUserVisibleFactSummaries(facts)),
+    ).not.toContain('401');
     expect(facts.find((fact) => fact.value === '可以')).toBeUndefined();
   });
 
@@ -164,7 +164,8 @@ describe('SocialCodexLifeGraphGovernanceService', () => {
     const slots: SocialAgentTaskSlots = {
       geo_area: {
         key: 'geo_area',
-        value: '青岛大学附近，坐标 36.062123,120.389456，高德地图链接 amap://poi',
+        value:
+          '青岛大学附近，坐标 36.062123,120.389456，高德地图链接 amap://poi',
         state: 'completed',
         source: 'user_message',
         updatedAt: now,
@@ -179,7 +180,9 @@ describe('SocialCodexLifeGraphGovernanceService', () => {
     };
 
     const facts = service.proposeStableFactsFromSlots(slots);
-    const locationFact = facts.find((fact) => fact.key === 'preferred_geo_area');
+    const locationFact = facts.find(
+      (fact) => fact.key === 'preferred_geo_area',
+    );
 
     expect(locationFact).toMatchObject({
       sensitivity: 'sensitive',

@@ -287,9 +287,8 @@ describe('SocialAgentMainAgentTurnService', () => {
               'activity',
               'candidate_preference',
             ]),
-            candidatePreferencePolicy: expect.stringContaining(
-              '公开可发现资料',
-            ),
+            candidatePreferencePolicy:
+              expect.stringContaining('公开可发现资料'),
             instruction: expect.stringContaining('不得重复询问'),
           }),
           lifeGraphGovernanceSummary: expect.objectContaining({

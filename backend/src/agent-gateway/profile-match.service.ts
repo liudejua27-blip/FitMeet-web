@@ -84,7 +84,7 @@ export type ProfileMatchDebugEvent = {
 export type ProfileMatchRunResult = {
   ok: true;
   matchedCount: number;
-  inboxEvents: number;
+  messageEvents: number;
   skippedDuplicates: number;
   skippedReasons: ProfileMatchSkippedReasons;
   recommendations: ProfileRecommendation[];
@@ -165,7 +165,7 @@ export class ProfileMatchService {
    * Recommendation-card action dispatch helper.
    *
    * Writes to `agent_tasks`, `agent_task_events`, `agent_action_logs`, and
-   * emits an Agent Inbox event with the
+   * emits a built-in message event with the
    * standard metadata shape ({ recommendationId, targetUserId, action,
    * status, requiresOwnerConfirmation, approvalId, conversationId,
    * messageId, ...extra }) and fire-and-forgets a webhook per action.
@@ -260,7 +260,7 @@ export class ProfileMatchService {
       });
       for (const conn of connections) {
         try {
-          await this.messages.createAgentInboxEvent({
+          await this.messages.createAgentMessageEvent({
             agentConnectionId: conn.id,
             ownerUserId,
             eventType: action,
@@ -269,7 +269,7 @@ export class ProfileMatchService {
             metadata,
           });
         } catch {
-          /* one inbox failure must not block others */
+          /* one message event failure must not block others */
         }
         void this.webhooks
           .emitToConnection(conn.id, action, metadata)
@@ -406,7 +406,7 @@ export class ProfileMatchService {
       .slice(0, Math.max(1, Math.min(limit, 20)));
 
     const recommendations: ProfileRecommendation[] = [];
-    let inboxEvents = 0;
+    let messageEvents = 0;
     for (const item of ranked) {
       const reasonerInput = this.buildReasonerInput(
         owner,
@@ -461,13 +461,16 @@ export class ProfileMatchService {
         reasoner,
       );
       recommendations.push(recommendation);
-      inboxEvents += await this.emitRecommendation(ownerUserId, recommendation);
+      messageEvents += await this.emitRecommendation(
+        ownerUserId,
+        recommendation,
+      );
     }
 
     return {
       ok: true,
       matchedCount: recommendations.length,
-      inboxEvents,
+      messageEvents,
       skippedDuplicates: skippedReasons.duplicateRecommendation,
       skippedReasons,
       recommendations,
@@ -773,7 +776,7 @@ export class ProfileMatchService {
     };
 
     for (const conn of targetConnections) {
-      await this.messages.createAgentInboxEvent({
+      await this.messages.createAgentMessageEvent({
         agentConnectionId: conn.id,
         ownerUserId: input.targetUserId,
         eventType: 'contact.request.received',
@@ -914,7 +917,7 @@ export class ProfileMatchService {
       where: { userId: ownerUserId, status: ConnectionStatus.Active },
       take: 20,
     });
-    let inboxEvents = 0;
+    let messageEvents = 0;
     const deliveryConnections = connections.length
       ? connections
       : [
@@ -981,7 +984,7 @@ export class ProfileMatchService {
       } catch {
         /* recommendation audit must not block matching */
       }
-      await this.messages.createAgentInboxEvent({
+      await this.messages.createAgentMessageEvent({
         agentConnectionId: conn.id,
         ownerUserId,
         eventType: 'profile.match.recommended',
@@ -989,7 +992,7 @@ export class ProfileMatchService {
         dedupeKey: `${conn.id}:profile.match.recommended:${recommendation.aiMatchSessionId}`,
         metadata,
       });
-      inboxEvents += 1;
+      messageEvents += 1;
       if (conn.id > 0) {
         void this.webhooks.emitToConnection(
           conn.id,
@@ -998,7 +1001,7 @@ export class ProfileMatchService {
         );
       }
     }
-    return inboxEvents;
+    return messageEvents;
   }
 
   private async createActionTask(input: {

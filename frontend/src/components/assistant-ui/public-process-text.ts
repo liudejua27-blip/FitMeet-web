@@ -14,7 +14,7 @@ const LEGACY_INTERNAL_PROCESS_PHRASES: Array<[RegExp, string]> = [
 ];
 
 const INTERNAL_KEY_VALUE_FRAGMENT =
-  /\b(?:traceId|runId|payload|agentTrace|structuredIntent|planner|metadata|runtime|checkpointId|parentCheckpointId|resumeToken|idempotencyKey|rawJson|rawJSON|toolCallId|toolResultId)\s*[:=]\s*(?:"[^"]*"|'[^']*'|\{[^{}]{0,240}\}|\[[^\[\]]{0,240}\]|[^\s,;，。)）\]}]+)/gi;
+  /\b(?:traceId|runId|payload|agentTrace|structuredIntent|planner|metadata|runtime|checkpointId|parentCheckpointId|resumeToken|idempotencyKey|rawJson|rawJSON|toolCallId|toolResultId)\s*[:=]\s*(?:"[^"]*"|'[^']*'|\{[^{}]{0,240}\}|\[[^\][]{0,240}\]|[^\s,;，。)）\]}]+)/gi;
 
 export function sanitizePublicProcessText(value: string) {
   const trimmed = value.trim();

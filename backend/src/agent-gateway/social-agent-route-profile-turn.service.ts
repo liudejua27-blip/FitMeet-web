@@ -108,7 +108,7 @@ export class SocialAgentRouteProfileTurnService {
         savedContext = true;
         rememberSocialAgentCurrentTask(task, {
           objective: 'profile_enrichment',
-          nextStep: '等待用户确认是否保存 Life Graph 画像提案',
+          nextStep: '等待用户确认是否保存画像更新建议',
           shouldSearchNow: false,
           profileSaved: false,
           waitingFor: 'life_graph_profile_confirmation',
@@ -321,25 +321,26 @@ export class SocialAgentRouteProfileTurnService {
   private summarizeTaskSlots(
     taskSlots: SocialAgentHydratedContext['taskSlots'],
   ): Record<string, unknown> {
-    return Object.fromEntries(
-      Object.entries(taskSlots as Record<string, unknown>).map(
-        ([key, value]) => {
-          if (!value || typeof value !== 'object' || Array.isArray(value)) {
-            return [key, this.safeContextText(value, 240)];
-          }
-          const slot = value as Record<string, unknown>;
-          return [
-            key,
-            {
-              ...(slot.state ? { state: this.safeContextText(slot.state, 40) } : {}),
-              ...(slot.value
-                ? { value: this.safeContextText(slot.value, 240) }
-                : {}),
-            },
-          ];
+    const entries: Array<[string, unknown]> = Object.entries(
+      taskSlots as Record<string, unknown>,
+    ).map(([key, value]) => {
+      if (!value || typeof value !== 'object' || Array.isArray(value)) {
+        return [key, this.safeContextText(value, 240)];
+      }
+      const slot = value as Record<string, unknown>;
+      return [
+        key,
+        {
+          ...(slot.state
+            ? { state: this.safeContextText(slot.state, 40) }
+            : {}),
+          ...(slot.value
+            ? { value: this.safeContextText(slot.value, 240) }
+            : {}),
         },
-      ),
-    );
+      ];
+    });
+    return Object.fromEntries(entries);
   }
 
   private safeContextText(value: unknown, max: number): string {

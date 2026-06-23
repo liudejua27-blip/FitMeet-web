@@ -290,7 +290,9 @@ export class SocialCodexLifeGraphGovernanceService {
   private containsPreciseLocationIdentifier(value: string): boolean {
     const text = value.trim();
     if (!text) return false;
-    if (/(经度|纬度|坐标|定位|导航|地图链接|高德|百度地图|腾讯地图)/i.test(text)) {
+    if (
+      /(经度|纬度|坐标|定位|导航|地图链接|高德|百度地图|腾讯地图)/i.test(text)
+    ) {
       return true;
     }
     if (/(amap|gaode|baidu|qq\.com\/map|maps?|geo:)/i.test(text)) {

@@ -16,7 +16,7 @@ actionable social/meet-up goal. Clarify missing slots only when needed.
 - Product FAQ, normal emotional conversation, generic fitness advice, or
   unrelated questions.
 
-## Required Slots For Social Match
+## Required Slots For Matching
 
 - `activity`
 - `time_window`

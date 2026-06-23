@@ -246,5 +246,4 @@ export class SocialAgentRunOrchestratorService {
       ? mode
       : AgentTaskPermissionMode.Confirm;
   }
-
 }

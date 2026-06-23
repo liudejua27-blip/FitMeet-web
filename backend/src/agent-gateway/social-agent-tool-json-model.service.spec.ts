@@ -386,7 +386,9 @@ describe('SocialAgentToolJsonModelService', () => {
     expect(currentRequestSignal().aborted).toBe(false);
     expect(fallback).not.toHaveBeenCalled();
 
-    await jest.advanceTimersByTimeAsync(SOCIAL_AGENT_QUALITY_TOOL_TIMEOUT_MS - 2500);
+    await jest.advanceTimersByTimeAsync(
+      SOCIAL_AGENT_QUALITY_TOOL_TIMEOUT_MS - 2500,
+    );
     expect(currentRequestSignal().aborted).toBe(false);
     expect(fallback).not.toHaveBeenCalled();
 

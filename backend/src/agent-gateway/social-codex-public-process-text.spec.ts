@@ -22,10 +22,13 @@ describe('Social Codex public process text', () => {
 
   it('still falls back for pure internal trace/debug process text', () => {
     expect(
-      sanitizeSocialCodexProcessTitle('tool_call_started planner traceId=hidden', {
-        stage: 'search_candidates',
-        state: 'running',
-      }),
+      sanitizeSocialCodexProcessTitle(
+        'tool_call_started planner traceId=hidden',
+        {
+          stage: 'search_candidates',
+          state: 'running',
+        },
+      ),
     ).toBe('正在筛选公开可发现的人');
 
     expect(

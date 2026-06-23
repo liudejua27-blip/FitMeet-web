@@ -86,7 +86,7 @@ describe('callDeepSeekChatCompletion', () => {
   });
 
   it('returns DeepSeek usage and cache-hit token metrics for non-streaming calls', async () => {
-    global.fetch = jest.fn((_input, _init) =>
+    global.fetch = jest.fn(() =>
       Promise.resolve({
         ok: true,
         json: async () => ({
@@ -101,7 +101,7 @@ describe('callDeepSeekChatCompletion', () => {
           choices: [{ message: { content: '带 usage 的结果' } }],
         }),
       } as Response),
-    ) as jest.MockedFunction<typeof fetch>;
+    ) as unknown as jest.MockedFunction<typeof fetch>;
 
     await expect(
       callDeepSeekChatCompletionWithUsage({
@@ -124,7 +124,7 @@ describe('callDeepSeekChatCompletion', () => {
   });
 
   it('reads OpenAI-compatible cached token details when DeepSeek cache fields are absent', async () => {
-    global.fetch = jest.fn((_input, _init) =>
+    global.fetch = jest.fn(() =>
       Promise.resolve({
         ok: true,
         json: async () => ({
@@ -137,7 +137,7 @@ describe('callDeepSeekChatCompletion', () => {
           choices: [{ message: { content: '兼容 usage 的结果' } }],
         }),
       } as Response),
-    ) as jest.MockedFunction<typeof fetch>;
+    ) as unknown as jest.MockedFunction<typeof fetch>;
 
     const result = await callDeepSeekChatCompletionWithUsage({
       apiKey: 'test-key',

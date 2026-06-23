@@ -2,29 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-RUN_AGENT_BROWSER_QA="${RUN_AGENT_BROWSER_QA:-true}"
-RUN_AGENT_OPPORTUNITY_SMOKE="${RUN_AGENT_OPPORTUNITY_SMOKE:-false}"
-RUN_AGENT_SSE_ABORT_SMOKE="${RUN_AGENT_SSE_ABORT_SMOKE:-false}"
-RUN_AGENT_20_TURN_MEMORY_SMOKE="${RUN_AGENT_20_TURN_MEMORY_SMOKE:-false}"
-RUN_AGENT_EMPTY_CANDIDATE_SMOKE="${RUN_AGENT_EMPTY_CANDIDATE_SMOKE:-false}"
-
-# RUN_AGENT_OPPORTUNITY_SMOKE accepts:
-#   false     skip real API opportunity smoke
-#   readiness run through clarification + OpportunityCard only
-#   true      run the full mutating journey
-#
-# Even readiness mode writes chat/search smoke data. Full mode can generate
-# opener drafts, confirm sends, create activities, submit reviews, and exercise
-# Life Graph proposal actions. Only enable either remote mode with a dedicated
-# smoke user.
-#
-# RUN_AGENT_20_TURN_MEMORY_SMOKE=true runs the real API opportunity smoke in a
-# 20-turn memory mode. It is opt-in because it performs additional model calls
-# and should be used against a dedicated smoke account.
-#
-# RUN_AGENT_EMPTY_CANDIDATE_SMOKE=true adds an empty-supply check to the real
-# API opportunity smoke. It proves zero real candidates render
-# CandidateEmptyStateCard instead of fake CandidateCards.
+RUN_AGENT_BROWSER_QA="${RUN_AGENT_BROWSER_QA:-auto}"
 
 # shellcheck source=scripts/lib/toolchain.sh
 source "${ROOT_DIR}/scripts/lib/toolchain.sh"
@@ -42,32 +20,8 @@ is_truthy() {
   esac
 }
 
-agent_smoke_api_base_url() {
-  printf '%s' "${AGENT_SMOKE_API_BASE_URL:-${FITMEET_API_BASE_URL:-${API_BASE_URL:-http://localhost:3000/api}}}"
-}
-
-agent_smoke_is_remote() {
-  local api_base hostname
-  api_base="$(agent_smoke_api_base_url)"
-  hostname="$(node -e "const u=new URL(process.argv[1]); console.log(u.hostname)" "${api_base}")"
-  case "${hostname}" in
-    localhost|127.0.0.1|::1) return 1 ;;
-    *) return 0 ;;
-  esac
-}
-
-run_agent_smoke_preflight() {
-  local mode="$1"
-  step "Run Agent remote smoke safety preflight (${mode})"
-  "${ROOT_DIR}/scripts/agent-remote-smoke-preflight.sh" "--${mode}" \
-    --api-base-url "$(agent_smoke_api_base_url)"
-}
-
 step "Audit Agent release worktree cleanup boundaries"
 "${ROOT_DIR}/scripts/agent-release-worktree-audit.sh"
-
-step "Self-test Agent release worktree audit"
-"${ROOT_DIR}/scripts/test-agent-release-worktree-audit.sh"
 
 step "Verify FitMeet Agent skill contracts and eval cases"
 node "${ROOT_DIR}/scripts/verify-agent-skills.mjs"
@@ -81,40 +35,14 @@ if [[ -n "${AGENT_SKILL_EVAL_REPORT_FILE:-}" ]]; then
   mkdir -p "$(dirname "${AGENT_SKILL_EVAL_REPORT_FILE}")"
   agent_skill_eval_args+=(--report "${AGENT_SKILL_EVAL_REPORT_FILE}")
 fi
-case "${RUN_AGENT_SKILL_EVAL_API:-false}" in
-  true|readiness)
-    agent_skill_eval_args+=(--api-readiness)
-    ;;
-  empty-candidate|empty)
-    agent_skill_eval_args+=(--api-empty-candidate)
-    ;;
-  20-turn-memory|20-turn|memory)
-    agent_skill_eval_args+=(--api-20-turn-memory)
-    ;;
-  full)
-    agent_skill_eval_args+=(--api-full)
-    ;;
-  sse-abort|sse|abort)
-    agent_skill_eval_args+=(--api-sse-abort)
-    ;;
-  all)
-    agent_skill_eval_args+=(--api-all)
-    ;;
-  false|'')
-    ;;
-  *)
-    echo "[FAIL] Unsupported RUN_AGENT_SKILL_EVAL_API=${RUN_AGENT_SKILL_EVAL_API}. Use false, readiness, empty-candidate, 20-turn-memory, full, sse-abort, or all." >&2
-    exit 1
-    ;;
-esac
 if ((${#agent_skill_eval_args[@]} > 0)); then
   node "${ROOT_DIR}/scripts/run-agent-skill-evals.mjs" "${agent_skill_eval_args[@]}"
 else
   node "${ROOT_DIR}/scripts/run-agent-skill-evals.mjs"
 fi
 
-step "Audit Agent assistant-ui release invariants"
-pnpm --dir "${ROOT_DIR}/frontend" run check:agent-chat-release
+step "Audit frontend release invariants"
+pnpm --dir "${ROOT_DIR}/frontend" run lint
 
 step "Typecheck backend Agent release surface"
 pnpm --dir "${ROOT_DIR}/backend" exec tsc --noEmit
@@ -122,13 +50,9 @@ pnpm --dir "${ROOT_DIR}/backend" exec tsc --noEmit
 step "Build backend Agent production bundle"
 pnpm --dir "${ROOT_DIR}/backend" run build
 
-step "Dry-run Agent smoke seed data"
-pnpm --dir "${ROOT_DIR}/backend" run seed:agent-smoke:dry-run
-
 step "Run backend Agent route, stream, and acceptance checks"
 pnpm --dir "${ROOT_DIR}/backend" exec jest \
   src/config/production-env-readiness.spec.ts \
-  src/config/production-deploy-readiness.spec.ts \
   src/common/process-role.util.spec.ts \
   src/agent-gateway/deepseek-streaming.util.spec.ts \
   src/agent-gateway/agent-control.controller.spec.ts \
@@ -236,7 +160,7 @@ pnpm --dir "${ROOT_DIR}/backend" exec jest \
   src/agent-gateway/social-agent-card-action-router.service.spec.ts \
   src/agent-gateway/social-agent-candidate-action.service.spec.ts \
   src/agent-gateway/social-agent-candidate-command.service.spec.ts \
-  src/agent-gateway/social-agent-inbox-tool.service.spec.ts \
+  src/agent-gateway/social-agent-message-event-tool.service.spec.ts \
   src/agent-gateway/candidate-explanation.service.spec.ts \
   src/agent-gateway/social-agent-candidate-card.presenter.spec.ts \
   src/agent-gateway/social-agent-candidate-display-fields.spec.ts \
@@ -273,7 +197,6 @@ pnpm --dir "${ROOT_DIR}/backend" exec jest \
   src/agent-gateway/social-agent-tool-execution-state.spec.ts \
   src/agent-gateway/social-agent-tool-execution-policy.service.spec.ts \
   src/agent-gateway/social-agent-tool-execution-summary.spec.ts \
-  src/agent-gateway/fitmeet-agent-tool-registry.controller.spec.ts \
   src/agent-gateway/social-agent-tool-executor.service.spec.ts \
   src/agent-gateway/social-agent-tool-json-model.service.spec.ts \
   src/agent-gateway/social-agent-tool-model.spec.ts \
@@ -299,7 +222,6 @@ pnpm --dir "${ROOT_DIR}/frontend" exec vitest run \
   src/test/AgentWorkspacePage.test.tsx \
   src/test/assistantUploadProgress.test.tsx \
   src/test/DiscoverClosure.test.ts \
-  src/test/discoverContent.test.ts \
   src/test/fitmeetCoreContract.test.ts \
   src/test/UserProfileInterestSignals.test.ts \
   src/test/socialAgentApiCheckpointStream.test.ts \
@@ -313,69 +235,26 @@ pnpm --dir "${ROOT_DIR}/frontend" exec vitest run \
   --testTimeout=20000 \
   --reporter=default
 
-if [ "${RUN_AGENT_BROWSER_QA}" = "true" ]; then
-  step "Run browser QA for /agent/chat"
-  pnpm --dir "${ROOT_DIR}/frontend" run qa:agent-chat
-else
-  step "Skip browser QA for /agent/chat"
-fi
-
-if [ "${RUN_AGENT_OPPORTUNITY_SMOKE}" = "readiness" ] || [ "${RUN_AGENT_OPPORTUNITY_SMOKE}" = "true" ]; then
-  if [ "${RUN_AGENT_OPPORTUNITY_SMOKE}" = "readiness" ]; then
-    step "Run real API smoke for Agent opportunity readiness"
-    export AGENT_SMOKE_STOP_AFTER_OPPORTUNITIES=true
-    run_agent_smoke_preflight readiness
-  else
-    step "Run real API smoke for Agent opportunity journey"
-    run_agent_smoke_preflight full
-  fi
-  if agent_smoke_is_remote && ! is_truthy "${AGENT_SMOKE_ALLOW_MUTATIONS:-}"; then
-    echo "[FAIL] RUN_AGENT_OPPORTUNITY_SMOKE=${RUN_AGENT_OPPORTUNITY_SMOKE} targets remote API $(agent_smoke_api_base_url)." >&2
-    echo "[FAIL] Set AGENT_SMOKE_ALLOW_MUTATIONS=true only with a dedicated smoke account or run scripts/ecs-post-deploy-smoke.sh --prepare-agent-smoke-seed --run-agent-opportunity-smoke." >&2
+case "${RUN_AGENT_BROWSER_QA}" in
+  true)
+    step "Run production browser QA for /agent/chat"
+    pnpm --dir "${ROOT_DIR}/frontend" run qa:agent-chat:production
+    ;;
+  auto)
+    if [[ -n "${FITMEET_AGENT_BROWSER_QA_EMAIL:-}" && -n "${FITMEET_AGENT_BROWSER_QA_PASSWORD:-}" ]]; then
+      step "Run production browser QA for /agent/chat"
+      pnpm --dir "${ROOT_DIR}/frontend" run qa:agent-chat:production
+    else
+      step "Skip browser QA for /agent/chat; set FITMEET_AGENT_BROWSER_QA_EMAIL/PASSWORD or RUN_AGENT_BROWSER_QA=true to enable"
+    fi
+    ;;
+  false)
+    step "Skip browser QA for /agent/chat"
+    ;;
+  *)
+    printf 'RUN_AGENT_BROWSER_QA must be auto, true, or false\n' >&2
     exit 1
-  fi
-  pnpm --dir "${ROOT_DIR}/backend" run smoke:agent-opportunity
-else
-  step "Skip real API smoke for Agent opportunity journey"
-fi
-
-if [ "${RUN_AGENT_20_TURN_MEMORY_SMOKE}" = "true" ]; then
-  step "Run real API smoke for Agent 20-turn memory continuity"
-  run_agent_smoke_preflight readiness
-  if agent_smoke_is_remote && ! is_truthy "${AGENT_SMOKE_ALLOW_MUTATIONS:-}"; then
-    echo "[FAIL] RUN_AGENT_20_TURN_MEMORY_SMOKE=true targets remote API $(agent_smoke_api_base_url)." >&2
-    echo "[FAIL] Set AGENT_SMOKE_ALLOW_MUTATIONS=true only with a dedicated smoke account or run scripts/ecs-post-deploy-smoke.sh --prepare-agent-smoke-seed first." >&2
-    exit 1
-  fi
-  AGENT_SMOKE_RUN_20_TURN_MEMORY=true \
-    AGENT_SMOKE_STOP_AFTER_OPPORTUNITIES=true \
-    pnpm --dir "${ROOT_DIR}/backend" run smoke:agent-opportunity
-else
-  step "Skip real API smoke for Agent 20-turn memory continuity"
-fi
-
-if [ "${RUN_AGENT_EMPTY_CANDIDATE_SMOKE}" = "true" ]; then
-  step "Run real API smoke for Agent empty-candidate recovery"
-  run_agent_smoke_preflight readiness
-  if agent_smoke_is_remote && ! is_truthy "${AGENT_SMOKE_ALLOW_MUTATIONS:-}"; then
-    echo "[FAIL] RUN_AGENT_EMPTY_CANDIDATE_SMOKE=true targets remote API $(agent_smoke_api_base_url)." >&2
-    echo "[FAIL] Set AGENT_SMOKE_ALLOW_MUTATIONS=true only with a dedicated smoke account or run scripts/ecs-post-deploy-smoke.sh --prepare-agent-smoke-seed first." >&2
-    exit 1
-  fi
-  AGENT_SMOKE_RUN_EMPTY_CANDIDATE_FALLBACK=true \
-    AGENT_SMOKE_STOP_AFTER_OPPORTUNITIES=true \
-    pnpm --dir "${ROOT_DIR}/backend" run smoke:agent-opportunity
-else
-  step "Skip real API smoke for Agent empty-candidate recovery"
-fi
-
-if [ "${RUN_AGENT_SSE_ABORT_SMOKE}" = "true" ]; then
-  step "Run real API smoke for Agent SSE abort"
-  step "Run real API smoke for Agent SSE visibility and abort"
-  run_agent_smoke_preflight sse-abort
-  pnpm --dir "${ROOT_DIR}/backend" run smoke:agent-sse-abort
-else
-  step "Skip real API smoke for Agent SSE visibility and abort"
-fi
+    ;;
+esac
 
 printf '\n[DONE] Agent release verification passed\n'

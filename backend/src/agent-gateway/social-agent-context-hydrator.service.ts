@@ -116,9 +116,10 @@ export class SocialAgentContextHydratorService {
           })
         : null,
       taskSlots: this.sanitizeContextValue(taskSlots) as typeof taskSlots,
-      taskSlotSummary: this.sanitizeContextValue(
-        taskSlotSummary,
-      ) as Record<string, string>,
+      taskSlotSummary: this.sanitizeContextValue(taskSlotSummary) as Record<
+        string,
+        string
+      >,
       knownTaskSlotConstraints: this.sanitizeContextValue(
         knownTaskSlotConstraints,
       ) as SocialAgentKnownTaskSlotConstraints | null,
@@ -141,9 +142,10 @@ export class SocialAgentContextHydratorService {
       pendingApprovals: this.sanitizeContextValue(
         pendingApprovals,
       ) as SocialAgentTaskMemory['pendingActions'],
-      candidateActions: this.sanitizeContextValue(candidateActions) as
-        | Record<string, unknown>
-        | null,
+      candidateActions: this.sanitizeContextValue(candidateActions) as Record<
+        string,
+        unknown
+      > | null,
     };
   }
 
@@ -185,7 +187,9 @@ export class SocialAgentContextHydratorService {
   private sanitizeTaskMemory(
     memory: SocialAgentTaskMemory,
     slotContext?: {
-      taskSlots: ReturnType<SocialAgentTaskMemoryStateMachineService['readSlots']>;
+      taskSlots: ReturnType<
+        SocialAgentTaskMemoryStateMachineService['readSlots']
+      >;
       taskSlotSummary: Record<string, string>;
       knownTaskSlotConstraints: SocialAgentKnownTaskSlotConstraints | null;
       candidateActions: Record<string, unknown> | null;
@@ -262,7 +266,9 @@ export class SocialAgentContextHydratorService {
 
   private firstArray(...values: unknown[]): unknown[] | null {
     for (const value of values) {
-      if (Array.isArray(value) && value.length > 0) return value;
+      if (Array.isArray(value) && value.length > 0) {
+        return Array.from<unknown>(value);
+      }
     }
     return null;
   }

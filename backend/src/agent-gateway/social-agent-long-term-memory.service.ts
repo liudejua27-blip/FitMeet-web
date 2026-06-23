@@ -241,20 +241,18 @@ export class SocialAgentLongTermMemoryService {
           preferenceHistory,
           'interest',
         ),
-        socialStyle:
-          confirmedCurrentValue(
-            typeof prefs.socialStyle === 'string' ? prefs.socialStyle : '',
-            preferenceHistory,
-            'socialStyle',
-          ),
-        communicationStyle:
-          confirmedCurrentValue(
-            typeof prefs.communicationStyle === 'string'
-              ? prefs.communicationStyle
-              : '',
-            preferenceHistory,
-            'communicationStyle',
-          ),
+        socialStyle: confirmedCurrentValue(
+          typeof prefs.socialStyle === 'string' ? prefs.socialStyle : '',
+          preferenceHistory,
+          'socialStyle',
+        ),
+        communicationStyle: confirmedCurrentValue(
+          typeof prefs.communicationStyle === 'string'
+            ? prefs.communicationStyle
+            : '',
+          preferenceHistory,
+          'communicationStyle',
+        ),
         preferredTraits: confirmedCurrentList(
           stringList(prefs.preferredTraits),
           preferenceHistory,
@@ -346,9 +344,7 @@ function confirmedCurrentList(
   const fieldHistory = history.filter((item) => item.field === field);
   if (fieldHistory.length === 0) return current;
   const confirmed = new Set(
-    fieldHistory
-      .filter((item) => item.confirmed)
-      .map((item) => item.value),
+    fieldHistory.filter((item) => item.confirmed).map((item) => item.value),
   );
   return current.filter((value) => confirmed.has(value));
 }

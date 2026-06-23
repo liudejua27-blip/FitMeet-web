@@ -7,9 +7,9 @@ import { MessagesGateway } from './messages.gateway';
 import { Conversation, ConversationSchema } from './conversation.schema';
 import { Message, MessageSchema } from './message.schema';
 import {
-  AgentInboxEvent,
-  AgentInboxEventSchema,
-} from './agent-inbox-event.schema';
+  AgentMessageEvent,
+  AgentMessageEventSchema,
+} from './agent-message-event.schema';
 import { User } from '../users/user.entity';
 import { AuthModule } from '../auth/auth.module';
 import { AgentConnection } from '../agent-gateway/entities/agent-connection.entity';
@@ -24,7 +24,7 @@ import { RealtimeModule } from '../realtime/realtime.module';
     MongooseModule.forFeature([
       { name: Conversation.name, schema: ConversationSchema },
       { name: Message.name, schema: MessageSchema },
-      { name: AgentInboxEvent.name, schema: AgentInboxEventSchema },
+      { name: AgentMessageEvent.name, schema: AgentMessageEventSchema },
     ]),
     TypeOrmModule.forFeature([
       User,

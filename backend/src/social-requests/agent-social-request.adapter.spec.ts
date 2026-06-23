@@ -24,7 +24,7 @@ function makeAdapter() {
     save: jest.fn(),
   };
   const messages = {
-    createAgentInboxEvent: jest.fn(),
+    createAgentMessageEvent: jest.fn(),
   };
   const adapter = new AgentSocialRequestAdapter(
     socialRequests as never,

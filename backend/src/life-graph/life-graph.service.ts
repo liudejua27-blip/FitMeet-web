@@ -3143,7 +3143,7 @@ export class LifeGraphService {
     const proposal = await this.proposals.findOne({
       where: { id: proposalId, userId },
     });
-    if (!proposal) throw new NotFoundException('Life Graph 提案不存在');
+    if (!proposal) throw new NotFoundException('画像更新建议不存在');
     return proposal;
   }
 

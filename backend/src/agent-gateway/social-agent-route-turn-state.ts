@@ -37,6 +37,7 @@ type SearchTurnPatch = {
   assistantMessageSource?: SocialAgentAssistantMessageSource;
   savedContext: boolean;
   activityResults: SocialAgentActivityResult[];
+  cards?: FitMeetAlphaCard[];
   queuedRun: SocialAgentAsyncRunSnapshot | null;
   runMode: SocialAgentIntentRouteResult['runMode'];
 };
@@ -89,7 +90,7 @@ export function applySearchTurnState(
       patch.assistantMessageSource ?? state.assistantMessageSource,
     savedContext: patch.savedContext || state.savedContext,
     activityResults: patch.activityResults,
-    cards: state.cards,
+    cards: patch.cards ?? state.cards,
     queuedRun: patch.queuedRun,
     runMode: patch.runMode,
   };

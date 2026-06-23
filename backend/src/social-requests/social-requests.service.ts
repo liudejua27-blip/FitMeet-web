@@ -736,8 +736,8 @@ export class SocialRequestsService {
 
   private agentSource(agent: AgentConnection): SocialRequestSource {
     switch (String(agent.agentName)) {
-      case 'openclaw':
-        return SocialRequestSource.OpenClaw;
+      case 'fitmeet_agent':
+        return SocialRequestSource.FitMeetAgent;
       case 'codex':
         return SocialRequestSource.Codex;
       default:

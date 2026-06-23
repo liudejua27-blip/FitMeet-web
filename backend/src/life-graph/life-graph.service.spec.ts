@@ -16,7 +16,7 @@ import {
   LifeGraphFieldSource,
   LifeGraphSignalKey,
 } from './life-graph.enums';
-/* eslint-disable @typescript-eslint/require-await */
+
 import { LifeGraphService } from './life-graph.service';
 
 const now = new Date('2026-05-26T01:00:00.000Z');

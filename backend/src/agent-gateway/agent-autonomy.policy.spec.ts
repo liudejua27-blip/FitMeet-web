@@ -1,6 +1,9 @@
 import { ApprovalRiskLevel } from './entities/agent-approval-request.entity';
 import { AgentSettingsMode } from './entities/agent-settings.entity';
-import { canAutoExecute, type AgentAutoActionType } from './agent-autonomy.policy';
+import {
+  canAutoExecute,
+  type AgentAutoActionType,
+} from './agent-autonomy.policy';
 
 describe('agent autonomy policy', () => {
   it('never auto-executes high-risk social side effects in any autonomy mode', () => {
@@ -40,12 +43,12 @@ describe('agent autonomy policy', () => {
   });
 
   it('still allows low-risk intelligence work without side effects', () => {
-    expect(canAutoExecute('recommend_candidate', AgentSettingsMode.Open, 'low')).toBe(
-      true,
-    );
-    expect(canAutoExecute('generate_invite', AgentSettingsMode.Normal, 'low')).toBe(
-      true,
-    );
+    expect(
+      canAutoExecute('recommend_candidate', AgentSettingsMode.Open, 'low'),
+    ).toBe(true);
+    expect(
+      canAutoExecute('generate_invite', AgentSettingsMode.Normal, 'low'),
+    ).toBe(true);
     expect(
       canAutoExecute('create_activity_draft', AgentSettingsMode.Open, 'low'),
     ).toBe(true);

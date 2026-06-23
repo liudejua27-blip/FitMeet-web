@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/require-await */
 import { UserSocialProfile } from '../users/user-social-profile.entity';
 import { CandidateExplanationService } from './candidate-explanation.service';
 import { SceneRiskPolicyService } from './scene-risk-policy.service';

@@ -17,7 +17,7 @@ import {
   MessageParticipantType,
   MessageSource,
 } from './message.schema';
-import { AgentInboxEvent } from './agent-inbox-event.schema';
+import { AgentMessageEvent } from './agent-message-event.schema';
 import { User } from '../users/user.entity';
 import {
   AgentConnection,
@@ -58,13 +58,13 @@ type SendMessageOptions = {
   actorUserId?: number | null;
 };
 
-type AgentInboxOptions = {
+type AgentMessageEventOptions = {
   limit?: number;
   unreadOnly?: boolean;
   eventType?: string;
 };
 
-type AgentInboxAckResult = {
+type AgentMessageAckResult = {
   ok: true;
   requested: number;
   acknowledged: number;
@@ -78,7 +78,7 @@ type StartConversationOptions = {
   metadata?: Record<string, unknown>;
 };
 
-type AgentInboxEventInput = {
+type AgentMessageEventInput = {
   agentConnectionId: number;
   ownerUserId: number;
   eventType: string;
@@ -122,8 +122,8 @@ export class MessagesService {
     private readonly convModel: Model<Conversation>,
     @InjectModel(Message.name)
     private readonly msgModel: Model<Message>,
-    @InjectModel(AgentInboxEvent.name)
-    private readonly inboxEventModel: Model<AgentInboxEvent>,
+    @InjectModel(AgentMessageEvent.name)
+    private readonly messageEventModel: Model<AgentMessageEvent>,
     @InjectRepository(User)
     private readonly userRepo: Repository<User>,
     @InjectRepository(AgentConnection)
@@ -167,7 +167,7 @@ export class MessagesService {
             id: conversationId,
             conversationId,
             userId: 0,
-            username: 'OpenClaw Agent',
+            username: 'FitMeet Agent',
             avatar: 'AI',
             color: '#22d3ee',
             lastMessage: cleanDisplayText(conv.lastMessage, ''),
@@ -257,7 +257,7 @@ export class MessagesService {
       const recipientConnection = await this.connectionRepo.findOne({
         where: {
           userId: otherId,
-          agentName: KnownAgent.OpenClaw,
+          agentName: KnownAgent.FitMeetAgent,
           status: ConnectionStatus.Active,
         },
         order: { updatedAt: 'DESC' },
@@ -272,7 +272,7 @@ export class MessagesService {
           actorUserId,
           metadata: {
             ...(options.metadata ?? {}),
-            source: 'auto_bound_openclaw_recipient',
+            source: 'auto_bound_fitmeet_agent_recipient',
           },
         });
       }
@@ -285,13 +285,13 @@ export class MessagesService {
         typeof options.metadata?.source === 'string'
           ? String(options.metadata.source)
           : agentConnectionId
-            ? 'openclaw'
+            ? 'fitmeet_agent'
             : undefined,
     });
     const receiverAgentId =
       options.receiverAgentId ??
       (agentConnectionId && senderType === 'user' ? agentConnectionId : null);
-    const shouldSyncAgentInbox =
+    const shouldSyncAgentMessageEvents =
       agentConnectionId != null &&
       senderType !== 'agent' &&
       Number(senderId) !== Number(ownerUserId);
@@ -334,10 +334,10 @@ export class MessagesService {
 
     const inc: Record<string, number> = {};
     if (otherId) inc[`unreadCount.${otherId}`] = 1;
-    if (receiverAgentId && !shouldSyncAgentInbox) {
+    if (receiverAgentId && !shouldSyncAgentMessageEvents) {
       inc[`unreadAgentCount.${receiverAgentId}`] = 1;
     }
-    if (shouldSyncAgentInbox) {
+    if (shouldSyncAgentMessageEvents) {
       inc[`unreadAgentCount.${agentConnectionId}`] =
         (inc[`unreadAgentCount.${agentConnectionId}`] ?? 0) + 1;
     }
@@ -378,7 +378,7 @@ export class MessagesService {
       });
     }
 
-    if (shouldSyncAgentInbox && ownerUserId && agentConnectionId) {
+    if (shouldSyncAgentMessageEvents && ownerUserId && agentConnectionId) {
       const unreadCount =
         (conv.unreadAgentCount?.[String(agentConnectionId)] ?? 0) +
         (inc[`unreadAgentCount.${agentConnectionId}`] ?? 0);
@@ -394,7 +394,7 @@ export class MessagesService {
         });
       } catch (err) {
         this.logger.warn(
-          `agent inbox sync failed: ${
+          `agent message event sync failed: ${
             err instanceof Error ? err.message : String(err)
           }`,
         );
@@ -511,7 +511,7 @@ export class MessagesService {
       agentConnectionId: options.agentConnectionId ?? null,
       ownerUserId: options.ownerUserId ?? null,
       actorUserId: options.actorUserId ?? options.ownerUserId ?? null,
-      source: options.agentConnectionId ? 'openclaw' : undefined,
+      source: options.agentConnectionId ? 'fitmeet_agent' : undefined,
     });
     const conv = await this.convModel.create({
       directKey,
@@ -628,9 +628,9 @@ export class MessagesService {
     return { conversationId: conv._id.toString(), preexisting: false };
   }
 
-  async getAgentInboxConversations(
+  async getAgentMessageConversations(
     agentId: number,
-    options: AgentInboxOptions = {},
+    options: AgentMessageEventOptions = {},
   ) {
     const limit = this.normalizeLimit(options.limit, 50, 100);
     const messageConversationIds = await this.msgModel
@@ -715,7 +715,7 @@ export class MessagesService {
             typeof conv.metadata?.source === 'string'
               ? conv.metadata.source
               : conv.agentConnectionId
-                ? 'openclaw'
+                ? 'fitmeet_agent'
                 : 'agent',
           participantUserIds: conv.participantIds ?? [],
           participantAgentIds: convAgentIds,
@@ -745,7 +745,7 @@ export class MessagesService {
       .filter((conv) => !options.unreadOnly || conv.unread > 0);
   }
 
-  async getAgentInboxMessages(
+  async getAgentConversationMessages(
     conversationId: string,
     agentId: number,
     options: { limit?: number } = {},
@@ -857,7 +857,7 @@ export class MessagesService {
       agentConnectionId: agentId,
       ownerUserId: options.ownerUserId ?? conv.ownerUserId ?? null,
       actorUserId: options.ownerUserId ?? conv.actorUserId ?? null,
-      metadata: { source: 'openclaw' },
+      metadata: { source: 'fitmeet_agent' },
     });
     const participantIds = conv.participantIds ?? [];
     const recipientUserId =
@@ -875,7 +875,7 @@ export class MessagesService {
       agentConnectionId: agentId,
       ownerUserId,
       actorUserId: ownerUserId,
-      source: 'openclaw',
+      source: 'fitmeet_agent',
     });
     let msg: Message;
     try {
@@ -890,7 +890,7 @@ export class MessagesService {
         card: null,
         metadata: {
           ...(metadata ?? {}),
-          agentInboxReply: true,
+          agentMessageReply: true,
         },
         senderType: 'agent',
         receiverType: 'user',
@@ -1046,35 +1046,35 @@ export class MessagesService {
     return conv.participantIds;
   }
 
-  async getAgentInboxEvents(
+  async getAgentMessageEvents(
     agentConnectionId: number,
-    options: AgentInboxOptions = {},
+    options: AgentMessageEventOptions = {},
   ) {
     const limit = this.normalizeLimit(options.limit, 50, 100);
     const query: Record<string, unknown> = { agentConnectionId };
     if (options.unreadOnly) query.unread = true;
     if (options.eventType) query.eventType = options.eventType;
 
-    return this.findAgentInboxEvents(query, limit);
+    return this.findAgentMessageEvents(query, limit);
   }
 
-  async getAgentInboxEventsForOwner(
+  async getAgentMessageEventsForOwner(
     ownerUserId: number,
-    options: AgentInboxOptions = {},
+    options: AgentMessageEventOptions = {},
   ) {
     const limit = this.normalizeLimit(options.limit, 50, 100);
     const query: Record<string, unknown> = { ownerUserId };
     if (options.unreadOnly) query.unread = true;
     if (options.eventType) query.eventType = options.eventType;
 
-    return this.findAgentInboxEvents(query, limit);
+    return this.findAgentMessageEvents(query, limit);
   }
 
-  private async findAgentInboxEvents(
+  private async findAgentMessageEvents(
     query: Record<string, unknown>,
     limit: number,
   ) {
-    const events = await this.inboxEventModel
+    const events = await this.messageEventModel
       .find(query)
       .sort({ createdAt: -1 })
       .limit(limit)
@@ -1116,31 +1116,31 @@ export class MessagesService {
         event.contentPreview ?? '',
         userMap.get(event.fromUserId ?? 0) ?? null,
       ),
-      nextAction: this.nextAgentInboxAction(event.eventType),
+      nextAction: this.nextAgentMessageAction(event.eventType),
       metadata: this.safeEventMetadata(event.metadata ?? {}),
       createdAt: event.createdAt,
       updatedAt: event.updatedAt,
     }));
   }
 
-  async ackAgentInboxEventsForOwner(
+  async ackAgentMessageEventsForOwner(
     ownerUserId: number,
     eventIds: string[] = [],
-  ): Promise<AgentInboxAckResult> {
-    return this.ackAgentInboxEventsByQuery({ ownerUserId }, eventIds);
+  ): Promise<AgentMessageAckResult> {
+    return this.ackAgentMessageEventsByQuery({ ownerUserId }, eventIds);
   }
 
-  async ackAgentInboxEvents(
+  async ackAgentMessageEvents(
     agentConnectionId: number,
     eventIds: string[] = [],
-  ): Promise<AgentInboxAckResult> {
-    return this.ackAgentInboxEventsByQuery({ agentConnectionId }, eventIds);
+  ): Promise<AgentMessageAckResult> {
+    return this.ackAgentMessageEventsByQuery({ agentConnectionId }, eventIds);
   }
 
-  private async ackAgentInboxEventsByQuery(
+  private async ackAgentMessageEventsByQuery(
     baseQuery: Record<string, unknown>,
     eventIds: string[] = [],
-  ): Promise<AgentInboxAckResult> {
+  ): Promise<AgentMessageAckResult> {
     const normalized = Array.from(
       new Set(eventIds.map((id) => (id ?? '').trim()).filter(Boolean)),
     ).slice(0, 100);
@@ -1161,10 +1161,10 @@ export class MessagesService {
       or.push(
         { dedupeKey: { $in: stableIds } },
         { 'metadata.eventId': { $in: stableIds } },
-        { 'metadata.inboxEventId': { $in: stableIds } },
+        { 'metadata.messageEventId': { $in: stableIds } },
       );
     }
-    const result = await this.inboxEventModel
+    const result = await this.messageEventModel
       .updateMany({ ...baseQuery, $or: or }, { $set: { unread: false } })
       .exec();
     return {
@@ -1175,7 +1175,7 @@ export class MessagesService {
     };
   }
 
-  async createAgentInboxEvent(input: AgentInboxEventInput) {
+  async createAgentMessageEvent(input: AgentMessageEventInput) {
     const conversationObjectId = input.conversationId
       ? this.toObjectId(input.conversationId)
       : null;
@@ -1191,7 +1191,7 @@ export class MessagesService {
       ].join(':');
 
     try {
-      const event = await this.inboxEventModel
+      const event = await this.messageEventModel
         .findOneAndUpdate(
           { dedupeKey },
           {
@@ -1238,7 +1238,7 @@ export class MessagesService {
       return event;
     } catch (err) {
       if ((err as { code?: number }).code === 11000) {
-        return this.inboxEventModel.findOne({ dedupeKey }).lean().exec();
+        return this.messageEventModel.findOne({ dedupeKey }).lean().exec();
       }
       throw err;
     }
@@ -1279,7 +1279,7 @@ export class MessagesService {
       [`metadata.source`]:
         typeof options.metadata?.source === 'string'
           ? options.metadata.source
-          : 'openclaw',
+          : 'fitmeet_agent',
     };
     if (options.ownerUserId != null) {
       set.ownerUserId = options.ownerUserId;
@@ -1324,7 +1324,7 @@ export class MessagesService {
       nextAction: 'report_to_owner_then_wait_for_instruction',
     };
 
-    const receivedEvent = await this.createAgentInboxEvent({
+    const receivedEvent = await this.createAgentMessageEvent({
       agentConnectionId: input.agentConnectionId,
       ownerUserId: input.ownerUserId,
       eventType: 'message.received',
@@ -1335,15 +1335,15 @@ export class MessagesService {
       dedupeKey: `${input.agentConnectionId}:message.received:${input.messageId}`,
       metadata: data,
     });
-    const updatedEvent = await this.createAgentInboxEvent({
+    const updatedEvent = await this.createAgentMessageEvent({
       agentConnectionId: input.agentConnectionId,
       ownerUserId: input.ownerUserId,
-      eventType: 'agent.inbox.updated',
+      eventType: 'agent.message.updated',
       conversationId: input.conversationId,
       messageId: input.messageId,
       fromUserId: input.fromUserId,
       contentPreview,
-      dedupeKey: `${input.agentConnectionId}:agent.inbox.updated:${input.messageId}`,
+      dedupeKey: `${input.agentConnectionId}:agent.message.updated:${input.messageId}`,
       metadata: data,
     });
     const receivedEventId = receivedEvent?._id
@@ -1351,21 +1351,21 @@ export class MessagesService {
       : `${input.agentConnectionId}:message.received:${input.messageId}`;
     const updatedEventId = updatedEvent?._id
       ? String(updatedEvent._id)
-      : `${input.agentConnectionId}:agent.inbox.updated:${input.messageId}`;
+      : `${input.agentConnectionId}:agent.message.updated:${input.messageId}`;
 
     await this.emitAgentWebhook(input.agentConnectionId, 'message.received', {
       ...data,
       eventId: receivedEventId,
-      inboxEventId: receivedEventId,
+      messageEventId: receivedEventId,
       ackEventIds: [receivedEventId],
     });
     await this.emitAgentWebhook(
       input.agentConnectionId,
-      'agent.inbox.updated',
+      'agent.message.updated',
       {
         ...data,
         eventId: updatedEventId,
-        inboxEventId: updatedEventId,
+        messageEventId: updatedEventId,
         ackEventIds: [updatedEventId],
       },
     );
@@ -1660,7 +1660,7 @@ export class MessagesService {
     const stable =
       data.eventId ??
       data.event_id ??
-      data.inboxEventId ??
+      data.messageEventId ??
       data.messageId ??
       data.conversationId;
     if (!stable) return `evt_${crypto.randomUUID()}`;
@@ -1712,7 +1712,7 @@ export class MessagesService {
     return `${eventType}: ${contentPreview}`;
   }
 
-  private nextAgentInboxAction(eventType: string) {
+  private nextAgentMessageAction(eventType: string) {
     if (eventType === 'message.received') {
       return 'report_to_owner_then_read_conversation_if_requested';
     }

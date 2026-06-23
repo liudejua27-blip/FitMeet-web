@@ -72,9 +72,10 @@ export function readSocialAgentExactCacheKeyFingerprint(
   SocialAgentPromptFingerprint,
   'promptPrefixHash' | 'dynamicContextHash'
 > | null {
-  const match = /^.+:prefix:([a-f0-9]{24}):dynamic:([a-f0-9]{24}):exact:[a-f0-9]{40}$/.exec(
-    cacheKey,
-  );
+  const match =
+    /^.+:prefix:([a-f0-9]{24}):dynamic:([a-f0-9]{24}):exact:[a-f0-9]{40}$/.exec(
+      cacheKey,
+    );
   if (!match) return null;
   return {
     promptPrefixHash: match[1],

@@ -185,16 +185,12 @@ API_BASE_URL=https://api.socialworld.world/api \
 ./scripts/verify-production.sh
 ```
 
-App/Web real account smoke after staging test users exist:
+Public-intent write/read-back smoke when production writes are allowed:
 
 ```bash
 BASE_URL=https://socialworld.world \
 API_BASE_URL=https://api.socialworld.world/api \
-APP_SMOKE_EMAIL=test@example.com \
-APP_SMOKE_PASSWORD='***' \
-APP_SMOKE_TARGET_USER_ID=123 \
-APP_SMOKE_RUN_MUTATIONS=true \
-./scripts/verify-production.sh --run-app-smoke
+./scripts/verify-production.sh --run-public-intent-write
 ```
 
 ## iOS Staging Gate
@@ -212,7 +208,9 @@ FITMEET_ALPHA_STAGING_MESSAGE_TARGET_USER_ID=123 \
 Scripts/release-preflight-ios.sh --require-staging
 ```
 
-This covers login, refresh/profile restore, avatar upload/profile update, real messaging, feed moment publish/read-back, and optional Social Agent chat when `FITMEET_ALPHA_STAGING_AGENT_CHAT=1`.
+This covers login, refresh/profile restore, avatar upload/profile update, real
+messaging, public-intent read-back, and optional Social Agent chat when
+`FITMEET_ALPHA_STAGING_AGENT_CHAT=1`.
 
 ## Performance Smoke
 

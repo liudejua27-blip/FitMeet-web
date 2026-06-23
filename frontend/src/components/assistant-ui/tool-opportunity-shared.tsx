@@ -1,6 +1,6 @@
 import { CheckCircle2, Sparkles } from 'lucide-react';
 
-import { normalizeInlineProductText } from './tool-card-shared';
+import { normalizeInlineProductText } from './tool-card-text';
 import type { ToolUISchemaType } from './tool-ui-schema';
 
 export function ConfirmedContextChips({
@@ -54,14 +54,4 @@ export function PrimaryReason({
       <p className="mt-1 text-xs leading-5 text-[#71717a]">{text}</p>
     </div>
   );
-}
-
-export function safeImageSrc(value: string | null) {
-  if (!value) return null;
-  try {
-    const url = new URL(value, window.location.origin);
-    return url.protocol === 'http:' || url.protocol === 'https:' ? url.href : null;
-  } catch {
-    return null;
-  }
 }

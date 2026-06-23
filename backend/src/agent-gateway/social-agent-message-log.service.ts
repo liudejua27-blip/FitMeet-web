@@ -121,8 +121,8 @@ export class SocialAgentMessageLogService {
           ? {
               kind: 'approval',
               pendingApproval: sanitizeForDisplay(route.pendingApproval),
-          }
-        : {}),
+            }
+          : {}),
       };
       if (options.replaceLastAssistantTurn) {
         upsertLastSocialAgentAssistantConversationTurn(task, conversationTurn);

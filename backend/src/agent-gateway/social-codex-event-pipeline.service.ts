@@ -173,7 +173,10 @@ export class SocialCodexEventPipelineService {
     const title = cleanDisplayText(event.display?.title ?? '');
     if (!title) return null;
     const detail = cleanDisplayText(event.display?.detail ?? '');
-    if (event.type === 'approval.required' || event.type === 'approval.resolved') {
+    if (
+      event.type === 'approval.required' ||
+      event.type === 'approval.resolved'
+    ) {
       return [
         event.type,
         event.stage,
@@ -183,11 +186,7 @@ export class SocialCodexEventPipelineService {
         detail,
       ].join('|');
     }
-    return [
-      event.display?.state ?? '',
-      title,
-      detail,
-    ].join('|');
+    return [event.display?.state ?? '', title, detail].join('|');
   }
 
   private approvalDisplayIdentity(event: SocialAgentEventV2): string {
@@ -219,8 +218,7 @@ export class SocialCodexEventPipelineService {
       '正在读取你的偏好',
       {
         state: 'running',
-        detail:
-          '会结合最近对话、当前任务和已确认偏好，不展示内部思考链。',
+        detail: '会结合最近对话、当前任务和已确认偏好，不展示内部思考链。',
       },
     );
   }
@@ -286,23 +284,23 @@ export class SocialCodexEventPipelineService {
   }
 
   async writeRunFailed(writer: SocialCodexEventWriter) {
-    return writer('run.failed', 'detect_social_intent', '连接中断了，可以继续', {
-      state: 'failed',
-      detail: '这段需求还在，可以直接继续；重试会从刚才的位置接着处理。',
-    });
+    return writer(
+      'run.failed',
+      'detect_social_intent',
+      '连接中断了，可以继续',
+      {
+        state: 'failed',
+        detail: '这段需求还在，可以直接继续；重试会从刚才的位置接着处理。',
+      },
+    );
   }
 
   async writeRunCompleted(writer: SocialCodexEventWriter, lifecycle: string) {
     const completion = this.runCompletionDisplay(lifecycle);
-    return writer(
-      'run.completed',
-      completion.stage,
-      completion.title,
-      {
-        state: completion.state,
-        detail: completion.detail,
-      },
-    );
+    return writer('run.completed', completion.stage, completion.title, {
+      state: completion.state,
+      detail: completion.detail,
+    });
   }
 
   async writeEarlySlotInferenceEvents(
@@ -625,7 +623,7 @@ export class SocialCodexEventPipelineService {
         '已整理画像变化建议',
         {
           state: 'waiting',
-          detail: '确认前不会写入长期 Life Graph，你可以修改或忽略。',
+          detail: '确认前不会写入长期偏好，你可以修改或忽略。',
           payload: { proposal: result.lifeGraphWritebackProposal },
         },
       );
@@ -745,16 +743,16 @@ export class SocialCodexEventPipelineService {
     existingSlots: unknown,
     text: string | null | undefined,
   ): Record<string, unknown> | null | undefined {
-    if (!this.taskSlots || typeof text !== 'string') return existingSlots as
-      | Record<string, unknown>
-      | null
-      | undefined;
+    if (!this.taskSlots || typeof text !== 'string')
+      return existingSlots as Record<string, unknown> | null | undefined;
     const extracted = this.taskSlots.extractSlotsFromUserMessage(text);
     if (Object.keys(extracted).length === 0) {
       return existingSlots as Record<string, unknown> | null | undefined;
     }
     const existing =
-      existingSlots && typeof existingSlots === 'object' && !Array.isArray(existingSlots)
+      existingSlots &&
+      typeof existingSlots === 'object' &&
+      !Array.isArray(existingSlots)
         ? (existingSlots as Record<string, unknown>)
         : {};
     return {

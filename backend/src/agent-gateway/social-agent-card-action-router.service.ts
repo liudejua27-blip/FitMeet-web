@@ -408,10 +408,11 @@ export class SocialAgentCardActionRouterService {
   }
 
   private normalizeCardAction(
-    action: SocialAgentCardActionBody['action'] | string | null | undefined,
+    action: unknown,
   ): SocialAgentCardActionBody['action'] {
-    if (!action) return null;
-    const normalized = String(action).trim().toLowerCase();
+    if (typeof action !== 'string') return null;
+    const normalized = action.trim().toLowerCase();
+    if (!normalized) return null;
     if (
       normalized === 'send_invite' ||
       normalized === 'send_message' ||
@@ -484,7 +485,7 @@ export class SocialAgentCardActionRouterService {
     if (normalized === 'view_activity') {
       return 'activity.view_detail';
     }
-    return action as SocialAgentCardActionBody['action'];
+    return normalized as SocialAgentCardActionBody['action'];
   }
 
   private agentForAction(action: string) {
@@ -495,14 +496,14 @@ export class SocialAgentCardActionRouterService {
       action.startsWith('review.') ||
       action.startsWith('meet_loop.')
     ) {
-      return 'Meet Loop Agent' as const;
+      return 'Match Agent' as const;
     }
     if (
       action === 'connect_candidate' ||
       action.startsWith('candidate.') ||
       action.startsWith('opener.')
     ) {
-      return 'Social Match Agent' as const;
+      return 'Match Agent' as const;
     }
     return 'FitMeet Main Agent' as const;
   }
@@ -650,12 +651,19 @@ export class SocialAgentCardActionRouterService {
     }
     const publicIntentId = this.text(result.publicIntentId);
     const socialRequestId = this.number(result.socialRequestId);
-    const discoverHref =
-      this.text(result.discoverHref) ||
+    const publicIntentHref =
+      this.text(result.publicIntentHref) ||
       (publicIntentId
         ? `/public-intent/${encodeURIComponent(publicIntentId)}`
         : socialRequestId
-          ? `/social-request/${encodeURIComponent(String(socialRequestId))}`
+          ? `/discover?socialRequestId=${encodeURIComponent(String(socialRequestId))}`
+          : null);
+    const discoverHref =
+      this.text(result.discoverHref) ||
+      (publicIntentId
+        ? `/discover?publicIntentId=${encodeURIComponent(publicIntentId)}`
+        : socialRequestId
+          ? `/discover?socialRequestId=${encodeURIComponent(String(socialRequestId))}`
           : '/discover');
     return this.simpleRouteResult({
       taskId,
@@ -674,6 +682,7 @@ export class SocialAgentCardActionRouterService {
             publicIntentId,
             socialRequestId,
             discoverHref,
+            publicIntentHref,
             autoPublished: true,
             publishStatus: 'published',
           },
@@ -689,6 +698,7 @@ export class SocialAgentCardActionRouterService {
                 publicIntentId,
                 socialRequestId,
                 discoverHref,
+                publicIntentHref,
               },
             },
           ],

@@ -15,7 +15,7 @@ export type UserFacingAgentLightStatus =
   | '正在理解你的需求'
   | '正在整理回复'
   | '已整理回复'
-  | '正在结合你的 Life Graph'
+  | '正在结合你的长期偏好'
   | '正在读取你的偏好'
   | '正在筛选合适的人'
   | '正在筛选公开可发现的人'
@@ -26,7 +26,7 @@ export type UserFacingAgentLightStatus =
   | '正在等待你确认'
   | '正在创建约练计划'
   | '正在整理约练方案'
-  | '正在更新你的 Life Graph'
+  | '正在整理画像更新'
   | '正在整理画像变化建议';
 
 export interface UserFacingAgentSafeStatus {
@@ -112,8 +112,7 @@ export interface UserFacingAgentCheckpointRecoveryAction {
   requiresApprovalDecision?: boolean;
 }
 
-export interface UserFacingAgentCheckpointStepAction
-  extends UserFacingAgentCheckpointRecoveryAction {
+export interface UserFacingAgentCheckpointStepAction extends UserFacingAgentCheckpointRecoveryAction {
   stepId: string;
 }
 
@@ -210,9 +209,7 @@ export interface UserFacingAgentSessionSnapshot {
 
 export interface SocialAgentProfileGateStatus {
   passed: boolean;
-  missing: Array<
-    'city' | 'activity' | 'availability' | 'boundary' | 'publicAuthorization'
-  >;
+  missing: Array<'city' | 'activity' | 'availability' | 'boundary' | 'publicAuthorization'>;
   assistantMessage: string;
   profileCompleteness: number | null;
   readinessLevel: string | null;
@@ -249,13 +246,10 @@ export interface FitMeetAgentThreadDetail {
   session: UserFacingAgentSessionSnapshot;
 }
 
-export type SocialAgentReminderTopic =
-  | 'friendship'
-  | 'fitness_partner'
-  | 'activity'
-  | 'life_graph';
+export type SocialAgentReminderTopic = 'friendship' | 'fitness_partner' | 'activity' | 'life_graph';
 
 export type SocialAgentReminderScene =
+  | 'new_match'
   | 'weekend_opportunities'
   | 'past_social_goal'
   | 'activity_follow_up'
@@ -266,7 +260,7 @@ export interface SocialAgentReminderPreference {
   userId: number;
   enabled: boolean;
   topics: SocialAgentReminderTopic[];
-  frequency: 'daily' | 'weekly' | 'manual';
+  frequency: 'realtime' | 'daily' | 'weekly' | 'manual';
   quietStart: string;
   quietEnd: string;
   tone: 'gentle' | 'direct' | 'quiet';
@@ -857,9 +851,9 @@ export const socialAgentApi = {
 
   listReminders: (limit = 20) =>
     api
-      .requestProtected<SocialAgentReminder[]>(
-        `${fitMeetCoreEndpoints.socialAgentReminders.list}?limit=${encodeURIComponent(String(limit))}`,
-      )
+      .requestProtected<
+        SocialAgentReminder[]
+      >(`${fitMeetCoreEndpoints.socialAgentReminders.list}?limit=${encodeURIComponent(String(limit))}`)
       .then(sanitizeSocialAgentResponse),
 
   runReminderOnce: (force = false) =>
@@ -886,10 +880,10 @@ export const socialAgentApi = {
 
   openReminder: (id: number | string) =>
     api
-      .requestProtected<{ ok: boolean; reminder: SocialAgentReminder | null }>(
-        fitMeetCoreEndpoints.socialAgentReminders.open(id),
-        { method: 'POST' },
-      )
+      .requestProtected<{
+        ok: boolean;
+        reminder: SocialAgentReminder | null;
+      }>(fitMeetCoreEndpoints.socialAgentReminders.open(id), { method: 'POST' })
       .then(sanitizeSocialAgentResponse),
 
   dismissReminder: (id: number | string) =>
@@ -898,10 +892,7 @@ export const socialAgentApi = {
         ok: boolean;
         reminder: SocialAgentReminder | null;
         preference?: SocialAgentReminderPreference;
-      }>(
-        fitMeetCoreEndpoints.socialAgentReminders.dismiss(id),
-        { method: 'POST' },
-      )
+      }>(fitMeetCoreEndpoints.socialAgentReminders.dismiss(id), { method: 'POST' })
       .then(sanitizeSocialAgentResponse),
 
   runTaskNext: (taskId: number) =>
@@ -921,9 +912,7 @@ export const socialAgentApi = {
     } = {},
   ) =>
     api
-      .requestProtected<SocialCodexReplayPackage>(
-        socialAgentTaskReplayPath(taskId, input),
-      )
+      .requestProtected<SocialCodexReplayPackage>(socialAgentTaskReplayPath(taskId, input))
       .then(sanitizeSocialAgentResponse),
 
   getTaskEventEval: (taskId: number) =>
@@ -964,8 +953,7 @@ async function runCheckpointStreamWithPrepare(
 }
 
 function checkpointStreamEndpoint(data: CheckpointStreamInput): string {
-  const stepId =
-    typeof data.stepId === 'string' && data.stepId.trim() ? data.stepId.trim() : null;
+  const stepId = typeof data.stepId === 'string' && data.stepId.trim() ? data.stepId.trim() : null;
   return stepId
     ? data.action === 'fork'
       ? fitMeetCoreEndpoints.socialAgentChat.checkpointStepForkStream(data.checkpointId, stepId)
@@ -1157,8 +1145,7 @@ function userFacingResponseFromRunCompletedEvent(
     textFromUnknown(summary?.title) ??
     textFromUnknown(event.display?.title) ??
     '我整理好了，可以继续追问或让我接着处理下一步。';
-  const lightStatus =
-    event.display?.state === 'waiting' ? '正在等待你确认' : '已整理回复';
+  const lightStatus = event.display?.state === 'waiting' ? '正在等待你确认' : '已整理回复';
   return {
     assistantMessage,
     assistantMessageSource: 'llm',
@@ -1176,9 +1163,7 @@ function userFacingResponseFromRunCompletedEvent(
       threadId: textFromUnknown(event.threadId) ?? null,
       runId: textFromUnknown(event.runId) ?? null,
       messageId:
-        textFromUnknown(event.messageId) ??
-        textFromUnknown(event.payload?.messageId) ??
-        null,
+        textFromUnknown(event.messageId) ?? textFromUnknown(event.payload?.messageId) ?? null,
     },
   };
 }
@@ -1186,8 +1171,7 @@ function userFacingResponseFromRunCompletedEvent(
 function socialAgentV2RunFailedError(event: SocialAgentEventV2 & { type: 'run.failed' }) {
   const title = recoveryTitleFromRunFailedEvent(event);
   const explicitMessage =
-    textFromUnknown(event.display?.detail) ??
-    textFromUnknown(event.payload?.message);
+    textFromUnknown(event.display?.detail) ?? textFromUnknown(event.payload?.message);
   const message =
     explicitMessage && !isGenericRunFailedMessage(explicitMessage)
       ? explicitMessage

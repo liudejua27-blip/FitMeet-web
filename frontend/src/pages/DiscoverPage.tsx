@@ -1,4 +1,11 @@
-import { type CSSProperties, type MouseEvent, useCallback, useEffect, useMemo, useState } from 'react';
+import {
+  type CSSProperties,
+  type MouseEvent,
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+} from 'react';
 import clsx from 'clsx';
 import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { SiteLink } from '../components/navigation/SiteLink';
@@ -7,17 +14,15 @@ import { socialAgentApi } from '../api/socialAgentApi';
 import { getMeetDistanceMeters } from '../lib/distance';
 import { getBrowserLocation } from '../lib/location';
 import type { Coordinates } from '../lib/amap';
-import { filterDisplayableMeets, filterDisplayablePosts } from '../data/discoverContent';
+import { filterDisplayableMeets } from '../data/discoverContent';
 import { getSportLabel, normalizeSportGroup } from '../data/taxonomy';
 import { useAuthStore, useNotificationStore } from '../stores';
-import type { Meet, Post, PublicSocialIntent } from '../types';
-
-type DiscoverMeet = Meet & {
-  sourceKind?: 'meet' | 'publicIntent';
-  publicIntentId?: string;
-  linkedSocialRequestId?: number | null;
-  detailHref?: string;
-};
+import type { Meet, PublicSocialIntent } from '../types';
+import {
+  detailHrefForDiscoverMeet,
+  publicIntentToDiscoverMeet,
+  type DiscoverMeet,
+} from './discoverMeetPresenter';
 
 type SportFilter = {
   id: string;
@@ -51,13 +56,14 @@ export const DiscoverPage = () => {
   const [searchParams] = useSearchParams();
   const searchParamKey = searchParams.toString();
   const focusScene = searchParams.get('focusScene')?.trim();
+  const focusPublicIntentId = searchParams.get('publicIntentId')?.trim();
+  const focusSocialRequestId = searchParams.get('socialRequestId')?.trim();
   const [activeSport, setActiveSport] = useState('all');
   const [activeTab, setActiveTab] = useState<'recommend' | 'nearby' | 'latest' | 'match'>(
     'recommend',
   );
   const [meets, setMeets] = useState<DiscoverMeet[]>([]);
   const [publicIntents, setPublicIntents] = useState<PublicSocialIntent[]>([]);
-  const [posts, setPosts] = useState<Post[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [joinedMeets, setJoinedMeets] = useState<number[]>([]);
@@ -70,34 +76,19 @@ export const DiscoverPage = () => {
     setLoading(true);
     setError('');
     try {
-      const [meetData, feedData, intentData] = await Promise.all([
+      const [meetData, intentData] = await Promise.all([
         dataService.getMeets({ lat: userLocation?.lat, lng: userLocation?.lng }),
-        dataService.getFeed({
-          page: 1,
-          pageSize: 12,
-          lat: userLocation?.lat,
-          lng: userLocation?.lng,
-        }),
         loadPublicDiscoverIntents(),
       ]);
       setMeets(
-        filterDisplayableMeets(meetData)
-          .map((meet) => ({
-            ...meet,
-            sourceKind: 'meet',
-            detailHref:
-              meet.activityId && meet.activityId > 0
-                ? `/activity/${meet.activityId}`
-                : meet.id > 0
-                  ? `/meet/${meet.id}`
-                  : undefined,
-          })),
+        filterDisplayableMeets(meetData).map((meet) => ({
+          ...meet,
+          sourceKind: 'meet',
+        })),
       );
-      setPosts(filterDisplayablePosts(feedData));
       setPublicIntents(intentData.filter((intent) => intent.status !== 'cancelled'));
     } catch {
       setMeets([]);
-      setPosts([]);
       setPublicIntents([]);
       setError('发现内容加载失败，请稍后重试。');
     } finally {
@@ -136,10 +127,28 @@ export const DiscoverPage = () => {
     if (activeTab === 'match') {
       data = [...data].sort((a, b) => matchScore(b) - matchScore(a));
     }
+    if (focusPublicIntentId || focusSocialRequestId) {
+      data = [...data].sort((a, b) => {
+        const aFocused = isFocusedDiscoverMeet(a, focusPublicIntentId, focusSocialRequestId);
+        const bFocused = isFocusedDiscoverMeet(b, focusPublicIntentId, focusSocialRequestId);
+        return Number(bFocused) - Number(aFocused);
+      });
+    }
     return data;
-  }, [activeSport, activeTab, meets, publicIntents]);
+  }, [activeSport, activeTab, focusPublicIntentId, focusSocialRequestId, meets, publicIntents]);
 
   useEffect(() => {
+    if (focusPublicIntentId || focusSocialRequestId) {
+      const targetMeet = displayMeets.find((meet) =>
+        isFocusedDiscoverMeet(meet, focusPublicIntentId, focusSocialRequestId),
+      );
+      if (!targetMeet) return;
+      const target = document.querySelector<HTMLElement>(
+        `[data-public-intent-id="${cssEscapeValue(targetMeet.publicIntentId)}"], [data-social-request-id="${cssEscapeValue(String(targetMeet.linkedSocialRequestId ?? ''))}"]`,
+      );
+      target?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      return;
+    }
     if (!focusScene) {
       return;
     }
@@ -160,7 +169,7 @@ export const DiscoverPage = () => {
     if (target) {
       target.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
-  }, [displayMeets, focusScene]);
+  }, [displayMeets, focusPublicIntentId, focusScene, focusSocialRequestId]);
 
   useEffect(() => {
     void loadDiscover();
@@ -182,16 +191,8 @@ export const DiscoverPage = () => {
       body: index === 0 ? `${getSportLabel(meet.sport)} · ${formatMeetTime(meet)}` : liveBody(meet),
       time: formatRelativePublishedTime(meet.createdAt, '刚刚更新'),
     }));
-    const postItems = posts.slice(0, 3).map((post) => ({
-      id: `post-${post.id}`,
-      avatar: post.username.slice(0, 1),
-      color: post.color,
-      title: post.title || post.username,
-      body: post.type === 'meet' ? '发布了场景邀请' : '更新了训练动态',
-      time: formatRelativePublishedTime(post.createdAt, '刚刚更新'),
-    }));
-    return [...meetItems, ...postItems].slice(0, 6);
-  }, [displayMeets, posts]);
+    return meetItems.slice(0, 6);
+  }, [displayMeets]);
 
   const activePeople = useMemo(
     () =>
@@ -199,27 +200,20 @@ export const DiscoverPage = () => {
         .filter((meet) => Number.isFinite(meet.userId) && Number(meet.userId) > 0)
         .slice(0, 4)
         .map((meet, index) => ({
-        id: meet.id,
-        userId: meet.userId,
-        name: publicDisplayName(meet.username, index),
-        sport: getSportLabel(meet.sport),
-        distance: meet.dist || '附近',
-        avatar: (meet.username || 'F').slice(0, 1),
-        color: meet.color,
-        href: `/user/${meet.userId}`,
-        meet,
-      })),
+          id: meet.id,
+          userId: meet.userId,
+          name: publicDisplayName(meet.username, index),
+          sport: getSportLabel(meet.sport),
+          distance: meet.dist || '附近',
+          avatar: (meet.username || 'F').slice(0, 1),
+          color: meet.color,
+          href: `/user/${meet.userId}`,
+          meet,
+        })),
     [displayMeets],
   );
 
   const spotlightMeets = useMemo(() => displayMeets.slice(0, 3), [displayMeets]);
-  const realScenarioCount = useMemo(
-    () =>
-      publicIntents.length +
-      meets.length +
-      posts.length,
-    [meets, posts.length, publicIntents.length],
-  );
 
   const handleUseLocation = useCallback(() => {
     setIsLocating(true);
@@ -263,9 +257,7 @@ export const DiscoverPage = () => {
     (meet: DiscoverMeet) => {
       if (!isLoggedIn) return;
       const targetUserId =
-        Number.isFinite(meet.userId) && Number(meet.userId) > 0
-          ? Number(meet.userId)
-          : null;
+        Number.isFinite(meet.userId) && Number(meet.userId) > 0 ? Number(meet.userId) : null;
       const day = new Date().toISOString().slice(0, 10);
       void socialAgentApi
         .recordInterestEvent({
@@ -318,10 +310,6 @@ export const DiscoverPage = () => {
     [isLoggedIn],
   );
 
-  const openCreate = useCallback(() => {
-    navigate('/social-request/new');
-  }, [navigate]);
-
   return (
     <div className="fitmeet-website fm-site fm-enterprise-site discover-page">
       <DiscoverSiteNav />
@@ -340,11 +328,11 @@ export const DiscoverPage = () => {
             </h1>
             <p>从约练、散步、咖啡和同频动态开始，看见可以自然认识的人。</p>
             <div className="discover-hero__actions">
-              <button type="button" className="fm-button fm-button--primary" onClick={openCreate}>
-                发布一个场景
-              </button>
-              <Link to="/agent" className="fm-button fm-button--ghost">
+              <Link to="/agent" className="fm-button fm-button--primary">
                 让 Agent 帮我找
+              </Link>
+              <Link to="/features" className="fm-button fm-button--ghost">
+                了解产品
               </Link>
             </div>
             <div className="match-sport-filter" aria-label="运动筛选">
@@ -484,9 +472,7 @@ export const DiscoverPage = () => {
             ) : (
               <div className="match-empty-state" data-testid="discover-real-empty-state">
                 <strong>暂时还没有公开场景</strong>
-                <p>
-                  你可以让 Agent 根据你的城市、时间、活动兴趣和安全边界生成第一张约练卡。
-                </p>
+                <p>你可以让 Agent 根据你的城市、时间、活动兴趣和安全边界生成第一张约练卡。</p>
                 <button type="button" onClick={() => navigate('/agent/chat')}>
                   让 Agent 帮我生成
                 </button>
@@ -495,10 +481,8 @@ export const DiscoverPage = () => {
 
             <div className="match-hall-end">
               <span />
-              没有更多了，去
-              <button type="button" onClick={openCreate}>
-                发布一个场景
-              </button>
+              没有更多了，可以继续让 Agent 根据你的偏好筛选
+              <Link to="/agent">打开 Agent</Link>
               <span />
             </div>
           </section>
@@ -510,25 +494,29 @@ export const DiscoverPage = () => {
                 <button type="button">查看更多 ›</button>
               </header>
               <div className="match-people-list">
-                {activePeople.length > 0 ? activePeople.map((person) => (
-                  <button
-                    key={person.id}
-                    type="button"
-                    onClick={() => {
-                      recordProfileInterest(person);
-                      navigate(person.href);
-                    }}
-                  >
-                    <span className="match-person-avatar" style={{ background: person.color }}>
-                      {person.avatar}
-                    </span>
-                    <span>
-                      <strong>{person.name}</strong>
-                      <small>{person.sport} · {person.distance}</small>
-                    </span>
-                    <em>详情</em>
-                  </button>
-                )) : (
+                {activePeople.length > 0 ? (
+                  activePeople.map((person) => (
+                    <button
+                      key={person.id}
+                      type="button"
+                      onClick={() => {
+                        recordProfileInterest(person);
+                        navigate(person.href);
+                      }}
+                    >
+                      <span className="match-person-avatar" style={{ background: person.color }}>
+                        {person.avatar}
+                      </span>
+                      <span>
+                        <strong>{person.name}</strong>
+                        <small>
+                          {person.sport} · {person.distance}
+                        </small>
+                      </span>
+                      <em>详情</em>
+                    </button>
+                  ))
+                ) : (
                   <p className="rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm leading-6 text-[#9a9487]">
                     暂时没有公开资料完整的附近用户。你发布真实场景后，系统会优先展示可查看详情的人。
                   </p>
@@ -546,21 +534,6 @@ export const DiscoverPage = () => {
                 <li>开始前确认活动地点和时间</li>
                 <li>遇到异常请举报，保护自己</li>
               </ul>
-            </section>
-
-            <section className="match-publish-panel">
-              <h2>把想做的事发出来</h2>
-              <p>说清楚时间、地点和边界，让认识从一个真实场景开始。</p>
-              <button type="button" onClick={openCreate}>
-                发布场景 <span>→</span>
-              </button>
-              <div>
-                <span>
-                  {realScenarioCount > 0
-                    ? `${realScenarioCount} 个真实生活场景正在展示`
-                    : '等待第一张真实生活场景'}
-                </span>
-              </div>
             </section>
           </aside>
         </section>
@@ -700,6 +673,8 @@ function MeetupMatchCard({
       to={detailHref}
       className="match-card-link"
       data-meet-anchor={meet.id}
+      data-public-intent-id={meet.publicIntentId ?? undefined}
+      data-social-request-id={meet.linkedSocialRequestId ?? undefined}
       onClick={onOpen}
     >
       <article className={`match-card match-card--${tone}`}>
@@ -707,7 +682,9 @@ function MeetupMatchCard({
           <span className="match-card__sport">{sportIcon(meet.sport)}</span>
           <div>
             <h2>{meet.title}</h2>
-            <p>{meet.city || '附近'} · {resolvedDistance}</p>
+            <p>
+              {meet.city || '附近'} · {resolvedDistance}
+            </p>
           </div>
           <span className="match-card__more" aria-hidden="true">
             ⋯
@@ -753,55 +730,23 @@ function MeetupMatchCard({
   );
 }
 
-export function publicIntentToDiscoverMeet(
-  intent: PublicSocialIntent,
-  index: number,
-): DiscoverMeet {
-  const sport = normalizeSportGroup(intent.requestType || intent.interestTags?.[0] || 'custom');
-  const color = ['#10a37f', '#f97316', '#4f46e5', '#d97706'][index % 4];
-  const detailHref = `/public-intent/${encodeURIComponent(intent.id)}`;
-  return {
-    id: publicIntentSyntheticId(intent.id, index),
-    userId: intent.userId ?? undefined,
-    title: intent.title || '新的社交机会',
-    type: intent.requestType || sport,
-    sport,
-    username: '同频发起人',
-    color,
-    colorBg: `${color}22`,
-    time: intent.timePreference || '时间待定',
-    loc: intent.locationPreference || intent.loc || intent.city || '地点待定',
-    city: intent.city,
-    lat: intent.lat,
-    lng: intent.lng,
-    dist: intent.radiusKm ? `${intent.radiusKm}km 内` : '附近',
-    price: '免费',
-    slots: Math.max(1, intent.matchedCount || 1),
-    maxSlots: Math.max(3, (intent.matchedCount || 1) + 2),
-    level: publicIntentLevel(intent),
-    desc: intent.description || intent.socialGoal || '发起人正在寻找合适的同频伙伴。',
-    status: 'active',
-    participants: (intent.interestTags || []).slice(0, 3),
-    cert: intent.riskLevel !== 'high',
-    rating: Math.max(4, Math.min(5, (intent.matchSignal?.score ?? 86) / 20)),
-    meetCount: intent.matchedCount || 1,
-    startAt: intent.timePreference,
-    createdAt: intent.createdAt,
-    sourceKind: 'publicIntent',
-    publicIntentId: intent.id,
-    linkedSocialRequestId: intent.linkedSocialRequestId,
-    detailHref,
-  };
+function isFocusedDiscoverMeet(
+  meet: DiscoverMeet,
+  publicIntentId?: string | null,
+  socialRequestId?: string | null,
+) {
+  return (
+    Boolean(publicIntentId && meet.publicIntentId === publicIntentId) ||
+    Boolean(socialRequestId && String(meet.linkedSocialRequestId ?? '') === socialRequestId)
+  );
 }
 
-export function detailHrefForDiscoverMeet(meet: DiscoverMeet) {
-  if (meet.detailHref) return meet.detailHref;
-  if (meet.sourceKind === 'publicIntent' && meet.publicIntentId) {
-    return `/public-intent/${encodeURIComponent(meet.publicIntentId)}`;
+function cssEscapeValue(value: string | null | undefined) {
+  if (!value) return '';
+  if (typeof CSS !== 'undefined' && typeof CSS.escape === 'function') {
+    return CSS.escape(value);
   }
-  if (meet.activityId && meet.activityId > 0) return `/activity/${meet.activityId}`;
-  if (meet.id > 0) return `/meet/${meet.id}`;
-  return `/agent/chat?scene=${encodeURIComponent(meet.title)}`;
+  return value.replace(/["\\]/g, '\\$&');
 }
 
 async function loadPublicDiscoverIntents() {
@@ -826,18 +771,6 @@ async function loadPublicDiscoverIntents() {
   return Array.from(byId.values()).sort(
     (a, b) => (Date.parse(b.createdAt) || 0) - (Date.parse(a.createdAt) || 0),
   );
-}
-
-function publicIntentSyntheticId(id: string, index: number) {
-  const hash = Array.from(id).reduce((sum, char) => sum + char.charCodeAt(0), 0);
-  return -100000 - index - hash;
-}
-
-function publicIntentLevel(intent: PublicSocialIntent) {
-  const text = `${intent.description} ${intent.socialGoal} ${intent.interestTags?.join(' ') ?? ''}`;
-  if (/(高强度|进阶|认真|训练)/i.test(text)) return '较高强度';
-  if (/(轻松|低压力|散步|新手)/i.test(text)) return '轻松';
-  return '中等';
 }
 
 function matchScore(meet: Meet) {

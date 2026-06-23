@@ -1,10 +1,7 @@
 import { ShieldCheck } from 'lucide-react';
 
 import type { VisibleCardAction } from './tool-card-actions';
-import type {
-  normalizeCandidateOpportunityView,
-  ToolUISchemaType,
-} from './tool-ui-schema';
+import type { ToolUISchemaType } from './tool-ui-schema';
 
 export function OpportunityGuardrailStrip({
   schemaType,
@@ -38,27 +35,4 @@ export function OpportunityGuardrailStrip({
       ))}
     </div>
   );
-}
-
-export function candidateSourceGuardrail(
-  opportunity: ReturnType<typeof normalizeCandidateOpportunityView>,
-) {
-  const explicit = opportunity.discoverySafetySignals.find(
-    (signal) =>
-      signal.includes('公开') || signal.includes('可发现') || signal.includes('Agent 匹配'),
-  );
-  return explicit ?? '只基于公开可发现或已允许 Agent 匹配的信息';
-}
-
-export function candidatePrivacyGuardrail(
-  opportunity: ReturnType<typeof normalizeCandidateOpportunityView>,
-) {
-  const explicit = opportunity.discoverySafetySignals.find(
-    (signal) =>
-      signal.includes('脱敏') ||
-      signal.includes('精确位置') ||
-      signal.includes('联系方式') ||
-      signal.includes('模糊'),
-  );
-  return explicit ?? '资料已脱敏，不展示精确位置或私密联系方式';
 }

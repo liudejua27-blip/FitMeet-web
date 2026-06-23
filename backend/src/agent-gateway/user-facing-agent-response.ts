@@ -15,7 +15,7 @@ import type {
 export type UserFacingAgentLightStatus =
   | '正在思考'
   | '正在理解你的需求'
-  | '正在结合你的 Life Graph'
+  | '正在结合你的长期偏好'
   | '正在读取你的偏好'
   | '正在筛选合适的人'
   | '正在筛选公开可发现的人'
@@ -26,7 +26,7 @@ export type UserFacingAgentLightStatus =
   | '正在等待你确认'
   | '正在创建约练计划'
   | '正在整理约练方案'
-  | '正在更新你的 Life Graph'
+  | '正在整理画像更新'
   | '正在整理画像变化建议';
 
 export interface UserFacingAgentSafeStatus {

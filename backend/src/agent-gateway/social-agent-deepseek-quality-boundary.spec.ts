@@ -177,7 +177,9 @@ describe('Social Agent DeepSeek quality production boundary', () => {
       'defaultChatModel',
     );
 
-    expect(routerSource).not.toContain("allowFast: this.routingMode() === 'fast'");
+    expect(routerSource).not.toContain(
+      "allowFast: this.routingMode() === 'fast'",
+    );
     expect(routerDefaultChatModel).not.toContain('DEEPSEEK_FAST_MODEL');
     expect(routerDefaultChatModel).not.toContain(
       'SOCIAL_AGENT_DEFAULT_FAST_MODEL',
@@ -190,7 +192,7 @@ describe('Social Agent DeepSeek quality production boundary', () => {
 
     expect(source).not.toContain('SOCIAL_AGENT_DEFAULT_FAST_MODEL');
     expect(source).not.toContain('DEEPSEEK_FAST_MODEL');
-    expect(source).not.toContain("allowFast: !qualityMode");
+    expect(source).not.toContain('allowFast: !qualityMode');
     expect(source).not.toContain("SOCIAL_AGENT_MODEL_ROUTING_MODE') ?? ''");
   });
 

@@ -386,8 +386,7 @@ describe('AgentSelfImproveService', () => {
         ownerUserId: 7,
         taskId: 44,
         userMessage: '我之前的记忆呢',
-        assistantMessage:
-          '连接刚才中断了。这段需求还在，可以直接继续。',
+        assistantMessage: '连接刚才中断了。这段需求还在，可以直接继续。',
         route: { intent: 'casual_chat' },
         result: { assistantMessageSource: 'fallback' },
       }),
@@ -420,12 +419,12 @@ describe('AgentSelfImproveService', () => {
       listSubagentMemory: jest.fn().mockResolvedValue([
         {
           id: 91,
-          agentName: 'Social Match Agent',
+          agentName: 'Match Agent',
           memoryScope: 'matching.worker_memory',
           critique: {
             failureReview: {
               required: true,
-              clusterKey: 'social-match-agent:recall-zero-candidates',
+              clusterKey: 'match-agent:recall-zero-candidates',
             },
           },
         },
@@ -451,7 +450,7 @@ describe('AgentSelfImproveService', () => {
           severity: 'high',
         }),
         expect.objectContaining({
-          key: 'social-match-agent:recall-zero-candidates',
+          key: 'match-agent:recall-zero-candidates',
           source: 'subagent_memory',
           count: 1,
         }),

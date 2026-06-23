@@ -48,7 +48,7 @@ export function LoginModal() {
   const title = mode === 'login' ? '回到 FitMeet' : '创建你的 FitMeet';
   const subtitle =
     mode === 'login'
-      ? '继续你的约练、匹配和 Life Graph。'
+      ? '继续你的约练、匹配和个人信息。'
       : '留下一个名字，让别人知道该怎么称呼你。';
   const submitLabel = mode === 'login' ? '继续进入' : '创建并进入';
 

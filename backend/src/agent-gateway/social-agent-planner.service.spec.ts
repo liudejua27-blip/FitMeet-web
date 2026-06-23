@@ -464,9 +464,7 @@ describe('SocialAgentPlannerService', () => {
             'planner/router/Brain/subagent 必须基于 knownSlots 继续推进；除非用户主动修改，否则不得重复询问 doNotAskAgainFor 中的字段。',
         },
         lifeGraphFactProposals: [],
-        lifeGraphFactDisplaySummaries: [
-          '常在周末或晚上安排低强度散步',
-        ],
+        lifeGraphFactDisplaySummaries: ['常在周末或晚上安排低强度散步'],
         lifeGraphGovernanceSummary: {
           total: 1,
           autoSaveCount: 1,
@@ -905,7 +903,7 @@ describe('SocialAgentPlannerService', () => {
       expect.arrayContaining([
         SocialAgentAction.SearchProfiles,
         SocialAgentAction.FavoriteCandidate,
-        SocialAgentAction.WriteInbox,
+        SocialAgentAction.WriteMessageEvent,
         SocialAgentAction.SendMessage,
         SocialAgentAction.SendInvite,
         SocialAgentAction.AddFriend,
@@ -1317,7 +1315,7 @@ describe('SocialAgentPlannerService', () => {
       expect.arrayContaining([
         SocialAgentAction.SearchProfiles,
         SocialAgentAction.FavoriteCandidate,
-        SocialAgentAction.WriteInbox,
+        SocialAgentAction.WriteMessageEvent,
         SocialAgentAction.SendMessage,
         SocialAgentAction.SendInvite,
         SocialAgentAction.AddFriend,
@@ -1403,7 +1401,7 @@ describe('SocialAgentPlannerService', () => {
     expect(result.plan.map((step) => step.action)).not.toEqual(
       expect.arrayContaining([
         SocialAgentAction.FavoriteCandidate,
-        SocialAgentAction.WriteInbox,
+        SocialAgentAction.WriteMessageEvent,
         SocialAgentAction.SendMessage,
         SocialAgentAction.SendInvite,
         SocialAgentAction.AddFriend,

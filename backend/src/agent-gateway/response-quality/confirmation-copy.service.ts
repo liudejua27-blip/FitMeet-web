@@ -23,7 +23,7 @@ export class ConfirmationCopyService {
       case 'share_location':
         return '共享位置前请你确认';
       case 'confirm_profile_update':
-        return '保存到 Life Graph 前请你确认';
+        return '保存到个人信息前请你确认';
       case 'submit_review':
         return '提交评价前请你确认';
     }
@@ -63,9 +63,9 @@ export class ConfirmationCopyService {
       case 'share_location':
         return '位置属于敏感信息。确认前我不会发送精确位置，也不会持续共享实时定位。';
       case 'confirm_profile_update':
-        return '这些信息会影响后续推荐。确认保存后，你仍然可以在 Life Graph 里查看、撤回或纠正。';
+        return '这些信息会影响后续推荐。确认保存后，你仍然可以在个人信息里查看、撤回或纠正。';
       case 'submit_review':
-        return '这次评价会帮助我更新你的 Life Graph 和 trust score。确认后才会写入；写入后你仍然可以查看、撤回或纠正。';
+        return '这次评价会帮助我更新你的长期偏好和可信度。确认后才会写入；写入后你仍然可以查看、撤回或纠正。';
     }
   }
 }

@@ -169,7 +169,9 @@ export function toolCallStreamEvent(step: {
     };
   }
   const doneTitle =
-    step.status === 'failed' ? '刚才连接不稳' : completedStatusFromStep(step.label);
+    step.status === 'failed'
+      ? '刚才连接不稳'
+      : completedStatusFromStep(step.label);
   return {
     type: 'tool_result',
     lifecycle: lifecycleFromStep(step.label),
@@ -177,7 +179,8 @@ export function toolCallStreamEvent(step: {
     agentName: cleanMetadataString(step.agentName),
     toolName,
     title: doneTitle,
-    detail: step.status === 'failed' ? '这段需求还在，可以继续处理。' : undefined,
+    detail:
+      step.status === 'failed' ? '这段需求还在，可以继续处理。' : undefined,
     status: step.status,
   };
 }
@@ -314,7 +317,8 @@ export function progressFromStep(step: {
           : isTool
             ? lightStatusFromStep(step.label)
             : '正在理解你的需求',
-    detail: step.status === 'failed' ? '这段需求还在，可以继续处理。' : undefined,
+    detail:
+      step.status === 'failed' ? '这段需求还在，可以继续处理。' : undefined,
     state:
       step.status === 'done'
         ? 'done'
@@ -411,7 +415,8 @@ function userFacingStreamRecoveryNotice(
     return {
       kind: 'timeout',
       title: '这段需求还在',
-      message: '刚才处理比平时久一点，可以继续处理；不会重复执行已确认的高风险动作。',
+      message:
+        '刚才处理比平时久一点，可以继续处理；不会重复执行已确认的高风险动作。',
       retryable: true,
       source: 'stream_error',
     };
@@ -429,7 +434,8 @@ function userFacingStreamRecoveryNotice(
     kind: 'failed',
     title: '连接中断了，可以继续',
     message:
-      shouldStreamFallbackAssistantText(message) && !TECHNICAL_ERROR_PATTERN.test(message)
+      shouldStreamFallbackAssistantText(message) &&
+      !TECHNICAL_ERROR_PATTERN.test(message)
         ? message
         : '这段需求还在，可以继续处理；不会重复执行已确认的高风险动作。',
     retryable: true,

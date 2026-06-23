@@ -89,9 +89,6 @@ export class User {
   @Column({ type: 'jsonb', default: () => "'[]'" })
   bestRecords: { name: string; value: string }[];
 
-  @Column({ default: false })
-  isCoach: boolean;
-
   /** Cumulative trust score: +1 per accepted proof, +2 per completed
    *  mutually-confirmed activity. Used by AgentGateway risk scoring. */
   @Column({ type: 'int', default: 0 })

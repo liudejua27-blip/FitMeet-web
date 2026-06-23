@@ -80,9 +80,7 @@ export class NonRetryableSubagentWorkerJobError extends Error {
   }
 }
 
-export function isNonRetryableSubagentWorkerJobError(
-  error: unknown,
-): boolean {
+export function isNonRetryableSubagentWorkerJobError(error: unknown): boolean {
   return (
     error instanceof NonRetryableSubagentWorkerJobError ||
     (Boolean(error) &&
@@ -315,7 +313,8 @@ export class FitMeetSubagentWorkerService {
     const plannerInput =
       this.recordOrNull(handoff.plannerInput) ?? handoff.input;
     const observations = (handoff.observations ?? [handoff.observation]).map(
-      (item) => this.subagentObservationSnapshot(item, knownTaskSlotConstraints),
+      (item) =>
+        this.subagentObservationSnapshot(item, knownTaskSlotConstraints),
     );
     const observation =
       observations[observations.length - 1] ??
@@ -355,7 +354,9 @@ export class FitMeetSubagentWorkerService {
         ),
         answerBoundary: this.recordOrNull(handoff.handoffOutput.answerBoundary),
         failureReview: this.recordOrNull(handoff.handoffOutput.failureReview),
-        subagentProfile: this.recordOrNull(handoff.handoffOutput.subagentProfile),
+        subagentProfile: this.recordOrNull(
+          handoff.handoffOutput.subagentProfile,
+        ),
         observation,
         observationCount: observations.length,
       }),
@@ -434,7 +435,9 @@ export class FitMeetSubagentWorkerService {
       handled: observation.handled ?? null,
       candidateCount: observation.candidateCount ?? null,
       approvalRequired:
-        observation.approvalRequired ?? observation.requiresConfirmation ?? null,
+        observation.approvalRequired ??
+        observation.requiresConfirmation ??
+        null,
       requiresConfirmation: observation.requiresConfirmation ?? null,
       eventType: observation.eventType ?? null,
       summary: observation.summary ?? observation.explanation ?? null,
@@ -473,7 +476,9 @@ export class FitMeetSubagentWorkerService {
   }
 
   private safeSubagentRecord(value: unknown): Record<string, unknown> {
-    const sanitized = this.boundedSubagentMemoryValue(sanitizeForDisplay(value));
+    const sanitized = this.boundedSubagentMemoryValue(
+      sanitizeForDisplay(value),
+    );
     return this.isRecord(sanitized) ? sanitized : {};
   }
 
@@ -521,9 +526,8 @@ export class FitMeetSubagentWorkerService {
     agent: FitMeetAlphaAgentName,
   ): SocialAgentModelUseCase {
     if (agent === 'Life Graph Agent') return 'profile_extraction';
-    if (agent === 'Social Match Agent') return 'candidate_summary';
-    if (agent === 'Meet Loop Agent') return 'planner';
-    if (agent === 'Math Agent') return 'planner';
+    if (agent === 'Match Agent') return 'candidate_summary';
+    if (agent === 'Agent Brain') return 'planner';
     return 'planner';
   }
 
@@ -548,29 +552,21 @@ export class FitMeetSubagentWorkerService {
         defaultToolBudget: 3,
       };
     }
-    if (agent === 'Social Match Agent') {
+    if (agent === 'Match Agent') {
       return {
         memoryScope: 'matching.worker_memory',
-        evalRunner: 'social_match_recall_ranking_eval_v1',
-        failureReviewPolicy: 'cluster_recall_or_ranking_failures',
+        evalRunner: 'match_recall_ranking_and_meet_loop_eval_v1',
+        failureReviewPolicy:
+          'cluster_recall_ranking_or_state_transition_failures',
         privateScratchpad: true,
         defaultToolBudget: 3,
       };
     }
-    if (agent === 'Meet Loop Agent') {
+    if (agent === 'Agent Brain') {
       return {
-        memoryScope: 'meet_loop.worker_memory',
-        evalRunner: 'meet_loop_state_machine_eval_v1',
-        failureReviewPolicy: 'review_state_transition_and_idempotency',
-        privateScratchpad: true,
-        defaultToolBudget: 4,
-      };
-    }
-    if (agent === 'Math Agent') {
-      return {
-        memoryScope: 'math.worker_memory',
-        evalRunner: 'deterministic_math_contract_eval_v1',
-        failureReviewPolicy: 'review_invalid_input_or_unit_boundary',
+        memoryScope: 'agent_brain.worker_memory',
+        evalRunner: 'agent_brain_low_cost_router_eval_v1',
+        failureReviewPolicy: 'review_router_or_unit_boundary',
         privateScratchpad: false,
         defaultToolBudget: 1,
       };
@@ -607,37 +603,37 @@ export class FitMeetSubagentWorkerService {
     const profile = this.isRecord(input.plannerInput.profile)
       ? input.plannerInput.profile
       : null;
-    const longTermSnapshot = (this.isRecord(
-      input.plannerInput.longTermSnapshot,
-    )
-      ? input.plannerInput.longTermSnapshot
-      : null) as FitMeetSubagentWorkerContextSnapshot['longTermSnapshot'];
+    const longTermSnapshot = (
+      this.isRecord(input.plannerInput.longTermSnapshot)
+        ? input.plannerInput.longTermSnapshot
+        : null
+    ) as FitMeetSubagentWorkerContextSnapshot['longTermSnapshot'];
     const taskMemory =
       this.recordOrNull(hydratedContext?.taskMemory) ??
       this.recordOrNull(taskContext?.taskMemory);
     const taskSlots = this.isRecord(hydratedContext?.taskSlots)
       ? hydratedContext.taskSlots
       : this.isRecord(taskContext?.taskSlots)
-      ? taskContext.taskSlots
-      : this.recordOrNull(taskMemory?.taskSlots);
+        ? taskContext.taskSlots
+        : this.recordOrNull(taskMemory?.taskSlots);
     const taskSlotSummary = this.isRecord(hydratedContext?.taskSlotSummary)
       ? hydratedContext.taskSlotSummary
       : this.isRecord(taskContext?.taskSlotSummary)
-      ? taskContext.taskSlotSummary
-      : this.recordOrNull(taskMemory?.taskSlotSummary);
+        ? taskContext.taskSlotSummary
+        : this.recordOrNull(taskMemory?.taskSlotSummary);
     const pendingApprovals = Array.isArray(hydratedContext?.pendingApprovals)
       ? hydratedContext.pendingApprovals
       : Array.isArray(hydratedContext?.pendingActions)
-      ? hydratedContext.pendingActions
-      : Array.isArray(taskContext?.pendingApprovals)
-      ? taskContext.pendingApprovals
-      : Array.isArray(taskContext?.pendingActions)
-      ? taskContext.pendingActions
-      : Array.isArray(taskMemory?.pendingApprovals)
-      ? taskMemory.pendingApprovals
-      : Array.isArray(taskMemory?.pendingActions)
-      ? taskMemory.pendingActions
-      : [];
+        ? hydratedContext.pendingActions
+        : Array.isArray(taskContext?.pendingApprovals)
+          ? taskContext.pendingApprovals
+          : Array.isArray(taskContext?.pendingActions)
+            ? taskContext.pendingActions
+            : Array.isArray(taskMemory?.pendingApprovals)
+              ? taskMemory.pendingApprovals
+              : Array.isArray(taskMemory?.pendingActions)
+                ? taskMemory.pendingActions
+                : [];
     const candidateActions =
       this.recordOrNull(hydratedContext?.candidateActions) ??
       this.recordOrNull(hydratedContext?.candidateState) ??
@@ -694,7 +690,8 @@ export class FitMeetSubagentWorkerService {
       }),
     );
     const runtimeThreadId =
-      threadId ?? (input.taskId ? `agent-task:${input.taskId}` : 'agent-task:0');
+      threadId ??
+      (input.taskId ? `agent-task:${input.taskId}` : 'agent-task:0');
     const legacyPayload: Record<string, unknown> = {
       kind: 'route_branch',
       runId,
@@ -750,13 +747,9 @@ export class FitMeetSubagentWorkerService {
         contextTurnLimit: this.contextTurnLimit(),
         profile,
         longTermSnapshot,
-        brainToolResults: this.recordArray(
-          input.plannerInput.brainToolResults,
-        ),
+        brainToolResults: this.recordArray(input.plannerInput.brainToolResults),
         state: {
-          assistantMessage: this.string(
-            input.plannerInput.assistantMessage,
-          ),
+          assistantMessage: this.string(input.plannerInput.assistantMessage),
         },
         workerRuntime: {
           mode: 'queue_worker_ready',
@@ -927,8 +920,8 @@ export class FitMeetSubagentWorkerService {
         this.isRecord(hydratedContext?.taskSlots)
           ? hydratedContext.taskSlots
           : this.isRecord(taskContext?.taskSlots)
-          ? taskContext.taskSlots
-          : null,
+            ? taskContext.taskSlots
+            : null,
       )
     );
   }

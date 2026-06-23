@@ -9,7 +9,7 @@ interface ProtectedRouteProps {
  * Route guard — keeps the user on the requested URL but opens the login modal
  * when they are not authenticated. Once the user logs in, the page renders
  * automatically because `isLoggedIn` flips to true. No redirect to "/" so the
- * deep link is preserved (e.g. /social-request/new).
+ * deep link is preserved (e.g. /agent/profile).
  */
 export function ProtectedRoute({ children }: ProtectedRouteProps) {
   const { isLoggedIn, restoring, openLogin } = useAuthStore();
@@ -22,7 +22,11 @@ export function ProtectedRoute({ children }: ProtectedRouteProps) {
 
   if (restoring) {
     return (
-      <div className="min-h-[40vh] flex items-center justify-center" role="status" aria-label="恢复会话中">
+      <div
+        className="min-h-[40vh] flex items-center justify-center"
+        role="status"
+        aria-label="恢复会话中"
+      >
         <div className="w-6 h-6 border-2 border-lime border-t-transparent rounded-full animate-spin" />
         <span className="sr-only">正在恢复登录状态…</span>
       </div>

@@ -388,11 +388,19 @@ export function hasExistingPublishContext(
   if (!taskContext) return false;
   if (nonEmptyRecord(taskContext.taskSlots)) return true;
   if (nonEmptyRecord(taskContext.taskSlotSummary)) return true;
+  if (nonEmptyRecord(taskContext.shortTerm)) return true;
+  if (nonEmptyRecord(taskContext.shortTermMemory)) return true;
+  if (nonEmptyRecord(taskContext.activityState)) return true;
+  if (nonEmptyText(taskContext.currentGoal)) return true;
+  if (nonEmptyText(taskContext.goal)) return true;
+  if (nonEmptyText(taskContext.taskGoal)) return true;
   const taskMemory = nonEmptyRecord(taskContext.taskMemory)
     ? (taskContext.taskMemory as Record<string, unknown>)
     : null;
   if (nonEmptyRecord(taskMemory?.taskSlots)) return true;
   if (nonEmptyRecord(taskMemory?.taskSlotSummary)) return true;
+  if (nonEmptyRecord(taskMemory?.activeEntities)) return true;
+  if (nonEmptyText(taskMemory?.currentGoal)) return true;
   return false;
 }
 
@@ -414,6 +422,14 @@ function nonEmptyRecord(value: unknown): boolean {
     return false;
   }
   return Object.keys(value).length > 0;
+}
+
+function nonEmptyText(value: unknown): boolean {
+  if (typeof value === 'string') return value.trim().length > 0;
+  if (typeof value === 'number' || typeof value === 'boolean') {
+    return String(value).trim().length > 0;
+  }
+  return false;
 }
 
 function normalizeAllowedSocialExecutionRoute(

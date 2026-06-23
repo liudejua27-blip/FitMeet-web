@@ -24,7 +24,7 @@ export class PublicSocialIntent {
   @Column({ type: 'int', nullable: true })
   linkedSocialRequestId: number | null;
 
-  @Column({ default: 'public_social_skills' })
+  @Column({ default: 'public_intent' })
   source: string;
 
   @Column({ default: 'public' })

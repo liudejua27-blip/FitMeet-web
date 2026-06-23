@@ -291,7 +291,8 @@ export class SocialAgentCandidateActionService {
       .pendingActions.slice()
       .reverse()
       .find((action) => {
-        if (!this.isCandidateInviteApprovalAction(action.actionType)) return false;
+        if (!this.isCandidateInviteApprovalAction(action.actionType))
+          return false;
         return requestedApprovalId ? action.id === requestedApprovalId : true;
       });
     if (!pendingMessageAction) {
@@ -477,7 +478,8 @@ export class SocialAgentCandidateActionService {
       .pendingActions.slice()
       .reverse()
       .find((action) => {
-        if (!this.isCandidateInviteApprovalAction(action.actionType)) return false;
+        if (!this.isCandidateInviteApprovalAction(action.actionType))
+          return false;
         return requestedApprovalId ? action.id === requestedApprovalId : true;
       });
 
@@ -553,7 +555,8 @@ export class SocialAgentCandidateActionService {
       .pendingActions.slice()
       .reverse()
       .find((action) => {
-        if (!this.isCandidateInviteApprovalAction(action.actionType)) return false;
+        if (!this.isCandidateInviteApprovalAction(action.actionType))
+          return false;
         return requestedApprovalId ? action.id === requestedApprovalId : true;
       });
     if (pendingMessageAction) {
@@ -799,9 +802,7 @@ export class SocialAgentCandidateActionService {
             id: this.number(connectResult.approvalId) as number,
             type: ApprovalType.ContactRequest,
             actionType: 'connect_candidate',
-            summary: targetUserId
-              ? '加好友并聊天：这位用户'
-              : '加好友并聊天',
+            summary: targetUserId ? '加好友并聊天：这位用户' : '加好友并聊天',
             riskLevel: ApprovalRiskLevel.High,
             payload: body.payload ?? {},
             expiresAt: null,
@@ -902,7 +903,9 @@ export class SocialAgentCandidateActionService {
     const pendingMessageAction = readSocialAgentTaskMemory(task)
       .pendingActions.slice()
       .reverse()
-      .find((action) => this.isCandidateInviteApprovalAction(action.actionType));
+      .find((action) =>
+        this.isCandidateInviteApprovalAction(action.actionType),
+      );
 
     const candidate =
       readSocialAgentStoredCandidateSummaries(task)[0] ??
@@ -1859,8 +1862,12 @@ export class SocialAgentCandidateActionService {
     await this.interestEvents.recordEvent(eventInput);
   }
 
-  private isCandidateInviteApprovalAction(actionType: string | null | undefined): boolean {
-    return actionType === 'send_invite' || actionType === 'send_candidate_message';
+  private isCandidateInviteApprovalAction(
+    actionType: string | null | undefined,
+  ): boolean {
+    return (
+      actionType === 'send_invite' || actionType === 'send_candidate_message'
+    );
   }
 
   private connectCheckpointPayload(input: {

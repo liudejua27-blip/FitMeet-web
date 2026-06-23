@@ -237,7 +237,11 @@ export class SocialAgentRouteConversationTurnService {
     ) {
       return true;
     }
-    if (/^(谢谢|感谢|多谢|辛苦了|好的|好|行|可以|明白|知道了)[!！。,.，\s]*$/i.test(normalized)) {
+    if (
+      /^(谢谢|感谢|多谢|辛苦了|好的|好|行|可以|明白|知道了)[!！。,.，\s]*$/i.test(
+        normalized,
+      )
+    ) {
       return true;
     }
     return this.isStaticProductHelpQuestion(normalized);

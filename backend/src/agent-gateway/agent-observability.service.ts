@@ -157,7 +157,10 @@ export class AgentObservabilityService {
   private readonly latency = new Map<string, LatencyBucket>();
   private readonly failureReasons: CounterMap = new Map();
   private readonly queueDepth = new Map<string, number>();
-  private readonly llmTokenCostByUseCase = new Map<string, LlmTokenCostBucket>();
+  private readonly llmTokenCostByUseCase = new Map<
+    string,
+    LlmTokenCostBucket
+  >();
   private readonly runCostByRunId = new Map<string, RunExecutionCostBucket>();
   private readonly runIdByTraceId = new Map<string, string>();
 
@@ -501,7 +504,8 @@ export class AgentObservabilityService {
       if (bucket.avgApproxPromptChars > 18000) {
         alerts.push({
           code: 'llm_prompt_context_too_large',
-          severity: bucket.avgApproxPromptChars > 24000 ? 'critical' : 'warning',
+          severity:
+            bucket.avgApproxPromptChars > 24000 ? 'critical' : 'warning',
           message: `${useCase} average prompt context is too large.`,
           value: bucket.avgApproxPromptChars,
           threshold: 18000,
@@ -567,7 +571,9 @@ export class AgentObservabilityService {
         ? Number((bucket.promptCacheHitTokens / cacheMeasuredTokens).toFixed(4))
         : null;
     const avgApproxPromptChars =
-      bucket.calls > 0 ? Math.round(bucket.approxPromptChars / bucket.calls) : 0;
+      bucket.calls > 0
+        ? Math.round(bucket.approxPromptChars / bucket.calls)
+        : 0;
     const estimatedBillableInputTokens =
       cacheMeasuredTokens > 0
         ? bucket.promptCacheMissTokens
@@ -741,7 +747,8 @@ export class AgentObservabilityService {
     approxPromptChars?: number | null;
   }): void {
     if (!input.traceId) return;
-    const runId = this.runIdByTraceId.get(input.traceId) ?? `trace:${input.traceId}`;
+    const runId =
+      this.runIdByTraceId.get(input.traceId) ?? `trace:${input.traceId}`;
     const bucket = this.ensureRunCostBucket({
       runId,
       traceId: input.traceId,
@@ -750,7 +757,9 @@ export class AgentObservabilityService {
     bucket.llmCallCount += 1;
     bucket.promptTokens += this.nonNegative(input.promptTokens);
     bucket.promptCacheHitTokens += this.nonNegative(input.promptCacheHitTokens);
-    bucket.promptCacheMissTokens += this.nonNegative(input.promptCacheMissTokens);
+    bucket.promptCacheMissTokens += this.nonNegative(
+      input.promptCacheMissTokens,
+    );
     bucket.completionTokens += this.nonNegative(input.completionTokens);
     bucket.reasoningTokens += this.nonNegative(input.reasoningTokens);
     bucket.reportedTokenCount += this.nonNegative(input.tokenCount);
@@ -895,9 +904,9 @@ export class AgentObservabilityService {
           promptCacheHitRate:
             cacheMeasuredTokens > 0
               ? Number(
-                  (
-                    bucket.promptCacheHitTokens / cacheMeasuredTokens
-                  ).toFixed(4),
+                  (bucket.promptCacheHitTokens / cacheMeasuredTokens).toFixed(
+                    4,
+                  ),
                 )
               : null,
           estimatedBillableInputTokens:
@@ -922,7 +931,9 @@ export class AgentObservabilityService {
   private trimRunCostBuckets(limit = 50): void {
     if (this.runCostByRunId.size <= limit) return;
     const stale = Array.from(this.runCostByRunId.entries())
-      .sort(([, left], [, right]) => left.updatedAt.localeCompare(right.updatedAt))
+      .sort(([, left], [, right]) =>
+        left.updatedAt.localeCompare(right.updatedAt),
+      )
       .slice(0, this.runCostByRunId.size - limit);
     for (const [runId, bucket] of stale) {
       this.runCostByRunId.delete(runId);
@@ -996,7 +1007,10 @@ export class AgentObservabilityService {
     return out;
   }
 
-  private serializeLlmTokenCost(): Record<string, SerializedLlmTokenCostBucket> {
+  private serializeLlmTokenCost(): Record<
+    string,
+    SerializedLlmTokenCostBucket
+  > {
     const out: Record<string, SerializedLlmTokenCostBucket> = {};
     for (const [useCase, bucket] of this.llmTokenCostByUseCase.entries()) {
       const cacheMeasuredTokens =
@@ -1011,9 +1025,7 @@ export class AgentObservabilityService {
         promptCacheHitRate:
           cacheMeasuredTokens > 0
             ? Number(
-                (
-                  bucket.promptCacheHitTokens / cacheMeasuredTokens
-                ).toFixed(4),
+                (bucket.promptCacheHitTokens / cacheMeasuredTokens).toFixed(4),
               )
             : null,
         completionTokens: bucket.completionTokens,

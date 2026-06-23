@@ -117,8 +117,7 @@ describe('SocialAgentTokenBudgetContextPackerService', () => {
       }) as never,
     );
 
-    const longText =
-      '这是一段用于模拟长对话和工具上下文的文本。'.repeat(80);
+    const longText = '这是一段用于模拟长对话和工具上下文的文本。'.repeat(80);
     const { payload, promptBudget } = packer.packFinalResponseInput({
       userMessage: '继续帮我找人',
       intent: 'social_search',

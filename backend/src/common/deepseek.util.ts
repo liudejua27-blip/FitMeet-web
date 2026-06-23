@@ -129,8 +129,8 @@ async function callDeepSeekChatCompletionOnce(
       throw new Error(
         options.signal?.aborted
           ? 'client_aborted'
-          : options.timeoutMessage ??
-              `DeepSeek timeout after ${options.timeoutMs}ms`,
+          : (options.timeoutMessage ??
+              `DeepSeek timeout after ${options.timeoutMs}ms`),
       );
     }
     throw error;

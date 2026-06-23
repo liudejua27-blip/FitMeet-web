@@ -324,16 +324,18 @@ describe('SocialAgentRouteConversationTurnService', () => {
     });
     expect(workflow.assistantMessage).toContain('两种都可以');
     expect(workflow.assistantMessage).toContain('直接发布需求');
+    expect(metrics.recordDeterministicRouteReply).toHaveBeenCalledWith(
+      'product_help',
+    );
+    expect(metrics.recordDeterministicRouteReply).toHaveBeenCalledWith(
+      'workflow_help',
+    );
+    expect(metrics.recordDeterministicRouteReply).toHaveBeenCalledWith(
+      'product_help',
+    );
     expect(
-      metrics.recordDeterministicRouteReply,
-    ).toHaveBeenCalledWith('product_help');
-    expect(
-      metrics.recordDeterministicRouteReply,
-    ).toHaveBeenCalledWith('workflow_help');
-    expect(
-      metrics.recordDeterministicRouteReply,
-    ).toHaveBeenCalledWith('product_help');
-    expect(chatLlm.generateConversationalAnswerWithSource).not.toHaveBeenCalled();
+      chatLlm.generateConversationalAnswerWithSource,
+    ).not.toHaveBeenCalled();
     expect(profileEnrichment.handleTurn).not.toHaveBeenCalled();
   });
 
@@ -379,7 +381,9 @@ describe('SocialAgentRouteConversationTurnService', () => {
     expect(metrics.recordDeterministicRouteReply).toHaveBeenCalledWith(
       'casual_chat',
     );
-    expect(chatLlm.generateConversationalAnswerWithSource).not.toHaveBeenCalled();
+    expect(
+      chatLlm.generateConversationalAnswerWithSource,
+    ).not.toHaveBeenCalled();
   });
 
   it('passes hydrated worker context into direct conversational memory context', async () => {

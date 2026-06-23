@@ -104,5 +104,5 @@ if (-not $NoFrontend) {
 Write-Host ""
 Write-Host "Dev stack requested."
 Write-Host "Backend:  http://localhost:3000/api/health"
-Write-Host "Feed API: http://localhost:3000/api/feed"
+Write-Host "Discover API: http://localhost:3000/api/public/social-intents"
 Write-Host "Frontend: http://localhost:5173"

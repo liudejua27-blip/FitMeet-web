@@ -16,8 +16,8 @@ describe('fitmeet subagent worker command contract', () => {
     buildFitMeetSubagentWorkerCommand({
       runId: 'run-1',
       traceId: 'trace-1',
-      agentName: 'Social Match Agent',
-      queueName: 'fitmeet.subagent.social-match-agent',
+      agentName: 'Match Agent',
+      queueName: 'fitmeet.subagent.match-agent',
       ownerUserId: 7,
       taskId: 101,
       threadId: 'agent-task:101',
@@ -33,7 +33,7 @@ describe('fitmeet subagent worker command contract', () => {
       route: { intent: 'find_partner' } as never,
       workerRuntime: {
         mode: 'queue_worker_ready',
-        queueName: 'fitmeet.subagent.social-match-agent',
+        queueName: 'fitmeet.subagent.match-agent',
         timeoutMs: 15000,
         modelUseCase: 'candidate_summary',
         model: 'deepseek-worker-test',
@@ -72,7 +72,7 @@ describe('fitmeet subagent worker command contract', () => {
           threadId: 'agent-task:101',
           taskId: 101,
         }),
-        agent: 'Social Match Agent',
+        agent: 'Match Agent',
         goal: '找周末跑步搭子',
         tools: [
           { toolName: 'social_match_search_turn', input: { city: '青岛' } },
@@ -344,7 +344,8 @@ describe('fitmeet subagent worker command contract', () => {
           time_window: plannerTaskContext.taskSlots.time_window,
           location_text: plannerTaskContext.taskSlots.location_text,
           activity: plannerTaskContext.taskSlots.activity,
-          candidate_preference: narrowToolContext.taskSlots.candidate_preference,
+          candidate_preference:
+            narrowToolContext.taskSlots.candidate_preference,
         }),
         pendingApprovals: plannerTaskContext.pendingApprovals,
         candidateActions: {
@@ -521,9 +522,8 @@ describe('fitmeet subagent worker command contract', () => {
                 confirmation: 'inferred_context',
               }),
             ]),
-            userVisibleSummary: expect.stringContaining(
-              '候选偏好：女生、舞蹈相关',
-            ),
+            userVisibleSummary:
+              expect.stringContaining('候选偏好：女生、舞蹈相关'),
             instruction: expect.stringContaining('不得重复询问'),
           }),
           pendingApprovals: taskContext.taskMemory.pendingActions,
@@ -787,7 +787,7 @@ describe('fitmeet subagent worker command contract', () => {
 
   it('keeps worker route wrappers executable while protecting direct side effects', () => {
     const command = buildValidCommand({
-      agentName: 'Meet Loop Agent',
+      agentName: 'Match Agent',
       tools: [
         {
           toolName: 'meet_loop_action_turn',

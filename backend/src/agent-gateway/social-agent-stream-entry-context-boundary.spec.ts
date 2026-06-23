@@ -98,9 +98,7 @@ describe('Social Agent stream entry context boundary', () => {
     expect(streamUserFacingMessage).toContain(
       'socialCodexEvents.writeProfileGateIfNeeded',
     );
-    expect(streamUserFacingMessage).toContain(
-      'this.chat.handleMessageStream',
-    );
+    expect(streamUserFacingMessage).toContain('this.chat.handleMessageStream');
     expect(streamUserFacingMessage).toContain(
       'this.writeLlmAssistantTextForResult',
     );
@@ -131,14 +129,10 @@ describe('Social Agent stream entry context boundary', () => {
     expect(tryWriteLlmAssistantText).toContain('signal: input.signal');
     expect(tryWriteLlmAssistantText).toContain('onDelta');
 
-    expect(hydrateFinalResponseContext).toContain(
-      'this.contextHydrator',
-    );
+    expect(hydrateFinalResponseContext).toContain('this.contextHydrator');
     expect(hydrateFinalResponseContext).toContain('hydrated.taskMemory');
     expect(hydrateFinalResponseContext).toContain('hydrated.taskSlots');
-    expect(hydrateFinalResponseContext).toContain(
-      'hydrated.lifeGraphSummary',
-    );
+    expect(hydrateFinalResponseContext).toContain('hydrated.lifeGraphSummary');
     expect(hydrateFinalResponseContext).toContain('hydrated.pendingApprovals');
     expect(hydrateFinalResponseContext).toContain('hydrated.candidateActions');
   });

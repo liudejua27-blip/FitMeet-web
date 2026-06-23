@@ -232,8 +232,7 @@ forbidden_legacy_paths=(
   "frontend/src/components/sections/VisionSection.tsx"
   "frontend/src/components/sections/FinalCTA.tsx"
   "frontend/src/components/showcase"
-  "frontend/src/components/three/EarthScene.tsx"
-  "frontend/src/components/three/OrbitingEntities.tsx"
+  "frontend/src/components/three"
   "frontend/src/components/ui/GatewayPortalCard.tsx"
   "frontend/src/components/ui/SectionHeading.tsx"
   "frontend/src/data/gateways.ts"
@@ -299,20 +298,13 @@ fi
 if ((${#frontend_static_mock_import_entries[@]} > 0)); then
   printf '\nStatic mock Agent adapter imports found outside tests:\n' >&2
   printf '  %s\n' "${frontend_static_mock_import_entries[@]}" >&2
-  fail 'Mock Agent adapter must remain behind explicit dynamic mock-mode loading so production cannot bundle the demo path.'
+  fail 'Mock Agent adapter must not be imported by production source.'
 fi
 
 frontend_dev_import_entries=()
 if [[ -d frontend/src ]]; then
   while IFS= read -r match; do
     [[ -z "${match}" ]] && continue
-    # The only allowed dev import in production source is the lazy mock adapter
-    # loader guarded by import.meta.env.DEV in createAgentAdapter.ts. Everything
-    # else would create another path for demo-only code to leak into /agent/chat.
-    if [[ "${match}" == *"frontend/src/components/agent-workspace/api/createAgentAdapter.ts:"* &&
-      "${match}" == *"import('../../../dev/agent/mockAgentAdapter')"* ]]; then
-      continue
-    fi
     frontend_dev_import_entries+=("${match}")
   done < <(
     grep -RIn --exclude-dir=node_modules --exclude-dir=dist \
@@ -329,7 +321,7 @@ fi
 if ((${#frontend_dev_import_entries[@]} > 0)); then
   printf '\nDev-only frontend imports found outside the guarded Agent mock loader:\n' >&2
   printf '  %s\n' "${frontend_dev_import_entries[@]}" >&2
-  fail 'Production frontend source must not import frontend/src/dev; keep dev-only adapters behind the approved lazy mock loader.'
+  fail 'Production frontend source must not import frontend/src/dev.'
 fi
 
 critical_agent_context_files=(
@@ -384,19 +376,19 @@ fi
 category_for_path() {
   local path="$1"
   case "${path}" in
-    backend/src/agent-gateway/*|backend/src/ai/*|backend/src/common/deepseek.util.ts|backend/src/common/deepseek.util.spec.ts|backend/src/database/migrations/*SocialAgent*|backend/src/openapi/fitmeet-core.openapi.ts|backend/src/scripts/smoke-agent-*|backend/src/scripts/prepare-agent-smoke-seed.ts|backend/tsconfig.json)
+    backend/src/agent-gateway/*|backend/src/ai/*|backend/src/common/deepseek.util.ts|backend/src/common/deepseek.util.spec.ts|backend/src/database/migrations/*SocialAgent*|backend/src/openapi/fitmeet-core.openapi.ts|backend/tsconfig.json)
       printf 'agent-backend-core'
       ;;
-    frontend/src/components/agent-workspace/*|frontend/src/components/assistant-ui/*|frontend/src/components/ai-elements/*|frontend/src/components/agent-loop/ActivityIcebreakerCard.tsx|frontend/src/components/agent-loop/ActivityProofUploader.tsx|frontend/src/components/agent-loop/AgentApprovalCard.tsx|frontend/src/components/agent/Agent*.tsx|frontend/src/components/agent/ant-guide/*|frontend/src/assets/agent/ant-guide/*|frontend/src/dev/agent/*|frontend/src/api/socialAgentApi.ts|frontend/src/api/socialAgentDebugApi.ts|frontend/src/api/agentInboxApi.ts|frontend/src/api/agentL5RuntimeApi.ts|frontend/src/lib/agentApprovalCopy.ts|frontend/src/lib/socialCodexProcessCopy.ts|frontend/src/pages/AgentControlCenterPage.tsx|frontend/src/pages/AgentHubPage.tsx|frontend/src/pages/AgentL5AdminPage.tsx|frontend/src/pages/SocialSkillsDeveloperPage.tsx|frontend/src/pages/DemoAgentSocialLoopPage.tsx|frontend/src/pages/DemoInvestorPage.tsx|frontend/src/types/agent.ts|frontend/src/global.css)
+    frontend/src/components/agent-workspace/*|frontend/src/components/assistant-ui/*|frontend/src/components/ai-elements/*|frontend/src/components/agent-loop/ActivityIcebreakerCard.tsx|frontend/src/components/agent-loop/ActivityProofUploader.tsx|frontend/src/components/agent-loop/AgentApprovalCard.tsx|frontend/src/components/agent/Agent*.tsx|frontend/src/components/agent/ant-guide/*|frontend/src/assets/agent/ant-guide/*|frontend/src/api/socialAgentApi.ts|frontend/src/api/socialAgentDebugApi.ts|frontend/src/api/agentL5RuntimeApi.ts|frontend/src/lib/agentApprovalCopy.ts|frontend/src/lib/socialCodexProcessCopy.ts|frontend/src/pages/AgentL5AdminPage.tsx|frontend/src/pages/DemoAgentSocialLoopPage.tsx|frontend/src/pages/DemoInvestorPage.tsx|frontend/src/types/agent.ts|frontend/src/global.css)
       printf 'agent-frontend-assistant-ui'
       ;;
-    backend/src/match/*|backend/src/social-requests/*|frontend/src/api/socialRequestsApi.ts|frontend/src/pages/DiscoverPage.tsx|frontend/src/pages/PublicIntentDetailPage.tsx|frontend/src/pages/UserProfilePage.tsx|frontend/src/pages/AiProfileBuilderPage.tsx|frontend/src/pages/AiRealmPage.tsx|frontend/src/pages/HomePage.tsx|frontend/src/pages/HomePage.legacy.tsx|frontend/src/components/agent-loop/SocialRequestCard.tsx|frontend/src/components/hero/*|frontend/src/components/sections/*|frontend/src/components/showcase/*|frontend/src/components/three/EarthScene.tsx|frontend/src/components/three/OrbitingEntities.tsx|frontend/src/components/ui/GatewayPortalCard.tsx|frontend/src/components/ui/SectionHeading.tsx|frontend/src/data/*|frontend/src/styles/visual-upgrades.css|frontend/src/test/DiscoverClosure.test.ts|frontend/src/test/discoverContent.test.ts|frontend/src/routes/AppRoutes.tsx|frontend/src/types/index.ts)
+    backend/src/match/*|backend/src/social-requests/*|frontend/src/pages/DiscoverPage.tsx|frontend/src/pages/PublicIntentDetailPage.tsx|frontend/src/pages/UserProfilePage.tsx|frontend/src/pages/AgentPersonalInfoPage.tsx|frontend/src/pages/PlatformPage.tsx|frontend/src/components/hero/*|frontend/src/components/sections/*|frontend/src/components/showcase/*|frontend/src/components/three/*|frontend/src/components/ui/GatewayPortalCard.tsx|frontend/src/components/ui/SectionHeading.tsx|frontend/src/data/*|frontend/src/styles/visual-upgrades.css|frontend/src/test/DiscoverClosure.test.ts|frontend/src/test/DiscoverPage.test.tsx|frontend/src/routes/AppRoutes.tsx|frontend/src/types/index.ts)
       printf 'discover-profile-closure'
       ;;
     deploy/*|docker-compose.prod.yml|scripts/build-deploy-zip.*|scripts/ecs-*|scripts/verify-production.sh|scripts/verify-agent-goal-production.sh|scripts/verify-agent-token-cost.sh|scripts/verify-agent-release.sh|scripts/agent-release-matrix.sh|scripts/agent-release-worktree-audit.sh|scripts/launch-status.sh|backend/src/config/production-*|.env.example|backend/.env.example|frontend/.env.example)
       printf 'deploy-production'
       ;;
-    docs/*|README.md|frontend/FRONTEND_ACCEPTANCE_CHECKLIST.md|frontend/scripts/*|frontend/src/api/fitmeetCoreContract.ts|frontend/src/test/*|frontend/src/test/utils/*|scripts/agent-remote-smoke-*|scripts/fix-*|scripts/verify-agent-release.sh|scripts/verify-agent-skills.mjs|scripts/run-agent-skill-evals.mjs|scripts/agent-release-matrix.sh|scripts/stage-agent-release-bucket.sh|scripts/test-agent-release-worktree-audit.sh)
+    docs/*|README.md|frontend/FRONTEND_ACCEPTANCE_CHECKLIST.md|frontend/scripts/*|frontend/src/api/fitmeetCoreContract.ts|frontend/src/test/*|frontend/src/test/utils/*|scripts/fix-*|scripts/verify-agent-release.sh|scripts/verify-agent-skills.mjs|scripts/run-agent-skill-evals.mjs|scripts/agent-release-matrix.sh|scripts/stage-agent-release-bucket.sh)
       printf 'tests-docs'
       ;;
     *)

@@ -161,7 +161,10 @@ function resolveFields(input: {
     .join(' ');
   const combined = `${historyText} ${text}`.trim();
   const boundaries = memory.boundaries;
-  const relationshipGoal = relationshipGoalSummary(combined, memory.preferences);
+  const relationshipGoal = relationshipGoalSummary(
+    combined,
+    memory.preferences,
+  );
   return {
     city:
       cleanDisplayText(entities.city, '') ||
@@ -190,11 +193,12 @@ function resolveFields(input: {
       extractActivity(combined),
     intensity: taskSlots.intensity || extractIntensity(combined),
     relationshipGoal,
-    candidatePreference: candidatePreferenceSummary(
-      combined,
-      memory.preferences,
-      relationshipGoal,
-    ) || taskSlots.candidate_preference,
+    candidatePreference:
+      candidatePreferenceSummary(
+        combined,
+        memory.preferences,
+        relationshipGoal,
+      ) || taskSlots.candidate_preference,
     boundary:
       hasCommunicationBoundary(boundaries, combined) || boundaries.noAutoMessage
         ? boundarySummary(boundaries, combined)
@@ -222,12 +226,18 @@ function readTaskSlotValues(
   appendTaskSlotValues(out, contextTaskMemory.taskSlots);
   appendTaskSlotValues(out, context.taskSlots);
   appendKnownConstraintSlotValues(out, memory.knownTaskSlotConstraints);
-  appendKnownConstraintSlotValues(out, contextTaskMemory.knownTaskSlotConstraints);
+  appendKnownConstraintSlotValues(
+    out,
+    contextTaskMemory.knownTaskSlotConstraints,
+  );
   appendKnownConstraintSlotValues(out, context.knownTaskSlotConstraints);
   return out;
 }
 
-function appendTaskSlotValues(out: Record<string, string>, value: unknown): void {
+function appendTaskSlotValues(
+  out: Record<string, string>,
+  value: unknown,
+): void {
   const taskSlots = isRecord(value) ? value : {};
   for (const [key, slotValue] of Object.entries(taskSlots)) {
     if (!isRecord(slotValue)) continue;
@@ -276,11 +286,7 @@ function isTaskSlotUsableForClarification(
   const source = cleanDisplayText(slot.source, '');
   if (state === 'missing') return false;
   if (key === 'geo_area') return Boolean(slot.value);
-  if (
-    key === 'activity' ||
-    key === 'time_window' ||
-    key === 'location_text'
-  ) {
+  if (key === 'activity' || key === 'time_window' || key === 'location_text') {
     if (source === 'inferred' || state === 'inferred') return false;
   }
   return Boolean(slot.value);
@@ -307,11 +313,13 @@ function buildSearchGoal(input: {
   const currentGoal = cleanDisplayText(input.currentGoal, '');
   const boundary = input.fields.boundary;
   const strangerPolicy =
-    input.fields.strangerPolicy && !boundary.includes(input.fields.strangerPolicy)
+    input.fields.strangerPolicy &&
+    !boundary.includes(input.fields.strangerPolicy)
       ? input.fields.strangerPolicy
       : '';
   const publicActivity =
-    input.fields.publicActivity && !boundary.includes(input.fields.publicActivity)
+    input.fields.publicActivity &&
+    !boundary.includes(input.fields.publicActivity)
       ? input.fields.publicActivity
       : '';
   const parts = Array.from(
@@ -514,10 +522,7 @@ function candidatePreferenceSummary(
   if (descriptivePerson?.[1]) {
     return cleanRelationshipGoal(descriptivePerson[1]);
   }
-  if (
-    relationshipGoal &&
-    !isGenericRelationshipGoal(relationshipGoal)
-  ) {
+  if (relationshipGoal && !isGenericRelationshipGoal(relationshipGoal)) {
     return relationshipGoal;
   }
   const activityCompanion = text.match(
@@ -527,9 +532,7 @@ function candidatePreferenceSummary(
     return `${cleanDisplayText(activityCompanion[1] ?? activityCompanion[3] ?? '运动', '')}搭子`;
   }
   if (/(认识新朋友|新朋友|交朋友|扩圈)/i.test(text)) {
-    const style = /(轻松|低压力|慢热|公共场所|站内聊|周末有空|同城)/i.test(
-      text,
-    )
+    const style = /(轻松|低压力|慢热|公共场所|站内聊|周末有空|同城)/i.test(text)
       ? '低压力新朋友'
       : '新朋友';
     return style;

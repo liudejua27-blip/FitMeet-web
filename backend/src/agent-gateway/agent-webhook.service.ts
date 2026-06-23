@@ -160,7 +160,7 @@ export class AgentWebhookService {
     const stable =
       data.eventId ??
       data.event_id ??
-      data.inboxEventId ??
+      data.messageEventId ??
       data.messageId ??
       data.conversationId ??
       data.recommendationId ??

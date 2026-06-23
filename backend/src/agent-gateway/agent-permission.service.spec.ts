@@ -13,7 +13,7 @@ describe('AgentPermissionService', () => {
     SocialAgentAction.GenerateContent,
     SocialAgentAction.DraftMessage,
     SocialAgentAction.FavoriteCandidate,
-    SocialAgentAction.WriteInbox,
+    SocialAgentAction.WriteMessageEvent,
     SocialAgentAction.SendMessage,
     SocialAgentAction.AddFriend,
     SocialAgentAction.SendInvite,

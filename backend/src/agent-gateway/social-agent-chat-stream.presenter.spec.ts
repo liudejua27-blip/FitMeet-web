@@ -54,7 +54,7 @@ describe('social-agent-chat-stream.presenter', () => {
       id: 'rank.candidates:2',
       label: 'rank candidates with safety boundary',
       status: 'done' as const,
-      agentName: 'Social Match Agent',
+      agentName: 'Match Agent',
       toolName: 'social_match_search_turn',
     };
 
@@ -62,13 +62,13 @@ describe('social-agent-chat-stream.presenter', () => {
       type: 'agent_loop_step',
       stepId: 'rank.candidates:2',
       phase: 'observe',
-      agentName: 'Social Match Agent',
+      agentName: 'Match Agent',
       toolName: 'social_match_search_turn',
     });
     expect(toolCallStreamEvent(step)).toMatchObject({
       type: 'tool_result',
       stepId: 'rank.candidates:2',
-      agentName: 'Social Match Agent',
+      agentName: 'Match Agent',
       toolName: 'social_match_search_turn',
     });
     expect(progressFromStep(step)).toMatchObject({
@@ -77,7 +77,7 @@ describe('social-agent-chat-stream.presenter', () => {
       kind: 'tool',
       metadata: {
         stepId: 'rank.candidates:2',
-        agentName: 'Social Match Agent',
+        agentName: 'Match Agent',
         toolName: 'social_match_search_turn',
       },
     });
@@ -114,8 +114,7 @@ describe('social-agent-chat-stream.presenter', () => {
       expect(event).toMatchObject({
         type: 'error',
         code: 'AGENT_STREAM_FAILED',
-        message:
-          '连接刚才中断了。这段需求还在，可以直接继续。',
+        message: '连接刚才中断了。这段需求还在，可以直接继续。',
         recoveryNotice: expect.objectContaining({
           retryable: true,
           source: 'stream_error',
@@ -134,7 +133,8 @@ describe('social-agent-chat-stream.presenter', () => {
       recoveryNotice: expect.objectContaining({
         kind: 'timeout',
         title: '这段需求还在',
-        message: '刚才处理比平时久一点，可以继续处理；不会重复执行已确认的高风险动作。',
+        message:
+          '刚才处理比平时久一点，可以继续处理；不会重复执行已确认的高风险动作。',
       }),
     });
     expect(JSON.stringify(timeout)).not.toContain('这次处理时间有点久');

@@ -30,7 +30,7 @@ Environment:
   EXPECTED_RELEASE_BUILT_AT            Optional exact release builtAt. If unset
                                        and release.json exists, read from it.
   RUN_AGENT_BROWSER_QA=auto|true|false Auto runs when QA credentials exist.
-  FITMEET_AGENT_BROWSER_QA_EMAIL       Dedicated QA/smoke account email.
+  FITMEET_AGENT_BROWSER_QA_EMAIL       Dedicated QA account email.
   FITMEET_AGENT_BROWSER_QA_PASSWORD    Dedicated QA/smoke account password.
   FITMEET_ADMIN_JWT or ADMIN_JWT       Optional admin token for L5 cost data.
   REQUIRE_AGENT_COST_DATA=true         Fail when live cost evidence is missing.
@@ -135,9 +135,8 @@ fi
 ok "Discover page reachable and static HTML does not include fake 128-person copy"
 
 public_intents_file="$(curl_json "Public social intents" "${API_BASE_URL}/public/social-intents?page=1&limit=8")"
-feed_file="$(curl_json "Public feed" "${API_BASE_URL}/feed?page=1&limit=8")"
 counts="$(
-  node - "${public_intents_file}" "${feed_file}" <<'NODE'
+  node - "${public_intents_file}" <<'NODE'
 const fs = require('fs');
 const read = (file) => JSON.parse(fs.readFileSync(file, 'utf8'));
 const listFrom = (doc) => {
@@ -147,32 +146,22 @@ const listFrom = (doc) => {
   if (Array.isArray(doc.results)) return doc.results;
   if (doc.data && Array.isArray(doc.data.items)) return doc.data.items;
   if (doc.data && Array.isArray(doc.data.data)) return doc.data.data;
-  if (doc.feed && Array.isArray(doc.feed)) return doc.feed;
   return [];
 };
 const intents = listFrom(read(process.argv[2]));
-const feed = listFrom(read(process.argv[3]));
-console.log(`${intents.length} ${feed.length}`);
+console.log(`${intents.length}`);
 NODE
 )"
-read -r public_intent_count feed_count <<<"${counts}"
+read -r public_intent_count <<<"${counts}"
 
 if [[ "${public_intent_count}" -lt 1 ]]; then
   cat >&2 <<EOF
 [FAIL] /public/social-intents returned 0 discoverable items.
-[hint] If this is a fresh/empty production DB, seed a safe public Agent smoke intent:
-[hint]   cd /opt/FitMeet-web
-[hint]   AGENT_SMOKE_SEED_ALLOW_PRODUCTION=true ./scripts/ecs-backend-pnpm.sh -- seed:agent-smoke:prod -- --allow-production
+[hint] If this is a fresh/empty production DB, publish a safe Agent约练卡 through /agent and confirm it appears in Discover.
 EOF
   exit 1
 fi
 ok "Public social intents expose ${public_intent_count} discoverable item(s)"
-
-if [[ "${feed_count}" -lt 1 ]]; then
-  warn "Public feed has 0 items. Discover can still be proven by public social intents, but public dynamics remain empty."
-else
-  ok "Public feed exposes ${feed_count} item(s)"
-fi
 
 should_run_browser_qa=false
 case "${RUN_AGENT_BROWSER_QA}" in
@@ -183,7 +172,7 @@ case "${RUN_AGENT_BROWSER_QA}" in
     should_run_browser_qa=false
     ;;
   auto)
-    if [[ -n "${FITMEET_AGENT_BROWSER_QA_EMAIL:-${AGENT_SMOKE_EMAIL:-}}" && -n "${FITMEET_AGENT_BROWSER_QA_PASSWORD:-${AGENT_SMOKE_PASSWORD:-}}" ]]; then
+    if [[ -n "${FITMEET_AGENT_BROWSER_QA_EMAIL:-}" && -n "${FITMEET_AGENT_BROWSER_QA_PASSWORD:-}" ]]; then
       should_run_browser_qa=true
     fi
     ;;

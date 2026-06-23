@@ -2,7 +2,7 @@ import {
   CandidateRiskLevel,
   SocialRequestCandidateStatus,
 } from './social-request-candidate.entity';
-/* eslint-disable @typescript-eslint/require-await */
+
 import { MatchService } from './match.service';
 import { CompatibilityScorerService } from './compatibility-scorer.service';
 import {
@@ -78,7 +78,6 @@ function user(overrides: Partial<User> = {}): User {
     trainingCount: 0,
     caloriesBurned: 0,
     bestRecords: [],
-    isCoach: false,
     trustScore: 20,
     socialTrustCount: 1,
     createdAt: new Date('2026-05-01T00:00:00Z'),

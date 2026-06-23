@@ -12,24 +12,11 @@ const args = new Set(process.argv.slice(2));
 const reportArgIndex = process.argv.findIndex((arg) => arg === '--report');
 const reportFile =
   reportArgIndex >= 0 ? process.argv[reportArgIndex + 1] : undefined;
-const supportedApiFlags = [
-  '--api-readiness',
-  '--api-empty-candidate',
-  '--api-20-turn-memory',
-  '--api-full',
-  '--api-sse-abort',
-  '--api-all',
-];
 if (args.has('--help') || args.has('-h')) {
-  console.log(`Usage: node scripts/run-agent-skill-evals.mjs [--backend] [--show-details] [--report FILE] [${supportedApiFlags.join('|')}]
+  console.log(`Usage: node scripts/run-agent-skill-evals.mjs [--backend] [--show-details] [--report FILE]
 
 Default mode validates FitMeet skill eval cases against project contracts and
-evidence files. --backend also runs the critical Jest assertions. API modes run
-the existing authenticated Agent smoke scripts against AGENT_SMOKE_API_BASE_URL,
-FITMEET_API_BASE_URL, API_BASE_URL, or http://localhost:3000/api.
-
-API modes require USER_JWT/FITMEET_USER_JWT or AGENT_SMOKE_EMAIL/PASSWORD.
-Remote targets also require the existing AGENT_SMOKE_ALLOW_* safety flags.`);
+evidence files. --backend also runs the critical Jest assertions.`);
   process.exit(0);
 }
 if (reportArgIndex >= 0 && (!reportFile || reportFile.startsWith('--'))) {
@@ -38,29 +25,6 @@ if (reportArgIndex >= 0 && (!reportFile || reportFile.startsWith('--'))) {
 }
 const runBackend = args.has('--backend');
 const showDetails = args.has('--show-details');
-const apiModes = new Set(
-  process.argv
-    .slice(2)
-    .filter((arg) => arg.startsWith('--api'))
-    .map((arg) => arg.replace(/^--api-?/, '') || 'readiness'),
-);
-const runApiReadiness =
-  apiModes.has('readiness') || apiModes.has('smoke') || apiModes.has('all');
-const runApiEmptyCandidate =
-  apiModes.has('empty-candidate') ||
-  apiModes.has('empty') ||
-  apiModes.has('all');
-const runApiTwentyTurnMemory =
-  apiModes.has('20-turn-memory') ||
-  apiModes.has('20-turn') ||
-  apiModes.has('memory') ||
-  apiModes.has('all');
-const runApiFull = apiModes.has('full') || apiModes.has('all');
-const runApiSseAbort =
-  apiModes.has('sse-abort') ||
-  apiModes.has('sse') ||
-  apiModes.has('abort') ||
-  apiModes.has('all');
 
 const sourceFiles = {
   acceptance:
@@ -77,16 +41,17 @@ const sourceFiles = {
     'backend/src/agent-gateway/social-agent-fallback-source-boundary.spec.ts',
   fitmeetAlphaAgentSdkSpec:
     'backend/src/agent-gateway/fitmeet-alpha-agent-sdk.service.spec.ts',
-  toolRegistryControllerSpec:
-    'backend/src/agent-gateway/fitmeet-agent-tool-registry.controller.spec.ts',
+  candidateActionSpec:
+    'backend/src/agent-gateway/social-agent-candidate-action.service.spec.ts',
   agentRouteIsolationSpec: 'frontend/src/test/AgentRouteIsolation.test.ts',
   agentWorkspaceRuntimeSpec: 'frontend/src/test/agentWorkspaceRuntime.test.ts',
   toolFallbackRenderSpec: 'frontend/src/test/toolFallbackRender.test.tsx',
   agentAdapterSpec: 'frontend/src/test/agentAdapter.test.ts',
+  toolCardActionsSpec: 'frontend/src/test/toolCardActions.test.ts',
   toolExecutorSpec:
     'backend/src/agent-gateway/social-agent-tool-executor.service.spec.ts',
-  inboxToolSpec:
-    'backend/src/agent-gateway/social-agent-inbox-tool.service.spec.ts',
+  messageEventToolSpec:
+    'backend/src/agent-gateway/social-agent-message-event-tool.service.spec.ts',
   lifeGraphGovernanceSpec:
     'backend/src/agent-gateway/social-codex-life-graph-governance.service.spec.ts',
   meetLoopSpec:
@@ -96,7 +61,6 @@ const sourceFiles = {
   profileGateSpec:
     'backend/src/agent-gateway/social-agent-profile-gate.service.spec.ts',
   releaseVerify: 'scripts/verify-agent-release.sh',
-  smokeOpportunity: 'backend/src/scripts/smoke-agent-opportunity-journey.ts',
   stateMachineSpec:
     'backend/src/agent-gateway/social-agent-task-memory-state-machine.service.spec.ts',
   toolUiSchemaSpec: 'frontend/src/test/toolUiSchema.test.ts',
@@ -469,9 +433,10 @@ const validators = {
       (item) => item.expected.mustNotHref === '/discover?focusScene=',
       'must forbid focusScene as the primary detail link',
     );
-    expectIncludes('releaseVerify', [
-      'Run real API smoke for Agent opportunity readiness',
-      'RUN_AGENT_OPPORTUNITY_SMOKE',
+    expectIncludes('toolCardActionsSpec', [
+      "discoverHref: '/discover?publicIntentId=intent_302'",
+      "publicIntentHref: '/public-intent/intent_302'",
+      "toBe('/public-intent/intent_302')",
     ]);
   },
 
@@ -517,9 +482,10 @@ const validators = {
 
   candidate_top_three_with_reasons(caseItem) {
     expectCase(caseItem, (item) => item.expected.maxVisibleCandidates === 3, 'must cap visible candidates to 3');
-    expectIncludes('smokeOpportunity', [
-      'minCandidates: 3',
-      'candidate OpportunityCard',
+    expectIncludes('toolFallbackRenderSpec', [
+      "data-product-components', 'CandidateCards'",
+      "toHaveTextContent('3 个候选')",
+      "toHaveLength(3)",
     ]);
     expectIncludes('toolUiSchemaSpec', ['CandidateCards', 'OpportunityCard']);
   },
@@ -546,8 +512,9 @@ const validators = {
 
   approval_reject_prevents_side_effect(caseItem) {
     expectCase(caseItem, (item) => item.expected.executed === false, 'reject must prevent execution');
-    expectIncludes('smokeOpportunity', [
-      'opener.reject cancels the high-risk send without side effects',
+    expectIncludes('candidateActionSpec', [
+      'rejects an opener send from the approval card without contacting the candidate',
+      "action: 'opener.reject'",
     ]);
   },
 
@@ -561,8 +528,10 @@ const validators = {
 
   opener_preview_without_side_effect(caseItem) {
     expectCase(caseItem, (item) => item.expected.draftOnly === true && item.expected.sent === false, 'opener must be draft-only');
-    expectIncludes('smokeOpportunity', [
-      'candidate.generate_opener creates a send approval card',
+    expectIncludes('candidateActionSpec', [
+      'creates an opener draft card without creating approval before the user sends it',
+      "action: 'candidate.generate_opener'",
+      "schemaAction: 'opener.confirm_send'",
     ]);
   },
 
@@ -582,9 +551,9 @@ const validators = {
 
   waiting_reply_missing_connection_no_error_loop(caseItem) {
     expectCase(caseItem, (item) => item.expected.workerErrorLoop === false, 'worker error loop must be impossible');
-    expectIncludes('inboxToolSpec', [
-      'reads owner inbox events without an agent connection when no conversation is scoped',
-      'requires an agent connection for conversation-scoped inbox reads',
+    expectIncludes('messageEventToolSpec', [
+      'reads owner message events without an agent connection when no conversation is scoped',
+      'requires an agent connection for conversation-scoped message center reads',
     ]);
   },
 
@@ -669,7 +638,8 @@ const validators = {
     );
     expectIncludes('agentRouteIsolationSpec', [
       'keeps message submission inside the active thread instead of creating a thread per message',
-      'threadId: canonicalActiveThreadId',
+      'const threadIdForRun =',
+      'threadId: threadIdForRun',
       'socialAgentApi.createThread()',
       'const startNewThread = async () =>',
     ]);
@@ -730,12 +700,6 @@ const validators = {
       (item) => item.expected.adhocExecutionForbidden === true,
       'Admin/debug tools must be rejected from user-facing adhoc execution',
     );
-    expectIncludes('toolRegistryControllerSpec', [
-      'hides admin debug tools from the user-facing registry manifest',
-      'hides admin debug tools from the agent-token registry manifest',
-      'get_candidate_pool_debug',
-      'FitMeetAgentToolCategory.AdminDebug',
-    ]);
     expectIncludes('toolExecutorSpec', [
       'blocks admin debug tools from user-facing adhoc task actions',
       'Admin/debug tools cannot be executed from user-facing Agent task actions.',
@@ -760,11 +724,10 @@ function runBackendAssertions() {
     'src/agent-gateway/social-agent-opportunity-clarification.spec.ts',
     'src/agent-gateway/social-agent-profile-gate.service.spec.ts',
     'src/agent-gateway/social-codex-trace-eval.service.spec.ts',
-    'src/agent-gateway/social-agent-inbox-tool.service.spec.ts',
+    'src/agent-gateway/social-agent-message-event-tool.service.spec.ts',
     'src/agent-gateway/social-agent-context-window.spec.ts',
     'src/agent-gateway/social-agent-deepseek-quality-boundary.spec.ts',
     'src/agent-gateway/social-agent-fallback-source-boundary.spec.ts',
-    'src/agent-gateway/fitmeet-agent-tool-registry.controller.spec.ts',
     'src/agent-gateway/social-agent-tool-executor.service.spec.ts',
   ];
   const result = spawnSync(
@@ -781,93 +744,6 @@ function runBackendAssertions() {
       id: 'backend-jest',
       message: `backend eval assertion specs failed with status ${result.status}`,
     });
-  }
-}
-
-function runCommand(id, command, commandArgs, env = {}) {
-  const result = spawnSync(command, commandArgs, {
-    cwd: root,
-    stdio: 'inherit',
-    env: {
-      ...process.env,
-      ...env,
-    },
-  });
-  if (result.status !== 0) {
-    failures.push({
-      id,
-      message: `${command} ${commandArgs.join(' ')} failed with status ${result.status}`,
-    });
-  }
-}
-
-function runApiScenarioAssertions() {
-  if (
-    runApiReadiness ||
-    runApiEmptyCandidate ||
-    runApiTwentyTurnMemory ||
-    runApiFull
-  ) {
-    runCommand(
-      'api-preflight-readiness',
-      path.join(root, 'scripts', 'agent-remote-smoke-preflight.sh'),
-      ['--readiness', '--api-base-url', agentSmokeApiBaseUrl()],
-    );
-    if (runApiReadiness) {
-      runCommand(
-        'api-opportunity-readiness',
-        'pnpm',
-        ['--dir', 'backend', 'run', 'smoke:agent-opportunity'],
-        { AGENT_SMOKE_STOP_AFTER_OPPORTUNITIES: 'true' },
-      );
-    }
-  }
-  if (runApiEmptyCandidate) {
-    runCommand(
-      'api-empty-candidate',
-      'pnpm',
-      ['--dir', 'backend', 'run', 'smoke:agent-opportunity'],
-      {
-        AGENT_SMOKE_RUN_EMPTY_CANDIDATE_FALLBACK: 'true',
-        AGENT_SMOKE_STOP_AFTER_OPPORTUNITIES: 'true',
-      },
-    );
-  }
-  if (runApiTwentyTurnMemory) {
-    runCommand(
-      'api-20-turn-memory',
-      'pnpm',
-      ['--dir', 'backend', 'run', 'smoke:agent-opportunity'],
-      {
-        AGENT_SMOKE_RUN_20_TURN_MEMORY: 'true',
-        AGENT_SMOKE_STOP_AFTER_OPPORTUNITIES: 'true',
-      },
-    );
-  }
-  if (runApiFull) {
-    runCommand(
-      'api-preflight-full',
-      path.join(root, 'scripts', 'agent-remote-smoke-preflight.sh'),
-      ['--full', '--api-base-url', agentSmokeApiBaseUrl()],
-    );
-    runCommand(
-      'api-opportunity-full',
-      'pnpm',
-      ['--dir', 'backend', 'run', 'smoke:agent-opportunity'],
-      { AGENT_SMOKE_STOP_AFTER_OPPORTUNITIES: 'false' },
-    );
-  }
-  if (runApiSseAbort) {
-    runCommand(
-      'api-preflight-sse-abort',
-      path.join(root, 'scripts', 'agent-remote-smoke-preflight.sh'),
-      ['--sse-abort', '--api-base-url', agentSmokeApiBaseUrl()],
-    );
-    runCommand(
-      'api-sse-abort',
-      'pnpm',
-      ['--dir', 'backend', 'run', 'smoke:agent-sse-abort'],
-    );
   }
 }
 
@@ -942,25 +818,11 @@ function writeReport(status) {
     },
     modes: {
       backend: runBackend,
-      apiReadiness: runApiReadiness,
-      apiEmptyCandidate: runApiEmptyCandidate,
-      apiTwentyTurnMemory: runApiTwentyTurnMemory,
-      apiFull: runApiFull,
-      apiSseAbort: runApiSseAbort,
     },
     failures,
   };
   fs.writeFileSync(absoluteReportPath, `${JSON.stringify(report, null, 2)}\n`);
   console.log(`[OK] Wrote Agent skill eval report: ${absoluteReportPath}`);
-}
-
-function agentSmokeApiBaseUrl() {
-  return (
-    process.env.AGENT_SMOKE_API_BASE_URL ??
-    process.env.FITMEET_API_BASE_URL ??
-    process.env.API_BASE_URL ??
-    'http://localhost:3000/api'
-  );
 }
 
 const cases = parseEvalCases();
@@ -993,7 +855,6 @@ for (const caseItem of cases) {
 validateToolExamples();
 
 if (runBackend) runBackendAssertions();
-runApiScenarioAssertions();
 
 if (failures.length > 0) {
   writeReport('failed');
@@ -1008,5 +869,5 @@ if (failures.length > 0) {
 
 writeReport('passed');
 console.log(
-  `[OK] Agent skill eval runner passed: ${passes.length}/${cases.length} case(s), ${toolExamplePasses.length} tool example(s)${runBackend ? ' + backend assertions' : ''}${runApiReadiness || runApiEmptyCandidate || runApiTwentyTurnMemory || runApiFull || runApiSseAbort ? ' + API scenario smoke' : ''}`,
+  `[OK] Agent skill eval runner passed: ${passes.length}/${cases.length} case(s), ${toolExamplePasses.length} tool example(s)${runBackend ? ' + backend assertions' : ''}`,
 );

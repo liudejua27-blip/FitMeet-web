@@ -594,7 +594,9 @@ export class SocialAgentPlannerService {
   }
 
   private plannerCacheTtlMs(): number {
-    const raw = this.config.get<string>('SOCIAL_AGENT_TASK_PLANNER_CACHE_TTL_MS');
+    const raw = this.config.get<string>(
+      'SOCIAL_AGENT_TASK_PLANNER_CACHE_TTL_MS',
+    );
     if (raw === '0') return 0;
     const parsed = Number(raw);
     if (Number.isFinite(parsed) && parsed >= 0) {
@@ -655,7 +657,7 @@ export class SocialAgentPlannerService {
         this.optionalString(task.goal),
       replanningRules: [
         'If lastFailure exists, do not repeat the same failing tool unless there is a changed input or a safer alternative.',
-        'For blocked high-risk actions, move to drafting, inbox, or user confirmation instead of forcing execution.',
+        'For blocked high-risk actions, move to drafting, message center, or user confirmation instead of forcing execution.',
         'Preserve the user goal and use the latest user follow-up as the strongest instruction.',
         'Treat taskContext.taskSlots as hard constraints: answered, confirmed, completed, and modified slots are already known and must not be asked again.',
         'Use candidate_preference only against public, user-consented profile fields or public tags; never infer private traits.',
@@ -856,8 +858,7 @@ export class SocialAgentPlannerService {
             taskId: hydratedContext.taskId,
             recentMessageCount: hydratedContext.recentMessages.length,
             taskSlotSummary: hydratedContext.taskSlotSummary,
-            knownTaskSlotConstraints:
-              hydratedContext.knownTaskSlotConstraints,
+            knownTaskSlotConstraints: hydratedContext.knownTaskSlotConstraints,
             lifeGraphSummary: hydratedContext.lifeGraphSummary,
             pendingApprovals: hydratedContext.pendingApprovals,
             candidateActions: hydratedContext.candidateActions,
@@ -1052,7 +1053,7 @@ export class SocialAgentPlannerService {
     const actions = [
       SocialAgentAction.FavoriteCandidate,
       SocialAgentAction.DraftMessage,
-      SocialAgentAction.WriteInbox,
+      SocialAgentAction.WriteMessageEvent,
       SocialAgentAction.SendMessage,
       SocialAgentAction.AddFriend,
     ];
@@ -1114,9 +1115,7 @@ export class SocialAgentPlannerService {
           this.optionalString(currentTask.nextStep),
         ]
       : [];
-    return [goal, ...savedContextEvidence]
-      .filter(Boolean)
-      .join(' ');
+    return [goal, ...savedContextEvidence].filter(Boolean).join(' ');
   }
 
   private isFallbackSearchContinuation(message: string): boolean {
@@ -1248,8 +1247,8 @@ export class SocialAgentPlannerService {
         return 'Send invite';
       case SocialAgentAction.FavoriteCandidate:
         return 'Favorite candidate';
-      case SocialAgentAction.WriteInbox:
-        return 'Write inbox event';
+      case SocialAgentAction.WriteMessageEvent:
+        return 'Write message event';
       case SocialAgentAction.OfflineMeet:
         return 'Arrange offline meet';
       case SocialAgentAction.Payment:
@@ -1265,9 +1264,7 @@ export class SocialAgentPlannerService {
     return typeof value === 'number' && Number.isFinite(value) ? value : 0;
   }
 
-  private nonEmptyRecord(
-    value: unknown,
-  ): Record<string, unknown> | undefined {
+  private nonEmptyRecord(value: unknown): Record<string, unknown> | undefined {
     return this.isRecord(value) && Object.keys(value).length > 0
       ? value
       : undefined;
@@ -1355,5 +1352,4 @@ export class SocialAgentPlannerService {
       }),
     );
   }
-
 }

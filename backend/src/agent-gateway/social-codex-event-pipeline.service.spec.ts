@@ -194,9 +194,7 @@ describe('SocialCodexEventPipelineService', () => {
 
     await pipeline.writeResultEvents(writer, response);
 
-    expect(writes.map((item) => item.event)).not.toContain(
-      'safety_check.done',
-    );
+    expect(writes.map((item) => item.event)).not.toContain('safety_check.done');
   });
 
   it('does not emit early slot events for ordinary chat with time and place but no social execution intent', async () => {
@@ -362,9 +360,9 @@ describe('SocialCodexEventPipelineService', () => {
           '正在理解你的需求',
       ),
     ).toHaveLength(1);
-    expect(writes.filter((item) => item.event === 'approval.required')).toHaveLength(
-      2,
-    );
+    expect(
+      writes.filter((item) => item.event === 'approval.required'),
+    ).toHaveLength(2);
   });
 
   it('starts with neutral GPT-style process copy for ordinary chat', async () => {
@@ -384,9 +382,13 @@ describe('SocialCodexEventPipelineService', () => {
 
     const serialized = JSON.stringify(writes.map((item) => item.data));
     expect(serialized).toContain('正在理解你的需求');
-    expect(serialized).toContain('会结合最近对话和已确认偏好，整理成自然回复。');
+    expect(serialized).toContain(
+      '会结合最近对话和已确认偏好，整理成自然回复。',
+    );
     expect(serialized).toContain('会结合最近对话、当前任务和已确认偏好');
-    expect(serialized).not.toMatch(/进入约练\/社交流程|约练流程|Life Graph 摘要/);
+    expect(serialized).not.toMatch(
+      /进入约练\/社交流程|约练流程|Life Graph 摘要/,
+    );
   });
 
   it('completes ordinary chat with neutral conversation copy instead of generic tool copy', async () => {
@@ -601,7 +603,9 @@ describe('SocialCodexEventPipelineService', () => {
       threadId: 'agent-task:42',
     });
 
-    expect(profileGate.getMinimumProfileStatusWithTaskSlots).toHaveBeenCalledWith(
+    expect(
+      profileGate.getMinimumProfileStatusWithTaskSlots,
+    ).toHaveBeenCalledWith(
       7,
       expect.objectContaining({
         activity: expect.objectContaining({ value: '散步' }),
@@ -704,27 +708,34 @@ describe('SocialCodexEventPipelineService', () => {
       runId: 'run:test',
     });
 
-    await writer('candidate_search.done', 'rank_candidates', '找到 3 个公开可发现的人', {
-      state: 'done',
-      payload: {
-        candidateCount: 3,
-        safeSummary: '公开资料显示都偏好周末下午散步。',
-        traceId: 'hidden-trace',
-        planner: { rawJson: true },
-        rawJson: { debug: true },
-        payload: { toolInput: 'internal' },
-        messages: [{ role: 'system', content: 'hidden prompt' }],
-        phone: '15253005312',
-        latitude: 36.123456,
-        nested: {
-          summary: '只使用公开可发现资料。',
-          toolCalls: [{ name: 'search_public_candidates' }],
-          preciseLocation: '青岛大学某宿舍楼 3 单元 401',
+    await writer(
+      'candidate_search.done',
+      'rank_candidates',
+      '找到 3 个公开可发现的人',
+      {
+        state: 'done',
+        payload: {
+          candidateCount: 3,
+          safeSummary: '公开资料显示都偏好周末下午散步。',
+          traceId: 'hidden-trace',
+          planner: { rawJson: true },
+          rawJson: { debug: true },
+          payload: { toolInput: 'internal' },
+          messages: [{ role: 'system', content: 'hidden prompt' }],
+          phone: '15253005312',
+          latitude: 36.123456,
+          nested: {
+            summary: '只使用公开可发现资料。',
+            toolCalls: [{ name: 'search_public_candidates' }],
+            preciseLocation: '青岛大学某宿舍楼 3 单元 401',
+          },
         },
       },
-    });
+    );
 
-    const streamedEvent = writes[0]?.data as { payload?: Record<string, unknown> };
+    const streamedEvent = writes[0]?.data as {
+      payload?: Record<string, unknown>;
+    };
     expect(streamedEvent.payload).toMatchObject({
       candidateCount: 3,
       safeSummary: '公开资料显示都偏好周末下午散步。',
@@ -852,7 +863,9 @@ describe('SocialCodexEventPipelineService', () => {
     );
     expect(
       writes.map((item) => item.data as { taskId?: number | null }),
-    ).toEqual(expect.arrayContaining([expect.objectContaining({ taskId: 42 })]));
+    ).toEqual(
+      expect.arrayContaining([expect.objectContaining({ taskId: 42 })]),
+    );
   });
 
   it('uses lightweight recovery copy instead of backend-style saved-conversation copy', async () => {

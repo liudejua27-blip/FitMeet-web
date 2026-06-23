@@ -186,12 +186,12 @@ export class SocialAgentToolExecutionPolicyService {
           }
         : null,
       socialCodexAudit: socialCodexDecision?.auditRequired
-        ? this.socialCodex?.buildAuditPayload({
+        ? (this.socialCodex?.buildAuditPayload({
             userId: task.ownerUserId,
             taskId: task.id,
             decision: socialCodexDecision,
             payload: input,
-          }) ?? null
+          }) ?? null)
         : null,
       dailyLimit: limit,
       idempotencyKey,

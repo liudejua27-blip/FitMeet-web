@@ -11,7 +11,7 @@ import {
   AgentConnection,
   ConnectionStatus,
 } from './entities/agent-connection.entity';
-/* eslint-disable @typescript-eslint/require-await */
+
 import { ProfileMatchService } from './profile-match.service';
 import { ContactRequest } from './entities/contact-request.entity';
 import { AgentActionLogService } from './agent-action-log.service';
@@ -51,7 +51,7 @@ describe('ProfileMatchService', () => {
   let taskRepo: ReturnType<typeof mockRepo>;
   let taskEventRepo: ReturnType<typeof mockRepo>;
   let messages: {
-    createAgentInboxEvent: jest.Mock;
+    createAgentMessageEvent: jest.Mock;
     startConversation: jest.Mock;
     sendMessage: jest.Mock;
   };
@@ -71,7 +71,7 @@ describe('ProfileMatchService', () => {
     taskRepo = mockRepo();
     taskEventRepo = mockRepo();
     messages = {
-      createAgentInboxEvent: jest.fn(),
+      createAgentMessageEvent: jest.fn(),
       startConversation: jest
         .fn()
         .mockResolvedValue({ conversationId: 'conv-1' }),
@@ -118,7 +118,7 @@ describe('ProfileMatchService', () => {
     service = module.get(ProfileMatchService);
   });
 
-  it('creates review-only inbox/webhook recommendations from profiles', async () => {
+  it('creates review-only message center/webhook recommendations from profiles', async () => {
     profileRepo.findOne.mockResolvedValue({
       userId: 1,
       city: 'Shanghai',
@@ -178,7 +178,7 @@ describe('ProfileMatchService', () => {
       suggestedOpener: expect.any(String),
       nextAction: 'owner_confirmation_required',
     });
-    expect(messages.createAgentInboxEvent).toHaveBeenCalledWith(
+    expect(messages.createAgentMessageEvent).toHaveBeenCalledWith(
       expect.objectContaining({
         agentConnectionId: 9,
         ownerUserId: 1,
@@ -192,10 +192,11 @@ describe('ProfileMatchService', () => {
         }),
       }),
     );
-    const inboxPayload = messages.createAgentInboxEvent.mock.calls[0][0];
-    expect(JSON.stringify(inboxPayload.metadata.safeProfile)).not.toMatch(
-      /rich|收入|手机号|身份证/i,
-    );
+    const messageEventPayload =
+      messages.createAgentMessageEvent.mock.calls[0][0];
+    expect(
+      JSON.stringify(messageEventPayload.metadata.safeProfile),
+    ).not.toMatch(/rich|收入|手机号|身份证/i);
     expect(webhooks.emitToConnection).toHaveBeenCalledWith(
       9,
       'profile.match.recommended',
@@ -218,7 +219,7 @@ describe('ProfileMatchService', () => {
 
     expect(result.matchedCount).toBe(0);
     expect(result.skippedReasons.blockedUser).toBe(1);
-    expect(messages.createAgentInboxEvent).not.toHaveBeenCalled();
+    expect(messages.createAgentMessageEvent).not.toHaveBeenCalled();
   });
 
   it('reports duplicate and below-threshold profile skips without leaking private tags', async () => {
@@ -282,7 +283,7 @@ describe('ProfileMatchService', () => {
       ]),
     );
     expect(JSON.stringify(result.debugEvents)).not.toMatch(/rich|income/i);
-    expect(messages.createAgentInboxEvent).not.toHaveBeenCalled();
+    expect(messages.createAgentMessageEvent).not.toHaveBeenCalled();
   });
 
   it('does not auto-enable the profile match pool by default', async () => {
@@ -302,7 +303,7 @@ describe('ProfileMatchService', () => {
     expect(profileRepo.createQueryBuilder).not.toHaveBeenCalled();
   });
 
-  it('writes profile recommendations to the built-in Agent Inbox without an active connection', async () => {
+  it('writes profile recommendations to built-in messages without an active connection', async () => {
     profileRepo.findOne.mockResolvedValue({
       userId: 1,
       city: 'Shanghai',
@@ -340,8 +341,8 @@ describe('ProfileMatchService', () => {
 
     const result = await service.runOnce(1);
 
-    expect(result.inboxEvents).toBe(1);
-    expect(messages.createAgentInboxEvent).toHaveBeenCalledWith(
+    expect(result.messageEvents).toBe(1);
+    expect(messages.createAgentMessageEvent).toHaveBeenCalledWith(
       expect.objectContaining({
         agentConnectionId: 0,
         ownerUserId: 1,
@@ -412,12 +413,13 @@ describe('ProfileMatchService', () => {
     const result = await service.runOnce(1);
 
     expect(result.matchedCount).toBe(1);
-    const inboxPayload = messages.createAgentInboxEvent.mock.calls[0][0];
-    expect(JSON.stringify(inboxPayload.metadata.publicReasons)).not.toMatch(
-      /rich|wealth|resources/i,
-    );
-    expect(inboxPayload.metadata.privateReasonAvailable).toBe(true);
-    expect(inboxPayload.metadata.privateReasons).toBeUndefined();
+    const messageEventPayload =
+      messages.createAgentMessageEvent.mock.calls[0][0];
+    expect(
+      JSON.stringify(messageEventPayload.metadata.publicReasons),
+    ).not.toMatch(/rich|wealth|resources/i);
+    expect(messageEventPayload.metadata.privateReasonAvailable).toBe(true);
+    expect(messageEventPayload.metadata.privateReasons).toBeUndefined();
   });
 
   it('creates a target-consent contact request only after owner confirmation', async () => {
@@ -463,7 +465,7 @@ describe('ProfileMatchService', () => {
     });
   });
 
-  it('ignore writes action log + inbox event + webhook', async () => {
+  it('ignore writes action log + message event + webhook', async () => {
     sessionRepo.findOne.mockResolvedValue({
       id: 300,
       ownerId: 1,
@@ -499,7 +501,7 @@ describe('ProfileMatchService', () => {
 
     expect(result.action).toBe('recommendation.ignored');
     expect(actionLog.logAgentAction).toHaveBeenCalled();
-    expect(messages.createAgentInboxEvent).toHaveBeenCalledWith(
+    expect(messages.createAgentMessageEvent).toHaveBeenCalledWith(
       expect.objectContaining({
         eventType: 'recommendation.ignored',
         metadata: expect.objectContaining({

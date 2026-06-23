@@ -115,7 +115,7 @@ Required values include:
 - Mongo split vars and `MONGO_URI=mongodb://<user>:<password>@mongo:27017/fitness_app?authSource=admin`
 - `REDIS_PASSWORD`
 - `JWT_SECRET`
-- object storage credentials for uploads; avatar upload and feed image E2E require a real OSS/S3 bucket. If S3/R2 uses a custom endpoint, set `S3_PUBLIC_BASE_URL` to the HTTPS public media domain.
+- object storage credentials for uploads; avatar, profile media, and Agent card media checks require a real OSS/S3 bucket. If S3/R2 uses a custom endpoint, set `S3_PUBLIC_BASE_URL` to the HTTPS public media domain.
 - `DEEPSEEK_API_KEY`, `DEEPSEEK_CHAT_MODEL=deepseek-v4-pro`, `DEEPSEEK_FAST_MODEL=deepseek-v4-flash`, `AGENT_PLANNER_MODEL=deepseek-v4-pro`
 - Agent 智能策略：`SOCIAL_AGENT_MODEL_ROUTING_MODE=quality`, `SOCIAL_AGENT_INTENT_ROUTER_MODE=llm_first`, `SOCIAL_AGENT_CONTEXT_TURN_LIMIT=80`, `SOCIAL_AGENT_PLANNER_TIMEOUT_MS=25000`, `SOCIAL_AGENT_INTENT_TIMEOUT_MS=25000`, `SOCIAL_AGENT_CHAT_LLM_TIMEOUT_MS=30000`, `SOCIAL_AGENT_FINAL_RESPONSE_TIMEOUT_MS=30000`, `SOCIAL_AGENT_DEEPSEEK_FIRST_CHUNK_TIMEOUT_MS=20000`
 - First launch can keep `AGENT_OBSERVABILITY_ALERTS_ENABLED=false`. When traffic grows, set it to `true` and configure `AGENT_OBSERVABILITY_ALERT_WEBHOOK_URL`, `AGENT_OBSERVABILITY_ALERT_WEBHOOK_TOKEN`, and `AGENT_OBSERVABILITY_ALERT_COOLDOWN_MS=300000`.
@@ -184,90 +184,32 @@ after you have already run the preflight manually. `RUN_DB_MIGRATIONS=true` is
 the production default; if you deliberately set it false, the script still
 checks that critical tables already exist before starting the app.
 
-Prepare two release smoke users for Web production smoke and iOS staging E2E:
+Create dedicated QA users through the normal signup/admin process for Web
+production QA and iOS staging E2E. Keep credentials outside the repository.
+
+For the product-grade Agent launch gate, use the non-seed production
+verification scripts. They validate the deployed core loop without relying on
+the removed runtime smoke adapters:
 
 ```bash
-APP_SMOKE_SEED_PASSWORD='use-a-long-random-password' \
-APP_SMOKE_SEED_ALLOW_PRODUCTION=true \
-pnpm -C backend run seed:app-smoke-users
-```
-
-The command prints the exact `APP_SMOKE_*` and `FITMEET_ALPHA_STAGING_*` exports
-needed by `verify-production.sh --run-app-smoke` and the iOS staging backend
-E2E. Use dedicated smoke accounts, not a real user's account.
-
-You can also let the post-deploy smoke script create/update those dedicated
-accounts and immediately reuse the printed credentials inside the same shell
-process:
-
-```bash
-APP_SMOKE_SEED_PASSWORD='use-a-long-random-password' \
-APP_SMOKE_SEED_ALLOW_PRODUCTION=true \
-BASE_URL=https://www.ourfitmeet.cn \
-API_BASE_URL=https://www.ourfitmeet.cn/api \
-FITMEET_LAUNCH_TOPOLOGY=ecs \
-./scripts/ecs-post-deploy-smoke.sh --prepare-app-smoke-users --run-app-smoke
-```
-
-The script does not write smoke credentials to the repository. It keeps them in
-the current process only, then runs `verify-production.sh`.
-
-Prepare Agent smoke data inside the production Docker network without
-`ts-node`:
-
-```bash
-./scripts/ecs-backend-pnpm.sh -- seed:agent-smoke:prod:dry-run
-
-AGENT_SMOKE_SEED_ALLOW_PRODUCTION=true \
-./scripts/ecs-backend-pnpm.sh -- seed:agent-smoke:prod -- --allow-production
-```
-
-The Agent smoke seed refuses to write in `NODE_ENV=production` unless
-`AGENT_SMOKE_SEED_ALLOW_PRODUCTION=true` or `--allow-production` is present.
-
-For the product-grade Agent launch gate, prefer the combined post-deploy
-entrypoint so the dedicated Agent smoke users, opportunity journey, SSE abort
-check, and backend/worker log scan run in one controlled flow:
-
-Readiness pass, stopped after OpportunityCards and before high-risk actions:
-
-```bash
-AGENT_SMOKE_SEED_ALLOW_PRODUCTION=true \
 BASE_URL=https://www.ourfitmeet.cn \
 API_BASE_URL=https://www.ourfitmeet.cn/api \
 FITMEET_LAUNCH_TOPOLOGY=ecs \
 SCAN_COMPOSE_LOGS=true \
-./scripts/ecs-post-deploy-smoke.sh \
-  --prepare-agent-smoke-seed \
-  --run-agent-opportunity-readiness-smoke \
-  --scan-compose-logs
-```
+./scripts/ecs-post-deploy-smoke.sh --scan-compose-logs
 
-Full pass, using the same dedicated smoke account shape and allowing only smoke
-mutations:
-
-```bash
-AGENT_SMOKE_SEED_ALLOW_PRODUCTION=true \
 BASE_URL=https://www.ourfitmeet.cn \
 API_BASE_URL=https://www.ourfitmeet.cn/api \
-FITMEET_LAUNCH_TOPOLOGY=ecs \
-SCAN_COMPOSE_LOGS=true \
-./scripts/ecs-post-deploy-smoke.sh \
-  --prepare-agent-smoke-seed \
-  --run-agent-opportunity-smoke \
-  --run-agent-sse-abort-smoke \
-  --scan-compose-logs
+./scripts/verify-agent-goal-production.sh
 ```
 
-This creates/updates only dedicated smoke users and automatically sets the
-`AGENT_SMOKE_ALLOW_MUTATIONS=true` guard for that invocation. It validates the
-product-grade Agent launch gate:
+This validates the product-grade Agent launch gate:
 
 - ordinary chat does not trigger social cards.
 - ambiguous social intent clarifies before search.
-- explicit social intent returns OpportunityCards.
+- explicit social intent returns OpportunityCards through Agent.
 - high-risk send/create confirmation paths require approval.
-- it aborts one real SSE run after the first delta.
+- published cards are visible through Discover and `/public-intent/:id`.
 - recent `backend` / `subagent-worker` logs do not show known production
   failure patterns.
 
@@ -281,71 +223,16 @@ are created only for users who explicitly enabled Agent reminders, and they are
 sent only as in-app notifications / Agent chat prompts. They never auto-send
 messages, add friends, create activities, or publish content.
 
-Both post-deploy Agent smoke modes automatically run
-`scripts/agent-remote-smoke-preflight.sh` first. The preflight checks
-`AGENT_SMOKE_ALLOW_REMOTE`, dedicated smoke-account naming, JWT override safety,
-and the mutation guard before any real remote Agent smoke can run. To inspect
-the guard directly without touching the API, first create a local smoke env from
-the checked-in template:
+Attach generated verification output to the release checklist after confirming
+it contains no real credentials or personal email addresses.
 
-```bash
-cp deploy/agent-smoke.remote.env.example deploy/agent-smoke.remote.env
-$EDITOR deploy/agent-smoke.remote.env
-```
-
-Use only a dedicated smoke/test account in that file. The filled
-`deploy/agent-smoke.remote.env` is gitignored and must not be copied into a
-release zip, ticket, chat message, or screenshot. The required guards and
-credentials are `AGENT_SMOKE_ALLOW_REMOTE=true`,
-`AGENT_SMOKE_ALLOW_MUTATIONS=true`, `AGENT_SMOKE_EMAIL`, and
-`AGENT_SMOKE_PASSWORD`. The preflight rejects the template's
-`replace-with-dedicated-smoke-password` placeholder, so fill a real dedicated
-smoke password before running:
-
-```bash
-set -a
-source deploy/agent-smoke.remote.env
-set +a
-./scripts/agent-remote-smoke-preflight.sh \
-  --readiness \
-  --api-base-url "$API_BASE_URL"
-```
-
-For release evidence, prefer the wrapper below. It runs the same post-deploy
-smoke commands, redacts passwords, JWTs, bearer tokens, and email addresses, and
-writes a markdown proof file under `artifacts/agent-smoke-evidence/`. With
-`--all --prepare-agent-smoke-seed`, the wrapper prepares the dedicated Agent
-smoke seed once in the parent process, exports the printed `AGENT_SMOKE_*`
-values, and reuses that same smoke account across readiness, 20-turn memory,
-empty-candidate recovery, full opportunity, and SSE abort checks:
-
-```bash
-set -a
-source deploy/agent-smoke.remote.env
-set +a
-AGENT_SMOKE_SEED_ALLOW_PRODUCTION=true \
-BASE_URL=https://www.ourfitmeet.cn \
-API_BASE_URL=https://www.ourfitmeet.cn/api \
-FITMEET_LAUNCH_TOPOLOGY=ecs \
-./scripts/agent-remote-smoke-evidence.sh \
-  --all \
-  --prepare-agent-smoke-seed
-```
-
-Attach the generated `FitMeet Agent Remote Smoke Evidence` markdown to the
-release checklist after confirming it contains no real credentials or personal
-email addresses.
-
-Before final Agent cutover, run launch status with the evidence file as a hard
-gate:
+Before final Agent cutover, run launch status against the deployed ECS origin:
 
 ```bash
 FITMEET_LAUNCH_TOPOLOGY=ecs \
 WEB_ORIGIN=https://www.ourfitmeet.cn \
 API_BASE_URL=https://www.ourfitmeet.cn/api \
 RUN_IOS_TESTFLIGHT_CHECK=false \
-REQUIRE_AGENT_REMOTE_SMOKE_EVIDENCE=true \
-AGENT_REMOTE_SMOKE_EVIDENCE_FILE=/opt/FitMeet-web/artifacts/agent-smoke-evidence/agent-remote-smoke-all-YYYYMMDDTHHMMSSZ.md \
 ./scripts/launch-status.sh --topology ecs --skip-ios-testflight-check
 ```
 
@@ -389,30 +276,22 @@ BASE_URL=https://www.ourfitmeet.cn \
 API_BASE_URL=https://www.ourfitmeet.cn/api \
 EXPECTED_RELEASE_COMMIT="$EXPECTED_RELEASE_COMMIT" \
 EXPECTED_RELEASE_BUILT_AT="$EXPECTED_RELEASE_BUILT_AT" \
-FITMEET_AGENT_BROWSER_QA_EMAIL=agent-smoke-owner@ourfitmeet.cn \
+FITMEET_AGENT_BROWSER_QA_EMAIL=agent-qa-owner@ourfitmeet.cn \
 FITMEET_AGENT_BROWSER_QA_PASSWORD='***' \
 ./scripts/verify-agent-goal-production.sh
 ```
 
 If this verifier fails because `/public/social-intents` is empty on a fresh
-database, seed one safe smoke intent and rerun it:
+database, publish a controlled test card through the Agent card flow and rerun
+it. The old standalone seed/smoke flow is no longer part of the release path.
 
-```bash
-AGENT_SMOKE_SEED_ALLOW_PRODUCTION=true \
-./scripts/ecs-backend-pnpm.sh -- seed:agent-smoke:prod -- --allow-production
-```
-
-With prepared staging users:
+When production writes are allowed:
 
 ```bash
 BASE_URL=https://www.ourfitmeet.cn \
 API_BASE_URL=https://www.ourfitmeet.cn/api \
 FITMEET_LAUNCH_TOPOLOGY=ecs \
-APP_SMOKE_EMAIL=test@example.com \
-APP_SMOKE_PASSWORD='***' \
-APP_SMOKE_TARGET_USER_ID=123 \
-APP_SMOKE_RUN_MUTATIONS=true \
-./scripts/verify-production.sh --run-app-smoke
+./scripts/verify-production.sh --run-public-intent-write
 ```
 
 Or run the combined ECS smoke entrypoint:
@@ -421,10 +300,7 @@ Or run the combined ECS smoke entrypoint:
 BASE_URL=https://www.ourfitmeet.cn \
 API_BASE_URL=https://www.ourfitmeet.cn/api \
 FITMEET_LAUNCH_TOPOLOGY=ecs \
-APP_SMOKE_EMAIL=test@example.com \
-APP_SMOKE_PASSWORD='***' \
-APP_SMOKE_TARGET_USER_ID=123 \
-./scripts/ecs-post-deploy-smoke.sh --run-app-smoke
+./scripts/ecs-post-deploy-smoke.sh --run-public-intent-write
 ```
 
 iOS needs a matching Release API base if ECS is the final backend:

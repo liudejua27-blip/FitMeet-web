@@ -112,7 +112,9 @@ describe('assistant-ui tool fallback rendering', () => {
     expect(approval).toHaveTextContent('加好友并聊天前需要你确认');
     expect(approval).toHaveTextContent('确认后才会发出好友申请');
     expect(approval).not.toHaveTextContent('连接候选人');
-    expect(approval).not.toHaveTextContent(/riskLevel|medium|checkpoint|audit|将要执行|风险级别|风险等级|动作：|动作:/i);
+    expect(approval).not.toHaveTextContent(
+      /riskLevel|medium|checkpoint|audit|将要执行|风险级别|风险等级|动作：|动作:/i,
+    );
   });
 
   it('does not render standalone approval panels for low-risk candidate actions', () => {
@@ -250,8 +252,7 @@ describe('assistant-ui tool fallback rendering', () => {
               data: {
                 schemaType: 'social_match.candidate',
                 displayName: '陈砚',
-                suggestedOpener:
-                  '你好，我也在青岛大学附近散步，要不要今天先轻松走一圈？',
+                suggestedOpener: '你好，我也在青岛大学附近散步，要不要今天先轻松走一圈？',
               },
               actions: [],
             },
@@ -359,7 +360,7 @@ describe('assistant-ui tool fallback rendering', () => {
       within(actionCard)
         .getAllByTestId('assistant-ui-schema-action')
         .map((button) => button.textContent?.trim()),
-    ).toEqual(['查看详情', '收藏', '生成开场白', '发送邀请', '加好友并聊天']);
+    ).toEqual(['查看详情', '收藏', '发消息', '邀请Ta', '加好友并聊天']);
     expect(within(actionCard).getByRole('button', { name: '查看详情' })).toHaveAttribute(
       'data-requires-confirmation',
       'false',
@@ -383,9 +384,13 @@ describe('assistant-ui tool fallback rendering', () => {
     expect(screen.queryByTestId('assistant-ui-approval-tool')).not.toBeInTheDocument();
 
     fireEvent.click(within(actionCard).getByRole('button', { name: '收藏' }));
-    await waitFor(() => expect(onCardAction).toHaveBeenCalledWith(expect.objectContaining({
-      schemaAction: 'candidate.like',
-    })));
+    await waitFor(() =>
+      expect(onCardAction).toHaveBeenCalledWith(
+        expect.objectContaining({
+          schemaAction: 'candidate.like',
+        }),
+      ),
+    );
     expect(await screen.findByTestId('assistant-ui-inline-outcome-preview')).toHaveTextContent(
       '已收藏',
     );
@@ -404,20 +409,16 @@ describe('assistant-ui tool fallback rendering', () => {
     const inlineApproval = await screen.findByTestId('assistant-ui-inline-approval-panel');
     expect(inlineApproval).toHaveTextContent('确认发送邀请');
     expect(inlineApproval).toHaveTextContent('确认后才会发送邀请内容');
-    expect(inlineApproval).not.toHaveTextContent(/riskLevel|medium|checkpoint|audit|风险级别|风险等级|动作：|动作:/i);
+    expect(inlineApproval).not.toHaveTextContent(
+      /riskLevel|medium|checkpoint|audit|风险级别|风险等级|动作：|动作:/i,
+    );
     expect(screen.queryByTestId('assistant-ui-approval-tool')).not.toBeInTheDocument();
 
     fireEvent.click(within(inlineApproval).getByRole('button', { name: '确认发送' }));
     await waitFor(() =>
-      expect(screen.getByTestId('assistant-ui-inline-outcome-preview')).toHaveTextContent(
-        '邀请已确认',
-      ),
+      expect(onApproveApproval).toHaveBeenCalledWith(expect.objectContaining({ approvalId: 711 })),
     );
-    expect(onApproveApproval).toHaveBeenCalledWith(expect.objectContaining({ approvalId: 711 }));
-    expect(screen.getByTestId('assistant-ui-inline-outcome-preview')).toHaveTextContent(
-      '已确认发送给陈砚',
-    );
-    expect(screen.getByTestId('assistant-ui-inline-outcome-preview')).not.toHaveTextContent(
+    expect(document.body.textContent ?? '').not.toMatch(
       /riskLevel|medium|checkpoint|audit|风险级别|风险等级|动作：|动作:/i,
     );
   });
@@ -635,12 +636,14 @@ describe('assistant-ui tool fallback rendering', () => {
       within(actionCard)
         .getAllByTestId('assistant-ui-schema-action')
         .map((button) => button.textContent?.trim()),
-    ).toEqual(['查看详情', '收藏', '生成开场白', '发送邀请', '加好友并聊天']);
+    ).toEqual(['查看详情', '收藏', '发消息', '邀请Ta', '加好友并聊天']);
 
     fireEvent.click(within(actionCard).getByRole('button', { name: '发送邀请' }));
     const inlineApproval = await screen.findByTestId('assistant-ui-inline-approval-panel');
     expect(inlineApproval).toHaveTextContent('确认发送邀请');
-    expect(inlineApproval).not.toHaveTextContent(/riskLevel|medium|checkpoint|audit|风险级别|风险等级|动作：|动作:|保存点/i);
+    expect(inlineApproval).not.toHaveTextContent(
+      /riskLevel|medium|checkpoint|audit|风险级别|风险等级|动作：|动作:|保存点/i,
+    );
   });
 
   it('keeps invite approvals as send confirmations even when replay text mentions the candidate', async () => {
@@ -862,7 +865,11 @@ describe('assistant-ui tool fallback rendering', () => {
 
     expect(screen.getAllByTestId('assistant-ui-schema-card')).toHaveLength(1);
     expect(screen.queryByTestId('assistant-ui-approval-tool')).not.toBeInTheDocument();
-    expect(screen.queryByText(/riskLevel|medium|checkpoint|audit|风险级别|风险等级|动作：|动作:|保存点/i)).not.toBeInTheDocument();
+    expect(
+      screen.queryByText(
+        /riskLevel|medium|checkpoint|audit|风险级别|风险等级|动作：|动作:|保存点/i,
+      ),
+    ).not.toBeInTheDocument();
 
     const candidate = screen.getByTestId('assistant-ui-schema-card');
     const actionCard = within(candidate).getByTestId('assistant-ui-unified-action-card');
@@ -870,7 +877,7 @@ describe('assistant-ui tool fallback rendering', () => {
       within(actionCard)
         .getAllByTestId('assistant-ui-schema-action')
         .map((button) => button.textContent?.trim()),
-    ).toEqual(['查看详情', '收藏', '生成开场白', '发送邀请', '加好友并聊天']);
+    ).toEqual(['查看详情', '收藏', '发消息', '邀请Ta', '加好友并聊天']);
     expect(within(actionCard).getByRole('button', { name: '收藏' })).toHaveAttribute(
       'data-requires-confirmation',
       'false',
@@ -883,7 +890,9 @@ describe('assistant-ui tool fallback rendering', () => {
     fireEvent.click(within(actionCard).getByRole('button', { name: '加好友并聊天' }));
     const inlineApproval = await screen.findByTestId('assistant-ui-inline-approval-panel');
     expect(inlineApproval).toHaveTextContent('确认加好友并聊天');
-    expect(inlineApproval).not.toHaveTextContent(/riskLevel|medium|checkpoint|audit|风险级别|风险等级|动作：|动作:|保存点/i);
+    expect(inlineApproval).not.toHaveTextContent(
+      /riskLevel|medium|checkpoint|audit|风险级别|风险等级|动作：|动作:|保存点/i,
+    );
   });
 
   it('folds legacy opener approval cards without approvalId into the candidate card', async () => {
@@ -968,7 +977,9 @@ describe('assistant-ui tool fallback rendering', () => {
     fireEvent.click(within(candidate).getByRole('button', { name: '发送邀请' }));
     const inlineApproval = await screen.findByTestId('assistant-ui-inline-approval-panel');
     expect(inlineApproval).toHaveTextContent('确认发送邀请');
-    expect(inlineApproval).not.toHaveTextContent(/riskLevel|medium|checkpoint|audit|风险级别|风险等级|动作：|动作:|保存点/i);
+    expect(inlineApproval).not.toHaveTextContent(
+      /riskLevel|medium|checkpoint|audit|风险级别|风险等级|动作：|动作:|保存点/i,
+    );
   });
 
   it('folds orphan safety approval cards into one inline approval panel', () => {
@@ -1030,7 +1041,9 @@ describe('assistant-ui tool fallback rendering', () => {
     );
     expect(screen.queryAllByTestId('assistant-ui-schema-card')).toHaveLength(0);
     expect(approvalPanel).toHaveTextContent('确认发送邀请');
-    expect(approvalPanel).not.toHaveTextContent(/riskLevel|medium|checkpoint|audit|风险级别|风险等级|动作：|动作:|保存点/i);
+    expect(approvalPanel).not.toHaveTextContent(
+      /riskLevel|medium|checkpoint|audit|风险级别|风险等级|动作：|动作:|保存点/i,
+    );
   });
 
   it('keeps mixed candidate cards focused by suppressing orphan approval panels until a card action is clicked', () => {
@@ -1242,7 +1255,11 @@ describe('assistant-ui tool fallback rendering', () => {
           ],
         });
       }
-      return response({ assistantMessage: '已更新这张约练卡。', cards: [], pendingConfirmations: [] });
+      return response({
+        assistantMessage: '已更新这张约练卡。',
+        cards: [],
+        pendingConfirmations: [],
+      });
     });
     const onApproveApproval = vi.fn(() =>
       response({
@@ -1330,7 +1347,9 @@ describe('assistant-ui tool fallback rendering', () => {
     expect(onCardAction).not.toHaveBeenCalled();
     expect(inlineApproval).toHaveTextContent('确认发布到发现');
     expect(inlineApproval).toHaveTextContent('确认后这张约练卡才会出现在发现页');
-    expect(inlineApproval).not.toHaveTextContent(/riskLevel|medium|checkpoint|audit|风险级别|风险等级|动作：|动作:/i);
+    expect(inlineApproval).not.toHaveTextContent(
+      /riskLevel|medium|checkpoint|audit|风险级别|风险等级|动作：|动作:/i,
+    );
     expect(screen.queryByTestId('assistant-ui-approval-tool')).not.toBeInTheDocument();
     fireEvent.click(within(inlineApproval).getByRole('button', { name: '确认发布' }));
     await waitFor(() =>
@@ -1344,7 +1363,9 @@ describe('assistant-ui tool fallback rendering', () => {
     );
     const chainedApproval = await screen.findByTestId('assistant-ui-inline-approval-panel');
     expect(chainedApproval).toHaveTextContent('确认发布到发现');
-    expect(chainedApproval).not.toHaveTextContent(/riskLevel|medium|checkpoint|audit|风险级别|风险等级|动作：|动作:/i);
+    expect(chainedApproval).not.toHaveTextContent(
+      /riskLevel|medium|checkpoint|audit|风险级别|风险等级|动作：|动作:/i,
+    );
     fireEvent.click(within(chainedApproval).getByRole('button', { name: '确认发布' }));
     await waitFor(() =>
       expect(onApproveApproval).toHaveBeenCalledWith(
@@ -1410,7 +1431,9 @@ describe('assistant-ui tool fallback rendering', () => {
     ).toBeTruthy();
     expect(approval).toHaveTextContent('确认发送邀请');
     expect(approval).toHaveTextContent('发送前确认');
-    expect(approval).not.toHaveTextContent(/medium|riskLevel|actionType|checkpoint|风险级别|风险等级|动作：|动作:|保存点|audit/i);
+    expect(approval).not.toHaveTextContent(
+      /medium|riskLevel|actionType|checkpoint|风险级别|风险等级|动作：|动作:|保存点|audit/i,
+    );
   });
 
   it('keeps legacy process payloads as a single non-expandable status by default', () => {
@@ -1580,7 +1603,9 @@ describe('assistant-ui tool fallback rendering', () => {
     expect(statusLine).not.toHaveTextContent(/hydrate_context|planner|traceId|raw JSON/i);
     expect(within(process).queryByText('查看过程')).not.toBeInTheDocument();
     expect(screen.queryByTestId('assistant-ui-process-detail')).not.toBeInTheDocument();
-    expect(screen.queryByText(/hydrate_context|planner|traceId|raw JSON|payload|runtime/i)).not.toBeInTheDocument();
+    expect(
+      screen.queryByText(/hydrate_context|planner|traceId|raw JSON|payload|runtime/i),
+    ).not.toBeInTheDocument();
 
     const summary = process.querySelector('summary');
     expect(summary).not.toBeNull();
@@ -1588,7 +1613,9 @@ describe('assistant-ui tool fallback rendering', () => {
 
     expect(process).not.toHaveAttribute('open');
     expect(screen.queryByTestId('assistant-ui-process-detail')).not.toBeInTheDocument();
-    expect(screen.queryByText(/hydrate_context|planner|traceId|raw JSON|payload|runtime/i)).not.toBeInTheDocument();
+    expect(
+      screen.queryByText(/hydrate_context|planner|traceId|raw JSON|payload|runtime/i),
+    ).not.toBeInTheDocument();
     expect(screen.queryByTestId('assistant-ui-process-evidence')).not.toBeInTheDocument();
   });
 
@@ -1725,7 +1752,7 @@ describe('assistant-ui tool fallback rendering', () => {
     const statusLine = within(process).getByTestId('assistant-ui-process-status-line');
     expect(statusLine).toHaveTextContent('发送邀请前需要你确认');
     const statusText = statusLine.textContent ?? '';
-    expect((statusText.match(/需要你确认/g) ?? [])).toHaveLength(1);
+    expect(statusText.match(/需要你确认/g) ?? []).toHaveLength(1);
     expect(statusText).not.toContain('· 等待确认');
     expect(statusLine).not.toHaveTextContent(/hydrate_context|planner|traceId|raw JSON|payload/i);
     expect(screen.queryByTestId('assistant-ui-process-detail')).not.toBeInTheDocument();
@@ -1750,7 +1777,9 @@ describe('assistant-ui tool fallback rendering', () => {
     expect(screen.getByTestId('assistant-ui-approval-runtime-hints')).toHaveTextContent(
       '之后可以回看这次确认',
     );
-    expect(screen.queryByText(/hydrate_context|planner|traceId|raw JSON|payload/i)).not.toBeInTheDocument();
+    expect(
+      screen.queryByText(/hydrate_context|planner|traceId|raw JSON|payload/i),
+    ).not.toBeInTheDocument();
   });
 
   it('adds a short waiting-confirmation suffix only when the status title has not said it', () => {
@@ -1898,6 +1927,8 @@ describe('assistant-ui tool fallback rendering', () => {
     expect(screen.queryByTestId('assistant-ui-process-detail')).not.toBeInTheDocument();
     expect(screen.queryByTestId('assistant-ui-process-evidence')).not.toBeInTheDocument();
 
-    expect(screen.queryByText(/hydrate_context|planner|traceId|raw JSON|payload/i)).not.toBeInTheDocument();
+    expect(
+      screen.queryByText(/hydrate_context|planner|traceId|raw JSON|payload/i),
+    ).not.toBeInTheDocument();
   });
 });

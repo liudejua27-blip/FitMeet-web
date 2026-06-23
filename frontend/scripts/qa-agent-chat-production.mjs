@@ -13,8 +13,8 @@ const apiBaseUrl = (
   apiBaseUrlArg ||
   `${baseUrl}/api`
 ).replace(/\/+$/, '');
-const email = process.env.FITMEET_AGENT_BROWSER_QA_EMAIL || process.env.AGENT_SMOKE_EMAIL || '';
-const password = process.env.FITMEET_AGENT_BROWSER_QA_PASSWORD || process.env.AGENT_SMOKE_PASSWORD || '';
+const email = process.env.FITMEET_AGENT_BROWSER_QA_EMAIL || '';
+const password = process.env.FITMEET_AGENT_BROWSER_QA_PASSWORD || '';
 const allowRemote = process.env.FITMEET_AGENT_BROWSER_QA_ALLOW_REMOTE === 'true';
 const runConversation = process.env.FITMEET_AGENT_BROWSER_QA_RUN_CONVERSATION !== 'false';
 const expectedReleaseCommit = process.env.EXPECTED_RELEASE_COMMIT || process.env.FITMEET_RELEASE_COMMIT || '';
@@ -462,7 +462,7 @@ async function assertAccountMenu(page, viewportName) {
   const menu = page.locator('[data-testid="assistant-ui-sidebar-account-menu"]').first();
   await menu.waitFor({ state: 'visible', timeout: 5_000 });
 
-  const requiredItems = ['人物画像', 'Life Graph', '匹配确认', 'Agent Inbox', '个人资料'];
+  const requiredItems = ['个人信息'];
   for (const item of requiredItems) {
     await page.getByRole('menuitem', { name: new RegExp(item) }).waitFor({
       state: 'visible',

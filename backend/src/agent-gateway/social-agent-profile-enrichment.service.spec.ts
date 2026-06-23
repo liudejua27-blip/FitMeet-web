@@ -110,8 +110,8 @@ describe('SocialAgentProfileEnrichmentService', () => {
     expect(taskRepo.save).toHaveBeenCalledWith(task);
   });
 
-  it('answers profile missing-field questions from the latest brain tool result', async () => {
-    const { service } = makeHarness();
+  it('answers profile missing-field questions with controlled completion prompts', async () => {
+    const { chatLlm, executor, service, taskRepo } = makeHarness();
     const task = makeTask();
     rememberSocialAgentConversationBrainToolResult(task, {
       name: SocialAgentToolName.GetMyProfile,
@@ -127,8 +127,66 @@ describe('SocialAgentProfileEnrichmentService', () => {
       buildMemoryContext: () => null,
     });
 
-    expect(result.assistantMessage).toContain('可约时间、边界要求');
+    expect(result.assistantMessage).toContain('可约时间');
+    expect(result.assistantMessage).toContain('安全边界');
+    expect(result.assistantMessage).toContain('所有问题都可以跳过');
+    expect(result.assistantMessage).toContain('暂不确定');
+    expect(result.assistantMessage).toContain('本次使用，不保存');
+    expect(result.assistantMessage).toContain('是否开始匹配');
+    expect(result.assistantMessage).toContain('不会直接搜索候选人');
     expect(result.profileUpdated).toBe(false);
+    expect(taskRepo.save).toHaveBeenCalledWith(task);
+    expect(executor.executeToolAction).not.toHaveBeenCalled();
+    expect(chatLlm.extractProfileFieldsWithLlm).not.toHaveBeenCalled();
+    expect(chatLlm.generateAgentBrainReplyWithSource).not.toHaveBeenCalled();
+    expect(task.memory).toMatchObject({
+      taskMemory: {
+        currentTask: {
+          objective: 'profile_completion',
+          waitingFor: 'profile_completion_answers',
+          awaitingSearchConfirmation: false,
+          shouldSearchNow: false,
+          lastCompletedStep: 'profile_completion_questions_asked',
+          state: 'profile_building',
+          stateReason: 'profile_detected',
+        },
+      },
+    });
+  });
+
+  it('starts profile completion mode without recommending people or saving fields', async () => {
+    const { chatLlm, executor, service } = makeHarness();
+    const task = makeTask();
+
+    const result = await service.handleTurn({
+      ownerUserId: 7,
+      task,
+      message: '帮我完善 AI 画像，问我几个问题',
+      intent: 'profile_enrichment_request',
+      buildMemoryContext: () => null,
+    });
+
+    expect(result).toMatchObject({
+      savedContext: true,
+      profileUpdated: false,
+      profileUpdateProposal: null,
+      assistantMessageSource: 'deterministic_route',
+      assistantStreamed: false,
+    });
+    expect(result.assistantMessage).toContain('5 项关键画像信息');
+    expect(result.assistantMessage).toContain('当前目标');
+    expect(result.assistantMessage).toContain('互动形式');
+    expect(result.assistantMessage).toContain('时间和地点范围');
+    expect(result.assistantMessage).toContain('活动偏好');
+    expect(result.assistantMessage).toContain('安全边界');
+    expect(result.assistantMessage).toContain('不会推荐具体人物');
+    expect(result.assistantMessage).toContain('不会替你执行外部动作');
+    expect(result.assistantMessage).not.toMatch(
+      /raw JSON|traceId|planner|system tag|prompt|邀请Ta|开场白|city:|interestTags/i,
+    );
+    expect(executor.executeToolAction).not.toHaveBeenCalled();
+    expect(chatLlm.extractProfileFieldsWithLlm).not.toHaveBeenCalled();
+    expect(chatLlm.generateAgentBrainReplyWithSource).not.toHaveBeenCalled();
   });
 
   it('does not block candidate search for optional intensity or safety boundary once core opportunity fields are present', async () => {
@@ -182,6 +240,9 @@ describe('SocialAgentProfileEnrichmentService', () => {
     );
     expect(result.profileUpdated).toBe(true);
     expect(result.assistantMessage).toContain('已帮你把刚才的信息写入 AI 画像');
+    expect(result.assistantMessage).toContain('城市');
+    expect(result.assistantMessage).toContain('兴趣和活动偏好');
+    expect(result.assistantMessage).not.toMatch(/city|interestTags/);
     expect(result.assistantMessageSource).toBe('fallback');
   });
 
@@ -384,6 +445,10 @@ describe('SocialAgentProfileEnrichmentService', () => {
       },
     });
     expect(result.assistantMessage).toContain('先不直接搜索候选人');
+    expect(result.assistantMessage).toContain('城市：青岛');
+    expect(result.assistantMessage).toContain('性别：男');
+    expect(result.assistantMessage).toContain('兴趣和活动偏好：跑步');
+    expect(result.assistantMessage).not.toMatch(/city:|gender:|interestTags:/);
   });
 
   it('skips LLM profile extraction when deterministic profile facts are sufficient', async () => {

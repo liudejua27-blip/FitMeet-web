@@ -12,17 +12,37 @@ const DEBUG_FIELD_NAMES = new Set([
   'agentTrace',
   'structuredIntent',
   'planner',
+  'plannerSource',
   'rawJson',
   'rawJSON',
   'raw',
+  'rawText',
   'debug',
   'toolCalls',
   'toolCall',
+  'toolCallId',
   'debugReasons',
   'events',
   'model',
   'stack',
+  'prompt',
+  'systemPrompt',
+  'instruction',
+  'knownTaskSlotConstraints',
+  'candidatePreferencePolicy',
+  'profileUsed',
+  'chatRun',
+  'chatRuns',
+  'visibleSteps',
+  'queuedRun',
+  'runId',
+  'replan',
+  'error',
 ]);
+const DEBUG_FIELD_NAME_PATTERN =
+  /(?:trace|structuredIntent|planner|rawJson|rawJSON|debug|toolCall|stack|prompt|systemPrompt|instruction|knownTaskSlotConstraints|candidatePreferencePolicy|chatRun|visibleSteps|queuedRun|replan)/i;
+const DEBUG_TEXT_PATTERN =
+  /\b(?:traceId|agentTrace|structuredIntent|planner|raw JSON|rawJson|tool_call|toolCall|toolCalls|stack trace|system prompt|internal runtime|database query|sql query)\b/i;
 
 @Injectable()
 export class AgentCardAssemblerService {
@@ -34,18 +54,28 @@ export class AgentCardAssemblerService {
 
   stripDebugFields(value: unknown): unknown {
     if (Array.isArray(value)) {
-      return value.map((item) => this.stripDebugFields(item));
+      return value
+        .map((item) => this.stripDebugFields(item))
+        .filter((item) => item !== undefined);
+    }
+    if (typeof value === 'string') {
+      return DEBUG_TEXT_PATTERN.test(value) ? undefined : value;
     }
     if (!value || typeof value !== 'object') return value;
 
     const clean: Record<string, unknown> = {};
     Object.entries(value as Record<string, unknown>).forEach(
       ([key, nested]) => {
-        if (DEBUG_FIELD_NAMES.has(key)) return;
-        clean[key] = this.stripDebugFields(nested);
+        if (this.isDebugFieldName(key)) return;
+        const next = this.stripDebugFields(nested);
+        if (next !== undefined) clean[key] = next;
       },
     );
     return clean;
+  }
+
+  private isDebugFieldName(key: string): boolean {
+    return DEBUG_FIELD_NAMES.has(key) || DEBUG_FIELD_NAME_PATTERN.test(key);
   }
 
   private normalizeCardActions(cards: FitMeetAlphaCard[]): FitMeetAlphaCard[] {
@@ -246,7 +276,8 @@ export class AgentCardAssemblerService {
   }
 
   private readScalar(value: unknown): string | null {
-    if (typeof value === 'number' && Number.isFinite(value)) return String(value);
+    if (typeof value === 'number' && Number.isFinite(value))
+      return String(value);
     if (typeof value === 'string' && value.trim()) return value.trim();
     return null;
   }

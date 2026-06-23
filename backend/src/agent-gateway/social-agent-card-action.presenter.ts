@@ -66,7 +66,10 @@ export function buildSocialAgentCandidateDetailCard(input: {
     ) || (targetUserId ? '这位用户' : '对方');
   const area =
     cleanDisplayText(
-      candidate.area ?? candidate.city ?? candidate.location ?? candidate.region,
+      candidate.area ??
+        candidate.city ??
+        candidate.location ??
+        candidate.region,
       '',
     ) || null;
   const time =
@@ -93,11 +96,11 @@ export function buildSocialAgentCandidateDetailCard(input: {
         candidate.message,
       '',
     ) || '你好，我看到我们有一些共同兴趣，想先轻松聊聊，看是否适合一起活动。';
-  const interests = stringArray(
-    candidate.interests ??
-      candidate.tags ??
-      candidate.sharedInterests ??
-      candidate.commonInterests,
+  const interests = firstStringArray(
+    candidate.sharedInterests,
+    candidate.commonInterests,
+    candidate.interests,
+    candidate.tags,
   );
   const reasons = stringArray(
     candidate.fitReasons ??
@@ -121,12 +124,15 @@ export function buildSocialAgentCandidateDetailCard(input: {
     subtitle:
       cleanDisplayText(candidate.subtitle ?? candidate.contextLine, '') ||
       '候选详情已展开',
-    avatarUrl: cleanDisplayText(candidate.avatarUrl ?? candidate.imageUrl, '') || null,
+    avatarUrl:
+      cleanDisplayText(candidate.avatarUrl ?? candidate.imageUrl, '') || null,
     score: number(candidate.score ?? candidate.matchScore) ?? null,
     summary,
     relationshipGoal:
-      cleanDisplayText(candidate.relationshipGoal ?? candidate.relationGoal, '') ||
-      null,
+      cleanDisplayText(
+        candidate.relationshipGoal ?? candidate.relationGoal,
+        '',
+      ) || null,
     idealType:
       cleanDisplayText(candidate.idealType ?? candidate.targetPreference, '') ||
       null,
@@ -136,7 +142,8 @@ export function buildSocialAgentCandidateDetailCard(input: {
     area,
     time,
     distanceLabel:
-      cleanDisplayText(candidate.distanceLabel ?? candidate.distance, '') || null,
+      cleanDisplayText(candidate.distanceLabel ?? candidate.distance, '') ||
+      null,
     interests,
     safetyBadges,
     reasons:
@@ -144,11 +151,15 @@ export function buildSocialAgentCandidateDetailCard(input: {
         ? reasons
         : [
             area ? `地点/区域接近：${area}` : null,
-            interests[0] ? `共同兴趣：${interests.slice(0, 2).join('、')}` : null,
+            interests[0]
+              ? `共同兴趣：${interests.slice(0, 2).join('、')}`
+              : null,
             '发送前会保留确认边界',
           ].filter(Boolean),
     explanationSteps: stringArray(candidate.explanationSteps).slice(0, 3),
-    trustSignals: stringArray(candidate.trustSignals ?? candidate.consentSignals),
+    trustSignals: stringArray(
+      candidate.trustSignals ?? candidate.consentSignals,
+    ),
     coldStartSignals: stringArray(candidate.coldStartSignals),
     reasonerSource: reasoningQuality.reasonerSource,
     reasoningConfidence: reasoningQuality.reasoningConfidence,
@@ -238,7 +249,7 @@ export function buildSocialAgentCandidateDetailCard(input: {
       },
       {
         id: `candidate_connect:${input.taskId}:${candidateIdentity}`,
-        label: '加好友并聊天',
+        label: '确认后邀请Ta',
         action: 'connect_candidate',
         schemaAction: 'candidate.connect',
         requiresConfirmation: true,
@@ -288,7 +299,7 @@ export function buildSocialAgentActivityPlanCard(input: {
       safetyBoundary: '公共场所见面，不共享精确位置。',
       checkinReminder: '活动开始前我会提醒你确认是否到达。',
       reviewPrompt: '活动结束后我会请你做一次简短评价，再决定是否写入画像。',
-      lifeGraphUpdatePreview: '完成后会把这次活动结果用于更新你的 Life Graph。',
+      lifeGraphUpdatePreview: '完成后会把这次活动结果用于更新你的长期偏好。',
       trustScoreUpdatePreview:
         '完成与评价会写入 trust score，用来提升后续推荐可信度。',
       opportunity: {
@@ -326,7 +337,8 @@ export function buildSocialAgentActivityPlanCard(input: {
           noPreciseLocation: true,
           safetyBoundary: '公共场所见面，不共享精确位置。',
           checkinReminder: '活动开始前我会提醒你确认是否到达。',
-          reviewPrompt: '活动结束后我会请你做一次简短评价，再决定是否写入画像。',
+          reviewPrompt:
+            '活动结束后我会请你做一次简短评价，再决定是否写入画像。',
           ...input.payload,
         },
       },
@@ -409,7 +421,10 @@ export function buildSocialAgentCheckinCard(input: {
         title: '约练进展',
         description: '活动计划已创建，开始前先确认到达和安全边界。',
         nextAction: '开始前确认是否到达；不会共享精确位置。',
-        steps: socialAgentMeetLoopTimelineSteps('activity_confirmed', '确认到达后继续'),
+        steps: socialAgentMeetLoopTimelineSteps(
+          'activity_confirmed',
+          '确认到达后继续',
+        ),
       },
       publicPlaceOnly: true,
       noPreciseLocation: true,
@@ -461,7 +476,10 @@ export function buildSocialAgentActivityCompletionCard(input: {
         title: '约练进展',
         description: '已记录到达，活动结束后可确认完成并留下评价。',
         nextAction: '活动结束后确认是否完成。',
-        steps: socialAgentMeetLoopTimelineSteps('activity_checked_in', '活动结束后确认完成'),
+        steps: socialAgentMeetLoopTimelineSteps(
+          'activity_checked_in',
+          '活动结束后确认完成',
+        ),
       },
       checkedInAt: input.checkedInAt,
     },
@@ -495,7 +513,7 @@ export function buildSocialAgentReviewCard(input: {
     schemaVersion: 'fitmeet.tool-ui.v1',
     schemaType: 'meet_loop.timeline',
     title: '这次约练完成了吗？我可以帮你记录一个简短评价。',
-    body: '评价会帮助我调整后续推荐，也会用于更新你的 Life Graph 和履约可信度。',
+    body: '评价会帮助我调整后续推荐，也会用于更新你的长期偏好和履约可信度。',
     status: 'ready',
     data: {
       taskId: input.taskId,
@@ -510,7 +528,10 @@ export function buildSocialAgentReviewCard(input: {
         title: '约练进展',
         description: '活动已进入评价阶段，确认后才会写入长期画像。',
         nextAction: '提交评价后，我会给出画像更新建议。',
-        steps: socialAgentMeetLoopTimelineSteps('activity_completed', '提交评价后进入画像确认'),
+        steps: socialAgentMeetLoopTimelineSteps(
+          'activity_completed',
+          '提交评价后进入画像确认',
+        ),
       },
       defaultRating: 5,
       lifeGraphUpdatePreview:
@@ -636,7 +657,10 @@ function meetLoopTimelineActions(input: {
   stage: string;
   payload: Record<string, unknown>;
 }): FitMeetAlphaCardAction[] {
-  const counterpartIntent = cleanDisplayText(input.payload.counterpartIntent, '');
+  const counterpartIntent = cleanDisplayText(
+    input.payload.counterpartIntent,
+    '',
+  );
   const stage = cleanDisplayText(input.stage, '');
   const nextStepText = cleanDisplayText(
     input.payload.nextSafeStep ??
@@ -714,7 +738,9 @@ function meetLoopTimelineActions(input: {
   }
   if (
     counterpartIntent === 'accepted' &&
-    /activity|invite_activity|create_activity|offline|约练|活动|创建/.test(nextStepText)
+    /activity|invite_activity|create_activity|offline|约练|活动|创建/.test(
+      nextStepText,
+    )
   ) {
     return [
       {
@@ -734,10 +760,15 @@ function meetLoopTimelineActions(input: {
       meetLoopRescheduleAction(basePayload),
     ];
   }
-  return [meetLoopResumeAction(basePayload), meetLoopRescheduleAction(basePayload)];
+  return [
+    meetLoopResumeAction(basePayload),
+    meetLoopRescheduleAction(basePayload),
+  ];
 }
 
-function meetLoopResumeAction(payload: Record<string, unknown>): FitMeetAlphaCardAction {
+function meetLoopResumeAction(
+  payload: Record<string, unknown>,
+): FitMeetAlphaCardAction {
   return {
     id: 'meet_loop_resume',
     label: '继续推进',
@@ -749,7 +780,9 @@ function meetLoopResumeAction(payload: Record<string, unknown>): FitMeetAlphaCar
   };
 }
 
-function meetLoopRescheduleAction(payload: Record<string, unknown>): FitMeetAlphaCardAction {
+function meetLoopRescheduleAction(
+  payload: Record<string, unknown>,
+): FitMeetAlphaCardAction {
   return {
     id: 'meet_loop_reschedule',
     label: '调整时间',
@@ -783,7 +816,7 @@ export function buildSocialAgentLifeGraphUpdateCard(input: {
     schemaType: 'life_graph.diff',
     title: isCounterpartReply
       ? '这次回应可以作为一条弱画像信号。'
-      : '这次约练已经记录到你的 Life Graph。',
+      : '这次约练已经记录到你的长期偏好。',
     body: isCounterpartReply
       ? '如果你愿意，我会把这次低压力开场的回应记录为脱敏互动信号，用来优化后续推荐。'
       : '我会用这次真实完成和评价，优化之后推荐给你的运动搭子和活动时间。',
@@ -800,9 +833,7 @@ export function buildSocialAgentLifeGraphUpdateCard(input: {
       loopStage,
       review: { rating: input.rating, comment: input.comment },
       diff: {
-        title: isCounterpartReply
-          ? '低压力开场互动信号'
-          : '约练偏好更新建议',
+        title: isCounterpartReply ? '低压力开场互动信号' : '约练偏好更新建议',
         description: isCounterpartReply
           ? '对方已经回复，说明这类低压力、先站内聊的开场方式对你当前目标有效。'
           : input.positive
@@ -821,9 +852,10 @@ export function buildSocialAgentLifeGraphUpdateCard(input: {
           : ['运动社交偏好', '约练节奏', '履约可信度'],
         conflicts: [],
         sensitivityLevel: 'medium',
-        confirmationBoundary: '这只是画像更新建议；你可以保留、撤回或选择不用于推荐。',
+        confirmationBoundary:
+          '这只是画像更新建议；你可以保留、撤回或选择不用于推荐。',
         privacyBoundary: '不会写入精确位置或私聊内容。',
-        revokeHint: '确认后仍可在 Life Graph 中撤回或纠正。',
+        revokeHint: '确认后仍可在个人信息里撤回或纠正。',
         sourceSignals: isCounterpartReply
           ? ['对方已回复', '低压力开场有效', '先站内聊边界']
           : ['本次约练完成状态', '你的评价反馈'],
@@ -944,7 +976,7 @@ export function buildSocialAgentProofSubmittedCard(input: {
     schemaVersion: 'fitmeet.tool-ui.v1',
     schemaType: 'social_match.activity',
     title: '活动证明已提交',
-    body: '证明已进入待确认状态。对方确认后，我会继续更新活动履约状态和 Life Graph 信号。',
+    body: '证明已进入待确认状态。对方确认后，我会继续更新活动履约状态和长期偏好信号。',
     status: 'ready',
     data: {
       taskId: input.taskId,
@@ -1044,7 +1076,7 @@ export function buildSocialAgentActivityDetailCard(input: {
         location: cleanDisplayText(activity.locationName, ''),
         time: cleanDisplayText(activity.startTime, ''),
         safetyBadges: [
-          Boolean(activity.proofRequired) ? '需要履约证明' : '无需额外证明',
+          activity.proofRequired ? '需要履约证明' : '无需额外证明',
           proofStatus,
         ],
         safetyBoundary:
@@ -1119,7 +1151,7 @@ function socialAgentMeetLoopTimelineSteps(
     {
       key: 'life_graph',
       label: '回写画像',
-      description: '只把你确认的信息写回 Life Graph。',
+      description: '只把你确认的信息写回个人信息。',
     },
   ];
   const activeIndex = socialAgentMeetLoopStageIndex(stage);
@@ -1146,7 +1178,11 @@ function socialAgentMeetLoopStageIndex(stage: string) {
   const text = stage.toLowerCase();
   if (/life|trust/.test(text)) return 6;
   if (/review|complete|completed/.test(text)) return 5;
-  if (/met|meet|offline|checkin|check_in|checked_in|arrived|到达|签到|见面/.test(text))
+  if (
+    /met|meet|offline|checkin|check_in|checked_in|arrived|到达|签到|见面/.test(
+      text,
+    )
+  )
     return 4;
   if (/confirm/.test(text)) return 3;
   if (/reschedule|modify/.test(text)) return 2;
@@ -1181,6 +1217,14 @@ function stringArray(value: unknown): string[] {
     .slice(0, 6);
 }
 
+function firstStringArray(...values: unknown[]): string[] {
+  for (const value of values) {
+    const items = stringArray(value);
+    if (items.length > 0) return items;
+  }
+  return [];
+}
+
 function number(value: unknown): number | null {
   const next =
     typeof value === 'number'
@@ -1204,7 +1248,9 @@ function candidateReasoningQuality(candidate: Record<string, unknown>): {
     degradationReason?: 'empty_response' | 'model_unavailable';
   };
 } {
-  const nested = record(candidate.matchReasoner ?? candidate.candidateExplanation);
+  const nested = record(
+    candidate.matchReasoner ?? candidate.candidateExplanation,
+  );
   const reasonerSource = reasonerSourceValue(
     candidate.reasonerSource ??
       candidate.explanationSource ??
@@ -1251,7 +1297,8 @@ function candidateReasoningQuality(candidate: Record<string, unknown>): {
 function candidateActionSnapshot(candidate: Record<string, unknown>) {
   const reasoningQuality = candidateReasoningQuality(candidate);
   return {
-    targetUserId: candidate.targetUserId ?? candidate.candidateUserId ?? candidate.userId,
+    targetUserId:
+      candidate.targetUserId ?? candidate.candidateUserId ?? candidate.userId,
     candidateUserId: candidate.candidateUserId ?? candidate.userId,
     userId: candidate.userId,
     candidateRecordId: candidate.candidateRecordId ?? null,
@@ -1263,12 +1310,15 @@ function candidateActionSnapshot(candidate: Record<string, unknown>) {
       cleanDisplayText(candidate.nickname, '') ||
       cleanDisplayText(candidate.name, '') ||
       '候选人',
-    avatarUrl: cleanDisplayText(candidate.avatarUrl ?? candidate.imageUrl, '') || null,
+    avatarUrl:
+      cleanDisplayText(candidate.avatarUrl ?? candidate.imageUrl, '') || null,
     city: cleanDisplayText(candidate.city, '') || null,
     score: candidate.score ?? candidate.matchScore ?? null,
     matchScore: candidate.matchScore ?? candidate.score ?? null,
     commonTags: stringArray(candidate.commonTags).slice(0, 6),
-    matchReasons: stringArray(candidate.matchReasons ?? candidate.reasons).slice(0, 6),
+    matchReasons: stringArray(
+      candidate.matchReasons ?? candidate.reasons,
+    ).slice(0, 6),
     suggestedOpener:
       cleanDisplayText(
         candidate.suggestedOpener ??
@@ -1295,7 +1345,9 @@ function record(value: unknown): Record<string, unknown> {
     : {};
 }
 
-function reasonerSourceValue(value: unknown): 'deepseek' | 'fallback' | undefined {
+function reasonerSourceValue(
+  value: unknown,
+): 'deepseek' | 'fallback' | undefined {
   return value === 'deepseek' || value === 'fallback' ? value : undefined;
 }
 
@@ -1463,9 +1515,9 @@ export function messageForSocialAgentSchemaAction(
     case 'review.submit':
       return '提交活动评价';
     case 'life_graph.accept_update':
-      return '确认更新 Life Graph';
+      return '确认更新画像';
     case 'life_graph.reject_update':
-      return '不要更新 Life Graph';
+      return '不要更新画像';
     case 'meet_loop.resume':
       return '继续推进邀约';
     case 'meet_loop.reschedule':

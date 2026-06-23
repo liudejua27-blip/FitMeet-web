@@ -18,6 +18,11 @@ export type SocialAgentReminderTopic =
   | 'life_graph';
 
 export type SocialAgentReminderTone = 'gentle' | 'direct' | 'quiet';
+export type SocialAgentReminderFrequency =
+  | 'realtime'
+  | 'daily'
+  | 'weekly'
+  | 'manual';
 
 export type SocialAgentReminderStatus =
   | 'suggested'
@@ -43,11 +48,14 @@ export class SocialAgentReminderPreference {
   @Column({ default: false })
   enabled!: boolean;
 
-  @Column({ type: 'jsonb', default: () => "'[\"friendship\", \"fitness_partner\", \"activity\"]'" })
+  @Column({
+    type: 'jsonb',
+    default: () => '\'["friendship", "fitness_partner", "activity"]\'',
+  })
   topics!: SocialAgentReminderTopic[];
 
   @Column({ type: 'varchar', length: 32, default: 'weekly' })
-  frequency!: 'daily' | 'weekly' | 'manual';
+  frequency!: SocialAgentReminderFrequency;
 
   @Column({ type: 'varchar', length: 16, default: '09:00' })
   quietStart!: string;

@@ -19,7 +19,7 @@ import type {
   UserFacingAgentResponse,
 } from '../../api/socialAgentApi';
 import { AssistantShell } from '../assistant-ui/assistant-shell';
-import { requestAssistantComposerFocus } from '../assistant-ui/composer';
+import { requestAssistantComposerFocus } from '../assistant-ui/composer-focus';
 import {
   FitMeetToolUIActionsProvider,
   type FitMeetToolActionInput,
@@ -237,6 +237,7 @@ function FitMeetAssistantRuntimeProvider({
 }
 
 export function FitMeetAssistantUI(props: FitMeetAssistantUIProps) {
+  const { onNewConversation } = props;
   const {
     onApproveApproval,
     onForkState,
@@ -294,9 +295,9 @@ export function FitMeetAssistantUI(props: FitMeetAssistantUIProps) {
     requestAssistantComposerFocus();
   }, []);
   const handleNewConversation = useCallback(() => {
-    props.onNewConversation();
+    onNewConversation();
     focusComposerInputAfterNewConversation();
-  }, [focusComposerInputAfterNewConversation, props.onNewConversation]);
+  }, [focusComposerInputAfterNewConversation, onNewConversation]);
 
   return (
     <FitMeetAssistantRuntimeProvider
@@ -425,10 +426,8 @@ function convertFitMeetMessage(
       ? assistantCardsForResult(message.result)
       : [];
   const pendingConfirmations = message.result?.pendingConfirmations ?? [];
-  const {
-    cards: assistantCardsWithInlineApprovals,
-    standaloneConfirmations,
-  } = attachPendingConfirmationsToAssistantCards(assistantCards, pendingConfirmations);
+  const { cards: assistantCardsWithInlineApprovals, standaloneConfirmations } =
+    attachPendingConfirmationsToAssistantCards(assistantCards, pendingConfirmations);
   const visibleProcessSteps = compactAssistantProcessSteps(steps);
   const checkpointRuntimeSteps = processStepsFromRuntime(message.result?.runtime, message.content);
   const resultProcessSteps = processStepsFromResult(message.result);
@@ -440,10 +439,9 @@ function convertFitMeetMessage(
         : checkpointRuntimeSteps.length > 0
           ? checkpointRuntimeSteps
           : resultProcessSteps;
-  const processHistorySteps =
-    steps.some((step) => step.status !== 'pending')
-      ? compactAssistantProcessHistorySteps(steps)
-      : runtimeProcessSteps;
+  const processHistorySteps = steps.some((step) => step.status !== 'pending')
+    ? compactAssistantProcessHistorySteps(steps)
+    : runtimeProcessSteps;
   const visibleProcessSummary = visibleProcessSummaryForMessage(
     message,
     visibleSummaryFromProcessStep(primaryVisibleProcessStep(runtimeProcessSteps)),
@@ -488,11 +486,7 @@ function convertFitMeetMessage(
       },
     });
   }
-  if (
-    message.role === 'assistant' &&
-    message.result &&
-    standaloneConfirmations.length > 0
-  ) {
+  if (message.role === 'assistant' && message.result && standaloneConfirmations.length > 0) {
     content.push({
       type: 'data',
       name: 'fitmeet-approval',
@@ -626,9 +620,7 @@ function hasActionableProcessSurface(
   return steps.some((step) => {
     if (step.status === 'waiting' || step.status === 'error') return true;
     const processType =
-      typeof step.metadata?.processType === 'string'
-        ? step.metadata.processType
-        : step.processType;
+      typeof step.metadata?.processType === 'string' ? step.metadata.processType : step.processType;
     return (
       processType === 'approval' ||
       step.metadata?.pendingApproval === true ||
@@ -871,10 +863,9 @@ function processStepsFromRuntime(
   const stepId = stringFromUnknown(resumeCursor?.stepId) ?? 'checkpoint';
   const retryable = checkpointAction === 'retry';
   const label = retryable ? '刚才连接不稳' : '可以继续处理';
-  const detail =
-    retryable
-      ? '我保留了这段需求，可以从当前进度继续。'
-      : '可以重新整理这一段，或换一种方案继续。';
+  const detail = retryable
+    ? '我保留了这段需求，可以从当前进度继续。'
+    : '可以重新整理这一段，或换一种方案继续。';
   return [
     {
       id: stepId,
@@ -1012,8 +1003,7 @@ export function attachPendingConfirmationsToAssistantCards(
       .map((confirmation, index) => ({ confirmation, index }))
       .filter(
         ({ confirmation, index }) =>
-          !used.has(index) &&
-          confirmationCanLiveInsideCard(card, confirmation, cards),
+          !used.has(index) && confirmationCanLiveInsideCard(card, confirmation, cards),
       );
     if (matches.length === 0) return card;
 
@@ -1028,9 +1018,7 @@ export function attachPendingConfirmationsToAssistantCards(
         });
         return out;
       },
-      isRecord(data.inlineApprovalConfirmations)
-        ? { ...data.inlineApprovalConfirmations }
-        : {},
+      isRecord(data.inlineApprovalConfirmations) ? { ...data.inlineApprovalConfirmations } : {},
     );
     const firstInlineApproval = Object.values(inlineApprovalConfirmations)[0];
     return {
@@ -1171,26 +1159,26 @@ function confirmationCanLiveInsideCard(
     }
     if (cardSharesConfirmationIdentity(card, confirmation)) return true;
     if (cardTextHints(card).some((hint) => text.includes(hint))) return true;
-    return allCards.filter((item) => schemaTypeFromToolCard(item) === 'social_match.candidate')
-      .length === 1;
+    return (
+      allCards.filter((item) => schemaTypeFromToolCard(item) === 'social_match.candidate')
+        .length === 1
+    );
   }
   if (schemaType === 'social_match.activity') {
     if (
-      !/publish|social_request|activity|meet|create|location|发现|发布|约练|活动|位置/.test(
-        text,
-      )
+      !/publish|social_request|activity|meet|create|location|发现|发布|约练|活动|位置/.test(text)
     ) {
       return false;
     }
     if (cardSharesConfirmationIdentity(card, confirmation)) return true;
     if (cardTextHints(card).some((hint) => text.includes(hint))) return true;
-    return allCards.filter((item) => schemaTypeFromToolCard(item) === 'social_match.activity')
-      .length === 1;
+    return (
+      allCards.filter((item) => schemaTypeFromToolCard(item) === 'social_match.activity').length ===
+      1
+    );
   }
   if (schemaType === 'meet_loop.timeline') {
-    return /invite|message|connect|activity|meet|邀请|发送|连接|约练|改期/.test(
-      text,
-    );
+    return /invite|message|connect|activity|meet|邀请|发送|连接|约练|改期/.test(text);
   }
   if (schemaType === 'safety.approval') return true;
   return false;

@@ -7,7 +7,7 @@ export type SocialCodexRuntimeIdentity = {
    * Long-lived chat surface. A thread can contain many messages and can be
    * rebound to a task once a social/meet goal emerges.
    */
-  threadId: SocialCodexThreadId | string;
+  threadId: string;
   /**
    * FitMeet social/meet goal. Null means ordinary conversation without an
    * executable social task yet.
@@ -54,7 +54,9 @@ export type SocialCodexSessionModel = {
   latestRunId: string | null;
 };
 
-export function socialCodexThreadIdForTask(taskId: number): SocialCodexThreadId {
+export function socialCodexThreadIdForTask(
+  taskId: number,
+): SocialCodexThreadId {
   const normalized = normalizePositiveInteger(taskId);
   if (!normalized) {
     throw new Error('Social Codex thread id requires a positive task id.');

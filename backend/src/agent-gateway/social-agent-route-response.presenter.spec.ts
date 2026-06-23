@@ -247,7 +247,7 @@ describe('social-agent-route-response.presenter', () => {
     expect(calorieReply).toContain('非医疗参考');
   });
 
-  it('answers extended Math Agent calculations deterministically', () => {
+  it('answers extended Agent Brain calculations deterministically', () => {
     const bmiReply = socialAgentAssistantMessageForRoute({
       route: route({ intent: 'fitness_math' }),
       task: { id: 105, memory: {} } as unknown as AgentTask,

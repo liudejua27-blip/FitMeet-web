@@ -104,10 +104,6 @@ import {
   scorePublicIntentSuspicion,
 } from './public-social-intent.helpers';
 import {
-  buildSocialSkillsManifest,
-  buildSocialSkillsOpenApi,
-} from './agent-social-skills.contract';
-import {
   buildLegacyAgentActionLogInput,
   numberOrNull,
 } from './agent-gateway-legacy-log.mapper';
@@ -359,7 +355,7 @@ export class AgentGatewayService {
     const existing = await this.connRepo.findOne({
       where: {
         userId,
-        agentName: KnownAgent.OpenClaw,
+        agentName: KnownAgent.FitMeetAgent,
         status: ConnectionStatus.Active,
       },
       order: { createdAt: 'DESC' },
@@ -399,8 +395,8 @@ export class AgentGatewayService {
 
         const conn = connRepo.create({
           userId,
-          agentName: KnownAgent.OpenClaw,
-          agentDisplayName: 'OpenClaw Personal Token',
+          agentName: KnownAgent.FitMeetAgent,
+          agentDisplayName: 'FitMeet Agent',
           agentWebhookUrl: null,
           permissionLevel: AgentPermissionLevel.Open,
           dailyActionLimit: 500,
@@ -413,7 +409,7 @@ export class AgentGatewayService {
         const savedDelegateProfile =
           await this.ensureAiDelegateProfileForPersonalToken(
             userId,
-            user.name || 'OpenClaw',
+            user.name || 'FitMeet Agent',
             delegateProfileRepo,
           );
         await this.grantConnectionPermissions(savedConn.id, actions, permRepo);
@@ -456,7 +452,7 @@ export class AgentGatewayService {
       grantedActions: actions,
       mode: 'authorized',
       message:
-        'Store this token in OpenClaw as FITMEET_AGENT_TOKEN. It will not be shown again.',
+        'Store this token securely as FITMEET_AGENT_TOKEN. It will not be shown again.',
     };
   }
 
@@ -465,7 +461,7 @@ export class AgentGatewayService {
     if (!user) throw new NotFoundException('User not found');
 
     const connections = await this.findConnectionSummaries(userId, {
-      agentName: KnownAgent.OpenClaw,
+      agentName: KnownAgent.FitMeetAgent,
       status: ConnectionStatus.Active,
       take: 5,
     });
@@ -534,14 +530,14 @@ export class AgentGatewayService {
     };
   }
 
-  async getOpenClawSetupStatus(
+  async getFitMeetAgentSetupStatus(
     userId: number,
     subconsciousLoopStatus?: Record<string, unknown>,
   ) {
     const connections = await this.connRepo.find({
       where: {
         userId,
-        agentName: KnownAgent.OpenClaw,
+        agentName: KnownAgent.FitMeetAgent,
         status: ConnectionStatus.Active,
       },
       order: { updatedAt: 'DESC' },
@@ -720,8 +716,8 @@ export class AgentGatewayService {
 
   private providerFromKnownAgent(agentName: KnownAgent | string) {
     switch (String(agentName)) {
-      case 'openclaw':
-        return AgentProvider.OpenClaw;
+      case 'fitmeet_agent':
+        return AgentProvider.FitMeetAgent;
       case 'codex':
         return AgentProvider.Codex;
       case 'qclaw':
@@ -758,14 +754,6 @@ export class AgentGatewayService {
       lastActiveAt: connection.lastActiveAt,
       createdAt: connection.createdAt,
     };
-  }
-
-  getSocialSkillsOpenApi() {
-    return buildSocialSkillsOpenApi();
-  }
-
-  getSkillsManifest(conn: AgentConnection) {
-    return buildSocialSkillsManifest(conn);
   }
 
   // ───────────────────────────────────────────────
@@ -832,7 +820,7 @@ export class AgentGatewayService {
         id: `public_${crypto.randomUUID()}`,
         userId: null,
         linkedSocialRequestId: null,
-        source: 'public_social_skills',
+        source: 'public_intent',
         requestType: sanitizedDto.requestType.trim(),
         title:
           sanitizedDto.title?.trim() ||
@@ -860,7 +848,7 @@ export class AgentGatewayService {
             ? SocialRequestStatus.Matched
             : SocialRequestStatus.Searching,
         metadata: {
-          source: 'public_social_skills',
+          source: 'public_intent',
           ipBucket: hashPublicIntentBucket(normalizePublicIntentIp(meta)),
           deviceBucket: hashPublicIntentBucket(
             normalizePublicIntentHeader(meta.deviceId) ||
@@ -945,6 +933,8 @@ export class AgentGatewayService {
           OR LOWER(intent.city) LIKE LOWER(:q)
           OR LOWER(intent.loc) LIKE LOWER(:q)
           OR LOWER(intent.requestType) LIKE LOWER(:q)
+          OR LOWER(CAST(intent.interestTags AS TEXT)) LIKE LOWER(:q)
+          OR LOWER(CAST(intent.filters AS TEXT)) LIKE LOWER(:q)
         )`,
         { q: `%${normalized.q}%` },
       );
@@ -1106,7 +1096,7 @@ export class AgentGatewayService {
         status: 'candidate_rejected',
         requestId,
         candidateUserId: dto.candidateUserId,
-        nextStep: 'openclaw_may_present_another_fitmeet_candidate',
+        nextStep: 'fitmeet_agent_may_present_another_fitmeet_candidate',
       };
     }
 
@@ -1162,7 +1152,10 @@ export class AgentGatewayService {
         ownerUserId: conn.userId,
         actorUserId: conn.userId,
         metadata: {
-          source: String(conn.agentName) === 'openclaw' ? 'openclaw' : 'agent',
+          source:
+            String(conn.agentName) === 'fitmeet_agent'
+              ? 'fitmeet_agent'
+              : 'agent',
           requestId: request.id,
         },
       },
@@ -1179,7 +1172,10 @@ export class AgentGatewayService {
         ownerUserId: conn.userId,
         actorUserId: conn.userId,
         metadata: {
-          source: String(conn.agentName) === 'openclaw' ? 'openclaw' : 'agent',
+          source:
+            String(conn.agentName) === 'fitmeet_agent'
+              ? 'fitmeet_agent'
+              : 'agent',
           actorType: 'agent',
           actorUserId: conn.userId,
           agentConnectionId: conn.id,
@@ -1861,7 +1857,7 @@ export class AgentGatewayService {
     };
 
     for (const targetConn of targetConnections) {
-      await this.messagesService.createAgentInboxEvent({
+      await this.messagesService.createAgentMessageEvent({
         agentConnectionId: targetConn.id,
         ownerUserId: input.targetUserId,
         eventType: 'contact.request.received',

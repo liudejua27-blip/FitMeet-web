@@ -125,14 +125,14 @@ export class SceneRiskPolicyService {
       riskLevel = 'critical';
       blockedActions.push('auto_execute', 'precise_location');
       safetyPrompts.push(
-        '你的 Life Graph 不允许共享精确定位，Agent 不能自动发送位置。',
+        '你的安全边界不允许共享精确定位，Agent 不能自动发送位置。',
       );
     }
 
     if (safetySignals.publicPlaceOnly && actionType === 'offline_meeting') {
       riskLevel = this.maxRisk(riskLevel, 'high');
       safetyPrompts.push(
-        '你的 Life Graph 设置了公共场所优先，第一次见面必须选择公开、人多、好离开的地点。',
+        '你的安全边界设置了公共场所优先，第一次见面必须选择公开、人多、好离开的地点。',
       );
     }
 
@@ -146,7 +146,7 @@ export class SceneRiskPolicyService {
     ) {
       riskLevel = this.maxRisk(riskLevel, 'high');
       safetyPrompts.push(
-        '你的 Life Graph 显示不接受夜间活动，夜间约见需要高风险提醒并建议改到白天。',
+        '你的安全边界显示不接受夜间活动，夜间约见需要高风险提醒并建议改到白天。',
       );
     }
 
@@ -156,7 +156,7 @@ export class SceneRiskPolicyService {
     ) {
       riskLevel = this.maxRisk(riskLevel, 'medium');
       safetyPrompts.push(
-        '你的 Life Graph 要求严格确认，所有关键社交动作都需要进入待确认。',
+        '你的安全设置要求严格确认，所有关键社交动作都需要先确认。',
       );
     }
 

@@ -34,7 +34,7 @@ describe('toUserFacingAgentResponse', () => {
         source: 'rules',
         action: 'queue_search',
         taskId: 101,
-        assistantMessage: '我会先结合你的 Life Graph，再筛选合适的人。',
+        assistantMessage: '我会先结合你的长期偏好，再筛选合适的人。',
         savedContext: true,
         profileUpdated: false,
         shouldQueueRun: true,
@@ -94,7 +94,7 @@ describe('toUserFacingAgentResponse', () => {
     expect(response).toMatchObject({
       taskId: 101,
       threadId: 'agent-task:101',
-      assistantMessage: '我会先结合你的 Life Graph，再筛选合适的人。',
+      assistantMessage: '我会先结合你的长期偏好，再筛选合适的人。',
       lightStatus: '正在筛选公开可发现的人',
       pendingConfirmations: [],
       permissionMode: AgentTaskPermissionMode.Confirm,
@@ -321,7 +321,8 @@ describe('toUserFacingAgentResponse', () => {
     expect(response.recoveryNotice).toMatchObject({
       kind: 'timeout',
       title: '这段需求还在',
-      message: '刚才处理比平时久一点，可以继续处理；不会重复执行已确认的高风险动作。',
+      message:
+        '刚才处理比平时久一点，可以继续处理；不会重复执行已确认的高风险动作。',
       retryable: true,
       source: 'stream_error',
     });
@@ -519,9 +520,25 @@ describe('toUserFacingAgentResponse', () => {
               details: ['只用于消息内展示', '不触发社交工具'],
               traceId: 'trace-generic',
               planner: 'hidden planner',
+              plannerSource: 'deepseek planner',
+              knownTaskSlotConstraints: {
+                instruction: 'planner/router must keep this internal',
+              },
               rawJson: { debug: true },
             },
-            actions: [],
+            actions: [
+              {
+                id: 'safe_action',
+                label: '继续',
+                action: 'see_more',
+                requiresConfirmation: false,
+                payload: {
+                  taskId: 101,
+                  toolCallId: 'hidden-call',
+                  safeCopy: '可以继续查看',
+                },
+              },
+            ],
           },
         ],
         safety: {
@@ -549,7 +566,11 @@ describe('toUserFacingAgentResponse', () => {
     const serialized = JSON.stringify(response);
     expect(serialized).not.toContain('trace-generic');
     expect(serialized).not.toContain('planner');
+    expect(serialized).not.toContain('toolCallId');
+    expect(serialized).not.toContain('hidden-call');
+    expect(serialized).not.toContain('knownTaskSlotConstraints');
     expect(serialized).not.toContain('rawJson');
+    expect(serialized).toContain('可以继续查看');
   });
 
   it('maps pending approvals to natural pending confirmations', () => {
@@ -658,9 +679,15 @@ describe('toUserFacingAgentResponse', () => {
         expiresAt: null,
       },
     ]);
-    expect(JSON.stringify(response.pendingConfirmations)).not.toContain('trace-hidden');
-    expect(JSON.stringify(response.pendingConfirmations)).not.toContain('rawJson');
-    expect(JSON.stringify(response.pendingConfirmations)).not.toContain('这条私信');
+    expect(JSON.stringify(response.pendingConfirmations)).not.toContain(
+      'trace-hidden',
+    );
+    expect(JSON.stringify(response.pendingConfirmations)).not.toContain(
+      'rawJson',
+    );
+    expect(JSON.stringify(response.pendingConfirmations)).not.toContain(
+      '这条私信',
+    );
   });
 
   it('filters low-risk card actions out of user-facing pending confirmations', () => {
@@ -905,7 +932,7 @@ describe('toUserFacingAgentResponse', () => {
         source: 'rules',
         action: 'answer',
         taskId: 101,
-        assistantMessage: '我识别到以下画像信息，是否保存到你的 Life Graph？',
+        assistantMessage: '我识别到以下画像信息，是否保存到你的个人信息？',
         savedContext: true,
         profileUpdated: false,
         shouldQueueRun: false,
@@ -956,12 +983,12 @@ describe('toUserFacingAgentResponse', () => {
           taskId: 101,
           proposalId: 77,
           proposedFields: ['lifestyle.availableTimes: 周末下午'],
-          confirmationBoundary: '确认前不会写入长期 Life Graph。',
+          confirmationBoundary: '确认前不会写入长期偏好。',
           privacyBoundary: '仅保存脱敏画像偏好，不保存私聊原文或精确敏感信息。',
           revokeHint: '确认后仍可在 Life Graph 中查看、纠正或撤回。',
           diff: expect.objectContaining({
-            description: '只在你确认后写入长期 Life Graph。',
-            confirmationBoundary: '确认前不会写入长期 Life Graph。',
+            description: '只在你确认后写入长期偏好。',
+            confirmationBoundary: '确认前不会写入长期偏好。',
             privacyBoundary:
               '仅保存脱敏画像偏好，不保存私聊原文或精确敏感信息。',
             sourceSignals: ['用户提到周末下午一般有空'],
@@ -1050,8 +1077,7 @@ describe('toUserFacingAgentResponse', () => {
               rawMessage: 'Sure, where should we meet?',
             },
           ],
-          confirmationBoundary:
-            '这只是画像更新建议，确认前不会写入长期 Life Graph。',
+          confirmationBoundary: '这只是画像更新建议，确认前不会写入长期偏好。',
           privacyBoundary:
             '不保存对方私聊原文，只保存脱敏后的互动信号和下一步建议。',
           revokeHint: '确认后仍可在 Life Graph 中撤回这次影响。',
@@ -1087,8 +1113,7 @@ describe('toUserFacingAgentResponse', () => {
           confidence: 0.76,
         },
       ],
-      confirmationBoundary:
-        '这只是画像更新建议，确认前不会写入长期 Life Graph。',
+      confirmationBoundary: '这只是画像更新建议，确认前不会写入长期偏好。',
       privacyBoundary:
         '不保存对方私聊原文，只保存脱敏后的互动信号和下一步建议。',
       revokeHint: '确认后仍可在 Life Graph 中撤回这次影响。',

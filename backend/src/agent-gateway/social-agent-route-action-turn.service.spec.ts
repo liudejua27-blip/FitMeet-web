@@ -175,6 +175,7 @@ describe('SocialAgentRouteActionTurnService', () => {
           }),
           actions: expect.arrayContaining([
             expect.objectContaining({
+              label: '发布卡片',
               schemaAction: 'publish_to_discover',
               requiresConfirmation: true,
               payload: expect.objectContaining({
@@ -188,6 +189,12 @@ describe('SocialAgentRouteActionTurnService', () => {
               }),
             }),
             expect.objectContaining({
+              label: '修改信息',
+              schemaAction: 'activity.modify_time',
+              requiresConfirmation: false,
+            }),
+            expect.objectContaining({
+              label: '暂不发布',
               schemaAction: 'activity.skip_publish',
               requiresConfirmation: false,
             }),
@@ -213,9 +220,7 @@ describe('SocialAgentRouteActionTurnService', () => {
         userId: 7,
         threadId: 'agent-task:101',
         taskId: 101,
-        recentMessages: [
-          { role: 'user', content: '今晚青岛大学附近散步' },
-        ],
+        recentMessages: [{ role: 'user', content: '今晚青岛大学附近散步' }],
         taskMemory: null,
         taskSlots: {
           time_window: { value: '今天晚上', state: 'completed' },

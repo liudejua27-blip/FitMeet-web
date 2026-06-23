@@ -12,19 +12,11 @@ export const fitMeetCoreEndpoints = {
   users: {
     updateProfile: '/users/profile',
   },
-  feed: {
-    getFeed: '/feed',
-    createPost: '/feed',
-    getPostInteractions: '/feed/interactions',
+  discover: {
     publicSocialIntents: '/public/social-intents',
     publicSocialIntent: (id: string) => `/public/social-intents/${encodeURIComponent(id)}` as const,
     publicSocialIntentMatches: (id: string) =>
       `/public/social-intents/${encodeURIComponent(id)}/matches` as const,
-    likePost: (id: number) => `/feed/${id}/like` as const,
-    savePost: (id: number) => `/feed/${id}/save` as const,
-    getComments: (postId: number) => `/feed/${postId}/comments` as const,
-    addComment: (postId: number) => `/feed/${postId}/comments` as const,
-    likeComment: (commentId: number) => `/feed/comments/${commentId}/like` as const,
   },
   messages: {
     startConversation: '/messages/start',
@@ -36,15 +28,6 @@ export const fitMeetCoreEndpoints = {
     startPublicIntentConversation: (publicIntentId: string) =>
       `/messages/public-intents/${encodeURIComponent(publicIntentId)}/start` as const,
     getUnreadCount: '/messages/unread',
-  },
-  agentInbox: {
-    conversations: '/agents/inbox/conversations',
-    events: '/agents/inbox/events',
-    ackEvents: '/agents/inbox/events/ack',
-    messages: (conversationId: string) =>
-      `/agents/inbox/conversations/${encodeURIComponent(conversationId)}/messages` as const,
-    reply: (conversationId: string) =>
-      `/agents/inbox/conversations/${encodeURIComponent(conversationId)}/reply` as const,
   },
   agentControl: {
     latestCheckpointForTask: (taskId: number | string) =>
@@ -67,16 +50,6 @@ export const fitMeetCoreEndpoints = {
       `/agent/checkpoints/${encodeURIComponent(
         String(checkpointId),
       )}/steps/${encodeURIComponent(stepId)}/fork` as const,
-  },
-  agentProfileMatches: {
-    list: '/agents/profile-matches',
-    ignore: (id: number) => `/agents/profile-matches/${id}/ignore` as const,
-    favorite: (id: number) => `/agents/profile-matches/${id}/favorite` as const,
-    draftOpener: (id: number) => `/agents/profile-matches/${id}/draft-opener` as const,
-    confirmContact: (id: number) => `/agents/profile-matches/${id}/confirm-contact` as const,
-    requestContactExchange: (id: number) =>
-      `/agents/profile-matches/${id}/request-contact-exchange` as const,
-    sendIntro: (id: number) => `/agents/profile-matches/${id}/send-intro` as const,
   },
   socialAgentChat: {
     run: '/social-agent/chat/run',
@@ -206,18 +179,10 @@ export const fitMeetCoreEndpointTemplates = {
   users: {
     updateProfile: '/users/profile',
   },
-  feed: {
-    getFeed: '/feed',
-    createPost: '/feed',
-    getPostInteractions: '/feed/interactions',
+  discover: {
     publicSocialIntents: '/public/social-intents',
     publicSocialIntent: '/public/social-intents/{id}',
     publicSocialIntentMatches: '/public/social-intents/{id}/matches',
-    likePost: '/feed/{id}/like',
-    savePost: '/feed/{id}/save',
-    getComments: '/feed/{postId}/comments',
-    addComment: '/feed/{postId}/comments',
-    likeComment: '/feed/comments/{commentId}/like',
   },
   messages: {
     startConversation: '/messages/start',
@@ -227,13 +192,6 @@ export const fitMeetCoreEndpointTemplates = {
     startPublicIntentConversation: '/messages/public-intents/{id}/start',
     getUnreadCount: '/messages/unread',
   },
-  agentInbox: {
-    conversations: '/agents/inbox/conversations',
-    events: '/agents/inbox/events',
-    ackEvents: '/agents/inbox/events/ack',
-    messages: '/agents/inbox/conversations/{conversationId}/messages',
-    reply: '/agents/inbox/conversations/{conversationId}/reply',
-  },
   agentControl: {
     latestCheckpointForTask: '/agent/checkpoints/tasks/{taskId}/latest',
     checkpointRetry: '/agent/checkpoints/{checkpointId}/retry',
@@ -242,15 +200,6 @@ export const fitMeetCoreEndpointTemplates = {
     checkpointStepRetry: '/agent/checkpoints/{checkpointId}/steps/{stepId}/retry',
     checkpointStepReplay: '/agent/checkpoints/{checkpointId}/steps/{stepId}/replay',
     checkpointStepFork: '/agent/checkpoints/{checkpointId}/steps/{stepId}/fork',
-  },
-  agentProfileMatches: {
-    list: '/agents/profile-matches',
-    ignore: '/agents/profile-matches/{id}/ignore',
-    favorite: '/agents/profile-matches/{id}/favorite',
-    draftOpener: '/agents/profile-matches/{id}/draft-opener',
-    confirmContact: '/agents/profile-matches/{id}/confirm-contact',
-    requestContactExchange: '/agents/profile-matches/{id}/request-contact-exchange',
-    sendIntro: '/agents/profile-matches/{id}/send-intro',
   },
   socialAgentChat: {
     run: '/social-agent/chat/run',
@@ -333,17 +282,10 @@ export type FitMeetCoreEndpointGroup = keyof typeof fitMeetCoreEndpoints;
 export type FitMeetCoreStaticEndpoint =
   | (typeof fitMeetCoreEndpoints.auth)[keyof typeof fitMeetCoreEndpoints.auth]
   | (typeof fitMeetCoreEndpoints.users)[keyof typeof fitMeetCoreEndpoints.users]
-  | (typeof fitMeetCoreEndpoints.feed)['getFeed']
-  | (typeof fitMeetCoreEndpoints.feed)['createPost']
-  | (typeof fitMeetCoreEndpoints.feed)['getPostInteractions']
-  | (typeof fitMeetCoreEndpoints.feed)['publicSocialIntents']
+  | (typeof fitMeetCoreEndpoints.discover)['publicSocialIntents']
   | (typeof fitMeetCoreEndpoints.messages)['startConversation']
   | (typeof fitMeetCoreEndpoints.messages)['getConversations']
   | (typeof fitMeetCoreEndpoints.messages)['getUnreadCount']
-  | (typeof fitMeetCoreEndpoints.agentInbox)['conversations']
-  | (typeof fitMeetCoreEndpoints.agentInbox)['events']
-  | (typeof fitMeetCoreEndpoints.agentInbox)['ackEvents']
-  | (typeof fitMeetCoreEndpoints.agentProfileMatches)['list']
   | (typeof fitMeetCoreEndpoints.socialAgentChat)['messages']
   | (typeof fitMeetCoreEndpoints.socialAgentChat)['messagesStream']
   | (typeof fitMeetCoreEndpoints.socialAgentChat)['run']

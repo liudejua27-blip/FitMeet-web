@@ -80,8 +80,8 @@ fi
 step "Install frontend dependencies"
 pnpm --dir "${ROOT_DIR}/frontend" install --frozen-lockfile
 
-step "Audit Agent chat release files"
-pnpm --dir "${ROOT_DIR}/frontend" run check:agent-chat-release
+step "Lint frontend release surface"
+pnpm --dir "${ROOT_DIR}/frontend" run lint
 
 step "Build frontend for ECS same-origin /api"
 VITE_API_BASE_URL="${VITE_API_BASE_URL:-/api}" \
@@ -104,9 +104,6 @@ fi
 step "Build backend"
 pnpm --dir "${ROOT_DIR}/backend" build
 
-step "Dry-run production Agent smoke seed"
-pnpm --dir "${ROOT_DIR}/backend" run seed:agent-smoke:prod:dry-run
-
 if [ "$RUN_BACKEND_DOCKER_BUILD_CHECK" = "true" ]; then
   step "Build backend production Docker image"
   require_cmd docker
@@ -123,18 +120,11 @@ else
 fi
 
 require_path "backend/dist/main.js"
-require_path "backend/dist/scripts/prepare-agent-smoke-seed.js"
-require_path "backend/dist/scripts/smoke-agent-opportunity-journey.js"
-require_path "backend/dist/scripts/smoke-agent-sse-abort.js"
 require_path "backend/dist/scripts/check-production-tables.js"
 require_path "backend/dist/agent-gateway/subagent-worker-healthcheck.js"
 require_path "backend/Dockerfile.prod"
-require_path "backend/src/scripts/prepare-agent-smoke-seed.ts"
-require_path "backend/src/scripts/smoke-agent-opportunity-journey.ts"
-require_path "backend/src/scripts/smoke-agent-sse-abort.ts"
 require_path "docker-compose.prod.yml"
 require_path "deploy/env.production.ecs.example"
-require_path "deploy/agent-smoke.remote.env.example"
 require_path "nginx/nginx.conf"
 require_path "scripts/deploy-production.sh"
 require_path "scripts/cloud-platform-preflight.sh"
@@ -156,9 +146,6 @@ require_path "scripts/run-agent-skill-evals.mjs"
 require_path "scripts/agent-release-matrix.sh"
 require_path "scripts/agent-release-worktree-audit.sh"
 require_path "scripts/stage-agent-release-bucket.sh"
-require_path "scripts/test-agent-release-worktree-audit.sh"
-require_path "scripts/agent-remote-smoke-preflight.sh"
-require_path "scripts/agent-remote-smoke-evidence.sh"
 require_path "frontend/scripts/qa-agent-chat-production.mjs"
 require_path "frontend/src/test/socialAgentApiReplay.test.ts"
 require_path "docs/agent-release-e2e-matrix.md"
@@ -304,31 +291,12 @@ require_file_contains "frontend/src/test/AgentWorkspacePage.test.tsx" "data-proc
 require_file_contains "frontend/src/test/agentWorkspaceRuntime.test.ts" "lets replay.summary replace old process nodes instead of accumulating a timeline"
 require_file_contains "frontend/src/test/toolProcessModel.test.ts" "older payloads omit displayMode"
 
-require_file_contains "docs/agent-release-e2e-matrix.md" "FitMeet Agent Release E2E Matrix"
-require_file_contains "docs/agent-release-e2e-matrix.md" "scripts/agent-release-matrix.sh"
-require_file_contains "docs/agent-release-e2e-matrix.md" "scripts/agent-release-worktree-audit.sh"
-require_file_contains "docs/agent-release-e2e-matrix.md" "Remote smoke safety preflight"
-require_file_contains "docs/agent-release-e2e-matrix.md" "Remote smoke env template"
-require_file_contains "docs/agent-release-e2e-matrix.md" "deploy/agent-smoke.remote.env.example"
-require_file_contains "docs/agent-release-e2e-matrix.md" "scripts/agent-remote-smoke-preflight.sh --readiness"
-require_file_contains "docs/agent-release-e2e-matrix.md" "Remote smoke evidence capture"
-require_file_contains "docs/agent-release-e2e-matrix.md" "Production browser QA"
-require_file_contains "docs/agent-release-e2e-matrix.md" "scripts/agent-remote-smoke-evidence.sh --all --prepare-agent-smoke-seed"
-require_file_contains "docs/agent-release-e2e-matrix.md" "pnpm --dir frontend run qa:agent-chat:production"
-require_file_contains "docs/agent-release-e2e-matrix.md" "Final Agent cutover status"
-require_file_contains "docs/agent-release-e2e-matrix.md" "REQUIRE_AGENT_REMOTE_SMOKE_EVIDENCE=true"
-require_file_contains "docs/agent-release-e2e-matrix.md" "Opportunity readiness smoke"
-require_file_contains "docs/agent-release-e2e-matrix.md" "Full opportunity smoke"
-require_file_contains "docs/agent-release-e2e-matrix.md" "Opportunity smoke report"
-require_file_contains "docs/agent-skills/README.md" "AGENT_SMOKE_REPORT_FILE"
-require_file_contains "docs/agent-release-e2e-matrix.md" "Ordinary chat does not trigger social UI"
-require_file_contains "docs/agent-release-e2e-matrix.md" "Life Graph remains proposal-based"
-require_file_contains "scripts/agent-release-matrix.sh" "--opportunity-readiness-smoke"
-require_file_contains "scripts/agent-release-matrix.sh" "--opportunity-full-smoke"
+require_file_contains "frontend/src/routes/AppRoutes.tsx" "path=\"/public-intent/:id\""
+require_file_contains "frontend/src/routes/AppRoutes.tsx" "path=\"/messages\""
+require_file_contains "frontend/src/test/toolCardActions.test.ts" "discoverHref"
+require_file_contains "frontend/src/test/toolCardActions.test.ts" "/public-intent/intent_302"
 require_file_contains "scripts/agent-release-matrix.sh" "scripts/agent-release-worktree-audit.sh"
 require_file_contains "scripts/agent-release-matrix.sh" "scripts/verify-agent-release.sh"
-require_file_contains "scripts/agent-release-worktree-audit.sh" "frontend/src/dev/agent/mockAgentAdapter.ts"
-require_file_contains "scripts/agent-release-worktree-audit.sh" "dev-only Agent mock fixture"
 require_file_contains "scripts/verify-agent-release.sh" "scripts/verify-agent-skills.mjs"
 require_file_contains "scripts/verify-agent-release.sh" "scripts/run-agent-skill-evals.mjs"
 require_file_contains "scripts/run-agent-skill-evals.mjs" "twenty_turn_memory_no_repeat_questions"
@@ -342,27 +310,6 @@ require_file_contains "docs/agent-skills/eval-cases.jsonl" "twenty_turn_memory_n
 require_file_contains "docs/agent-skills/eval-cases.jsonl" "candidate_empty_safe_fallback"
 require_file_contains "docs/agent-skills/eval-cases.jsonl" "correction_updates_candidate_preference_without_reasking_core_slots"
 require_file_contains "docs/agent-skills/eval-cases.jsonl" "admin_debug_tools_hidden_from_user_runtime"
-require_file_contains "scripts/agent-remote-smoke-preflight.sh" "--readiness"
-require_file_contains "scripts/agent-remote-smoke-preflight.sh" "--full"
-require_file_contains "scripts/agent-remote-smoke-preflight.sh" "--sse-abort"
-require_file_contains "scripts/agent-remote-smoke-preflight.sh" "AGENT_SMOKE_ALLOW_REMOTE"
-require_file_contains "scripts/agent-remote-smoke-preflight.sh" "AGENT_SMOKE_ALLOW_MUTATIONS"
-require_file_contains "scripts/agent-remote-smoke-preflight.sh" "AGENT_SMOKE_ALLOW_JWT_MUTATIONS"
-require_file_contains "scripts/agent-remote-smoke-preflight.sh" "looks_like_smoke_account"
-require_file_contains "scripts/agent-remote-smoke-preflight.sh" "looks_like_placeholder_secret"
-require_file_contains "scripts/agent-remote-smoke-preflight.sh" "AGENT_SMOKE_PASSWORD still looks like a placeholder"
-require_file_contains "scripts/agent-remote-smoke-evidence.sh" "FitMeet Agent Remote Smoke Evidence"
-require_file_contains "scripts/agent-remote-smoke-evidence.sh" "--all"
-require_file_contains "scripts/agent-remote-smoke-evidence.sh" "--20-turn-memory"
-require_file_contains "scripts/agent-remote-smoke-evidence.sh" "--empty-candidate"
-require_file_contains "scripts/agent-remote-smoke-evidence.sh" "run_post_deploy_smoke 20-turn-memory"
-require_file_contains "scripts/agent-remote-smoke-evidence.sh" "run_post_deploy_smoke empty-candidate"
-require_file_contains "scripts/agent-remote-smoke-evidence.sh" "scripts/ecs-post-deploy-smoke.sh"
-require_file_contains "scripts/agent-remote-smoke-evidence.sh" "fitmeet.agent-opportunity-smoke-report.v1"
-require_file_contains "scripts/agent-remote-smoke-evidence.sh" "prepare_agent_smoke_seed_once"
-require_file_contains "scripts/agent-remote-smoke-evidence.sh" "export AGENT_SMOKE_ALLOW_MUTATIONS=true"
-require_file_contains "scripts/agent-remote-smoke-evidence.sh" "redact()"
-require_file_contains "scripts/agent-remote-smoke-evidence.sh" "[redacted-email]"
 require_file_contains "frontend/scripts/qa-agent-chat-production.mjs" "FitMeet Agent Production Browser QA"
 require_file_contains "frontend/scripts/qa-agent-chat-production.mjs" "FITMEET_AGENT_BROWSER_QA_ALLOW_REMOTE"
 require_file_contains "frontend/scripts/qa-agent-chat-production.mjs" "EXPECTED_RELEASE_COMMIT"
@@ -379,51 +326,7 @@ require_file_contains "scripts/verify-production.sh" "Authenticated Social Agent
 require_file_contains "scripts/verify-agent-goal-production.sh" "Discover page still contains fake 128-person production copy"
 require_file_contains "scripts/verify-agent-goal-production.sh" "/public/social-intents returned 0 discoverable items"
 require_file_contains "scripts/verify-agent-goal-production.sh" "qa:agent-chat:production"
-require_file_contains "scripts/launch-status.sh" "VALIDATE_AGENT_REMOTE_SMOKE_EVIDENCE_ONLY"
-require_file_contains "scripts/launch-status.sh" "--validate-agent-remote-smoke-evidence-only"
-require_file_contains "scripts/launch-status.sh" "secret_assignment_pattern"
-require_file_contains "scripts/launch-status.sh" "redacted_assignment_pattern"
-require_file_contains "scripts/launch-status.sh" "redacted_bearer_pattern"
-require_file_contains "scripts/launch-status.sh" "unredacted bearer token"
-require_file_contains "scripts/launch-status.sh" "unredacted email address"
 require_file_contains "scripts/launch-status.sh" "Social Codex trace eval passed"
-require_file_contains "scripts/launch-status.sh" "structured opportunity smoke reports"
-require_file_contains "scripts/launch-status.sh" "ECS post-deploy Agent 20-turn-memory smoke"
-require_file_contains "scripts/launch-status.sh" "ECS post-deploy Agent empty-candidate smoke"
-require_file_contains "scripts/launch-status.sh" "readiness, 20-turn memory, empty-candidate, and full opportunity smoke"
-require_file_contains "deploy/agent-smoke.remote.env.example" "FitMeet Agent remote smoke environment template"
-require_file_contains "deploy/agent-smoke.remote.env.example" "Never use a real user account for mutating Agent smoke"
-require_file_contains "deploy/agent-smoke.remote.env.example" "AGENT_SMOKE_ALLOW_REMOTE=true"
-require_file_contains "deploy/agent-smoke.remote.env.example" "AGENT_SMOKE_ALLOW_MUTATIONS=true"
-require_file_contains "deploy/agent-smoke.remote.env.example" "AGENT_SMOKE_STOP_AFTER_OPPORTUNITIES=true"
-require_file_contains "deploy/agent-smoke.remote.env.example" "AGENT_SMOKE_RUN_20_TURN_MEMORY=false"
-require_file_contains "deploy/agent-smoke.remote.env.example" "AGENT_SMOKE_RUN_EMPTY_CANDIDATE_FALLBACK=false"
-require_file_contains "deploy/agent-smoke.remote.env.example" "AGENT_SMOKE_REPORT_STDOUT=true"
-require_file_contains "docs/deployment-aliyun-ecs.md" "preflight rejects"
-require_file_contains "docs/deployment-aliyun-ecs.md" "replace-with-dedicated-smoke-password"
-require_file_contains "backend/src/scripts/smoke-agent-opportunity-journey.ts" "AGENT_SMOKE_STOP_AFTER_OPPORTUNITIES"
-require_file_contains "backend/src/scripts/smoke-agent-opportunity-journey.ts" "readiness-only smoke stopped before high-risk card actions"
-require_file_contains "backend/src/scripts/smoke-agent-opportunity-journey.ts" "search-critical context without over-asking stranger/public policy"
-require_file_contains "backend/src/scripts/smoke-agent-opportunity-journey.ts" "assertNoPendingApproval('clarified search', clarified)"
-require_file_contains "backend/src/scripts/smoke-agent-opportunity-journey.ts" "candidate preference correction preserves time/place/activity"
-require_file_contains "backend/src/scripts/smoke-agent-opportunity-journey.ts" "AGENT_SMOKE_SKIP_CORRECTION_MEMORY"
-require_file_contains "backend/src/scripts/smoke-agent-opportunity-journey.ts" "AGENT_SMOKE_RUN_20_TURN_MEMORY"
-require_file_contains "backend/src/scripts/smoke-agent-opportunity-journey.ts" "20-turn social task memory preserves task continuity"
-require_file_contains "backend/src/scripts/smoke-agent-opportunity-journey.ts" "AGENT_SMOKE_RUN_EMPTY_CANDIDATE_FALLBACK"
-require_file_contains "backend/src/scripts/smoke-agent-opportunity-journey.ts" "AGENT_SMOKE_REPORT_STDOUT"
-require_file_contains "backend/src/scripts/smoke-agent-opportunity-journey.ts" "CandidateEmptyStateCard instead of fake candidates"
-require_file_contains "scripts/ecs-post-deploy-smoke.sh" "AGENT_SMOKE_REPORT_STDOUT"
-require_file_contains "scripts/ecs-backend-pnpm.sh" "AGENT_SMOKE_RUN_20_TURN_MEMORY"
-require_file_contains "scripts/ecs-backend-pnpm.sh" "AGENT_SMOKE_RUN_EMPTY_CANDIDATE_FALLBACK"
-require_file_contains "scripts/ecs-backend-pnpm.sh" "AGENT_SMOKE_REPORT_STDOUT"
-require_file_contains "scripts/verify-agent-release.sh" "RUN_AGENT_OPPORTUNITY_SMOKE accepts"
-require_file_contains "scripts/verify-agent-release.sh" "AGENT_SMOKE_STOP_AFTER_OPPORTUNITIES=true"
-require_file_contains "scripts/verify-agent-release.sh" "RUN_AGENT_20_TURN_MEMORY_SMOKE=true"
-require_file_contains "scripts/verify-agent-release.sh" "--api-20-turn-memory"
-require_file_contains "scripts/verify-agent-release.sh" "RUN_AGENT_EMPTY_CANDIDATE_SMOKE=true"
-require_file_contains "scripts/verify-agent-release.sh" "--api-empty-candidate"
-require_file_contains "scripts/verify-agent-release.sh" "run_agent_smoke_preflight"
-require_file_contains "scripts/verify-agent-release.sh" "scripts/agent-remote-smoke-preflight.sh"
 require_file_contains "scripts/verify-agent-release.sh" "social-agent-context-hydrator.service.spec.ts"
 require_file_contains "scripts/verify-agent-release.sh" "social-agent-context-window.spec.ts"
 require_file_contains "scripts/verify-agent-release.sh" "social-agent-context-window-boundary.spec.ts"
@@ -461,7 +364,6 @@ require_file_contains "scripts/verify-agent-release.sh" "fitmeet-subagent-worker
 require_file_contains "scripts/verify-agent-release.sh" "subagent-worker.cli.spec.ts"
 require_file_contains "scripts/verify-agent-release.sh" "subagent-worker-queue.service.spec.ts"
 require_file_contains "scripts/verify-agent-release.sh" "social-agent-tool-execution-policy.service.spec.ts"
-require_file_contains "scripts/verify-agent-release.sh" "fitmeet-agent-tool-registry.controller.spec.ts"
 require_file_contains "scripts/verify-agent-release.sh" "social-agent-tool-executor.service.spec.ts"
 require_file_contains "scripts/verify-agent-release.sh" "social-agent-tool-json-model.service.spec.ts"
 require_file_contains "scripts/verify-agent-release.sh" "social-agent-tool-model.spec.ts"
@@ -470,21 +372,6 @@ require_file_contains "scripts/verify-agent-release.sh" "agentWorkspaceRuntime.t
 require_file_contains "scripts/verify-agent-release.sh" "AgentWorkspacePage.test.tsx"
 require_file_contains "scripts/verify-agent-release.sh" "socialAgentApiReplay.test.ts"
 require_file_contains "scripts/verify-agent-release.sh" "toolProcessModel.test.ts"
-require_file_contains "scripts/run-agent-skill-evals.mjs" "--api-20-turn-memory"
-require_file_contains "scripts/run-agent-skill-evals.mjs" "AGENT_SMOKE_RUN_20_TURN_MEMORY"
-require_file_contains "scripts/run-agent-skill-evals.mjs" "--api-empty-candidate"
-require_file_contains "scripts/run-agent-skill-evals.mjs" "AGENT_SMOKE_RUN_EMPTY_CANDIDATE_FALLBACK"
-require_file_contains "scripts/agent-release-matrix.sh" "--20-turn-memory-smoke"
-require_file_contains "scripts/ecs-post-deploy-smoke.sh" "--run-agent-opportunity-readiness-smoke"
-require_file_contains "scripts/ecs-post-deploy-smoke.sh" "--run-agent-20-turn-memory-smoke"
-require_file_contains "scripts/ecs-post-deploy-smoke.sh" "--run-agent-empty-candidate-smoke"
-require_file_contains "scripts/ecs-post-deploy-smoke.sh" "RUN_AGENT_OPPORTUNITY_SMOKE=readiness"
-require_file_contains "scripts/ecs-post-deploy-smoke.sh" "AGENT_SMOKE_RUN_20_TURN_MEMORY=true"
-require_file_contains "scripts/ecs-post-deploy-smoke.sh" "AGENT_SMOKE_RUN_EMPTY_CANDIDATE_FALLBACK=true"
-require_file_contains "scripts/ecs-post-deploy-smoke.sh" "run_agent_remote_preflight"
-require_file_contains "scripts/ecs-post-deploy-smoke.sh" "scripts/agent-remote-smoke-preflight.sh"
-require_file_contains "scripts/ecs-post-deploy-smoke.sh" "AGENT_SMOKE_STOP_AFTER_OPPORTUNITIES="
-require_file_contains "scripts/ecs-post-deploy-smoke.sh" "Running real Agent opportunity readiness smoke"
 require_path "docs/deployment-vercel-railway.md"
 
 step "Stage sanitized deploy tree"
@@ -504,7 +391,6 @@ rsync -a "${ROOT_DIR}/" "${STAGE_DIR}/" \
   --exclude '.env.*' \
   --exclude '*/.env' \
   --exclude '*/.env.*' \
-  --exclude 'deploy/agent-smoke.remote.env' \
   --exclude 'node_modules/' \
   --exclude '*/node_modules/' \
   --exclude 'package-lock.json' \
@@ -612,16 +498,9 @@ require_entry() {
 require_entry "frontend/dist/index.html" '^FitMeet-web/frontend/dist/index\.html$'
 require_entry "frontend/dist/assets" '^FitMeet-web/frontend/dist/assets/'
 require_entry "backend/Dockerfile.prod" '^FitMeet-web/backend/Dockerfile\.prod$'
-require_entry "backend/src/scripts/prepare-agent-smoke-seed.ts" '^FitMeet-web/backend/src/scripts/prepare-agent-smoke-seed\.ts$'
-require_entry "backend/dist/scripts/prepare-agent-smoke-seed.js" '^FitMeet-web/backend/dist/scripts/prepare-agent-smoke-seed\.js$'
-require_entry "backend/src/scripts/smoke-agent-opportunity-journey.ts" '^FitMeet-web/backend/src/scripts/smoke-agent-opportunity-journey\.ts$'
-require_entry "backend/dist/scripts/smoke-agent-opportunity-journey.js" '^FitMeet-web/backend/dist/scripts/smoke-agent-opportunity-journey\.js$'
-require_entry "backend/src/scripts/smoke-agent-sse-abort.ts" '^FitMeet-web/backend/src/scripts/smoke-agent-sse-abort\.ts$'
-require_entry "backend/dist/scripts/smoke-agent-sse-abort.js" '^FitMeet-web/backend/dist/scripts/smoke-agent-sse-abort\.js$'
 require_entry "backend/dist/agent-gateway/subagent-worker-healthcheck.js" '^FitMeet-web/backend/dist/agent-gateway/subagent-worker-healthcheck\.js$'
 require_entry "docker-compose.prod.yml" '^FitMeet-web/docker-compose\.prod\.yml$'
 require_entry "deploy/env.production.ecs.example" '^FitMeet-web/deploy/env\.production\.ecs\.example$'
-require_entry "deploy/agent-smoke.remote.env.example" '^FitMeet-web/deploy/agent-smoke\.remote\.env\.example$'
 require_entry "nginx/nginx.conf" '^FitMeet-web/nginx/nginx\.conf$'
 require_entry "scripts/ecs-host-preflight.sh" '^FitMeet-web/scripts/ecs-host-preflight\.sh$'
 require_entry "scripts/ecs-install-release.sh" '^FitMeet-web/scripts/ecs-install-release\.sh$'
@@ -634,8 +513,6 @@ require_entry "scripts/verify-agent-skills.mjs" '^FitMeet-web/scripts/verify-age
 require_entry "scripts/run-agent-skill-evals.mjs" '^FitMeet-web/scripts/run-agent-skill-evals\.mjs$'
 require_entry "scripts/agent-release-matrix.sh" '^FitMeet-web/scripts/agent-release-matrix\.sh$'
 require_entry "scripts/agent-release-worktree-audit.sh" '^FitMeet-web/scripts/agent-release-worktree-audit\.sh$'
-require_entry "scripts/agent-remote-smoke-preflight.sh" '^FitMeet-web/scripts/agent-remote-smoke-preflight\.sh$'
-require_entry "scripts/agent-remote-smoke-evidence.sh" '^FitMeet-web/scripts/agent-remote-smoke-evidence\.sh$'
 require_entry "scripts/cloud-platform-preflight.sh" '^FitMeet-web/scripts/cloud-platform-preflight\.sh$'
 require_entry "scripts/domain-readiness-check.sh" '^FitMeet-web/scripts/domain-readiness-check\.sh$'
 require_entry "scripts/launch-status.sh" '^FitMeet-web/scripts/launch-status\.sh$'
@@ -717,8 +594,6 @@ require_entry "Social Agent tool executor spec" '^FitMeet-web/backend/src/agent-
 require_entry "Social Agent tool JSON model spec" '^FitMeet-web/backend/src/agent-gateway/social-agent-tool-json-model\.service\.spec\.ts$'
 require_entry "Social Agent tool model spec" '^FitMeet-web/backend/src/agent-gateway/social-agent-tool-model\.spec\.ts$'
 
-require_entry "Agent assistant-ui release audit" '^FitMeet-web/frontend/scripts/audit-agent-chat-release\.mjs$'
-require_entry "Agent assistant-ui browser QA" '^FitMeet-web/frontend/scripts/qa-agent-chat-shell\.mjs$'
 require_entry "Agent production browser QA" '^FitMeet-web/frontend/scripts/qa-agent-chat-production\.mjs$'
 require_entry "Social Codex replay API test" '^FitMeet-web/frontend/src/test/socialAgentApiReplay\.test\.ts$'
 require_entry "Agent workspace page process test" '^FitMeet-web/frontend/src/test/AgentWorkspacePage\.test\.tsx$'
@@ -785,7 +660,6 @@ fail_if_entry "node_modules" '(^|/)node_modules/'
 fail_if_entry "macOS metadata" '(^|/)\.DS_Store$'
 fail_if_entry "root npm lockfile" '^FitMeet-web/package-lock\.json$'
 fail_if_entry "env files" '(^|/)\.env($|\.|/)'
-fail_if_entry "filled Agent remote smoke env" '^FitMeet-web/deploy/agent-smoke\.remote\.env$'
 fail_if_entry "ssl private material" '^FitMeet-web/nginx/ssl/'
 fail_if_entry "nested zip files" '\.zip$'
 fail_if_entry "logs" '(^|/)logs/|\.log$'
@@ -814,8 +688,7 @@ fail_if_entry "legacy universe hero components" '^FitMeet-web/frontend/src/compo
 fail_if_entry "legacy product motion showcase" '^FitMeet-web/frontend/src/components/showcase/'
 fail_if_entry "legacy universe gateway data" '^FitMeet-web/frontend/src/data/(gateways|heroCopy)\.ts$'
 fail_if_entry "legacy universe card components" '^FitMeet-web/frontend/src/components/ui/(GatewayPortalCard|SectionHeading)\.tsx$'
-fail_if_entry "legacy universe Earth scene" '^FitMeet-web/frontend/src/components/three/EarthScene\.tsx$'
-fail_if_entry "legacy universe orbiting agent labels" '^FitMeet-web/frontend/src/components/three/OrbitingEntities\.tsx$'
+fail_if_entry "legacy universe 3D components" '^FitMeet-web/frontend/src/components/three/'
 fail_if_entry "one-off legacy rewrite scripts" '^FitMeet-web/scripts/fix-(aimatch|loginmodal|meetmodal|postmodal)'
 
 step "Write checksum"

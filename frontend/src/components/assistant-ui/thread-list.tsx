@@ -13,8 +13,6 @@ import {
   MoreHorizontal,
   PanelLeft,
   Pencil,
-  Settings,
-  ShieldCheck,
   Trash2,
   UserRound,
   X,
@@ -28,7 +26,7 @@ import type {
   SocialAgentReminderScene,
 } from '../../api/socialAgentApi';
 import { cn } from '../../lib/utils';
-import { requestAssistantComposerFocus } from './composer';
+import { requestAssistantComposerFocus } from './composer-focus';
 import { TooltipIconButton } from './tooltip-icon-button';
 
 type ChatGPTThreadListProps = {
@@ -54,21 +52,20 @@ type ChatGPTThreadListProps = {
   ) => Promise<void> | void;
 };
 
-export const MobileThreadListButton = forwardRef<
-  HTMLButtonElement,
-  { onClick: () => void }
->(function MobileThreadListButton({ onClick }, ref) {
-  return (
-    <TooltipIconButton
-      ref={ref}
-      tooltip="打开会话列表"
-      className="fixed left-3 top-3 z-30 bg-transparent text-[#5d5d5d] shadow-none hover:bg-black/[0.05] hover:text-[#0d0d0d] lg:hidden"
-      onClick={onClick}
-    >
-      <PanelLeft className="h-4 w-4" aria-hidden="true" />
-    </TooltipIconButton>
-  );
-});
+export const MobileThreadListButton = forwardRef<HTMLButtonElement, { onClick: () => void }>(
+  function MobileThreadListButton({ onClick }, ref) {
+    return (
+      <TooltipIconButton
+        ref={ref}
+        tooltip="打开会话列表"
+        className="fixed left-3 top-3 z-30 bg-transparent text-[#5d5d5d] shadow-none hover:bg-black/[0.05] hover:text-[#0d0d0d] lg:hidden"
+        onClick={onClick}
+      >
+        <PanelLeft className="h-4 w-4" aria-hidden="true" />
+      </TooltipIconButton>
+    );
+  },
+);
 
 export function ChatGPTThreadList({
   open,
@@ -199,18 +196,13 @@ export function ChatGPTThreadList({
                     threadById.get(threadListItem.id) ??
                     createFallbackThreadSummary(threadListItem);
                   const threadIndex = threads.findIndex((item) => item.id === thread.id);
-                  const previousThread =
-                    threadIndex > 0 ? threads[threadIndex - 1] : null;
+                  const previousThread = threadIndex > 0 ? threads[threadIndex - 1] : null;
                   const groupLabel = getThreadGroupLabel(thread);
                   const shouldShowGroupLabel =
                     threadIndex <= 0 ||
                     !previousThread ||
                     getThreadGroupLabel(previousThread) !== groupLabel;
-                  const isActive = isThreadActive(
-                    thread,
-                    activeThreadId,
-                    runtimeMainThreadId,
-                  );
+                  const isActive = isThreadActive(thread, activeThreadId, runtimeMainThreadId);
                   return (
                     <div key={thread.id} data-thread-group={groupLabel}>
                       {shouldShowGroupLabel ? (
@@ -302,12 +294,8 @@ function SidebarAccountStatus({
         <UserRound className="h-4 w-4" aria-hidden="true" />
       </span>
       <span className="min-w-0 flex-1">
-        <span className="block truncate text-sm font-medium leading-5 text-[#18181b]">
-          {title}
-        </span>
-        <span className="block truncate text-xs leading-4 text-[#8a8f98]">
-          {subtitle}
-        </span>
+        <span className="block truncate text-sm font-medium leading-5 text-[#18181b]">{title}</span>
+        <span className="block truncate text-xs leading-4 text-[#8a8f98]">{subtitle}</span>
       </span>
     </>
   );
@@ -417,34 +405,10 @@ function SidebarAccountStatus({
 function SidebarAccountMenu({ onClose }: { onClose: () => void }) {
   const items = [
     {
-      href: '/ai-profile',
-      label: '人物画像',
-      detail: '完善 AI 画像与理想型',
+      href: '/agent/profile',
+      label: '个人信息',
+      detail: '资料、兴趣和安全边界',
       icon: UserRound,
-    },
-    {
-      href: '/profile/life-graph',
-      label: 'Life Graph',
-      detail: '查看记忆、撤回和确认',
-      icon: ShieldCheck,
-    },
-    {
-      href: '/match-confirmations',
-      label: '匹配确认',
-      detail: '处理候选人与邀请',
-      icon: Check,
-    },
-    {
-      href: '/agent-inbox',
-      label: 'Agent Inbox',
-      detail: '查看托管消息与事件',
-      icon: Bell,
-    },
-    {
-      href: '/profile',
-      label: '个人资料',
-      detail: '账户、安全与隐私设置',
-      icon: Settings,
     },
   ];
 
@@ -499,14 +463,8 @@ function ReminderPreferenceToggle({
   const toggleRef = useRef<HTMLButtonElement | null>(null);
   const enabled = Boolean(preference?.enabled);
   const scenes = reminderScenes(preference);
-  const label = loading
-    ? '正在读取提醒'
-    : enabled
-      ? '主动提醒已开启'
-      : '主动提醒已关闭';
-  const detail = enabled
-    ? reminderPreferenceDetail(preference)
-    : '默认不打扰，可手动开启';
+  const label = loading ? '正在读取提醒' : enabled ? '约练机会提醒已开启' : '约练机会提醒已关闭';
+  const detail = enabled ? reminderPreferenceDetail(preference) : '关闭后不会主动打扰，可手动开启';
   const auditDetail = reminderPreferenceAuditDetail(preference);
 
   useEffect(() => {
@@ -578,20 +536,20 @@ function ReminderPreferenceToggle({
               disabled={saving}
               onChange={(event) =>
                 void onUpdate({
-                  frequency: event.currentTarget.value as SocialAgentReminderPreference['frequency'],
+                  frequency: event.currentTarget
+                    .value as SocialAgentReminderPreference['frequency'],
                 })
               }
             >
-              <option value="weekly">每周</option>
-              <option value="daily">每日</option>
-              <option value="manual">仅手动</option>
+              <option value="realtime">实时提醒</option>
+              <option value="daily">每天一次摘要</option>
+              <option value="weekly">每周一次摘要</option>
+              <option value="manual">关闭</option>
             </select>
           </label>
           <div className="grid grid-cols-2 gap-1.5">
             <label className="block">
-              <span className="mb-1 block text-[11px] font-medium text-[#52525b]">
-                开始
-              </span>
+              <span className="mb-1 block text-[11px] font-medium text-[#52525b]">开始</span>
               <input
                 type="time"
                 className="h-7 w-full rounded-md border border-black/[0.08] bg-white px-2 text-[11px] text-[#3f3f46] outline-none focus:border-black/20"
@@ -602,9 +560,7 @@ function ReminderPreferenceToggle({
               />
             </label>
             <label className="block">
-              <span className="mb-1 block text-[11px] font-medium text-[#52525b]">
-                结束
-              </span>
+              <span className="mb-1 block text-[11px] font-medium text-[#52525b]">结束</span>
               <input
                 type="time"
                 className="h-7 w-full rounded-md border border-black/[0.08] bg-white px-2 text-[11px] text-[#3f3f46] outline-none focus:border-black/20"
@@ -646,7 +602,7 @@ function ReminderPreferenceToggle({
             </div>
           </div>
           <p className="text-[11px] leading-4 text-[#8a8f98]">
-            只做站内建议；发送邀请、加好友、创建活动或公开发布仍需确认。
+            Agent 只会提醒与你已表达过的约练、活动或匹配偏好相关的事情，不会替你自动发消息。
           </p>
           {auditDetail ? (
             <p
@@ -674,28 +630,29 @@ const REMINDER_SCENE_OPTIONS: Array<{
   value: SocialAgentReminderScene;
   label: string;
 }> = [
-  { value: 'weekend_opportunities', label: '周末机会' },
-  { value: 'past_social_goal', label: '旧目标' },
-  { value: 'activity_follow_up', label: '活动跟进' },
-  { value: 'life_graph_confirmation', label: '画像确认' },
+  { value: 'new_match', label: '有新匹配时提醒' },
+  { value: 'weekend_opportunities', label: '周末前提醒我看看机会' },
+  { value: 'past_social_goal', label: '长期没推进时提醒我继续' },
+  { value: 'activity_follow_up', label: '对方回复后提醒' },
+  { value: 'life_graph_confirmation', label: '邀请快过期时提醒' },
 ];
 
 function reminderPreferenceDetail(preference?: SocialAgentReminderPreference | null) {
   if (!preference) return '低打扰站内提醒';
   const frequency =
-    preference.frequency === 'daily'
-      ? '每日'
-      : preference.frequency === 'weekly'
-        ? '每周'
-        : '手动';
+    preference.frequency === 'realtime'
+      ? '实时提醒'
+      : preference.frequency === 'daily'
+        ? '每天一次摘要'
+        : preference.frequency === 'weekly'
+          ? '每周一次摘要'
+          : '关闭';
   const scenes = reminderSceneCount(preference);
   const sceneLabel = scenes > 0 ? `${scenes} 个场景` : '未选择场景';
   return `${frequency} · ${sceneLabel} · ${preference.quietStart}-${preference.quietEnd}`;
 }
 
-function reminderPreferenceAuditDetail(
-  preference?: SocialAgentReminderPreference | null,
-) {
+function reminderPreferenceAuditDetail(preference?: SocialAgentReminderPreference | null) {
   if (!preference) return null;
   const metadata = preference.metadata ?? {};
   const mutedUntil = formatShortDateTime(preference.mutedUntil);
@@ -747,9 +704,7 @@ function toggleReminderScene(
   scenes: SocialAgentReminderScene[],
   scene: SocialAgentReminderScene,
 ): SocialAgentReminderScene[] {
-  return scenes.includes(scene)
-    ? scenes.filter((item) => item !== scene)
-    : [...scenes, scene];
+  return scenes.includes(scene) ? scenes.filter((item) => item !== scene) : [...scenes, scene];
 }
 
 function isReminderScene(value: unknown): value is SocialAgentReminderScene {
@@ -978,7 +933,10 @@ function ThreadRow({
               {threadMetaItems.map((item, index) => (
                 <span key={item} className="flex min-w-0 items-center gap-1">
                   {index > 0 ? (
-                    <span className="size-0.5 shrink-0 rounded-full bg-[#c7c7cf]" aria-hidden="true" />
+                    <span
+                      className="size-0.5 shrink-0 rounded-full bg-[#c7c7cf]"
+                      aria-hidden="true"
+                    />
                   ) : null}
                   <span className="truncate">{item}</span>
                 </span>
@@ -1113,8 +1071,7 @@ function createFallbackThreadSummary(threadListItem: {
       : Number(custom.fitmeetTaskId) || 0;
   const createdAt =
     typeof custom.createdAt === 'string' ? custom.createdAt : new Date().toISOString();
-  const updatedAt =
-    typeof custom.updatedAt === 'string' ? custom.updatedAt : createdAt;
+  const updatedAt = typeof custom.updatedAt === 'string' ? custom.updatedAt : createdAt;
 
   return {
     id: threadListItem.id,
@@ -1123,8 +1080,7 @@ function createFallbackThreadSummary(threadListItem: {
     preview: typeof custom.preview === 'string' ? custom.preview : null,
     status: threadListItem.status || 'regular',
     goal: typeof custom.preview === 'string' ? custom.preview : '继续这个对话',
-    messageCount:
-      typeof custom.messageCount === 'number' ? custom.messageCount : undefined,
+    messageCount: typeof custom.messageCount === 'number' ? custom.messageCount : undefined,
     updatedAt,
     createdAt,
     custom,

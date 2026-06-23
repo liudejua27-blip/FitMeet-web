@@ -4,7 +4,11 @@ export function conversationalFallbackReply(
   message: string,
   intent: SocialAgentIntentType,
 ): string {
-  if (/(你能做什么|你可以做什么|你都可以干什么|你可以干什么|有什么功能|能力|fitmeet|产品|社交助理)/i.test(message)) {
+  if (
+    /(你能做什么|你可以做什么|你都可以干什么|你可以干什么|有什么功能|能力|fitmeet|产品|社交助理)/i.test(
+      message,
+    )
+  ) {
     return '我是 FitMeet 的 AI 社交助理，可以正常聊天、解释人物画像和匹配逻辑，也能帮你完善画像、找搭子、推荐候选、发起约练，并生成更自然的开场白。当你明确说要找人、找搭子或找活动时，我再调用搜索工具；发送消息、加好友和邀请见面都需要你确认。';
   }
   if (intent === 'workflow_help' || looksLikeWorkflowQuestion(message)) {
@@ -18,6 +22,9 @@ export function conversationalFallbackReply(
   }
   if (looksLikeLowPressureSocialQuestion(message)) {
     return lowPressureSocialReply();
+  }
+  if (looksLikeSocialAdviceQuestion(message)) {
+    return socialAdviceFallbackReply();
   }
   if (/(deepseek|api|不会回答|为什么.*回答|回答.*问题)/i.test(message)) {
     return '你说得对，普通问题我应该直接回答，而不是只返回模板。作为 FitMeet 的 AI 社交助理，我可以回答产品、人物画像、匹配逻辑和社交偏好问题；当你明确要找人、找活动或发起动作时，我再调用对应工具。';
@@ -49,8 +56,22 @@ export function looksLikeLowPressureSocialQuestion(message: string): boolean {
   );
 }
 
+export function looksLikeSocialAdviceQuestion(message: string): boolean {
+  return /(适合|应该|建议|更适合|比较适合|推荐).{0,18}(什么样|哪类|哪种|什么类型|类型).{0,12}(人|朋友|搭子|对象)|推荐.{0,18}(适合我|我的|我适合).{0,18}(人|朋友|搭子|对象|类型)/i.test(
+    message,
+  );
+}
+
 export function lowPressureSocialReply(): string {
   return '低压力社交的意思是：先从公开、安全、时间短、目标轻的场景开始认识人，不要求立刻熟络，也不强迫你马上加好友或见面。FitMeet 会优先推荐散步、咖啡、校园/公共路线、轻运动这类低负担机会；发布、邀请、加好友和交换联系方式都需要你确认。';
+}
+
+export function socialAdviceFallbackReply(): string {
+  return [
+    '可以先按类型判断，不搜索具体用户。',
+    '从你当前表达看，更适合低压力、目标明确、边界清楚的运动搭子：同城或同校、时间稳定、愿意先站内沟通、活动强度接近的人。',
+    '建议先从轻松跑步、散步、羽毛球这类公共场景开始；如果你之后想开始匹配，我会先让你确认约练卡片，不会自动邀请或联系别人。',
+  ].join('\n');
 }
 
 export function directReplySystemPrompt(): string {
@@ -98,7 +119,11 @@ export function productHelpFallbackReply(message: string): string {
   if (/(deepseek|api|不会回答|回答问题|为什么.*回答)/i.test(message)) {
     return '你说得对，普通问题应该由大模型回答，而不是只返回模板。如果大模型暂时超时，我也应该给你相关解释。你可以继续问 FitMeet、人物画像、匹配逻辑或社交偏好相关问题。';
   }
-  if (/(你能做什么|你可以做什么|你都可以干什么|你可以干什么|有什么功能|能力|fitmeet|产品|社交助理)/i.test(message)) {
+  if (
+    /(你能做什么|你可以做什么|你都可以干什么|你可以干什么|有什么功能|能力|fitmeet|产品|社交助理)/i.test(
+      message,
+    )
+  ) {
     return '我是 FitMeet 的 AI 社交助理，可以正常聊天、解释人物画像和匹配逻辑，也能帮你完善画像、找搭子、推荐候选、发起约练，并生成更自然的开场白。当你明确说要找人、找搭子或找活动时，我再调用搜索工具；发送消息、加好友和邀请见面都需要你确认。';
   }
   if (/(你好|hello|hi|嗨)/i.test(message)) {

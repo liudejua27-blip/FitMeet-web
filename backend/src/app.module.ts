@@ -10,23 +10,13 @@ import { AgentGatewayModule } from './agent-gateway/agent-gateway.module';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { AuthModule } from './auth/auth.module';
-import { CategoriesModule } from './categories/categories.module';
-import { ClubsModule } from './clubs/clubs.module';
-import { CoachesModule } from './coaches/coaches.module';
-import { CommentsModule } from './comments/comments.module';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
-import { EventsModule } from './events/events.module';
 import { FriendsModule } from './friends/friends.module';
-import { KafkaModule } from './kafka/kafka.module';
 import { MeetsModule } from './meets/meets.module';
 import { MessagesModule } from './messages/messages.module';
 import { ModerationModule } from './moderation/moderation.module';
-import { NotificationsModule } from './notifications/notifications.module';
-import { PostsModule } from './posts/posts.module';
-import { RecommendationsModule } from './recommendations/recommendations.module';
 import { RedisModule } from './redis/redis.module';
 import { SafetyModule } from './safety/safety.module';
-import { SearchModule } from './search/search.module';
 import { SocialRequestsModule } from './social-requests/social-requests.module';
 import { MatchModule } from './match/match.module';
 import { ActivitiesModule } from './activities/activities.module';
@@ -35,7 +25,6 @@ import { UsersModule } from './users/users.module';
 import { LifeGraphModule } from './life-graph/life-graph.module';
 import { WaitlistModule } from './waitlist/waitlist.module';
 import { RealtimeModule } from './realtime/realtime.module';
-import { FutureSkillsGatewayModule } from './future-skills-gateway/future-skills-gateway.module';
 import { AgentObservabilityTypeOrmLogger } from './agent-gateway/agent-observability-typeorm.logger';
 import { AdminRbacModule } from './admin-rbac/admin-rbac.module';
 
@@ -138,28 +127,17 @@ import { AdminRbacModule } from './admin-rbac/admin-rbac.module';
     ScheduleModule.forRoot(),
     RedisModule,
     AdminRbacModule,
-    KafkaModule.forRoot(),
     UploadsModule,
     UsersModule,
     RealtimeModule,
     LifeGraphModule,
     WaitlistModule,
-    FutureSkillsGatewayModule,
     AuthModule,
-    CategoriesModule,
-    CoachesModule,
-    CommentsModule,
     FriendsModule,
     MeetsModule,
     MessagesModule,
-    NotificationsModule,
-    PostsModule,
-    SearchModule,
-    EventsModule,
-    RecommendationsModule,
     ModerationModule,
     SafetyModule,
-    ClubsModule,
     AIModule,
     AgentGatewayModule,
     SocialRequestsModule,

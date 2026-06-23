@@ -89,7 +89,7 @@ function actionPathSteps(actions: VisibleCardAction[], schemaType: ToolUISchemaT
         schemaAction,
         requiresConfirmation,
         source: action?.source ?? defaultStep?.source ?? 'default',
-        label: actionPathLabel(schemaAction, requiresConfirmation),
+        label: actionPathLabel(schemaAction),
       };
     })
     .filter(Boolean) as Array<{
@@ -100,7 +100,7 @@ function actionPathSteps(actions: VisibleCardAction[], schemaType: ToolUISchemaT
   }>;
 }
 
-function actionPathLabel(schemaAction: ToolUISchemaAction, _requiresConfirmation: boolean) {
+function actionPathLabel(schemaAction: ToolUISchemaAction) {
   if (schemaAction === 'candidate.view_detail') return '先看详情';
   if (schemaAction === 'candidate.like') return '收藏';
   if (schemaAction === 'candidate.generate_opener') return '生成开场白';

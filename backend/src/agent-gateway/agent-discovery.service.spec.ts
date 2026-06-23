@@ -6,8 +6,14 @@ import {
   AgentProfileStatus,
   AgentType,
 } from './entities/agent-profile.entity';
-import { AgentActionStatus, AgentActionType } from './entities/agent-action-log.entity';
-import { ApprovalRiskLevel, ApprovalType } from './entities/agent-approval-request.entity';
+import {
+  AgentActionStatus,
+  AgentActionType,
+} from './entities/agent-action-log.entity';
+import {
+  ApprovalRiskLevel,
+  ApprovalType,
+} from './entities/agent-approval-request.entity';
 import { AgentDiscoveryService } from './agent-discovery.service';
 
 const repo = () => ({

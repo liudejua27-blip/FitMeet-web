@@ -6,7 +6,10 @@ import {
   LifeGraphFieldCategory,
   LifeGraphFieldSource,
 } from '../life-graph/life-graph.enums';
-import type { CandidateExplanation } from './candidate-explanation.service';
+import type {
+  CandidateExplanation,
+  CandidateExplanationInput,
+} from './candidate-explanation.service';
 import { buildCandidatePoolCandidate } from './social-agent-candidate-card.presenter';
 
 const now = new Date('2026-05-23T08:00:00.000Z');
@@ -98,7 +101,15 @@ describe('buildCandidatePoolCandidate', () => {
       publicIntentId: null,
       socialRequestId: 100,
       activityId: null,
-      query: { acceptsStrangers: true },
+      query: {
+        city: '青岛',
+        interestTags: ['跑步', '咖啡'],
+        activityType: '跑步',
+        timePreference: '周末下午',
+        locationPreference: '青岛大学附近',
+        rawText: '想找青岛大学附近一起跑步的人',
+        acceptsStrangers: true,
+      },
       lifeGraphSignals: {
         identitySignals: {},
         socialIntentSignals: {},
@@ -235,7 +246,9 @@ describe('buildCandidatePoolCandidate', () => {
       '公开资料已允许 Agent 推荐',
       '共同公开兴趣：跑步',
     ]);
-    expect(candidate.recommendationConsent.privacyLabel).toContain('不展示手机号');
+    expect(candidate.recommendationConsent.privacyLabel).toContain(
+      '不展示手机号',
+    );
     expect(candidate.recommendationConsent.privacyLabel).toContain('精确位置');
     expect(candidate.recommendationConsent.privacyLabel).toContain('私聊内容');
     expect(candidate.whyYouMayLike).toContain('Alex');
@@ -243,6 +256,71 @@ describe('buildCandidatePoolCandidate', () => {
     expect(risk.normalizeScene).toHaveBeenCalledWith(
       null,
       expect.stringContaining('跑步'),
+    );
+  });
+
+  it('keeps current task slots ahead of candidate default tags on visible cards', () => {
+    const explain = jest.fn((input: CandidateExplanationInput) => {
+      const candidateInput = input.candidate ?? {};
+      const commonTags = Array.isArray(candidateInput.commonTags)
+        ? candidateInput.commonTags
+        : [];
+      return explanation({
+        suggestedOpener: `围绕${String(commonTags[0] ?? '当前任务')}开场`,
+      });
+    });
+    const candidate = buildCandidatePoolCandidate({
+      source: 'profile_candidate',
+      user: user(),
+      profile: profile(),
+      city: '青岛',
+      displayName: 'Alex',
+      interestTags: ['咖啡', 'Citywalk'],
+      profileCompleteness: 0.88,
+      matchScore: 70,
+      scoreBreakdown: { interestSimilarity: 18 },
+      commonTags: ['咖啡'],
+      matchReasons: ['公开资料已授权推荐'],
+      publicIntentId: null,
+      socialRequestId: 100,
+      activityId: null,
+      query: {
+        acceptsStrangers: true,
+        activityType: '散步',
+        timePreference: '今天晚上',
+        locationPreference: '青岛大学附近',
+        rawText: '今天晚上在青岛大学附近散步',
+        interestTags: ['散步'],
+        city: '青岛',
+      },
+      sceneRisk: sceneRisk('low'),
+      candidateExplanation: { explain },
+    });
+
+    expect(candidate).toMatchObject({
+      activityType: '散步',
+      sport: '散步',
+      timePreference: '今天晚上',
+      timeLabel: '今天晚上',
+      timeWindow: '今天晚上',
+      locationText: '青岛大学附近',
+      area: '青岛大学附近',
+      suggestedOpener: '围绕散步开场',
+      suggestedMessage: '围绕散步开场',
+    });
+    expect(candidate.interestTags).toEqual(['散步']);
+    expect(candidate.commonTags).toEqual(['散步']);
+    expect(candidate.sharedInterests).toEqual(['散步']);
+    expect(candidate.interestTags).not.toEqual(
+      expect.arrayContaining(['咖啡', 'Citywalk']),
+    );
+    expect(explain).toHaveBeenCalledWith(
+      expect.objectContaining({
+        candidate: expect.objectContaining({
+          commonTags: ['散步'],
+          interestTags: ['散步'],
+        }),
+      }),
     );
   });
 

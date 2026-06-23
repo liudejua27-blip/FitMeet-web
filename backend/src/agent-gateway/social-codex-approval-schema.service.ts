@@ -63,10 +63,12 @@ export class SocialCodexApprovalSchemaService {
       return {
         actionType,
         title: '发布到发现前需要你确认',
-        detail: '确认后，这张约练卡会出现在发现页，其他公开可发现用户可以看到。',
+        detail:
+          '确认后，这张约练卡会出现在发现页，其他公开可发现用户可以看到。',
         confirmationLabel: '确认发布',
         dryRunPreviewTitle: '预览将公开的约练卡',
-        executionBoundary: '只公开约练卡范围信息，不公开手机号、精确住址或私聊内容。',
+        executionBoundary:
+          '只公开约练卡范围信息，不公开手机号、精确住址或私聊内容。',
         resumePolicy: '同意后从发布发现步骤继续；拒绝后保留草稿。',
         auditNote: '发布确认会保留记录，后续可撤回公开。',
       };
@@ -102,7 +104,8 @@ export class SocialCodexApprovalSchemaService {
         detail: '联系方式属于高敏信息，确认前不会展示或发送。',
         confirmationLabel: '确认交换',
         dryRunPreviewTitle: '预览将交换的联系方式范围',
-        executionBoundary: '只交换你明确同意的联系方式，不自动同步其它账号信息。',
+        executionBoundary:
+          '只交换你明确同意的联系方式，不自动同步其它账号信息。',
         resumePolicy: '同意后从联系方式交换步骤继续；拒绝后继续平台内沟通。',
         auditNote: '联系方式交换会写入高风险审计日志。',
       };
@@ -123,11 +126,11 @@ export class SocialCodexApprovalSchemaService {
       return {
         actionType,
         title: '写入敏感画像前需要你确认',
-        detail: '这类画像会影响长期推荐，确认前不会写入 Life Graph。',
+        detail: '这类画像会影响长期推荐，确认前不会保存到个人信息。',
         confirmationLabel: '确认写入',
         dryRunPreviewTitle: '预览将写入的画像变化',
         executionBoundary: '只写入你确认的稳定事实，可撤回、导出或删除。',
-        resumePolicy: '同意后从 Life Graph 写回继续；拒绝后不保存该事实。',
+        resumePolicy: '同意后继续保存画像更新；拒绝后不保存该事实。',
         auditNote: '敏感画像写入会记录证据、来源和过期策略。',
       };
     }
@@ -137,8 +140,10 @@ export class SocialCodexApprovalSchemaService {
       detail: '这个动作可能影响你和他人的社交体验，确认前不会执行。',
       confirmationLabel: '确认执行',
       dryRunPreviewTitle: '预览将执行的动作',
-      executionBoundary: '确认前不会触达对方或公开内容；确认后只执行预览中的内容。',
-      resumePolicy: '同意后接着当前进度继续；拒绝后停止这个动作，不会触达对方。',
+      executionBoundary:
+        '确认前不会触达对方或公开内容；确认后只执行预览中的内容。',
+      resumePolicy:
+        '同意后接着当前进度继续；拒绝后停止这个动作，不会触达对方。',
       auditNote: '确认结果会保留记录。',
     };
   }

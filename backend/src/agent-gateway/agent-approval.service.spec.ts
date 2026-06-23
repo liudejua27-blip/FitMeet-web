@@ -417,9 +417,7 @@ describe('AgentApprovalService classify', () => {
         ]),
       );
       expect(result.reasons).not.toEqual(
-        expect.arrayContaining([
-          `open_requires_pending_${item.actionType}`,
-        ]),
+        expect.arrayContaining([`open_requires_pending_${item.actionType}`]),
       );
     }
   });

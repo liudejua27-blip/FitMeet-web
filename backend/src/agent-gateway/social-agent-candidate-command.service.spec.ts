@@ -150,7 +150,7 @@ describe('SocialAgentCandidateCommandService', () => {
         reason: 'Candidate command endpoints execute only through AgentLoop.',
         tools: [
           {
-            agent: 'Social Match Agent',
+            agent: 'Match Agent',
             toolName: 'candidate_command_execute',
             requiresApproval: false,
             input: expect.objectContaining({
@@ -203,7 +203,7 @@ describe('SocialAgentCandidateCommandService', () => {
           visibility: SocialRequestVisibility.Private,
           status: UserSocialRequestStatus.Draft,
         }),
-      expectedAgent: 'Meet Loop Agent',
+      expectedAgent: 'Match Agent',
     },
     {
       command: 'save_candidate',
@@ -213,7 +213,7 @@ describe('SocialAgentCandidateCommandService', () => {
           candidateRecordId: 501,
           socialRequestId: 301,
         }),
-      expectedAgent: 'Social Match Agent',
+      expectedAgent: 'Match Agent',
     },
     {
       command: 'send_candidate_message',
@@ -223,7 +223,7 @@ describe('SocialAgentCandidateCommandService', () => {
           candidateRecordId: 501,
           message: '今晚先轻松跑一段吗？',
         }),
-      expectedAgent: 'Social Match Agent',
+      expectedAgent: 'Match Agent',
     },
     {
       command: 'connect_candidate',
@@ -233,7 +233,7 @@ describe('SocialAgentCandidateCommandService', () => {
           candidateRecordId: 501,
           socialRequestId: 301,
         }),
-      expectedAgent: 'Social Match Agent',
+      expectedAgent: 'Match Agent',
     },
   ])(
     'routes $command through the confirmed-action AgentLoop contract',

@@ -3,9 +3,7 @@ import {
   sanitizeForDisplay,
 } from '../common/display-text.util';
 import type { AgentTask } from './entities/agent-task.entity';
-import {
-  buildRecommendationAssistantMessage,
-} from './social-agent-chat-result.presenter';
+import { buildRecommendationAssistantMessage } from './social-agent-chat-result.presenter';
 import type {
   FitMeetAlphaCard,
   FitMeetAlphaCardAction,
@@ -126,31 +124,34 @@ function readResultFromTaskMemory(
         mode: 'draft',
       } as SocialAgentRequestDraft)
     : null;
-  return withRestoredOpportunityCard({
-    taskId: task.id,
-    status: task.status,
-    visibleSteps: readStoredVisibleSteps(task, visibleStepLabel),
-    assistantMessage:
-      cleanDisplayText(chatRun.message, '') ||
-      cleanDisplayText(eventResult?.message, '') ||
-      buildRecommendationAssistantMessage(candidates),
-    emptyReason:
-      cleanDisplayText(chatRun.emptyReason, '') === 'no_real_candidates'
-        ? 'no_real_candidates'
-        : cleanDisplayText(eventResult?.emptyReason, '') ===
-            'no_real_candidates'
+  return withRestoredOpportunityCard(
+    {
+      taskId: task.id,
+      status: task.status,
+      visibleSteps: readStoredVisibleSteps(task, visibleStepLabel),
+      assistantMessage:
+        cleanDisplayText(chatRun.message, '') ||
+        cleanDisplayText(eventResult?.message, '') ||
+        buildRecommendationAssistantMessage(candidates),
+      emptyReason:
+        cleanDisplayText(chatRun.emptyReason, '') === 'no_real_candidates'
           ? 'no_real_candidates'
-          : null,
-    message:
-      cleanDisplayText(chatRun.message, '') ||
-      cleanDisplayText(eventResult?.message, '') ||
-      null,
-    debugReasons: null,
-    socialRequestDraft,
-    candidates,
-    approvalRequiredActions: [],
-    events,
-  }, task.id);
+          : cleanDisplayText(eventResult?.emptyReason, '') ===
+              'no_real_candidates'
+            ? 'no_real_candidates'
+            : null,
+      message:
+        cleanDisplayText(chatRun.message, '') ||
+        cleanDisplayText(eventResult?.message, '') ||
+        null,
+      debugReasons: null,
+      socialRequestDraft,
+      candidates,
+      approvalRequiredActions: [],
+      events,
+    },
+    task.id,
+  );
 }
 
 function withRestoredOpportunityCard<
@@ -191,15 +192,17 @@ function buildRestoredOpportunityCard(
   const autoPublished =
     draft.autoPublished === true || metadata.autoPublished === true;
   const title =
-    cleanDisplayText(
-      draft.title ?? card.title ?? metadata.title,
-      '',
-    ) || '约练卡草稿';
-  const city = cleanDisplayText(draft.city ?? card.city ?? metadata.city, '') || '同城';
+    cleanDisplayText(draft.title ?? card.title ?? metadata.title, '') ||
+    '约练卡草稿';
+  const city =
+    cleanDisplayText(draft.city ?? card.city ?? metadata.city, '') || '同城';
   const activityType =
     cleanDisplayText(
-      draft.activityType ?? draft.type ?? card.activityType ?? metadata.activity,
-        '',
+      draft.activityType ??
+        draft.type ??
+        card.activityType ??
+        metadata.activity,
+      '',
     ) || '约练';
   const time =
     cleanDisplayText(
@@ -302,10 +305,10 @@ function buildRestoredOpportunityCard(
       publicIntentId,
       discoverHref,
       autoPublished,
-      publishStatus: autoPublished ? 'published' : 'draft_requires_confirmation',
-      publishPolicy: autoPublished
-        ? '已发布到发现页'
-        : '确认后发布到发现页',
+      publishStatus: autoPublished
+        ? 'published'
+        : 'draft_requires_confirmation',
+      publishPolicy: autoPublished ? '已发布到发现页' : '确认后发布到发现页',
       opportunity: {
         id: `opportunity:${taskId}:activity:${socialRequestId ?? publicIntentId ?? 'draft'}`,
         type: 'activity',
@@ -330,9 +333,7 @@ function buildRestoredOpportunityCard(
       locationName: location,
       activityType,
       time,
-      interestTags: Array.isArray(draft.interestTags)
-        ? draft.interestTags
-        : [],
+      interestTags: Array.isArray(draft.interestTags) ? draft.interestTags : [],
       publicPlaceOnly: true,
       noPreciseLocation: true,
       safetyBoundary: '不会公开精确位置、联系方式或私密画像。',

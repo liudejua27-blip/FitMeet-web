@@ -9,14 +9,16 @@ import { SocialRequestCandidateStatus } from '../match/social-request-candidate.
 import { UserSocialRequestStatus } from '../social-requests/social-request.entity';
 
 describe('AgentApprovalDispatcherService', () => {
-  function makeService(options: {
-    activities?: Record<string, jest.Mock>;
-    approvalRepo?: Record<string, jest.Mock>;
-    actionLogs?: Record<string, jest.Mock>;
-    l5Runtime?: Record<string, jest.Mock>;
-    socialRequests?: Record<string, jest.Mock>;
-    taskRepo?: Record<string, jest.Mock>;
-  } = {}) {
+  function makeService(
+    options: {
+      activities?: Record<string, jest.Mock>;
+      approvalRepo?: Record<string, jest.Mock>;
+      actionLogs?: Record<string, jest.Mock>;
+      l5Runtime?: Record<string, jest.Mock>;
+      socialRequests?: Record<string, jest.Mock>;
+      taskRepo?: Record<string, jest.Mock>;
+    } = {},
+  ) {
     const activities = options.activities ?? {};
     const approvalRepo =
       options.approvalRepo ??
@@ -170,7 +172,8 @@ describe('AgentApprovalDispatcherService', () => {
         status: 'published',
         socialRequestId: 301,
         publicIntentId: 'public_301',
-        discoverHref: '/public-intent/public_301',
+        discoverHref: '/discover?publicIntentId=public_301',
+        publicIntentHref: '/public-intent/public_301',
         synced: true,
       },
     });
@@ -186,7 +189,8 @@ describe('AgentApprovalDispatcherService', () => {
             approvalId: 9910,
             socialRequestId: 301,
             publicIntentId: 'public_301',
-            discoverHref: '/public-intent/public_301',
+            discoverHref: '/discover?publicIntentId=public_301',
+            publicIntentHref: '/public-intent/public_301',
             status: 'published',
             synced: true,
           }),
@@ -195,7 +199,8 @@ describe('AgentApprovalDispatcherService', () => {
           shortTerm: expect.objectContaining({
             publishedSocialRequestId: 301,
             publicIntentId: 'public_301',
-            discoverHref: '/public-intent/public_301',
+            discoverHref: '/discover?publicIntentId=public_301',
+            publicIntentHref: '/public-intent/public_301',
             publishStatus: 'published',
           }),
         }),
@@ -304,9 +309,11 @@ describe('AgentApprovalDispatcherService', () => {
 
   it('dispatches approved activity creation with safety and idempotency context', async () => {
     const activities = {
-      create: jest
-        .fn()
-        .mockResolvedValue({ id: 700, invitedUserId: 22, status: 'pending_confirm' }),
+      create: jest.fn().mockResolvedValue({
+        id: 700,
+        invitedUserId: 22,
+        status: 'pending_confirm',
+      }),
     };
     const { actionLogs, l5Runtime, service } = makeService({ activities });
 
@@ -399,7 +406,9 @@ describe('AgentApprovalDispatcherService', () => {
 
   it('rolls failed activity creation back to pending so the approval can be retried', async () => {
     const activities = {
-      create: jest.fn().mockRejectedValue(new Error('activity service offline')),
+      create: jest
+        .fn()
+        .mockRejectedValue(new Error('activity service offline')),
     };
     const approvalRepo = {
       update: jest.fn().mockResolvedValue({ affected: 1 }),

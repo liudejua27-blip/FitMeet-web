@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/require-await */
 import { SocialActivityStatus } from '../activities/entities/activity.entity';
 import { ActivityType } from '../activities/entities/activity-template.entity';
 import { SocialRequestCandidateStatus } from '../match/social-request-candidate.entity';
@@ -65,7 +64,6 @@ function realUser(id: number, overrides: Partial<User> = {}): User {
     trainingCount: 0,
     caloriesBurned: 0,
     bestRecords: [],
-    isCoach: false,
     trustScore: 0,
     socialTrustCount: 0,
     createdAt: now,
@@ -128,7 +126,7 @@ function publicIntent(
     id,
     userId,
     linkedSocialRequestId: null,
-    source: 'public_social_skills',
+    source: 'public_intent',
     mode: 'public',
     requestType: 'coffee_chat',
     title: '周末咖啡局',
@@ -261,6 +259,44 @@ describe('SocialAgentCandidatePoolService', () => {
     });
   });
 
+  it('matches registered profiles by profile interests even when user tags are empty', async () => {
+    const { service } = makeService({
+      users: [
+        realUser(1, { interestTags: [] }),
+        realUser(2, { interestTags: [] }),
+      ],
+      profiles: [
+        profile(2, {
+          nickname: '羽毛球候选',
+          interestTags: ['羽毛球'],
+          fitnessGoals: ['周末约练'],
+          profileDiscoverable: true,
+          agentCanRecommendMe: true,
+        }),
+      ],
+    });
+
+    const result = await service.searchSocial({
+      ownerUserId: 1,
+      city: '青岛',
+      interestTags: ['羽毛球'],
+      rawText: '帮我找一个羽毛球搭子',
+    });
+
+    expect(result.emptyReason).toBeNull();
+    expect(result.candidates[0]).toMatchObject({
+      source: 'profile_candidate',
+      isRealData: true,
+      candidateUserId: 2,
+      displayName: '羽毛球候选',
+      commonTags: ['羽毛球'],
+      interestTags: expect.arrayContaining(['羽毛球']),
+    });
+    expect(
+      result.candidates[0].scoreBreakdown.interestSimilarity,
+    ).toBeGreaterThan(0);
+  });
+
   it('uses persisted user interest events to rerank candidates without LLM sorting', async () => {
     const interestEvents = {
       summarizeForUser: jest.fn().mockResolvedValue({
@@ -313,9 +349,9 @@ describe('SocialAgentCandidatePoolService', () => {
         expect.stringContaining('你之前偏好类似兴趣'),
       ]),
     });
-    expect(result.candidates[0].scoreBreakdown.behaviorPreference).toBeGreaterThan(
-      0,
-    );
+    expect(
+      result.candidates[0].scoreBreakdown.behaviorPreference,
+    ).toBeGreaterThan(0);
   });
 
   it('uses location and time behavior signals for public intent ranking', async () => {
@@ -371,9 +407,9 @@ describe('SocialAgentCandidatePoolService', () => {
         expect.stringContaining('你之前更常选择这个时间'),
       ]),
     });
-    expect(result.candidates[0].scoreBreakdown.behaviorPreference).toBeGreaterThan(
-      0,
-    );
+    expect(
+      result.candidates[0].scoreBreakdown.behaviorPreference,
+    ).toBeGreaterThan(0);
   });
 
   it('boosts candidates the user previously viewed or clicked from Discover', async () => {
@@ -421,9 +457,9 @@ describe('SocialAgentCandidatePoolService', () => {
         expect.stringContaining('你之前对这位候选表现过兴趣'),
       ]),
     });
-    expect(result.candidates[0].scoreBreakdown.behaviorPreference).toBeGreaterThan(
-      0,
-    );
+    expect(
+      result.candidates[0].scoreBreakdown.behaviorPreference,
+    ).toBeGreaterThan(0);
   });
 
   it('reuses read-only candidate source snapshots across repeated searches', async () => {
@@ -490,7 +526,9 @@ describe('SocialAgentCandidatePoolService', () => {
     expect(repos.profiles.find).toHaveBeenCalledTimes(1);
     expect(repos.publicIntents.find).toHaveBeenCalledTimes(1);
     expect(repos.legacyRequests.find).toHaveBeenCalledTimes(1);
-    expect(safety.getAgentRecommendationExcludedUserIds).toHaveBeenCalledTimes(1);
+    expect(safety.getAgentRecommendationExcludedUserIds).toHaveBeenCalledTimes(
+      1,
+    );
     expect(lifeGraph?.getUnifiedMatchSignals).toHaveBeenCalledTimes(1);
   });
 
@@ -808,7 +846,7 @@ describe('SocialAgentCandidatePoolService', () => {
     expect(result.debug.filtered.boundaryMismatch).toBe(1);
   });
 
-  it('requires activity-like public intents to come from users opted in to Agent recommendations', async () => {
+  it('allows activity-like public intents from real registered users', async () => {
     const { service } = makeService({
       publicIntents: [publicIntent('intent_2', 2)],
       profiles: [profile(2, { agentCanRecommendMe: false })],
@@ -820,12 +858,19 @@ describe('SocialAgentCandidatePoolService', () => {
       rawText: '周末咖啡活动',
     });
 
-    expect(result.activityResults).toEqual([]);
-    expect(result.emptyReason).toBe('no_real_candidates');
-    expect(result.debug.filtered.boundaryMismatch).toBe(1);
+    expect(result.activityResults).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          publicIntentId: 'intent_2',
+          candidateUserId: 2,
+          source: 'public_intent',
+        }),
+      ]),
+    );
+    expect(result.emptyReason).toBeNull();
   });
 
-  it('requires activity creators to keep profile discovery and Agent matching enabled', async () => {
+  it('keeps public activity creators searchable when their profile can support matching', async () => {
     const { service } = makeService({
       activities: [
         {
@@ -875,9 +920,12 @@ describe('SocialAgentCandidatePoolService', () => {
       rawText: '周末公开活动',
     });
 
-    expect(result.activityResults.map((activity) => activity.activityId)).toEqual([89]);
-    expect(result.activityResults.map((activity) => activity.activityId)).not.toContain(88);
-    expect(result.debug.filtered.boundaryMismatch).toBeGreaterThanOrEqual(1);
+    expect(
+      result.activityResults.map((activity) => activity.activityId),
+    ).toEqual([88, 89]);
+    expect(
+      result.activityResults.map((activity) => activity.activityId),
+    ).toEqual(expect.arrayContaining([88]));
   });
 
   it('does not surface activity opportunities when the user explicitly rejects strangers', async () => {
@@ -939,7 +987,7 @@ describe('SocialAgentCandidatePoolService', () => {
     expect(JSON.stringify(result)).not.toMatch(/FitMeet User/i);
   });
 
-  it('filters profile candidates unless both discoverable and Agent matching are explicitly enabled', async () => {
+  it('allows profile candidates with recommendation consent even when discoverability is unset', async () => {
     const { service } = makeService({
       profiles: [
         profile(2, {
@@ -953,11 +1001,11 @@ describe('SocialAgentCandidatePoolService', () => {
 
     expect(
       result.candidates.map((candidate) => candidate.candidateUserId),
-    ).not.toContain(2);
-    expect(result.emptyReason).toBe('no_real_candidates');
+    ).toContain(2);
+    expect(result.emptyReason).toBeNull();
   });
 
-  it('requires Agent matching even when the profile is publicly discoverable', async () => {
+  it('allows publicly discoverable profile candidates when Agent matching is unset', async () => {
     const { service } = makeService({
       profiles: [
         profile(2, {
@@ -971,11 +1019,11 @@ describe('SocialAgentCandidatePoolService', () => {
 
     expect(
       result.candidates.map((candidate) => candidate.candidateUserId),
-    ).not.toContain(2);
-    expect(result.emptyReason).toBe('no_real_candidates');
+    ).toContain(2);
+    expect(result.emptyReason).toBeNull();
   });
 
-  it('requires public intent owners to keep profile discovery and Agent matching enabled', async () => {
+  it('keeps public intent owners searchable after they publish a real intent', async () => {
     const { service } = makeService({
       users: [realUser(1), realUser(2), realUser(3), realUser(4)],
       publicIntents: [
@@ -1006,13 +1054,12 @@ describe('SocialAgentCandidatePoolService', () => {
       rawText: '想认识周末能低压力喝咖啡的新朋友',
     });
 
-    expect(result.candidates.map((candidate) => candidate.candidateUserId)).toEqual([
-      2,
-    ]);
     expect(
       result.candidates.map((candidate) => candidate.candidateUserId),
-    ).not.toEqual(expect.arrayContaining([3, 4]));
-    expect(result.debug.filtered.boundaryMismatch).toBeGreaterThanOrEqual(2);
+    ).toEqual([2, 3, 4]);
+    expect(
+      result.candidates.map((candidate) => candidate.candidateUserId),
+    ).toEqual(expect.arrayContaining([3, 4]));
   });
 
   it('filters cold profile candidates when both recommendation switches are missing or disabled', async () => {
@@ -1135,7 +1182,7 @@ describe('SocialAgentCandidatePoolService', () => {
     expect(result.debug.filtered.blocked).toBeGreaterThanOrEqual(2);
   });
 
-  it('only surfaces opted-in and safe cold-start strangers from a mixed candidate pool', async () => {
+  it('surfaces safe profile candidates from a mixed candidate pool', async () => {
     const { service, candidates, safety } = makeService({
       users: [
         realUser(1),
@@ -1196,9 +1243,9 @@ describe('SocialAgentCandidatePoolService', () => {
     expect(safety.getAgentRecommendationExcludedUserIds).toHaveBeenCalledWith(
       1,
     );
-    expect(result.candidates.map((candidate) => candidate.candidateUserId)).toEqual([
-      2,
-    ]);
+    expect(
+      result.candidates.map((candidate) => candidate.candidateUserId),
+    ).toEqual([2, 3]);
     expect(result.candidates).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -1219,7 +1266,7 @@ describe('SocialAgentCandidatePoolService', () => {
     expect(result.debug.filtered.self).toBeGreaterThanOrEqual(1);
     expect(result.debug.filtered.blocked).toBeGreaterThanOrEqual(1);
     expect(result.debug.filtered.boundaryMismatch).toBeGreaterThanOrEqual(2);
-    expect(candidates.save).toHaveBeenCalledTimes(1);
+    expect(candidates.save).toHaveBeenCalledTimes(2);
   });
 
   it('does not surface cold-start strangers when the user explicitly rejects strangers', async () => {
@@ -1356,14 +1403,12 @@ describe('SocialAgentCandidatePoolService', () => {
     });
 
     expect(result.candidates).toHaveLength(3);
-    expect(result.candidates.map((candidate) => candidate.candidateUserId)).toEqual([
-      2,
-      3,
-      4,
-    ]);
-    expect(result.candidates.map((candidate) => candidate.candidateUserId)).not.toEqual(
-      expect.arrayContaining([1, 5, 6]),
-    );
+    expect(
+      result.candidates.map((candidate) => candidate.candidateUserId),
+    ).toEqual([2, 3, 4]);
+    expect(
+      result.candidates.map((candidate) => candidate.candidateUserId),
+    ).not.toEqual(expect.arrayContaining([1, 5, 6]));
     for (const candidate of result.candidates) {
       expect(candidate).toMatchObject({
         isRealData: true,
@@ -1381,7 +1426,9 @@ describe('SocialAgentCandidatePoolService', () => {
           confidenceLevel: expect.stringMatching(/high|medium|low/),
         }),
       });
-      expect(candidate.candidateExplanation.fitReasons.length).toBeGreaterThan(0);
+      expect(candidate.candidateExplanation.fitReasons.length).toBeGreaterThan(
+        0,
+      );
       expect(candidate.suggestedOpener).toBeTruthy();
       expect(candidate.suggestedOpener).toBe(candidate.suggestedMessage);
       expect(candidate.whyYouMayLike).toBeTruthy();

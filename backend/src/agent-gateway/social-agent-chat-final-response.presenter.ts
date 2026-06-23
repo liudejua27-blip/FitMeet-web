@@ -15,7 +15,10 @@ import {
 import type { SocialAgentFinalResponseInput } from './social-agent-final-response.service';
 import type { AgentTask } from './entities/agent-task.entity';
 import type { ExtractedProfileFields } from './social-agent-chat.types';
-import type { SocialAgentIntentRouterResult, SocialAgentIntentType } from './social-agent-intent-router.service';
+import type {
+  SocialAgentIntentRouterResult,
+  SocialAgentIntentType,
+} from './social-agent-intent-router.service';
 import type { SocialAgentMemoryContext } from './social-agent-memory-context.service';
 
 type SocialAgentChatProfileUpdateMode =
@@ -47,12 +50,15 @@ export function buildSocialAgentDirectReplyFinalResponseInput(input: {
       input.contextTurnLimit,
     ),
     memoryContext: memoryContextRecord(input.memoryContext),
-    taskContext: input.taskContext ?? summarizeSocialAgentTaskMemoryForLlm(input.task),
+    taskContext:
+      input.taskContext ?? summarizeSocialAgentTaskMemoryForLlm(input.task),
     plannerDecision: readSocialAgentConversationBrainDecision(input.task),
     toolResults:
       input.toolResults && input.toolResults.length > 0
         ? input.toolResults
-        : [readSocialAgentConversationBrainLastToolResult(input.task)].filter(Boolean),
+        : [readSocialAgentConversationBrainLastToolResult(input.task)].filter(
+            Boolean,
+          ),
     safetyRules: socialAgentFinalResponseSafetyRules(),
     responseGoal: '直接回答用户问题，并根据当前状态自然推进下一步。',
     fallbackReply: input.fallbackReply,
@@ -99,7 +105,8 @@ export function buildSocialAgentAgentBrainFinalResponseInput(input: {
       input.contextTurnLimit,
     ),
     memoryContext: memoryContextRecord(input.memoryContext),
-    taskContext: input.taskContext ?? summarizeSocialAgentTaskMemoryForLlm(input.task),
+    taskContext:
+      input.taskContext ?? summarizeSocialAgentTaskMemoryForLlm(input.task),
     plannerDecision: readSocialAgentConversationBrainDecision(input.task),
     toolResults: input.toolOutput ? [input.toolOutput] : [],
     safetyRules: socialAgentFinalResponseSafetyRules(),
@@ -111,6 +118,8 @@ export function buildSocialAgentAgentBrainFinalResponseInput(input: {
   };
 }
 
-function memoryContextRecord(memoryContext: SocialAgentMemoryContext | null): Record<string, unknown> {
+function memoryContextRecord(
+  memoryContext: SocialAgentMemoryContext | null,
+): Record<string, unknown> {
   return (memoryContext ?? {}) as unknown as Record<string, unknown>;
 }

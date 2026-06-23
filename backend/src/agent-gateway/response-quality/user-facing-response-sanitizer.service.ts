@@ -123,7 +123,8 @@ export class UserFacingResponseSanitizerService {
       return {
         kind: 'timeout',
         title: '这段需求还在',
-        message: '刚才处理比平时久一点，可以继续处理；不会重复执行已确认的高风险动作。',
+        message:
+          '刚才处理比平时久一点，可以继续处理；不会重复执行已确认的高风险动作。',
         retryable: true,
         source: 'stream_error',
       };
@@ -332,7 +333,7 @@ export class UserFacingResponseSanitizerService {
         proposedSignals,
         confirmationBoundary: this.readText(
           proposal.confirmationBoundary,
-          '这只是画像更新建议，确认前不会写入长期 Life Graph。',
+          '这只是画像更新建议，确认前不会写入长期偏好。',
         ),
         privacyBoundary: this.readText(
           proposal.privacyBoundary,
@@ -340,7 +341,7 @@ export class UserFacingResponseSanitizerService {
         ),
         revokeHint: this.readText(
           proposal.revokeHint,
-          '确认后仍可在 Life Graph 中撤回这次影响。',
+          '确认后仍可在个人信息里撤回这次影响。',
         ),
       },
     };
@@ -378,7 +379,7 @@ export class UserFacingResponseSanitizerService {
     return {
       id: `life_graph_proposal:${proposal.proposalId}`,
       type: 'profile_proposal',
-      title: '建议更新 Life Graph',
+      title: '建议更新个人信息',
       body:
         proposal.aiSummary ||
         '我识别到一些可以用于后续推荐的画像信息，请确认是否保存。',
@@ -397,14 +398,14 @@ export class UserFacingResponseSanitizerService {
           title: '画像更新建议',
           description: hasConflicts
             ? '这条记忆和旧记录存在差异，只有你确认后才会覆盖长期画像。'
-            : '只在你确认后写入长期 Life Graph。',
+            : '只在你确认后写入长期偏好。',
           current: conflicts.length ? conflicts.join('；') : '暂无明确冲突',
           proposed: proposal.aiSummary || '等待你确认后更新',
           conflicts,
           sensitivityLevel: hasConflicts ? 'medium' : 'low',
           confirmationBoundary: hasConflicts
             ? '确认保存表示你允许这次提案覆盖冲突的旧画像；拒绝则不会写入。'
-            : '确认前不会写入长期 Life Graph。',
+            : '确认前不会写入长期偏好。',
           privacyBoundary: '仅保存脱敏画像偏好，不保存私聊原文或精确敏感信息。',
           sourceSignals,
         },
@@ -412,10 +413,10 @@ export class UserFacingResponseSanitizerService {
         sensitivityLevel: hasConflicts ? 'medium' : 'low',
         confirmationBoundary: hasConflicts
           ? '确认保存表示你允许这次提案覆盖冲突的旧画像；拒绝则不会写入。'
-          : '确认前不会写入长期 Life Graph。',
+          : '确认前不会写入长期偏好。',
         privacyBoundary: '仅保存脱敏画像偏好，不保存私聊原文或精确敏感信息。',
         sourceSignals,
-        revokeHint: '确认后仍可在 Life Graph 中查看、纠正或撤回。',
+        revokeHint: '确认后仍可在个人信息里查看、纠正或撤回。',
         confirmationRequired: proposal.confirmationRequired,
         missingFields: proposal.missingFields,
       },
@@ -766,6 +767,6 @@ function collapseRepeatedWholeText(value: string): string {
 function normalizeAssistantMessageText(value: string): string {
   return value
     .replace(/\s+/g, '')
-    .replace(/[，,。.!！?？；;：:、"'“”‘’（）()【】\[\]\-—]/g, '')
+    .replace(/[，,。.!！?？；;：:、"'“”‘’（）()【】[\]—-]/g, '')
     .toLowerCase();
 }

@@ -11,7 +11,7 @@ import type {
   FitMeetAssistantMessage,
   FitMeetAssistantRecovery,
 } from '../agent-workspace/FitMeetAssistantUI.types';
-import { requestAssistantComposerFocus } from './composer';
+import { requestAssistantComposerFocus } from './composer-focus';
 import { ChatGPTThread } from './thread';
 import { ChatGPTThreadList, MobileThreadListButton } from './thread-list';
 import { TooltipIconButton } from './tooltip-icon-button';
@@ -81,7 +81,9 @@ export function AssistantShell({
   onDismissReminder,
   onUpdateReminderPreference,
 }: AssistantShellProps) {
-  const [sidebarOpen, setSidebarOpen] = useState(initialSidebarOpen);
+  const [sidebarOpen, setSidebarOpen] = useState(
+    () => Boolean(focusReminderSettings) || initialSidebarOpen(),
+  );
   const [isDesktopSidebar, setIsDesktopSidebar] = useState(isDesktopViewport);
   const [focusComposerOnReady, setFocusComposerOnReady] = useState(false);
   const mobileSidebarButtonRef = useRef<HTMLButtonElement | null>(null);
@@ -142,13 +144,7 @@ export function AssistantShell({
     return () => {
       if (timeout !== undefined) window.clearTimeout(timeout);
     };
-  }, [
-    focusComposerInput,
-    focusComposerOnReady,
-    messages.length,
-    sessionRestoring,
-    sidebarOpen,
-  ]);
+  }, [focusComposerInput, focusComposerOnReady, messages.length, sessionRestoring, sidebarOpen]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -191,11 +187,6 @@ export function AssistantShell({
     };
   }, [closeMobileSidebar, isDesktopSidebar, sidebarOpen]);
 
-  useEffect(() => {
-    if (!focusReminderSettings) return;
-    setSidebarOpen(true);
-  }, [focusReminderSettings]);
-
   const isMobileSidebarModal = sidebarOpen && !isDesktopSidebar;
 
   return (
@@ -211,10 +202,7 @@ export function AssistantShell({
       data-thread-count={threads.length}
       data-active-thread-id={activeThreadId ?? ''}
     >
-      <MobileThreadListButton
-        ref={mobileSidebarButtonRef}
-        onClick={() => setSidebarOpen(true)}
-      />
+      <MobileThreadListButton ref={mobileSidebarButtonRef} onClick={() => setSidebarOpen(true)} />
       {isDesktopSidebar && !sidebarOpen ? (
         <div className="fixed left-3 top-3 z-30 hidden items-center gap-1 lg:flex">
           <TooltipIconButton
@@ -296,7 +284,7 @@ export function AssistantShell({
           onFeedback={onFeedback}
           onDisableReminders={onDisableReminders}
           onDismissReminder={onDismissReminder}
-      />
+        />
       </main>
     </div>
   );

@@ -71,7 +71,9 @@ const LazyCandidateEmptyStateCard = lazy(() =>
   })),
 );
 const LazyLifeGraphDiffCard = lazy(() =>
-  import('./tool-life-graph-card').then((module) => ({ default: module.LifeGraphDiffCard })),
+  import('./tool-personal-profile-update-card').then((module) => ({
+    default: module.LifeGraphDiffCard,
+  })),
 );
 const LazyMeetLoopResultCard = lazy(() =>
   import('./tool-meet-loop-card').then((module) => ({ default: module.MeetLoopResultCard })),

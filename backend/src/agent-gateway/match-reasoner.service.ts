@@ -168,16 +168,15 @@ export class MatchReasonerService {
     try {
       const augmented = await this.tryDeepseekWithRetry(input, fallback);
       return this.sanitizeOutput(
-        augmented ?? this.degradeFallbackExplanation(fallback, 'empty_response'),
+        augmented ??
+          this.degradeFallbackExplanation(fallback, 'empty_response'),
       );
     } catch (err) {
       if (this.isClientAbort(err)) {
         throw this.toError(err);
       }
       const reason = socialAgentDeepSeekFailureReason(err);
-      this.logger.warn(
-        `MatchReasoner deepseek augmentation failed: ${reason}`,
-      );
+      this.logger.warn(`MatchReasoner deepseek augmentation failed: ${reason}`);
       return this.degradeFallbackExplanation(fallback, reason);
     }
   }
@@ -426,8 +425,7 @@ export class MatchReasonerService {
         ],
         5,
       ),
-      nextAction:
-        '建议先保存候选或稍后重试智能解释；发送邀请前仍需你确认。',
+      nextAction: '建议先保存候选或稍后重试智能解释；发送邀请前仍需你确认。',
       requiresUserConfirmation: true,
       source: 'fallback',
       fallbackReason: reason,

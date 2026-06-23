@@ -2,14 +2,9 @@ import { ChevronDown, Info } from 'lucide-react';
 import type { ReactNode } from 'react';
 
 import { cn } from '../../lib/utils';
+import { normalizeInlineProductText } from './tool-card-text';
 
-export function ProductCardDetails({
-  title,
-  children,
-}: {
-  title: string;
-  children: ReactNode;
-}) {
+export function ProductCardDetails({ title, children }: { title: string; children: ReactNode }) {
   return (
     <details
       className="group/card-details mt-3 rounded-xl bg-[#fbfbfc] px-3 py-2 ring-1 ring-black/[0.05]"
@@ -47,12 +42,6 @@ export function ReasonList({ title, reasons }: { title: string; reasons: string[
       </ul>
     </div>
   );
-}
-
-export function normalizeInlineProductText(value?: string | null) {
-  if (!value) return null;
-  const text = value.trim();
-  return text.length > 0 ? text : null;
 }
 
 export function MetaChip({ icon, label }: { icon: ReactNode; label: string }) {

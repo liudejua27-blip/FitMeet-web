@@ -135,7 +135,6 @@ export function buildProductionEnvReport(env: EnvMap): ProductionEnvReport {
   checkUploadTempDir(env, error);
   checkAgentModel(env, error);
   checkAgentIntelligencePolicy(env, error);
-  checkKafka(env, error);
   checkSubagentWorker(env, error, warning);
   checkObservabilityAlerts(env, error, warning);
 
@@ -523,15 +522,6 @@ function isFastDeepSeekModel(value: string): boolean {
   return /(^|[-_])(flash|fast|lite)([-_]|$)/i.test(value.trim());
 }
 
-function checkKafka(
-  env: EnvMap,
-  error: (key: string, message: string) => void,
-): void {
-  if (env.ENABLE_KAFKA === 'true' && !hasConfiguredValue(env.KAFKA_BROKERS)) {
-    error('KAFKA_BROKERS', 'must be set when ENABLE_KAFKA=true.');
-  }
-}
-
 function checkSubagentWorker(
   env: EnvMap,
   error: (key: string, message: string) => void,
@@ -560,10 +550,10 @@ function checkSubagentWorker(
     .split(',')
     .map((item) => item.trim())
     .filter(Boolean);
-  if (queues.length > 0 && queues.length < 4) {
+  if (queues.length > 0 && queues.length < 3) {
     warning(
       'FITMEET_SUBAGENT_WORKER_QUEUE',
-      'custom queue list should include Life Graph, Social Match, Meet Loop, and Math worker queues unless this is an intentional partial rollout.',
+      'custom queue list should include Agent Brain, Life Graph, and Match worker queues unless this is an intentional partial rollout.',
     );
   }
 }

@@ -16,12 +16,19 @@ import { SocialAgentFinalResponseService } from './social-agent-final-response.s
 import { SocialAgentMetricsService } from './social-agent-metrics.service';
 import type { ExtractedProfileFields } from './social-agent-chat.types';
 import { SocialAgentChatDeepSeekClientService } from './social-agent-chat-deepseek-client.service';
-import { SOCIAL_AGENT_DEFAULT_CONTEXT_TURNS, socialAgentContextTurnLimit } from './social-agent-context-window';
+import {
+  SOCIAL_AGENT_DEFAULT_CONTEXT_TURNS,
+  socialAgentContextTurnLimit,
+} from './social-agent-context-window';
 import {
   createTrackedSocialAgentDeltaHandler,
   socialAgentAnswerSource,
 } from './social-agent-chat-llm-delta';
-import type { SocialAgentBrainReplyInput, SocialAgentDirectReplyInput, SocialAgentGeneratedAnswer } from './social-agent-chat-llm.types';
+import type {
+  SocialAgentBrainReplyInput,
+  SocialAgentDirectReplyInput,
+  SocialAgentGeneratedAnswer,
+} from './social-agent-chat-llm.types';
 import {
   buildSocialAgentProfileExtractionMessages,
   parseSocialAgentProfileExtractionContent,
@@ -82,7 +89,14 @@ export class SocialAgentChatLlmService {
           signal: input.signal,
         },
       );
-      return { text, source: socialAgentAnswerSource(text, fallbackReply, delta.emittedDelta()) };
+      return {
+        text,
+        source: socialAgentAnswerSource(
+          text,
+          fallbackReply,
+          delta.emittedDelta(),
+        ),
+      };
     }
     try {
       const answer = await this.callDeepSeekForDirectReply({
@@ -124,7 +138,14 @@ export class SocialAgentChatLlmService {
           signal: input.signal,
         },
       );
-      return { text, source: socialAgentAnswerSource(text, input.fallbackReply, delta.emittedDelta()) };
+      return {
+        text,
+        source: socialAgentAnswerSource(
+          text,
+          input.fallbackReply,
+          delta.emittedDelta(),
+        ),
+      };
     }
     try {
       const answer = await this.callDeepSeekForAgentBrain({
@@ -165,7 +186,8 @@ export class SocialAgentChatLlmService {
     const cacheTtlMs = this.profileExtractionCacheTtlMs();
     if (cacheTtlMs > 0) {
       const cached = await this.profileExtractionCache().getAsync(cacheKey);
-      const cacheFingerprint = readSocialAgentExactCacheKeyFingerprint(cacheKey);
+      const cacheFingerprint =
+        readSocialAgentExactCacheKeyFingerprint(cacheKey);
       this.metrics.recordLlmOutputCache?.({
         cacheName: 'profile_extraction_exact',
         hit: cached !== null,
@@ -201,7 +223,9 @@ export class SocialAgentChatLlmService {
     }
   }
 
-  profileFieldsFromRecord(value: Record<string, unknown>): ExtractedProfileFields {
+  profileFieldsFromRecord(
+    value: Record<string, unknown>,
+  ): ExtractedProfileFields {
     return profileFieldsFromRecord(value);
   }
 
@@ -252,9 +276,9 @@ export class SocialAgentChatLlmService {
 
   private profileExtractionCacheTtlMs(): number {
     const configured = Number(
-      this.deepSeek.configReader()?.get(
-        'SOCIAL_AGENT_PROFILE_EXTRACTION_CACHE_TTL_MS',
-      ) ?? '',
+      this.deepSeek
+        .configReader()
+        ?.get('SOCIAL_AGENT_PROFILE_EXTRACTION_CACHE_TTL_MS') ?? '',
     );
     if (Number.isFinite(configured) && configured >= 0) {
       return Math.floor(configured);

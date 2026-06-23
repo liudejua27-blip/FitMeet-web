@@ -30,7 +30,7 @@ function makeTask(overrides: Partial<AgentTask> = {}): AgentTask {
 
 function makeService() {
   const messages = {
-    getAgentInboxMessages: jest.fn(),
+    getAgentConversationMessages: jest.fn(),
     getTaskConversationMessages: jest.fn(),
   };
   const toolJsonModel = {
@@ -54,7 +54,7 @@ function makeService() {
 describe('SocialAgentConversationToolService', () => {
   it('returns memory and event patches for unread counterpart messages', async () => {
     const { service, messages, l5Runtime } = makeService();
-    messages.getAgentInboxMessages.mockResolvedValue([
+    messages.getAgentConversationMessages.mockResolvedValue([
       {
         id: 'msg_1',
         conversationId: 'conv_1',
@@ -73,9 +73,13 @@ describe('SocialAgentConversationToolService', () => {
 
     const result = await service.readTaskConversationMessages(makeTask(), {});
 
-    expect(messages.getAgentInboxMessages).toHaveBeenCalledWith('conv_1', 7, {
-      limit: 50,
-    });
+    expect(messages.getAgentConversationMessages).toHaveBeenCalledWith(
+      'conv_1',
+      7,
+      {
+        limit: 50,
+      },
+    );
     expect(result.output).toMatchObject({
       conversationId: 'conv_1',
       cursor: 'msg_1',
@@ -104,7 +108,7 @@ describe('SocialAgentConversationToolService', () => {
         },
       },
     });
-    expect(result.inboxEvent).toMatchObject({
+    expect(result.messageEvent).toMatchObject({
       eventType: 'social_agent.message.received',
       input: {
         conversationId: 'conv_1',
@@ -132,9 +136,9 @@ describe('SocialAgentConversationToolService', () => {
     );
   });
 
-  it('does not emit task or inbox events when there are no new messages', async () => {
+  it('does not emit task or message events when there are no new messages', async () => {
     const { service, messages, l5Runtime } = makeService();
-    messages.getAgentInboxMessages.mockResolvedValue([
+    messages.getAgentConversationMessages.mockResolvedValue([
       {
         id: 'msg_1',
         conversationId: 'conv_1',
@@ -149,7 +153,7 @@ describe('SocialAgentConversationToolService', () => {
     expect(result.output).toMatchObject({ newMessageCount: 0 });
     expect(result.receivedMessages).toEqual([]);
     expect(result.taskEvent).toBeUndefined();
-    expect(result.inboxEvent).toBeUndefined();
+    expect(result.messageEvent).toBeUndefined();
     expect(result.loopUpdates).toMatchObject({
       latestReceivedMessage: null,
       latestReceivedMessages: [],
@@ -158,7 +162,7 @@ describe('SocialAgentConversationToolService', () => {
     expect(l5Runtime.transitionMeetLoop).not.toHaveBeenCalled();
   });
 
-  it('summarizes replies with model fallback wiring and inbox event patches', async () => {
+  it('summarizes replies with model fallback wiring and message event patches', async () => {
     const { service, toolJsonModel, l5Runtime } = makeService();
     toolJsonModel.callJson.mockResolvedValue({
       summary: 'Counterpart wants a meeting point.',
@@ -224,7 +228,7 @@ describe('SocialAgentConversationToolService', () => {
         status: 'done',
       },
     });
-    expect(result.inboxEvent).toMatchObject({
+    expect(result.messageEvent).toMatchObject({
       eventType: 'social_agent.reply.summarized',
       input: {
         conversationId: 'conv_1',
@@ -284,7 +288,7 @@ describe('SocialAgentConversationToolService', () => {
       {},
     );
 
-    expect(messages.getAgentInboxMessages).not.toHaveBeenCalled();
+    expect(messages.getAgentConversationMessages).not.toHaveBeenCalled();
     expect(messages.getTaskConversationMessages).toHaveBeenCalledWith(100, {
       conversationId: 'conv_1',
       limit: 50,

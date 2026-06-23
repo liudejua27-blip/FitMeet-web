@@ -56,7 +56,8 @@ export class CardCopywriterService {
       ? '已根据你的首次公开授权同步到发现页；邀请、加好友或发送消息仍需你确认。'
       : '默认不公开发布；如果需要公开发起，我会单独征得你确认。';
     const approvalPolicy = '创建约练前必须由你确认时间、地点和参与边界。';
-    const meetLoopNextStep = '确认后进入“等待回复/确认到达/评价回写”的约练闭环。';
+    const meetLoopNextStep =
+      '确认后进入“等待回复/确认到达/评价回写”的约练闭环。';
     const activityProtocol = this.activityProtocol({
       locationName,
       publishPolicy,
@@ -166,10 +167,23 @@ export class CardCopywriterService {
       },
       actions: [
         {
+          id: 'view_activity_detail',
+          label: '查看详情',
+          action: 'activity.view_detail',
+          schemaAction: 'activity.view_detail',
+          loopStage: 'activity_draft_created',
+          requiresConfirmation: false,
+          payload: {
+            taskId: input.taskId,
+            socialRequestId: draft.socialRequestId ?? null,
+            opportunityId: `opportunity:${input.taskId}:activity`,
+          },
+        },
+        {
           id: 'confirm_create_activity',
-          label: '发布到发现',
+          label: '发布卡片',
           action: 'publish_to_discover',
-          schemaAction: 'publish_to_discover',
+          schemaAction: 'activity.confirm_create',
           loopStage: 'activity_draft_created',
           requiresConfirmation: true,
           payload: {
@@ -200,7 +214,7 @@ export class CardCopywriterService {
         },
         {
           id: 'modify_activity_plan',
-          label: '修改',
+          label: '修改信息',
           action: 'reschedule_meet_loop',
           schemaAction: 'activity.modify_time',
           loopStage: 'activity_draft_created',
@@ -269,10 +283,18 @@ export class CardCopywriterService {
     const preferenceHistorySignals = this.stringList(
       candidate.preferenceHistorySignals,
     );
-    const recentPublicActivity = this.stringList(candidate.recentPublicActivity);
+    const recentPublicActivity = this.stringList(
+      candidate.recentPublicActivity,
+    );
     const interestTags = this.candidateInterests(candidate, input.draft).slice(
       0,
       5,
+    );
+    const displayInterestTags = this.candidateDisplayInterests(
+      candidate,
+      input.draft,
+      taskSlotSummary,
+      interestTags,
     );
     const reasons = this.uniqueStrings([
       ...matchPoints,
@@ -282,8 +304,10 @@ export class CardCopywriterService {
     ]);
     const activityType =
       cleanDisplayText(input.draft?.activityType, '') ||
+      cleanDisplayText(taskSlotSummary.activity, '') ||
+      cleanDisplayText(candidate.activityType ?? candidate.sport, '') ||
       this.inferActivity(candidate);
-    const explicitOpener =
+    const rawOpener =
       cleanDisplayText(explanation.suggestedOpener, '') ||
       cleanDisplayText(candidate.suggestedOpener, '') ||
       cleanDisplayText(candidate.suggestedMessage, '');
@@ -303,7 +327,9 @@ export class CardCopywriterService {
         candidate.riskWarnings ?? this.record(candidate.risk).warnings,
       )[0] ||
       '第一次建议选择公共场所，先站内沟通，不共享精确位置。';
-    const explicitRecommendationConsent = this.record(candidate.recommendationConsent);
+    const explicitRecommendationConsent = this.record(
+      candidate.recommendationConsent,
+    );
     const recommendationConsent =
       Object.keys(explicitRecommendationConsent).length > 0
         ? explicitRecommendationConsent
@@ -324,23 +350,38 @@ export class CardCopywriterService {
     const whyNow =
       cleanDisplayText(candidate.whyNow, '') ||
       this.personalization.whyNow({
-        timePreference: input.draft?.timePreference ?? taskSlotSummary.time_window,
+        timePreference:
+          input.draft?.timePreference ??
+          taskSlotSummary.time_window ??
+          candidate.timePreference ??
+          candidate.timeLabel ??
+          candidate.timeWindow,
         locationText:
-          input.draft?.city ??
+          input.draft?.locationName ??
+          input.draft?.location ??
           input.draft?.locationText ??
           taskSlotSummary.location_text ??
-          taskSlotSummary.geo_area,
+          taskSlotSummary.geo_area ??
+          candidate.locationText ??
+          candidate.area,
         candidateCity: candidate.city,
         distanceKm: candidate.distanceKm,
       });
     const area =
+      cleanDisplayText(input.draft?.locationName, '') ||
+      cleanDisplayText(input.draft?.location, '') ||
+      cleanDisplayText(input.draft?.locationText, '') ||
+      cleanDisplayText(taskSlotSummary.location_text, '') ||
+      cleanDisplayText(taskSlotSummary.geo_area, '') ||
+      cleanDisplayText(candidate.locationText, '') ||
       cleanDisplayText(candidate.area, '') ||
-      cleanDisplayText(candidate.city, '') ||
       cleanDisplayText(input.draft?.city, '同城');
     const timePreference = cleanDisplayText(
       input.draft?.timePreference ??
         taskSlotSummary.time_window ??
-        candidate.timePreference,
+        candidate.timePreference ??
+        candidate.timeLabel ??
+        candidate.timeWindow,
       '时间待确认',
     );
     const intensity = cleanDisplayText(
@@ -354,7 +395,7 @@ export class CardCopywriterService {
     const idealType = this.candidateIdealType(candidate);
     const invitePolicy = this.candidateInvitePolicy(candidate);
     const opener =
-      explicitOpener ||
+      this.taskAlignedOpener(rawOpener, activityType) ||
       this.defaultCandidateOpener({
         displayName,
         activityType: activityType || '活动',
@@ -423,7 +464,7 @@ export class CardCopywriterService {
           area,
           time: timePreference,
           distanceLabel: this.candidateDistanceLabel(candidate),
-          interests: interestTags,
+          interests: displayInterestTags,
           relationshipGoal,
           idealType,
           invitePolicy,
@@ -473,7 +514,7 @@ export class CardCopywriterService {
         recommendationProtocol,
         preferenceHistorySignals,
         recentPublicActivity,
-        sharedInterests: interestTags,
+        sharedInterests: displayInterestTags,
         explanationSteps,
         rankingBreakdown,
         reasonerSource: reasoningQuality.reasonerSource,
@@ -510,7 +551,7 @@ export class CardCopywriterService {
           '生成开场白',
           '先收藏',
           '发送邀请',
-          '加好友并聊天',
+          '确认后邀请Ta',
           '更多类似的人',
           '不感兴趣',
         ],
@@ -657,6 +698,10 @@ export class CardCopywriterService {
       displayName: context.displayName,
       safetyBoundary: context.safetyBoundary,
     };
+    const idempotencyIdentity =
+      typeof targetUserId === 'string' || typeof targetUserId === 'number'
+        ? String(targetUserId)
+        : context.opportunityId;
     return [
       {
         id: 'view_detail',
@@ -709,9 +754,7 @@ export class CardCopywriterService {
           approvalRequired: true,
           checkpointRequired: true,
           resumeMode: 'resume_after_approval',
-          idempotencyKey: `opener-send:${taskId}:${String(
-            targetUserId ?? context.opportunityId,
-          )}`,
+          idempotencyKey: `opener-send:${taskId}:${idempotencyIdentity}`,
           suggestedOpener: context.suggestedOpener,
           riskLevel: 'medium',
           riskReasons: [
@@ -724,7 +767,7 @@ export class CardCopywriterService {
       },
       {
         id: 'invite_candidate',
-        label: '加好友并聊天',
+        label: '确认后邀请Ta',
         action: 'candidate.connect',
         schemaAction: 'candidate.connect',
         loopStage: 'candidate_selected',
@@ -736,9 +779,7 @@ export class CardCopywriterService {
           approvalRequired: true,
           checkpointRequired: true,
           resumeMode: 'resume_after_approval',
-          idempotencyKey: `candidate-connect:${taskId}:${String(
-            targetUserId ?? context.opportunityId,
-          )}`,
+          idempotencyKey: `candidate-connect:${taskId}:${idempotencyIdentity}`,
           suggestedOpener: context.suggestedOpener,
           riskLevel: 'medium',
           riskReasons: [
@@ -788,7 +829,8 @@ export class CardCopywriterService {
         cleanDisplayText(candidate.displayName, '') ||
         cleanDisplayText(candidate.nickname, '') ||
         '候选人',
-      avatarUrl: cleanDisplayText(candidate.avatarUrl ?? candidate.avatar, '') || null,
+      avatarUrl:
+        cleanDisplayText(candidate.avatarUrl ?? candidate.avatar, '') || null,
       city: cleanDisplayText(candidate.city, '') || null,
       score: candidate.score ?? candidate.matchScore ?? null,
       matchScore: candidate.matchScore ?? candidate.score ?? null,
@@ -868,9 +910,18 @@ export class CardCopywriterService {
     safetyBoundary: string,
   ): string[] {
     return this.uniqueStrings([
-      cleanDisplayText(this.record(candidate.recommendationConsent).sourceLabel, ''),
-      cleanDisplayText(this.record(candidate.recommendationConsent).privacyLabel, ''),
-      cleanDisplayText(this.record(candidate.recommendationConsent).strangerPolicyLabel, ''),
+      cleanDisplayText(
+        this.record(candidate.recommendationConsent).sourceLabel,
+        '',
+      ),
+      cleanDisplayText(
+        this.record(candidate.recommendationConsent).privacyLabel,
+        '',
+      ),
+      cleanDisplayText(
+        this.record(candidate.recommendationConsent).strangerPolicyLabel,
+        '',
+      ),
       candidate.isRealData === true ? '真实资料优先' : '',
       cleanDisplayText(candidate.dataQuality, '') ? '资料已校验' : '',
       '位置已模糊',
@@ -913,10 +964,8 @@ export class CardCopywriterService {
     safetyBoundary: string,
   ): string[] {
     const explicitSignals = this.stringList(candidate.discoverySafetySignals);
-    if (explicitSignals.length > 0) return explicitSignals.slice(0, 5);
-
     const blockedSignals = this.stringList(
-      candidate.blockedSignals ?? candidate.complaintSignals ?? candidate.riskWarnings,
+      candidate.blockedSignals ?? candidate.complaintSignals,
     );
     return this.uniqueStrings([
       recommendationConsent.profileDiscoverable === true ||
@@ -932,8 +981,11 @@ export class CardCopywriterService {
       recommendationConsent.privacyLabel
         ? cleanDisplayText(recommendationConsent.privacyLabel, '')
         : '资料已脱敏',
-      blockedSignals.length === 0 ? '无拉黑/投诉风险信号' : '存在风险信号，需降低触达强度',
+      blockedSignals.length === 0
+        ? '无拉黑/投诉风险信号'
+        : '存在风险信号，需降低触达强度',
       safetyBoundary ? '邀请前保留确认边界' : '',
+      ...explicitSignals,
     ]).slice(0, 5);
   }
 
@@ -1038,13 +1090,40 @@ export class CardCopywriterService {
     draft?: Record<string, unknown> | null,
   ): string[] {
     return this.uniqueStrings([
+      cleanDisplayText(draft?.activityType, ''),
+      cleanDisplayText(candidate.activityType, ''),
+      cleanDisplayText(candidate.sport, ''),
       ...this.stringList(candidate.commonTags),
       ...this.stringList(candidate.sharedInterests),
       ...this.stringList(candidate.interestTags),
       ...this.stringList(candidate.tags),
-      cleanDisplayText(draft?.activityType, ''),
-      cleanDisplayText(candidate.sport, ''),
     ]).slice(0, 5);
+  }
+
+  private candidateDisplayInterests(
+    candidate: Record<string, unknown>,
+    draft: Record<string, unknown> | null | undefined,
+    taskSlotSummary: Record<string, unknown>,
+    fallback: string[],
+  ): string[] {
+    const taskInterests = this.uniqueStrings([
+      cleanDisplayText(draft?.activityType, ''),
+      cleanDisplayText(draft?.sport, ''),
+      cleanDisplayText(taskSlotSummary.activity, ''),
+      ...this.stringList(draft?.interestTags),
+    ]).slice(0, 5);
+    if (taskInterests.length > 0) return taskInterests;
+    return this.uniqueStrings([
+      ...this.stringList(candidate.sharedInterests),
+      ...this.stringList(candidate.commonTags),
+      ...fallback,
+    ]).slice(0, 5);
+  }
+
+  private taskAlignedOpener(opener: string, activityType: string): string {
+    if (!opener) return '';
+    if (!activityType) return opener;
+    return opener.includes(activityType) ? opener : '';
   }
 
   private candidateDistanceLabel(
@@ -1116,7 +1195,12 @@ export class CardCopywriterService {
     relationshipGoal: string | null;
     preferenceHistorySignals: string[];
     safetyBoundary: string;
-  }): Array<{ key: string; label: string; score: number | null; reason: string }> {
+  }): Array<{
+    key: string;
+    label: string;
+    score: number | null;
+    reason: string;
+  }> {
     const breakdown = this.record(input.candidate.scoreBreakdown);
     const numberValue = (value: unknown): number | null => {
       const parsed =
@@ -1131,13 +1215,19 @@ export class CardCopywriterService {
       {
         key: 'location',
         label: '城市/距离',
-        score: numberValue(breakdown.distance ?? breakdown.cityMatch ?? breakdown.locationFit),
-        reason: input.area ? `区域在 ${input.area} 附近，适合先低压力了解。` : '区域信息已模糊处理。',
+        score: numberValue(
+          breakdown.distance ?? breakdown.cityMatch ?? breakdown.locationFit,
+        ),
+        reason: input.area
+          ? `区域在 ${input.area} 附近，适合先低压力了解。`
+          : '区域信息已模糊处理。',
       },
       {
         key: 'interest',
         label: '共同兴趣',
-        score: numberValue(breakdown.interestSimilarity ?? breakdown.commonTags),
+        score: numberValue(
+          breakdown.interestSimilarity ?? breakdown.commonTags,
+        ),
         reason: input.interestTags.length
           ? `共同兴趣包含 ${input.interestTags.slice(0, 3).join('、')}。`
           : `${input.activityType} 与这次需求相关。`,
@@ -1157,13 +1247,18 @@ export class CardCopywriterService {
       {
         key: 'social_boundary',
         label: '社交边界',
-        score: numberValue(breakdown.socialBoundaryFit ?? breakdown.boundaryFit),
-        reason: '对方公开可发现，适合先从低压力互动开始；真正联系前仍会等你确认。',
+        score: numberValue(
+          breakdown.socialBoundaryFit ?? breakdown.boundaryFit,
+        ),
+        reason:
+          '对方公开可发现，适合先从低压力互动开始；真正联系前仍会等你确认。',
       },
       {
         key: 'life_graph',
         label: '画像偏好',
-        score: numberValue(breakdown.lifeGraphBehaviorFit ?? breakdown.profileFit),
+        score: numberValue(
+          breakdown.lifeGraphBehaviorFit ?? breakdown.profileFit,
+        ),
         reason:
           input.preferenceHistorySignals[0] ||
           `${input.relationshipGoal ?? '低压力认识'}，${input.intensity}节奏更贴近你的偏好。`,

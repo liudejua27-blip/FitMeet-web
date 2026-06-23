@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/require-await */
 import { SocialAgentIntentRouterService } from './social-agent-intent-router.service';
 import { SOCIAL_AGENT_QUALITY_PLANNER_TIMEOUT_MS } from './social-agent-model-router.service';
 import { SocialAgentLlmOutputCacheService } from './social-agent-llm-output-cache.service';
@@ -69,12 +68,12 @@ describe('SocialAgentIntentRouterService', () => {
       intent: 'casual_chat',
       source: 'rules',
     });
-    await expect(router.route({ message: '你有什么功能' })).resolves.toMatchObject(
-      {
-        intent: 'product_help',
-        source: 'rules',
-      },
-    );
+    await expect(
+      router.route({ message: '你有什么功能' }),
+    ).resolves.toMatchObject({
+      intent: 'product_help',
+      source: 'rules',
+    });
     await expect(
       router.route({ message: '5公里30分钟配速是多少？' }),
     ).resolves.toMatchObject({
@@ -1832,10 +1831,7 @@ describe('SocialAgentIntentRouterService', () => {
       });
       expect(userPayload.routingConstraints).toMatchObject({
         treatKnownTaskSlotsAsAnswered: true,
-        knownContextSlots: expect.arrayContaining([
-          'geo_area',
-          'intensity',
-        ]),
+        knownContextSlots: expect.arrayContaining(['geo_area', 'intensity']),
         doNotRepeatQuestionsForSlots: expect.arrayContaining([
           'activity',
           'time_window',

@@ -1,6 +1,6 @@
 # FitMeet Performance Readiness
 
-Last updated: 2026-06-07
+Last updated: 2026-06-23
 
 This document records the current performance posture for a launch target designed toward 10,000 concurrent users. It is not a claim that 10,000 concurrent users has been proven. It lists what is in place, what must be measured, and the exact blockers for a trustworthy result.
 
@@ -19,8 +19,10 @@ This document records the current performance posture for a launch target design
   - `serverSelectionTimeoutMS: 5000`
 - Redis is available for cache/realtime coordination paths.
 - Rate limiting is enabled globally with short/medium/long throttler buckets, with tighter throttles on login/register/SMS.
-- Feed pagination is present with `page` and `limit`; the OpenAPI contract caps core feed limit at 50.
-- Mongo message schemas declare compound indexes for high-frequency conversation list, message history, unread count, Agent inbox, and recent Agent signal reads. These are code-level declarations; staging/production index existence must still be verified against the live Mongo deployment.
+- Discover public-intent pagination is present with `page` and `limit`; the
+  OpenAPI contract keeps this as the primary public read path for discoverable
+  cards.
+- Mongo message schemas declare compound indexes for high-frequency conversation list, message history, unread count, Agent message events, and recent Agent signal reads. These are code-level declarations; staging/production index existence must still be verified against the live Mongo deployment.
 - Static asset compression and Helmet are enabled in the API process.
 - Health and readiness are separated:
   - `GET /api/health` for process liveness.
@@ -41,7 +43,7 @@ Default target and endpoints:
 - Endpoints:
   - `/api/health`
   - `/api/ready`
-  - `/api/feed?page=1&limit=5`
+  - `/api/public/social-intents?page=1&limit=5`
   - `/api/openapi/fitmeet-core.json`
 
 Realtime 1000-online Socket.IO smoke:
@@ -64,17 +66,19 @@ Remote safety gates:
 
 No successful 1000-concurrency local or staging load result is recorded in this environment yet. A local run has now produced an actionable failure result: the backend dependency stack stays healthy, but the single-IP smoke is blocked by global rate limiting.
 
-2026-06-07 local Codex verification:
+2026-06-07 local Codex verification, now historical:
 
-- Passed: `./scripts/release-preflight.sh --web-only`; backend/frontend/landing install, lint, build, unit/contract tests, dry-run App core smoke, and living-social seed dry-run passed. This is a release correctness baseline, not a load-test result.
+- Passed: `./scripts/release-preflight.sh --web-only`; backend/frontend install, lint, build, and unit/contract tests passed. This is a release correctness baseline, not a load-test result.
 - Passed: Docker Desktop is now installed; `docker --version` reports Docker 29.5.2 and `docker compose version` reports Compose v5.1.4.
 - Passed: `docker compose up -d postgres mongo redis` completed after Docker finished pulling Postgres and Mongo images.
-- Passed: `pnpm --dir backend migration:run` applied 42 migrations to an empty local Postgres database.
-- Passed: `pnpm --dir backend migration:status` reports `availableCount=42`, `appliedCount=42`, `pendingCount=0`.
-- Passed: `pnpm --dir backend seed:living-social-data` wrote 50 local users, 50 social profiles, and 50 social requests.
+- Obsolete after the 2026-06-23 cleanup: the project no longer carries 42
+  historical migrations or the living-social seed script. Empty databases should
+  use the single core baseline migration.
 - Passed: local backend startup against Docker Postgres/Mongo/Redis; `/api/ready` returned `postgres=ok`, `mongo=ok`, and `redis=ok`.
-- Passed: `pnpm --dir backend smoke:app-core` with `APP_SMOKE_RUN_MUTATIONS=true` covered auth/profile restore, refresh rotation, avatar upload/profile save, feed moment publish/read-back, real message start/send/read-back, and Social Agent route-message.
-- Failed: `LOAD_TEST_CONCURRENCY=1000 node scripts/load-1000-readonly.mjs` returned 92% errors because global throttling returned HTTP 429 for `/api/health`, `/api/ready`, `/api/feed?page=1&limit=5`, and `/api/openapi/fitmeet-core.json`.
+- The old App smoke covered deleted legacy social-feed paths. Current release
+  evidence should focus on auth/profile, public intents, Discover, messages,
+  and Agent publish.
+- Failed: `LOAD_TEST_CONCURRENCY=1000 node scripts/load-1000-readonly.mjs` returned 92% errors because global throttling returned HTTP 429 for `/api/health`, `/api/ready`, the public read path, and `/api/openapi/fitmeet-core.json`.
 
 Local 1000 read-only load result from 2026-06-07:
 
@@ -177,7 +181,8 @@ node scripts/realtime-1000-online-smoke.mjs
 
 Minimum before TestFlight/public beta:
 
-- `/api/health`, `/api/ready`, `/api/openapi/fitmeet-core.json`, and `/api/feed?page=1&limit=5` return 2xx during the smoke.
+- `/api/health`, `/api/ready`, `/api/openapi/fitmeet-core.json`, and
+  `/api/public/social-intents?page=1&limit=5` return 2xx during the smoke.
 - Read-only 1000-concurrency smoke:
   - error rate <= 1%
   - p95 <= 1000 ms
@@ -195,16 +200,17 @@ Target before claiming 10,000 concurrent support:
 - Add a write-path test with low rate limits for:
   - login/profile restore
   - avatar upload/profile update
-  - feed publish/read-back
+  - Agent OpportunityCard publish and public-intent read-back
   - message send/read-back
-- Capture database query plans for high-volume feed, message, and Social Agent task/session queries.
-- Confirm Mongo and Postgres indexes on the deployed databases, not only in entity/schema definitions. For Mongo, specifically verify `conversations`, `messages`, and `agentinboxevents`.
+- Capture database query plans for high-volume public-intent, message, and
+  Social Agent task/session queries.
+- Confirm Mongo and Postgres indexes on the deployed databases, not only in entity/schema definitions. For Mongo, specifically verify `conversations`, `messages`, and `agentmessageevents`.
 - Confirm horizontal scaling behavior for Socket.IO and Redis coordination.
 
 ## Remaining Performance Risks
 
 - The Social Agent path can be CPU/IO heavy because it may call AI providers and perform multi-step database reads. It should not be part of unauthenticated high-concurrency smoke until provider quotas and timeouts are fixed.
 - Large Social Agent services still carry maintainability risk and need continued extraction and focused tests.
-- Feed and message queries need production `EXPLAIN ANALYZE` against realistic data volumes.
+- Public-intent and message queries need production `EXPLAIN ANALYZE` against realistic data volumes.
 - Upload performance depends on object storage and image processing; the current read-only load smoke does not cover multipart upload.
 - Realtime 1000-online smoke needs real tokens or a prepared test account; a single reused token proves socket capacity but not per-user fanout correctness.

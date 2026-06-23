@@ -11,18 +11,14 @@ export function PublicIntentDetailPage() {
   const { isLoggedIn } = useAuthStore();
   const [intent, setIntent] = useState<PublicSocialIntent | null>(null);
   const [candidates, setCandidates] = useState<PublicSocialCandidate[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
+  const [errorState, setErrorState] = useState<{
+    id: string;
+    message: string;
+  } | null>(null);
 
   useEffect(() => {
     let cancelled = false;
-    if (!id) {
-      setError('公开需求不存在');
-      setLoading(false);
-      return;
-    }
-    setLoading(true);
-    setError('');
+    if (!id) return undefined;
     Promise.all([
       dataService.getPublicSocialIntent(id),
       dataService.getPublicSocialIntentMatches(id).catch(() => null),
@@ -33,45 +29,54 @@ export function PublicIntentDetailPage() {
         setCandidates(matchResult?.candidates ?? []);
       })
       .catch(() => {
-        if (!cancelled) setError('公开需求加载失败，请稍后重试。');
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
+        if (!cancelled) {
+          setErrorState({
+            id,
+            message: '公开需求加载失败，请稍后重试。',
+          });
+        }
       });
     return () => {
       cancelled = true;
     };
   }, [id]);
+  const error = errorState && errorState.id === id ? errorState.message : '';
+  const loading = Boolean(id) && !error && intent?.id !== id;
 
   const publicTags = useMemo(() => intent?.interestTags?.slice(0, 6) ?? [], [intent]);
 
   const publicInterestTags = useMemo(
     () =>
-      [
-        intent?.requestType,
-        ...(intent?.interestTags ?? []),
-      ].filter((item): item is string => Boolean(item)),
+      [intent?.requestType, ...(intent?.interestTags ?? [])].filter((item): item is string =>
+        Boolean(item),
+      ),
     [intent?.interestTags, intent?.requestType],
   );
+  const publicIntentId = intent?.id ?? null;
+  const publicIntentOwnerUserId = intent?.userId ?? null;
+  const publicIntentSocialRequestId = intent?.linkedSocialRequestId ?? null;
+  const publicIntentCity = intent?.city || null;
+  const publicIntentLocation = intent?.locationPreference || intent?.loc || null;
+  const publicIntentTime = intent?.timePreference || null;
 
   useEffect(() => {
-    if (!isLoggedIn || !intent?.id) return;
+    if (!isLoggedIn || !publicIntentId) return;
     const day = new Date().toISOString().slice(0, 10);
     const metadata = {
-      publicIntentId: intent.id,
-      detailHref: `/public-intent/${encodeURIComponent(intent.id)}`,
+      publicIntentId,
+      detailHref: `/public-intent/${encodeURIComponent(publicIntentId)}`,
     };
     void socialAgentApi
       .recordInterestEvent({
         eventType: 'discover_click',
-        targetUserId: intent.userId ?? null,
-        socialRequestId: intent.linkedSocialRequestId ?? null,
+        targetUserId: publicIntentOwnerUserId,
+        socialRequestId: publicIntentSocialRequestId,
         activityTags: publicInterestTags,
-        city: intent.city || null,
-        locationText: intent.locationPreference || intent.loc || null,
-        timeWindow: intent.timePreference || null,
+        city: publicIntentCity,
+        locationText: publicIntentLocation,
+        timeWindow: publicIntentTime,
         source: 'public_intent_detail_page',
-        dedupeKey: `public-intent:view:${intent.id}:${day}`,
+        dedupeKey: `public-intent:view:${publicIntentId}:${day}`,
         metadata,
       })
       .catch(() => undefined);
@@ -80,15 +85,15 @@ export function PublicIntentDetailPage() {
       void socialAgentApi
         .recordInterestEvent({
           eventType: 'discover_click',
-          targetUserId: intent.userId ?? null,
-          socialRequestId: intent.linkedSocialRequestId ?? null,
+          targetUserId: publicIntentOwnerUserId,
+          socialRequestId: publicIntentSocialRequestId,
           weight: 2,
           activityTags: publicInterestTags,
-          city: intent.city || null,
-          locationText: intent.locationPreference || intent.loc || null,
-          timeWindow: intent.timePreference || null,
+          city: publicIntentCity,
+          locationText: publicIntentLocation,
+          timeWindow: publicIntentTime,
           source: 'public_intent_detail_dwell',
-          dedupeKey: `public-intent:dwell:${intent.id}:${day}`,
+          dedupeKey: `public-intent:dwell:${publicIntentId}:${day}`,
           metadata: {
             ...metadata,
             dwellMs: 8000,
@@ -99,46 +104,44 @@ export function PublicIntentDetailPage() {
 
     return () => window.clearTimeout(timer);
   }, [
-    intent?.city,
-    intent?.id,
-    intent?.linkedSocialRequestId,
-    intent?.loc,
-    intent?.locationPreference,
-    intent?.timePreference,
-    intent?.userId,
     isLoggedIn,
+    publicIntentCity,
+    publicIntentId,
+    publicIntentLocation,
+    publicIntentOwnerUserId,
+    publicIntentSocialRequestId,
+    publicIntentTime,
     publicInterestTags,
   ]);
 
   const recordProfileOpen = useCallback(
     (input: { targetUserId?: number | null; source: string }) => {
-      if (!isLoggedIn || !intent?.id || !input.targetUserId) return;
+      if (!isLoggedIn || !publicIntentId || !input.targetUserId) return;
       const day = new Date().toISOString().slice(0, 10);
       void socialAgentApi
         .recordInterestEvent({
           eventType: 'view_profile',
           targetUserId: input.targetUserId,
-          socialRequestId: intent.linkedSocialRequestId ?? null,
+          socialRequestId: publicIntentSocialRequestId,
           activityTags: publicInterestTags,
-          city: intent.city || null,
-          locationText: intent.locationPreference || intent.loc || null,
-          timeWindow: intent.timePreference || null,
+          city: publicIntentCity,
+          locationText: publicIntentLocation,
+          timeWindow: publicIntentTime,
           source: input.source,
-          dedupeKey: `public-intent:profile:${intent.id}:${input.targetUserId}:${day}`,
+          dedupeKey: `public-intent:profile:${publicIntentId}:${input.targetUserId}:${day}`,
           metadata: {
-            publicIntentId: intent.id,
+            publicIntentId,
           },
         })
         .catch(() => undefined);
     },
     [
-      intent?.city,
-      intent?.id,
-      intent?.linkedSocialRequestId,
-      intent?.loc,
-      intent?.locationPreference,
-      intent?.timePreference,
       isLoggedIn,
+      publicIntentCity,
+      publicIntentId,
+      publicIntentLocation,
+      publicIntentSocialRequestId,
+      publicIntentTime,
       publicInterestTags,
     ],
   );
@@ -211,14 +214,6 @@ export function PublicIntentDetailPage() {
           ) : null}
 
           <div className="mt-6 flex flex-wrap gap-3">
-            {intent.linkedSocialRequestId ? (
-              <Link
-                to={`/social-request/${intent.linkedSocialRequestId}`}
-                className="rounded-full bg-[#c8ff80] px-5 py-2 text-sm font-black text-[#11140f]"
-              >
-                查看匹配详情
-              </Link>
-            ) : null}
             {intent.userId ? (
               <Link
                 to={`/user/${intent.userId}`}
@@ -235,7 +230,7 @@ export function PublicIntentDetailPage() {
             ) : null}
             <Link
               to={`/agent/chat?intent=${encodeURIComponent(intent.id)}`}
-              className="rounded-full border border-white/15 px-5 py-2 text-sm font-bold text-[#f4efe6] transition hover:border-[#c8ff80]/60"
+              className="rounded-full bg-[#c8ff80] px-5 py-2 text-sm font-black text-[#11140f]"
             >
               让 Agent 帮我参与
             </Link>

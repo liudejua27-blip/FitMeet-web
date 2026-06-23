@@ -543,7 +543,7 @@ describe('social agent card action presenter', () => {
         }),
         expect.objectContaining({
           id: 'candidate_connect:101:22',
-          label: '加好友并聊天',
+          label: '确认后邀请Ta',
           schemaAction: 'candidate.connect',
           requiresConfirmation: true,
           payload: expect.objectContaining({

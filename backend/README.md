@@ -1,6 +1,6 @@
 # FitMeet Backend
 
-NestJS API service for FitMeet. It owns authentication, profiles, feed, uploads, Social Agent orchestration, messaging, activities, safety, Life Graph, and database migrations.
+NestJS API service for FitMeet. It owns authentication, users, personal profiles, Social Agent orchestration, Discover public intents, messages, friends, meets, activities, safety, uploads, waitlist/admin, Life Graph internal memory, and database migrations.
 
 ## Prerequisites
 
@@ -61,10 +61,8 @@ The readiness command validates required production keys, HTTPS origins, migrati
 Focused checks:
 
 ```bash
-pnpm test -- app.controller.spec.ts
 pnpm test:agent-beta
 pnpm test:e2e
-APP_SMOKE_DRY_RUN=true pnpm smoke:app-core
 ```
 
 ## API Contract
@@ -75,9 +73,17 @@ Core Web/App endpoints are documented in `src/openapi/fitmeet-core.openapi.ts` a
 GET /api/openapi/fitmeet-core.json
 ```
 
-Update this contract before adding or changing App-facing routes under `/auth`, `/feed`, `/social-agent/chat`, or `/uploads`.
+Update this contract before adding or changing Web/App-facing routes under `/auth`, `/users`, `/public/social-intents`, `/social-agent/chat`, `/messages`, `/friends`, `/safety`, or `/uploads`.
 
-Run `pnpm smoke:app-core` against a live backend for App-facing API smoke checks. It is local-only by default; staging runs must set `APP_SMOKE_API_BASE_URL`, `APP_SMOKE_ALLOW_REMOTE=true`, and test credentials. Mutating App flow checks for avatar upload and feed publishing require `APP_SMOKE_RUN_MUTATIONS=true`.
+Production verification uses the root scripts:
+
+```bash
+../scripts/verify-production.sh
+../scripts/verify-production.sh --run-public-intent-write
+../scripts/verify-agent-goal-production.sh
+```
+
+The first command is non-mutating. `--run-public-intent-write` is the explicit write/read-back check for the Discover public-intent path. Agent publish, invite, friend, and message flows should be validated with real QA credentials through the Social Agent endpoints rather than old seed/mock smoke scripts.
 
 ## Social Agent Notes
 

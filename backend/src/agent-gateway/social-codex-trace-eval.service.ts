@@ -79,7 +79,7 @@ type SocialCodexRunEvalState = {
 @Injectable()
 export class SocialCodexTraceEvalService {
   evaluate(events: SocialAgentEventV2[]): SocialCodexTraceEvalResult {
-    const ordered = [...events];
+    const ordered = this.replayOrder(events);
     const issues: SocialCodexTraceEvalIssue[] = [];
     const runStates = new Map<string, SocialCodexRunEvalState>();
 
@@ -116,7 +116,8 @@ export class SocialCodexTraceEvalService {
       if (this.containsSensitiveLeak(event)) {
         issues.push({
           code: 'sensitive_payload_leak',
-          message: '事件中包含联系方式或精确位置明文，不能进入用户可见 trace 或 replay。',
+          message:
+            '事件中包含联系方式或精确位置明文，不能进入用户可见 trace 或 replay。',
           eventId: event.eventId,
         });
       }
@@ -124,7 +125,7 @@ export class SocialCodexTraceEvalService {
         issues.push({
           code: 'raw_life_graph_proposal_leak',
           message:
-            '用户可见 replay 中出现完整 Life Graph 提案或证据，只能暴露脱敏摘要。',
+            '用户可见 replay 中出现完整画像更新建议或证据，只能暴露脱敏摘要。',
           eventId: event.eventId,
         });
       }
@@ -138,14 +139,16 @@ export class SocialCodexTraceEvalService {
         if (event.stage !== 'approval') {
           issues.push({
             code: 'approval_not_lifecycle_node',
-            message: 'approval.required 必须作为 Agent 生命周期里的 approval 阶段事件。',
+            message:
+              'approval.required 必须作为 Agent 生命周期里的 approval 阶段事件。',
             eventId: event.eventId,
           });
         }
         if (!this.hasApprovalCheckpoint(event)) {
           issues.push({
             code: 'approval_without_checkpoint',
-            message: 'approval.required 缺少 approvalId/checkpointId，无法稳定暂停和恢复。',
+            message:
+              'approval.required 缺少 approvalId/checkpointId，无法稳定暂停和恢复。',
             eventId: event.eventId,
           });
         }
@@ -175,11 +178,15 @@ export class SocialCodexTraceEvalService {
       if (event.type === 'approval.resolved' && event.stage !== 'approval') {
         issues.push({
           code: 'approval_not_lifecycle_node',
-          message: 'approval.resolved 必须作为 Agent 生命周期里的 approval 阶段事件。',
+          message:
+            'approval.resolved 必须作为 Agent 生命周期里的 approval 阶段事件。',
           eventId: event.eventId,
         });
       }
-      if (event.type === 'approval.resolved' && this.isApprovalApproved(event)) {
+      if (
+        event.type === 'approval.resolved' &&
+        this.isApprovalApproved(event)
+      ) {
         const approvalKey = this.approvalIdentity(event);
         if (approvalKey) run.approvedApprovalKeys.add(approvalKey);
         const actionType = this.highRiskActionType(event);
@@ -214,7 +221,8 @@ export class SocialCodexTraceEvalService {
       if (this.isHighRiskSideEffectEvent(event) && !run.safetyChecked) {
         issues.push({
           code: 'high_risk_without_safety_check',
-          message: '高风险真实动作前缺少 safety_check.done，社交 sandbox 未形成闭环。',
+          message:
+            '高风险真实动作前缺少 safety_check.done，社交 sandbox 未形成闭环。',
           eventId: event.eventId,
         });
       }
@@ -249,11 +257,13 @@ export class SocialCodexTraceEvalService {
           message: `run ${runId} 没有 completed/failed 终态事件，无法作为稳定回放样本。`,
         });
       }
-      if (this.requiresVisibleProcessTrace(run) && !run.hasVisibleProcessTrace) {
+      if (
+        this.requiresVisibleProcessTrace(run) &&
+        !run.hasVisibleProcessTrace
+      ) {
         issues.push({
           code: 'missing_visible_process_trace',
-          message:
-            `run ${runId} 进入了社交/约练执行阶段，但缺少用户可见过程事件。`,
+          message: `run ${runId} 进入了社交/约练执行阶段，但缺少用户可见过程事件。`,
         });
       }
     }
@@ -284,6 +294,28 @@ export class SocialCodexTraceEvalService {
         stages: Array.from(run.stages),
       })),
     };
+  }
+
+  private replayOrder(events: SocialAgentEventV2[]): SocialAgentEventV2[] {
+    return events
+      .map((event, index) => ({ event, index }))
+      .sort((left, right) => {
+        const leftTime = Date.parse(left.event.createdAt);
+        const rightTime = Date.parse(right.event.createdAt);
+        const leftComparable = Number.isFinite(leftTime) ? leftTime : 0;
+        const rightComparable = Number.isFinite(rightTime) ? rightTime : 0;
+        if (leftComparable !== rightComparable) {
+          return leftComparable - rightComparable;
+        }
+        if (
+          left.event.runId === right.event.runId &&
+          left.event.seq !== right.event.seq
+        ) {
+          return left.event.seq - right.event.seq;
+        }
+        return left.index - right.index;
+      })
+      .map(({ event }) => event);
   }
 
   private runState(
@@ -320,9 +352,14 @@ export class SocialCodexTraceEvalService {
       this.requiresVisibleProcessTrace(run),
     );
     const hasApproval = allRuns.some((run) => run.approvalRequired);
-    const hasHighRiskSideEffect = allRuns.some((run) => run.hasHighRiskSideEffect);
-    const hasTerminal = allRuns.length > 0 && allRuns.every((run) => run.terminalType);
-    const allBound = events.every((event) => Boolean(event.threadId && event.runId));
+    const hasHighRiskSideEffect = allRuns.some(
+      (run) => run.hasHighRiskSideEffect,
+    );
+    const hasTerminal =
+      allRuns.length > 0 && allRuns.every((run) => run.terminalType);
+    const allBound = events.every((event) =>
+      Boolean(event.threadId && event.runId),
+    );
     const hasSlotStage = allRuns.some((run) => run.stages.has('slot_filling'));
 
     return [
@@ -391,7 +428,10 @@ export class SocialCodexTraceEvalService {
       {
         id: 'replay_terminal',
         label: '可回放终态',
-        status: hasTerminal && !issueCodes.has('missing_terminal_event') ? 'pass' : 'fail',
+        status:
+          hasTerminal && !issueCodes.has('missing_terminal_event')
+            ? 'pass'
+            : 'fail',
         detail: '每个 run 必须写入 run.completed 或 run.failed 终态。',
       },
     ];
@@ -460,7 +500,8 @@ export class SocialCodexTraceEvalService {
   }
 
   private isHighRiskSideEffectEvent(event: SocialAgentEventV2): boolean {
-    if (event.type !== 'tool.done' && event.type !== 'run.completed') return false;
+    if (event.type !== 'tool.done' && event.type !== 'run.completed')
+      return false;
     return this.isHighRiskEvent(event);
   }
 
@@ -506,7 +547,8 @@ export class SocialCodexTraceEvalService {
     return (
       this.hasScalar(payload.approvalId) ||
       this.hasScalar(payload.checkpointId) ||
-      (this.isRecord(payload.resume) && this.hasScalar(payload.resume.checkpointId))
+      (this.isRecord(payload.resume) &&
+        this.hasScalar(payload.resume.checkpointId))
     );
   }
 
@@ -516,14 +558,17 @@ export class SocialCodexTraceEvalService {
       this.isRecord(payload.dryRunPreview) ||
       (this.isRecord(payload.socialCodex) &&
         this.isRecord(payload.socialCodex.dryRunPreview)) ||
-      (this.isRecord(payload.policy) && this.isRecord(payload.policy.dryRunPreview))
+      (this.isRecord(payload.policy) &&
+        this.isRecord(payload.policy.dryRunPreview))
     );
   }
 
   private hasAuditContract(event: SocialAgentEventV2): boolean {
     const payload = event.payload ?? {};
-    if (payload.auditRequired === true || payload.auditLogged === true) return true;
-    if (this.isRecord(payload.audit) && payload.audit.required === true) return true;
+    if (payload.auditRequired === true || payload.auditLogged === true)
+      return true;
+    if (this.isRecord(payload.audit) && payload.audit.required === true)
+      return true;
     if (this.isRecord(payload.socialCodex)) {
       if (payload.socialCodex.auditRequired === true) return true;
       if (
@@ -536,7 +581,8 @@ export class SocialCodexTraceEvalService {
     if (
       this.isRecord(payload.policy) &&
       (payload.policy.auditRequired === true ||
-        (this.isRecord(payload.policy.audit) && payload.policy.audit.required === true))
+        (this.isRecord(payload.policy.audit) &&
+          payload.policy.audit.required === true))
     ) {
       return true;
     }
@@ -575,15 +621,20 @@ export class SocialCodexTraceEvalService {
 
   private isApprovalApproved(event: SocialAgentEventV2): boolean {
     const payload = event.payload ?? {};
-    if (payload.approved === true || payload.decision === 'approved') return true;
+    if (payload.approved === true || payload.decision === 'approved')
+      return true;
     if (this.isRecord(payload.result)) {
-      return payload.result.approved === true || payload.result.decision === 'approved';
+      return (
+        payload.result.approved === true ||
+        payload.result.decision === 'approved'
+      );
     }
     return false;
   }
 
   private containsSensitiveLeak(event: SocialAgentEventV2): boolean {
-    const visible = event.visibility === 'user_visible' || event.visibility === 'debug_only';
+    const visible =
+      event.visibility === 'user_visible' || event.visibility === 'debug_only';
     if (!visible) return false;
     return (
       this.stringContainsSensitiveLeak(event.display?.title ?? '') ||
@@ -593,7 +644,10 @@ export class SocialCodexTraceEvalService {
   }
 
   private containsRawLifeGraphProposal(event: SocialAgentEventV2): boolean {
-    if (event.visibility !== 'user_visible' && event.visibility !== 'debug_only') {
+    if (
+      event.visibility !== 'user_visible' &&
+      event.visibility !== 'debug_only'
+    ) {
       return false;
     }
     return this.valueContainsRawLifeGraphProposal(event.payload);
@@ -613,13 +667,15 @@ export class SocialCodexTraceEvalService {
   }
 
   private valueContainsSensitiveLeak(value: unknown): boolean {
-    if (typeof value === 'string') return this.stringContainsSensitiveLeak(value);
+    if (typeof value === 'string')
+      return this.stringContainsSensitiveLeak(value);
     if (Array.isArray(value)) {
       return value.some((item) => this.valueContainsSensitiveLeak(item));
     }
     if (!this.isRecord(value)) return false;
     return Object.entries(value).some(([key, item]) => {
-      if (this.isSensitiveKey(key) && item !== '[redacted]' && item != null) return true;
+      if (this.isSensitiveKey(key) && item !== '[redacted]' && item != null)
+        return true;
       return this.valueContainsSensitiveLeak(item);
     });
   }
@@ -644,7 +700,8 @@ export class SocialCodexTraceEvalService {
   }
 
   private scalar(value: unknown): string | null {
-    if (typeof value === 'number' && Number.isFinite(value)) return String(value);
+    if (typeof value === 'number' && Number.isFinite(value))
+      return String(value);
     if (typeof value === 'string' && value.trim()) return value.trim();
     return null;
   }

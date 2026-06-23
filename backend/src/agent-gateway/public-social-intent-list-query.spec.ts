@@ -2,7 +2,7 @@ import { SocialRequestStatus } from './entities/social-request.entity';
 import { normalizePublicSocialIntentListFilters } from './public-social-intent-list-query';
 
 describe('normalizePublicSocialIntentListFilters', () => {
-  it('defaults the public feed to discoverable supply statuses', () => {
+  it('defaults public intents to discoverable supply statuses', () => {
     expect(normalizePublicSocialIntentListFilters()).toEqual({
       page: 1,
       take: 30,

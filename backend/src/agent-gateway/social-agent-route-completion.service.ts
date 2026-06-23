@@ -235,10 +235,9 @@ export class SocialAgentRouteCompletionService {
           actionType: input.pendingApproval.actionType,
           riskLevel: input.pendingApproval.riskLevel,
           resumePolicy: 'confirm_then_resume_same_run',
-          sideEffectPolicy:
-            input.runtime?.sideEffectPolicy ?? {
-              sideEffectsBeforeResume: 'idempotent_only',
-            },
+          sideEffectPolicy: input.runtime?.sideEffectPolicy ?? {
+            sideEffectsBeforeResume: 'idempotent_only',
+          },
         },
       );
     }
@@ -338,7 +337,8 @@ export class SocialAgentRouteCompletionService {
   private uniqueCards(cards: FitMeetAlphaCard[]): FitMeetAlphaCard[] {
     const seen = new Set<string>();
     return cards.filter((card) => {
-      const key = cleanDisplayText(card.id, '') || JSON.stringify(card.data ?? {});
+      const key =
+        cleanDisplayText(card.id, '') || JSON.stringify(card.data ?? {});
       if (seen.has(key)) return false;
       seen.add(key);
       return true;

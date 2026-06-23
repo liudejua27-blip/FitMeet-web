@@ -9,26 +9,13 @@ import { AgentObservabilityAlertSinkService } from './agent-observability-alert-
 import { AgentApprovalDispatcherService } from './agent-approval-dispatcher.service';
 import { AgentSelfImproveService } from './agent-self-improve.service';
 import { ActivitiesModule } from '../activities/activities.module';
-import { SocialAgentAutopilotController } from './social-agent-autopilot.controller';
 import { SocialAgentReminderController } from './social-agent-reminder.controller';
 import { AgentSelfImproveController } from './agent-self-improve.controller';
 import { AgentL5RuntimeController } from './agent-l5-runtime.controller';
 import { SocialAgentChatController } from './social-agent-chat.controller';
-import { SocialAgentDebugController } from './social-agent-debug.controller';
 import { SocialAgentTasksController } from './social-agent-tasks.controller';
-import {
-  FitMeetAgentToolRegistryAgentController,
-  FitMeetAgentToolRegistryUserController,
-} from './fitmeet-agent-tool-registry.controller';
-import {
-  AgentUserController,
-  AgentApiController,
-  AgentProfileQAController,
-  PublicSocialIntentController,
-  PublicSocialSkillsController,
-} from './agent-gateway.controller';
-import { AgentSkillsController } from './agent-skills.controller';
-import { MiniProgramController } from './mini-program.controller';
+import { AgentProfileQAController } from './agent-profile-qa.controller';
+import { PublicSocialIntentController } from './public-social-intent.controller';
 import { AgentTokenGuard } from './guards/agent-token.guard';
 import { AgentPermissionGuard } from './guards/agent-permission.guard';
 import { AgentOwnerOrTokenGuard } from './guards/agent-owner-or-token.guard';
@@ -88,7 +75,7 @@ import { SocialAgentToolInputParserService } from './social-agent-tool-input-par
 import { SocialAgentPaymentIntentToolService } from './social-agent-payment-intent-tool.service';
 import { SocialAgentMessageToolService } from './social-agent-message-tool.service';
 import { SocialAgentActivityToolService } from './social-agent-activity-tool.service';
-import { SocialAgentInboxToolService } from './social-agent-inbox-tool.service';
+import { SocialAgentMessageEventToolService } from './social-agent-message-event-tool.service';
 import { SocialAgentConversationToolService } from './social-agent-conversation-tool.service';
 import { SocialAgentDecisionToolService } from './social-agent-decision-tool.service';
 import { SocialAgentTaskMemoryService } from './social-agent-task-memory.service';
@@ -150,7 +137,6 @@ import { SocialAgentToolResultCacheService } from './social-agent-tool-result-ca
 import { SocialAgentEmbeddingCacheService } from './social-agent-embedding-cache.service';
 import { SocialAgentTokenBudgetContextPackerService } from './social-agent-token-budget-context-packer.service';
 import { SocialAgentMetricsService } from './social-agent-metrics.service';
-import { SocialAgentMetricsController } from './social-agent-metrics.controller';
 import { SocialAgentLongTermMemoryService } from './social-agent-long-term-memory.service';
 import { SocialAgentLongTermMemory } from './entities/social-agent-long-term-memory.entity';
 import { SocialAgentMessageFeedback } from './entities/social-agent-message-feedback.entity';
@@ -410,7 +396,7 @@ import { AdminRbacModule } from '../admin-rbac/admin-rbac.module';
     SocialAgentPaymentIntentToolService,
     SocialAgentMessageToolService,
     SocialAgentActivityToolService,
-    SocialAgentInboxToolService,
+    SocialAgentMessageEventToolService,
     SocialAgentConversationToolService,
     SocialAgentDecisionToolService,
     SocialAgentTaskMemoryService,
@@ -426,23 +412,13 @@ import { AdminRbacModule } from '../admin-rbac/admin-rbac.module';
     AgentOwnerOrTokenGuard,
   ],
   controllers: [
-    AgentUserController,
     AgentControlController,
-    AgentApiController,
     AgentProfileQAController,
-    AgentSkillsController,
-    MiniProgramController,
     PublicSocialIntentController,
-    PublicSocialSkillsController,
-    SocialAgentAutopilotController,
     SocialAgentReminderController,
     AgentSelfImproveController,
     AgentL5RuntimeController,
     SocialAgentChatController,
-    SocialAgentDebugController,
-    FitMeetAgentToolRegistryAgentController,
-    FitMeetAgentToolRegistryUserController,
-    SocialAgentMetricsController,
     SocialAgentTasksController,
   ],
   exports: [

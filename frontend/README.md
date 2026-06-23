@@ -1,6 +1,6 @@
 # FitMeet Frontend
 
-Vite + React frontend for the FitMeet public website and web app shell. It includes the public platform site, Agent workspace, real social feed, matching surfaces, messages, profile, admin pages, and geo/sports landing pages.
+Vite + React frontend for the FitMeet public website and web app shell. It includes the public platform site, Discover, Agent workspace, messages, user detail, personal information, legal pages, and necessary admin pages.
 
 ## Prerequisites
 
@@ -62,13 +62,12 @@ pnpm test -- src/test/AgentWorkspacePage.test.tsx
 
 - `src/App.tsx` owns the app shell: browser router, session restore, realtime provider, layout, motion, and login modal.
 - `src/routes/AppRoutes.tsx` owns lazy route registration.
-- `src/routes/routeBoundaries.ts` classifies public website, Agent workspace, Agent onboarding, and social feed route families.
+- `src/routes/routeBoundaries.ts` classifies public website, Agent workspace, Agent onboarding, and social interaction route families.
 - `src/api/baseClient.ts` owns request plumbing, auth token handling, and `ApiError`.
 - `src/api/authClient.ts` owns auth/profile calls.
-- `src/api/feedClient.ts` owns real social feed calls.
 - `src/api/socialAgentApi.ts` owns Social Agent chat/task calls.
 - `src/api/uploadApi.ts` owns image/video uploads.
-- `src/api/client.ts` is now a compatibility layer for older meet, club, message, and safety APIs.
+- `src/api/client.ts` is the small typed client for users, Discover public intents, meets, messages, friends, and safety APIs.
 
 ## API Contract
 
@@ -82,6 +81,6 @@ When adding a new App-facing endpoint, update the backend OpenAPI contract first
 
 ## Styling Boundaries
 
-Keep public marketing pages, Agent workspace, and web-app feed styles separated. Avoid adding new cross-page selectors to `src/global.css`; prefer domain CSS files or component-scoped class names that stay inside one route family.
+Keep public marketing pages, Discover, Agent workspace, and message/profile styles separated. Avoid adding new cross-page selectors to `src/global.css`; prefer domain CSS files or component-scoped class names that stay inside one route family.
 
 This project does not currently use shadcn/ui components. If shadcn is introduced later, run the CLI with pnpm and follow the project alias/component registry instead of hand-copying component code.

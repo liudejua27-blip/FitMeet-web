@@ -13,7 +13,11 @@ describe('social-agent-chat-llm-delta', () => {
     expect(handler).toHaveBeenCalledWith('   \n\t  ');
     expect(tracked.emittedDelta()).toBe(false);
     expect(
-      socialAgentAnswerSource('我先记录你的需求。', '我先记录你的需求。', tracked.emittedDelta()),
+      socialAgentAnswerSource(
+        '我先记录你的需求。',
+        '我先记录你的需求。',
+        tracked.emittedDelta(),
+      ),
     ).toBe('fallback');
   });
 
@@ -26,7 +30,11 @@ describe('social-agent-chat-llm-delta', () => {
     expect(handler).toHaveBeenCalledWith('我先记录');
     expect(tracked.emittedDelta()).toBe(true);
     expect(
-      socialAgentAnswerSource('我先记录你的需求。', '我先记录你的需求。', tracked.emittedDelta()),
+      socialAgentAnswerSource(
+        '我先记录你的需求。',
+        '我先记录你的需求。',
+        tracked.emittedDelta(),
+      ),
     ).toBe('llm');
   });
 });

@@ -21,7 +21,7 @@ import {
 import { SocialAgentToolInputParserService } from './social-agent-tool-input-parser.service';
 import { SocialAgentToolName } from './social-agent-tool.types';
 
-export type SocialAgentMessageToolInboxEvent = {
+export type SocialAgentMessageToolMessageEvent = {
   eventType: string;
   input: {
     conversationId?: string | null;
@@ -36,7 +36,7 @@ export type SocialAgentMessageToolResult = {
   output: unknown;
   loopUpdates?: Partial<SocialAgentLoopMemory>;
   sentMessage?: SocialAgentSentMessageMemoryInput;
-  inboxEvent?: SocialAgentMessageToolInboxEvent;
+  messageEvent?: SocialAgentMessageToolMessageEvent;
 };
 
 @Injectable()
@@ -253,7 +253,7 @@ export class SocialAgentMessageToolService {
         toolName: SocialAgentToolName.ReplyMessage,
         stepId,
       },
-      inboxEvent: {
+      messageEvent: {
         eventType: 'social_agent.reply.sent',
         input: {
           conversationId,

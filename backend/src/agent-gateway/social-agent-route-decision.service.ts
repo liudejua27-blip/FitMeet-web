@@ -205,7 +205,9 @@ export class SocialAgentRouteDecisionService {
   private conversationIntent(
     body: SocialAgentRouteMessageBody,
   ): NonNullable<SocialAgentRouteMessageBody['conversationIntent']> | null {
-    return body.clientContext?.conversationIntent ?? body.conversationIntent ?? null;
+    return (
+      body.clientContext?.conversationIntent ?? body.conversationIntent ?? null
+    );
   }
 
   private enforceRouteBoundary(
@@ -305,7 +307,10 @@ export class SocialAgentRouteDecisionService {
     }
   }
 
-  private applyCurrentMessageToTaskSlots(task: AgentTask, message: string): void {
+  private applyCurrentMessageToTaskSlots(
+    task: AgentTask,
+    message: string,
+  ): void {
     const slots =
       this.taskSlots ?? new SocialAgentTaskMemoryStateMachineService();
     try {

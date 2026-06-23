@@ -586,7 +586,9 @@ describe('MatchReasonerService', () => {
         return result;
       });
 
-    await jest.advanceTimersByTimeAsync(SOCIAL_AGENT_QUALITY_TOOL_TIMEOUT_MS - 1);
+    await jest.advanceTimersByTimeAsync(
+      SOCIAL_AGENT_QUALITY_TOOL_TIMEOUT_MS - 1,
+    );
     expect(settled).toBe(false);
     await jest.advanceTimersByTimeAsync(1);
     const result = await resultPromise;

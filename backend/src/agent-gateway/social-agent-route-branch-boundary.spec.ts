@@ -197,7 +197,8 @@ describe('Social Agent route branch production boundary', () => {
     for (const basename of branchFiles) {
       const source = fs.readFileSync(path.join(__dirname, basename), 'utf8');
       for (const symbol of forbiddenRuntimeSymbols) {
-        if (source.includes(symbol)) violations.push({ file: basename, symbol });
+        if (source.includes(symbol))
+          violations.push({ file: basename, symbol });
       }
     }
 
@@ -239,7 +240,9 @@ describe('Social Agent route branch production boundary', () => {
         );
       },
     );
-    const allowedFiles = new Set(['social-agent-route-branch-boundary.spec.ts']);
+    const allowedFiles = new Set([
+      'social-agent-route-branch-boundary.spec.ts',
+    ]);
     const violations: Array<{ file: string; symbol: string }> = [];
 
     for (const file of routeLikeFiles) {
@@ -250,7 +253,8 @@ describe('Social Agent route branch production boundary', () => {
         'SocialAgentToolExecutorService',
         '.executeToolAction(',
       ]) {
-        if (source.includes(symbol)) violations.push({ file: basename, symbol });
+        if (source.includes(symbol))
+          violations.push({ file: basename, symbol });
       }
     }
 
@@ -378,7 +382,9 @@ describe('Social Agent route branch production boundary', () => {
     expect(source).toContain('applyHydratedContextToTaskMemory');
     expect(loopIndex).toBeGreaterThan(0);
     expect(
-      source.indexOf('const longTermSnapshot = await this.readLongTermSnapshot'),
+      source.indexOf(
+        'const longTermSnapshot = await this.readLongTermSnapshot',
+      ),
     ).toBeGreaterThan(0);
     expect(
       source.indexOf(
@@ -389,16 +395,18 @@ describe('Social Agent route branch production boundary', () => {
       source.indexOf('this.applyHydratedContextToTaskMemory'),
     ).toBeGreaterThan(0);
     expect(
-      source.indexOf('const longTermSnapshot = await this.readLongTermSnapshot'),
+      source.indexOf(
+        'const longTermSnapshot = await this.readLongTermSnapshot',
+      ),
     ).toBeLessThan(loopIndex);
     expect(
       source.indexOf(
         'const hydratedContext = await this.hydrateRecommendationContext',
       ),
     ).toBeLessThan(loopIndex);
-    expect(source.indexOf('this.applyHydratedContextToTaskMemory')).toBeLessThan(
-      loopIndex,
-    );
+    expect(
+      source.indexOf('this.applyHydratedContextToTaskMemory'),
+    ).toBeLessThan(loopIndex);
     expect(source).toContain(
       'Initial recommendation run executes only through AgentLoop tools.',
     );
@@ -514,7 +522,9 @@ describe('Social Agent route branch production boundary', () => {
     ]);
 
     expect(performBody).toContain('loopService.execute');
-    expect(performBody).toContain('Card actions dispatch only through AgentLoop.');
+    expect(performBody).toContain(
+      'Card actions dispatch only through AgentLoop.',
+    );
     expect(performBody).toContain('card_action_dispatch');
     expect(performBody).toContain('maxToolCalls: 1');
     expect(performBody).toContain('maxRetries: 0');
@@ -563,7 +573,9 @@ describe('Social Agent route branch production boundary', () => {
     expect(interruptBody).toContain('stepActions');
     expect(markDecisionBody).toContain('appendApprovalResolvedEvent');
     expect(markDecisionBody).toContain("protocol: 'fitmeet.agent.resume.v1'");
-    expect(markDecisionBody).toContain("return this.toResumePlan(saved, 'resume')");
+    expect(markDecisionBody).toContain(
+      "return this.toResumePlan(saved, 'resume')",
+    );
   });
 
   it('keeps serialized subagent worker dispatch contextual and cancellable', () => {

@@ -1,7 +1,5 @@
 import { AgentTask } from './entities/agent-task.entity';
-import {
-  evaluateSocialOpportunityClarification,
-} from './social-agent-opportunity-clarification';
+import { evaluateSocialOpportunityClarification } from './social-agent-opportunity-clarification';
 import { readSocialAgentTaskMemory } from './social-agent-memory.util';
 import { SocialAgentTaskMemoryStateMachineService } from './social-agent-task-memory-state-machine.service';
 import type { SocialAgentIntentRouterResult } from './social-agent-intent-router.service';
@@ -204,8 +202,7 @@ describe('social opportunity clarification', () => {
     const clarification = evaluateSocialOpportunityClarification({
       task: currentTask,
       route: route(),
-      message:
-        '我想在青岛大学附近，今天上午，找个女生散步，喜欢编程。',
+      message: '我想在青岛大学附近，今天上午，找个女生散步，喜欢编程。',
     });
 
     expect(clarification.complete).toBe(true);
@@ -354,7 +351,14 @@ describe('social opportunity clarification', () => {
     expect(clarification.complete).toBe(true);
     expect(clarification.missing).toEqual([]);
     expect(clarification.missing).not.toEqual(
-      expect.arrayContaining(['city', 'time', 'activity', 'intensity', 'boundary', 'publicActivity']),
+      expect.arrayContaining([
+        'city',
+        'time',
+        'activity',
+        'intensity',
+        'boundary',
+        'publicActivity',
+      ]),
     );
     expect(clarification.assistantMessage).not.toContain('城市/大致区域');
     expect(clarification.assistantMessage).not.toContain('运动或见面场景');
@@ -556,10 +560,7 @@ describe('social opportunity clarification', () => {
 
     expect(clarification.complete).toBe(false);
     expect(clarification.missing).toEqual(
-      expect.arrayContaining([
-        'time',
-        'activity',
-      ]),
+      expect.arrayContaining(['time', 'activity']),
     );
     expect(clarification.missing).not.toContain('city');
     expect(clarification.assistantMessage).toContain('时间');

@@ -19,7 +19,7 @@ import { SocialAgentToolInputParserService } from './social-agent-tool-input-par
 import { SocialAgentToolJsonModelService } from './social-agent-tool-json-model.service';
 import { SocialAgentToolName } from './social-agent-tool.types';
 
-export type SocialAgentDecisionToolInboxEvent = {
+export type SocialAgentDecisionToolMessageEvent = {
   eventType: string;
   input: {
     conversationId?: string | null;
@@ -34,7 +34,7 @@ export type SocialAgentDecisionToolResult = {
   output: Record<string, unknown>;
   loopUpdates: Partial<SocialAgentLoopMemory>;
   shortTermUpdates: Partial<SocialAgentShortTermMemory>;
-  inboxEvent: SocialAgentDecisionToolInboxEvent;
+  messageEvent: SocialAgentDecisionToolMessageEvent;
 };
 
 export type SocialAgentLifeGraphWritebackProposal = {
@@ -140,7 +140,7 @@ export class SocialAgentDecisionToolService {
           'done',
         ),
       },
-      inboxEvent: {
+      messageEvent: {
         eventType: 'social_agent.next_action.decided',
         input: {
           conversationId: loop.conversationId ?? null,
@@ -256,11 +256,10 @@ export class SocialAgentDecisionToolService {
           confidence: this.clampConfidence(confidence),
         },
       ],
-      confirmationBoundary:
-        '这只是画像更新建议，确认前不会写入长期 Life Graph。',
+      confirmationBoundary: '这只是画像更新建议，确认前不会写入长期偏好。',
       privacyBoundary:
         '不保存对方私聊原文，只保存脱敏后的互动信号和下一步建议。',
-      revokeHint: '确认后仍可在 Life Graph 中撤回这次影响。',
+      revokeHint: '确认后仍可在个人信息里撤回这次影响。',
     };
   }
 

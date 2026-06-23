@@ -9,7 +9,10 @@ import {
   SocialRequestVisibility,
   UserSocialRequestStatus,
 } from '../social-requests/social-request.entity';
-import type { SocialAgentChatCandidate, SocialAgentRequestDraft } from './social-agent-chat.types';
+import type {
+  SocialAgentChatCandidate,
+  SocialAgentRequestDraft,
+} from './social-agent-chat.types';
 
 export {
   candidateExplanationFromRecord,

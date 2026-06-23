@@ -17,8 +17,8 @@ import { ApprovalRiskLevel } from './entities/agent-approval-request.entity';
 const conn = {
   id: 5,
   userId: 9,
-  agentName: 'openclaw',
-  agentDisplayName: 'OpenClaw',
+  agentName: 'fitmeet_agent',
+  agentDisplayName: 'FitMeetAgent',
   permissionLevel: AgentPermissionLevel.Open,
   status: ConnectionStatus.Active,
 };

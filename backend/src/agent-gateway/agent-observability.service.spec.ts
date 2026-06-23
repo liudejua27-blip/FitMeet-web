@@ -56,7 +56,7 @@ describe('AgentObservabilityService', () => {
       success: true,
     });
     service.recordQueueSnapshot([
-      { queueName: 'fitmeet.subagent.social-match-agent', queueDepth: 30 },
+      { queueName: 'fitmeet.subagent.match-agent', queueDepth: 30 },
     ]);
 
     const snapshot = service.snapshot();

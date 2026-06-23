@@ -19,7 +19,10 @@ export function buildProfileCandidateReasons(input: {
     reasons.push(`城市匹配：${input.city}。`);
   if (input.commonTags.length)
     reasons.push(`共同兴趣：${input.commonTags.slice(0, 3).join('、')}。`);
-  const candidatePreference = cleanDisplayText(input.query.candidatePreference, '');
+  const candidatePreference = cleanDisplayText(
+    input.query.candidatePreference,
+    '',
+  );
   if (candidatePreference && input.commonTags.length) {
     reasons.push(`已按公开资料里的偏好线索参考：${candidatePreference}。`);
   }
@@ -42,7 +45,10 @@ export function buildPublicIntentCandidateReasons(input: {
     reasons.push(`卡片城市匹配：${input.city}。`);
   if (input.commonTags.length)
     reasons.push(`卡片标签匹配：${input.commonTags.slice(0, 3).join('、')}。`);
-  const candidatePreference = cleanDisplayText(input.query.candidatePreference, '');
+  const candidatePreference = cleanDisplayText(
+    input.query.candidatePreference,
+    '',
+  );
   if (candidatePreference && input.commonTags.length) {
     reasons.push(`已按公开卡片标签参考你的偏好：${candidatePreference}。`);
   }

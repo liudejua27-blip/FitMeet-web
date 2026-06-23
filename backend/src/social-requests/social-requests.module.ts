@@ -6,12 +6,6 @@ import { ActivitiesModule } from '../activities/activities.module';
 import { AgentGatewayModule } from '../agent-gateway/agent-gateway.module';
 import { AgentConnection } from '../agent-gateway/entities/agent-connection.entity';
 import { AgentTokenGuard } from '../agent-gateway/guards/agent-token.guard';
-import {
-  AgentSocialRequestsController,
-  SocialRequestsController,
-} from './social-requests.controller';
-import { AiSocialAutopilotController } from './ai-social-autopilot.controller';
-import { AgentOwnerSocialActionsController } from './agent-owner-social-actions.controller';
 import { UserSocialRequest } from './social-request.entity';
 import { SocialRequestsService } from './social-requests.service';
 import { AgentSocialRequestAdapter } from './agent-social-request.adapter';
@@ -45,12 +39,7 @@ import { AgentApprovalRequest } from '../agent-gateway/entities/agent-approval-r
     MessagesModule,
     NotificationsModule,
   ],
-  controllers: [
-    SocialRequestsController,
-    AgentSocialRequestsController,
-    AgentOwnerSocialActionsController,
-    AiSocialAutopilotController,
-  ],
+  controllers: [],
   providers: [
     SocialRequestsService,
     AgentTokenGuard,

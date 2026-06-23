@@ -242,7 +242,7 @@ describe('SocialAgentTaskLifecycleService', () => {
     expect(eventRepo.save).not.toHaveBeenCalled();
   });
 
-  it('reuses the latest active conversation when the client omits thread id', async () => {
+  it('creates a new lightweight chat when the client omits thread id', async () => {
     const existing = makeTask({
       id: 202,
       ownerUserId: 7,
@@ -261,9 +261,26 @@ describe('SocialAgentTaskLifecycleService', () => {
       null,
     );
 
-    expect(task).toBe(existing);
-    expect(taskRepo.save).not.toHaveBeenCalled();
-    expect(eventRepo.save).not.toHaveBeenCalled();
+    expect(task).not.toBe(existing);
+    expect(task).toMatchObject({
+      ownerUserId: 7,
+      goal: '可以，帮我找人',
+      status: AgentTaskStatus.AwaitingFeedback,
+    });
+    expect(taskRepo.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ownerUserId: 7,
+        input: expect.objectContaining({
+          firstMessage: '可以，帮我找人',
+        }),
+      }),
+    );
+    expect(eventRepo.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventType: AgentTaskEventType.TaskCreated,
+        summary: '已创建 Social Agent 聊天上下文',
+      }),
+    );
   });
 
   it('reuses checkpoint-style thread ids instead of creating a duplicate thread', async () => {

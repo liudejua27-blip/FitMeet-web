@@ -148,7 +148,9 @@ export class SocialAgentChatController {
 
   private initialRunCopy(input?: InitialRunCopyInput | null) {
     const intent =
-      input?.conversationIntent ?? input?.clientContext?.conversationIntent ?? null;
+      input?.conversationIntent ??
+      input?.clientContext?.conversationIntent ??
+      null;
     if (intent === 'conversation') {
       return {
         title: '正在理解你的需求',
@@ -238,7 +240,9 @@ export class SocialAgentChatController {
   ) {
     const eventType = this.interestEventType(body?.eventType);
     if (!eventType) {
-      throw new BadRequestException('Unsupported social agent interest event type');
+      throw new BadRequestException(
+        'Unsupported social agent interest event type',
+      );
     }
     const event = await this.requireInterestEvents().recordEvent({
       ownerUserId: req.user.id,
@@ -812,7 +816,10 @@ export class SocialAgentChatController {
               runId,
               assistantMessageId,
             );
-            await this.persistFinalRunAssistantMemory(req.user.id, streamResult);
+            await this.persistFinalRunAssistantMemory(
+              req.user.id,
+              streamResult,
+            );
             const result = this.userFacingSanitizer.toUserFacingAgentResponse(
               streamResult,
               resolveUserPermissionMode(body?.permissionMode),
@@ -915,10 +922,10 @@ export class SocialAgentChatController {
             taskId: payload.type === 'task' ? payload.taskId : undefined,
             threadId:
               payload.type === 'task'
-                ? this.eventThreadId(
+                ? (this.eventThreadId(
                     payload.taskId,
                     body?.clientContext?.threadId,
-                  ) ?? undefined
+                  ) ?? undefined)
                 : undefined,
           });
           if (payload.type === 'step') {
@@ -1058,8 +1065,9 @@ export class SocialAgentChatController {
         },
         { signal, deferAssistantMessageLog: true },
       );
-      let streamResult: SocialAgentIntentRouteResult | SocialAgentChatRunResult =
-        result;
+      let streamResult:
+        | SocialAgentIntentRouteResult
+        | SocialAgentChatRunResult = result;
       let routeAssistantAlreadyPersistedByRun = false;
       if (result.taskId && taskBoundInitialTraceTaskId !== result.taskId) {
         taskBoundInitialTraceTaskId = result.taskId;
@@ -1662,13 +1670,15 @@ export class SocialAgentChatController {
   ): string | number | null {
     const parsedTaskId = parseSocialAgentThreadTaskId(taskId);
     if (parsedTaskId) return `agent-task:${parsedTaskId}`;
-    const parsedFallbackTaskId =
-      parseSocialAgentThreadTaskId(fallbackThreadId);
+    const parsedFallbackTaskId = parseSocialAgentThreadTaskId(fallbackThreadId);
     if (parsedFallbackTaskId) return `agent-task:${parsedFallbackTaskId}`;
     if (typeof fallbackThreadId === 'string' && fallbackThreadId.trim()) {
       return fallbackThreadId.trim();
     }
-    if (typeof fallbackThreadId === 'number' && Number.isFinite(fallbackThreadId)) {
+    if (
+      typeof fallbackThreadId === 'number' &&
+      Number.isFinite(fallbackThreadId)
+    ) {
       return fallbackThreadId;
     }
     return null;
@@ -1736,7 +1746,10 @@ export class SocialAgentChatController {
         queuedRun.runId,
         (_id, label) => label,
       );
-      if (stored?.status === 'completed' && this.isChatRunResult(stored.result)) {
+      if (
+        stored?.status === 'completed' &&
+        this.isChatRunResult(stored.result)
+      ) {
         return stored.result;
       }
       if (stored?.status === 'failed') return null;
@@ -1891,7 +1904,7 @@ export class SocialAgentChatController {
       messageId: input.messageId,
       text: input.text ?? '',
       traceId: input.traceId,
-      emit: async (payload) => {
+      emit: (payload) => {
         if (payload.type === 'assistant_delta') {
           write('assistant_delta', {
             type: 'assistant_delta',
@@ -2047,8 +2060,7 @@ export class SocialAgentChatController {
     result: Record<string, unknown>,
   ): SocialAgentAssistantMessageSource | null {
     const source = this.stringValue(result.assistantMessageSource);
-    return source === 'deterministic_route' ||
-      source === 'deterministic_action'
+    return source === 'deterministic_route' || source === 'deterministic_action'
       ? source
       : null;
   }
@@ -2252,7 +2264,10 @@ export class SocialAgentChatController {
     const pendingConfirmations = (
       result as { pendingConfirmations?: unknown[] }
     ).pendingConfirmations;
-    if (Array.isArray(pendingConfirmations) && pendingConfirmations.length > 0) {
+    if (
+      Array.isArray(pendingConfirmations) &&
+      pendingConfirmations.length > 0
+    ) {
       return false;
     }
     if (
@@ -2267,7 +2282,7 @@ export class SocialAgentChatController {
   }
 
   private normalizedLowCostCardAction(
-    action: SocialAgentCardActionBody['action'] | string | null | undefined,
+    action: string | null | undefined,
   ): string | null {
     const normalized = cleanDisplayText(action, '').trim().toLowerCase();
     if (!normalized) return null;
@@ -2321,11 +2336,7 @@ export class SocialAgentChatController {
 
   private withAssistantRuntimeAnchor<
     T extends { runtime?: Record<string, unknown> | null },
-  >(
-    result: T,
-    runId: string,
-    messageId: string,
-  ): T {
+  >(result: T, runId: string, messageId: string): T {
     return {
       ...result,
       runtime: {

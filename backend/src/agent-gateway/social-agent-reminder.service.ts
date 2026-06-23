@@ -10,6 +10,7 @@ import { AgentTask, AgentTaskStatus } from './entities/agent-task.entity';
 import {
   SocialAgentReminder,
   SocialAgentReminderPreference,
+  type SocialAgentReminderFrequency,
   type SocialAgentReminderTopic,
 } from './entities/social-agent-reminder.entity';
 import {
@@ -23,13 +24,14 @@ export type SocialAgentReminderPreferenceDto = {
   enabled?: boolean;
   topics?: SocialAgentReminderTopic[];
   scenes?: SocialAgentReminderScene[];
-  frequency?: 'daily' | 'weekly' | 'manual';
+  frequency?: SocialAgentReminderFrequency;
   quietStart?: string;
   quietEnd?: string;
   mutedUntil?: string | null;
 };
 
 export type SocialAgentReminderScene =
+  | 'new_match'
   | 'weekend_opportunities'
   | 'past_social_goal'
   | 'activity_follow_up'
@@ -135,7 +137,7 @@ export class SocialAgentReminderService {
       const preferences = await this.preferenceRepo.find({
         where: {
           enabled: true,
-          frequency: In(['daily', 'weekly']),
+          frequency: In(['realtime', 'daily', 'weekly']),
         },
         order: { lastSuggestedAt: 'ASC', updatedAt: 'ASC' },
         take: limit,
@@ -203,19 +205,15 @@ export class SocialAgentReminderService {
       dto.scenes,
       currentMetadata.reminderScenes,
     );
-    const auditPatch = reminderPreferenceAuditPatch(
-      current,
-      currentMetadata,
-      {
-        enabled: nextEnabled,
-        topics: nextTopics,
-        frequency: nextFrequency,
-        quietStart: nextQuietStart,
-        quietEnd: nextQuietEnd,
-        mutedUntil: nextMutedUntil,
-        scenes: nextScenes,
-      },
-    );
+    const auditPatch = reminderPreferenceAuditPatch(current, currentMetadata, {
+      enabled: nextEnabled,
+      topics: nextTopics,
+      frequency: nextFrequency,
+      quietStart: nextQuietStart,
+      quietEnd: nextQuietEnd,
+      mutedUntil: nextMutedUntil,
+      scenes: nextScenes,
+    });
     const next = this.preferenceRepo.merge(current, {
       enabled: nextEnabled,
       topics: nextTopics,
@@ -324,7 +322,9 @@ export class SocialAgentReminderService {
       targetId: reminder.id,
       pushPayload: {
         targetType: 'agent_reminder',
-        route: reminder.taskId ? `/agent/chat/${reminder.taskId}` : '/agent/chat',
+        route: reminder.taskId
+          ? `/agent/chat/${reminder.taskId}`
+          : '/agent/chat',
         reminderId: reminder.id,
         taskId: reminder.taskId,
         threadId: reminder.threadId,
@@ -440,9 +440,11 @@ export class SocialAgentReminderService {
     if (preference.lastSuggestedAt && !force) {
       if (preference.frequency === 'manual') return null;
       const intervalMs =
-        preference.frequency === 'daily'
-          ? 24 * 60 * 60 * 1000
-          : 7 * 24 * 60 * 60 * 1000;
+        preference.frequency === 'realtime'
+          ? 15 * 60 * 1000
+          : preference.frequency === 'daily'
+            ? 24 * 60 * 60 * 1000
+            : 7 * 24 * 60 * 60 * 1000;
       if (now.getTime() - preference.lastSuggestedAt.getTime() < intervalMs) {
         return 'frequency_capped';
       }
@@ -517,7 +519,7 @@ export class SocialAgentReminderService {
       '新的社交机会',
     ]);
     const safeInterest = safeReminderIntent(interest);
-    const title = reminderTitle(topic, safeInterest);
+    const title = reminderTitle(topic);
     const message = reminderMessage(topic, safeInterest, scene);
     return {
       topic,
@@ -536,7 +538,9 @@ export class SocialAgentReminderService {
         intentSanitized: safeInterest !== interest,
         preferenceHistorySignals,
         memoryDerivedIntent:
-          !task && !profile?.wantToMeet?.[0] && preferenceHistorySignals.length > 0,
+          !task &&
+          !profile?.wantToMeet?.[0] &&
+          preferenceHistorySignals.length > 0,
         suggestionOnly: true,
         deliveryChannels: [...REMINDER_DELIVERY_CHANNELS],
         externalDeliveryDisabled: true,
@@ -556,7 +560,8 @@ export class SocialAgentReminderService {
           {
             key: 'delivery',
             label: '站内提醒',
-            detail: '只通过站内通知和 Agent 会话提示，不使用短信、邮件或外部推送。',
+            detail:
+              '只通过站内通知和 Agent 会话提示，不使用短信、邮件或外部推送。',
           },
           {
             key: 'approval',
@@ -584,19 +589,6 @@ export class SocialAgentReminderService {
   }
 }
 
-function normalizeScenes(
-  input: unknown,
-  fallback: string[] = [],
-): SocialAgentReminderScene[] {
-  if (!Array.isArray(input)) {
-    return fallback.length
-      ? fallback.filter(isReminderScene)
-      : DEFAULT_REMINDER_SCENES;
-  }
-  const scenes = input.filter(isReminderScene);
-  return scenes.length ? Array.from(new Set(scenes)) : DEFAULT_REMINDER_SCENES;
-}
-
 function normalizeScenesForPreferenceUpdate(
   input: unknown,
   current: unknown,
@@ -611,6 +603,7 @@ function normalizeScenesForPreferenceUpdate(
 }
 
 const DEFAULT_REMINDER_SCENES: SocialAgentReminderScene[] = [
+  'new_match',
   'weekend_opportunities',
   'past_social_goal',
   'activity_follow_up',
@@ -619,6 +612,7 @@ const DEFAULT_REMINDER_SCENES: SocialAgentReminderScene[] = [
 
 function isReminderScene(value: unknown): value is SocialAgentReminderScene {
   return (
+    value === 'new_match' ||
     value === 'weekend_opportunities' ||
     value === 'past_social_goal' ||
     value === 'activity_follow_up' ||
@@ -650,6 +644,7 @@ function chooseReminderScene(
   ) {
     return 'activity_follow_up';
   }
+  if (scenes.includes('new_match')) return 'new_match';
   if (scenes.includes('past_social_goal')) return 'past_social_goal';
   return scenes[0] ?? 'weekend_opportunities';
 }
@@ -658,7 +653,8 @@ function normalizeTopics(
   input: unknown,
   fallback: SocialAgentReminderTopic[],
 ): SocialAgentReminderTopic[] {
-  if (!Array.isArray(input)) return fallback?.length ? fallback : DEFAULT_TOPICS;
+  if (!Array.isArray(input))
+    return fallback?.length ? fallback : DEFAULT_TOPICS;
   const allowed = new Set<SocialAgentReminderTopic>([
     'friendship',
     'fitness_partner',
@@ -673,9 +669,12 @@ function normalizeTopics(
 
 function normalizeFrequency(
   input: unknown,
-  fallback: 'daily' | 'weekly' | 'manual',
+  fallback: SocialAgentReminderFrequency,
 ) {
-  return input === 'daily' || input === 'weekly' || input === 'manual'
+  return input === 'realtime' ||
+    input === 'daily' ||
+    input === 'weekly' ||
+    input === 'manual'
     ? input
     : fallback;
 }
@@ -689,7 +688,9 @@ function normalizeTime(input: unknown, fallback: string) {
 function parseMinutes(value: string) {
   const [hour, minute] = value.split(':').map((part) => Number(part));
   if (!Number.isFinite(hour) || !Number.isFinite(minute)) return 0;
-  return Math.max(0, Math.min(23, hour)) * 60 + Math.max(0, Math.min(59, minute));
+  return (
+    Math.max(0, Math.min(23, hour)) * 60 + Math.max(0, Math.min(59, minute))
+  );
 }
 
 function chooseTopic(
@@ -707,7 +708,7 @@ function chooseTopic(
   return topics[0] ?? null;
 }
 
-function reminderTitle(topic: SocialAgentReminderTopic, intent: string) {
+function reminderTitle(topic: SocialAgentReminderTopic) {
   if (topic === 'activity') return '看看新的活动机会';
   if (topic === 'fitness_partner') return '看看新的约练机会';
   if (topic === 'life_graph') return '完善你的社交偏好';
@@ -725,6 +726,9 @@ function reminderMessage(
   }
   if (scene === 'activity_follow_up') {
     return `你之前提到“${cleanIntent}”，要不要我帮你看看这件事现在有没有新的安全进展？`;
+  }
+  if (scene === 'new_match') {
+    return `你之前提到“${cleanIntent}”，现在可能有新的匹配机会。要不要我帮你看看？`;
   }
   if (scene === 'past_social_goal') {
     return `你之前想过“${cleanIntent}”，周末可能有几个安全机会。要不要我帮你看看？`;
@@ -783,9 +787,8 @@ function latestPreferenceValue(
   field: LongTermPreferenceHistoryItem['field'],
 ): string {
   return (
-    history
-      .filter((item) => item.confirmed && item.field === field)
-      .at(-1)?.value ?? ''
+    history.filter((item) => item.confirmed && item.field === field).at(-1)
+      ?.value ?? ''
   );
 }
 
@@ -809,8 +812,10 @@ function preferenceHistoryFieldLabel(
 }
 
 function firstNonEmpty(values: Array<string | undefined | null>) {
-  return values.find((value) => typeof value === 'string' && value.trim())
-    ?.trim() ?? '新的社交机会';
+  return (
+    values.find((value) => typeof value === 'string' && value.trim())?.trim() ??
+    '新的社交机会'
+  );
 }
 
 function safeReminderIntent(value: string) {
@@ -901,7 +906,7 @@ function reminderPreferenceAuditPatch(
   next: {
     enabled: boolean;
     topics: SocialAgentReminderTopic[];
-    frequency: 'daily' | 'weekly' | 'manual';
+    frequency: SocialAgentReminderFrequency;
     quietStart: string;
     quietEnd: string;
     mutedUntil: Date | null;
@@ -917,7 +922,9 @@ function reminderPreferenceAuditPatch(
     current.frequency !== next.frequency ? 'frequency' : null,
     current.quietStart !== next.quietStart ? 'quietStart' : null,
     current.quietEnd !== next.quietEnd ? 'quietEnd' : null,
-    !sameNullableDate(current.mutedUntil, next.mutedUntil) ? 'mutedUntil' : null,
+    !sameNullableDate(current.mutedUntil, next.mutedUntil)
+      ? 'mutedUntil'
+      : null,
     !sameStringArray(currentScenes, next.scenes) ? 'scenes' : null,
   ].filter((field): field is string => Boolean(field));
   if (!changedFields.length) return {};
@@ -937,7 +944,10 @@ function reminderPreferenceAuditPatch(
   return patch;
 }
 
-function sameStringArray(left: readonly string[] = [], right: readonly string[] = []) {
+function sameStringArray(
+  left: readonly string[] = [],
+  right: readonly string[] = [],
+) {
   if (left.length !== right.length) return false;
   return left.every((value, index) => value === right[index]);
 }

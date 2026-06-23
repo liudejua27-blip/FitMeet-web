@@ -215,7 +215,8 @@ export class SocialAgentMeetLoopService {
       cleanDisplayText(payload.counterpartReply, '') ||
       '对方已经回复，适合继续站内聊。';
     const counterpartIntent = this.counterpartIntentFromPayload(payload);
-    const nextSafeStep = this.nextSafeStepForCounterpartIntent(counterpartIntent);
+    const nextSafeStep =
+      this.nextSafeStepForCounterpartIntent(counterpartIntent);
     const intentCopy = this.counterpartIntentCopy(counterpartIntent);
     const now = new Date().toISOString();
     const nextPayload: Record<string, unknown> = {
@@ -247,7 +248,8 @@ export class SocialAgentMeetLoopService {
     };
     transitionSocialAgentState(task, 'message_action', {
       objective: 'candidate_messaging',
-      nextStep: '对方已回复，可以继续站内聊；发起约练或继续邀请前仍会再次确认。',
+      nextStep:
+        '对方已回复，可以继续站内聊；发起约练或继续邀请前仍会再次确认。',
       shouldSearchNow: false,
       awaitingSearchConfirmation: false,
       waitingFor: 'continue_conversation',
@@ -299,7 +301,7 @@ export class SocialAgentMeetLoopService {
       context: 'counterpart_reply',
     });
     const assistantMessage =
-      '对方已经回复了。我先把状态推进到“继续站内聊”，不会自动继续发消息或创建约练；如果你愿意，也可以把这次低压力开场的回应作为一条可撤回的 Life Graph 弱信号。';
+      '对方已经回复了。我先把状态推进到“继续站内聊”，不会自动继续发消息或创建约练；如果你愿意，也可以把这次低压力开场的回应作为一条可撤回的偏好信号。';
     const result = this.cardActionRouteResult(task, assistantMessage, [
       timelineCard,
       lifeGraphCard,
@@ -322,7 +324,12 @@ export class SocialAgentMeetLoopService {
 
   private counterpartIntentFromPayload(
     payload: Record<string, unknown>,
-  ): 'accepted' | 'declined' | 'reschedule_requested' | 'ask_question' | 'continue_chat' {
+  ):
+    | 'accepted'
+    | 'declined'
+    | 'reschedule_requested'
+    | 'ask_question'
+    | 'continue_chat' {
     const explicit =
       cleanDisplayText(payload.counterpartIntent, '') ||
       cleanDisplayText(payload.replyIntent, '') ||
@@ -330,23 +337,40 @@ export class SocialAgentMeetLoopService {
       cleanDisplayText(payload.replyStatus, '') ||
       cleanDisplayText(payload.nextAction, '');
     const text = explicit.toLowerCase();
-    if (/decline|reject|refuse|cancel|not_interested|不去|拒绝|算了|没空|不方便/.test(text)) {
+    if (
+      /decline|reject|refuse|cancel|not_interested|不去|拒绝|算了|没空|不方便/.test(
+        text,
+      )
+    ) {
       return 'declined';
     }
-    if (/reschedule|modify|change_time|another_time|改期|换时间|改时间|其他时间/.test(text)) {
+    if (
+      /reschedule|modify|change_time|another_time|改期|换时间|改时间|其他时间/.test(
+        text,
+      )
+    ) {
       return 'reschedule_requested';
     }
-    if (/ask|question|location|where|when|地点|哪里|几点|时间|吗|？|\?/.test(text)) {
+    if (
+      /ask|question|location|where|when|地点|哪里|几点|时间|吗|？|\?/.test(text)
+    ) {
       return 'ask_question';
     }
-    if (/accept|accepted|yes|agree|confirmed|可以|好呀|行|同意|确认/.test(text)) {
+    if (
+      /accept|accepted|yes|agree|confirmed|可以|好呀|行|同意|确认/.test(text)
+    ) {
       return 'accepted';
     }
     return 'continue_chat';
   }
 
   private nextSafeStepForCounterpartIntent(
-    intent: 'accepted' | 'declined' | 'reschedule_requested' | 'ask_question' | 'continue_chat',
+    intent:
+      | 'accepted'
+      | 'declined'
+      | 'reschedule_requested'
+      | 'ask_question'
+      | 'continue_chat',
   ): string {
     if (intent === 'accepted') {
       return '可以继续站内聊；如果要创建约练或连接对方，我会先让你确认。';
@@ -364,7 +388,12 @@ export class SocialAgentMeetLoopService {
   }
 
   private counterpartIntentCopy(
-    intent: 'accepted' | 'declined' | 'reschedule_requested' | 'ask_question' | 'continue_chat',
+    intent:
+      | 'accepted'
+      | 'declined'
+      | 'reschedule_requested'
+      | 'ask_question'
+      | 'continue_chat',
   ): { label: string; description: string } {
     if (intent === 'accepted') {
       return {
@@ -538,12 +567,15 @@ export class SocialAgentMeetLoopService {
     );
     if (existingPending) return existingPending;
     const candidateRecordId =
-      this.number(payload.candidateRecordId ?? payload.socialRequestCandidateId) ??
-      null;
+      this.number(
+        payload.candidateRecordId ?? payload.socialRequestCandidateId,
+      ) ?? null;
     const socialRequestId = this.number(payload.socialRequestId) ?? null;
     const candidateUserId =
       this.number(
-        payload.candidateUserId ?? payload.targetUserId ?? payload.invitedUserId,
+        payload.candidateUserId ??
+          payload.targetUserId ??
+          payload.invitedUserId,
       ) ?? null;
     const approval = await this.approvals.create({
       userId: ownerUserId,
@@ -868,7 +900,7 @@ export class SocialAgentMeetLoopService {
     });
 
     const assistantMessage =
-      '签到已记录。活动结束后你确认完成，我再帮你生成评价卡，并说明 Life Graph 会更新什么。';
+      '签到已记录。活动结束后你确认完成，我再帮你生成评价卡，并说明会更新哪些长期偏好。';
     const result = this.cardActionRouteResult(task, assistantMessage, [card]);
     await this.writeEvent(
       task,
@@ -965,7 +997,7 @@ export class SocialAgentMeetLoopService {
     });
 
     const assistantMessage =
-      '太好了，这次约练我先标记为完成。你可以提交一个简短评价，我再把 Life Graph 和 trust score 更新说明给你看。';
+      '太好了，这次约练我先标记为完成。你可以提交一个简短评价，我再把长期偏好和可信度更新说明给你看。';
     const result = this.cardActionRouteResult(task, assistantMessage, [card]);
     await this.writeEvent(
       task,
@@ -1086,7 +1118,7 @@ export class SocialAgentMeetLoopService {
     });
 
     const assistantMessage =
-      '评价已提交。这次完成记录已经用于更新你的 Life Graph，并生成了 trust score 更新说明；你之后仍然可以查看、纠正或撤回这次画像影响。';
+      '评价已提交。这次完成记录已经用于更新你的长期偏好，并生成了可信度更新说明；你之后仍然可以查看、纠正或撤回这次画像影响。';
     const result = this.cardActionRouteResult(task, assistantMessage, [card]);
     await this.writeEvent(
       task,
@@ -1188,7 +1220,7 @@ export class SocialAgentMeetLoopService {
       proofType: dto.proofType,
     });
     const assistantMessage =
-      '活动证明已提交，当前等待对方确认。确认完成后，我会继续更新活动履约状态和 Life Graph。';
+      '活动证明已提交，当前等待对方确认。确认完成后，我会继续更新活动履约状态和长期偏好。';
     const result = this.cardActionRouteResult(task, assistantMessage, [card]);
     await this.writeEvent(
       task,

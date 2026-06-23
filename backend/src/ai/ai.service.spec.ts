@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/require-await */
 import { ConfigService } from '@nestjs/config';
 import { AIService } from './ai.service';
 

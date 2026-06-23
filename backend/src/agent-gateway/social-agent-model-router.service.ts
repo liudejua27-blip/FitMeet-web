@@ -21,7 +21,9 @@ export const SOCIAL_AGENT_QUALITY_TOOL_FIRST_CHUNK_TIMEOUT_MS = 20_000;
 export const SOCIAL_AGENT_DEFAULT_FAST_MODEL = 'deepseek-v4-flash';
 export const SOCIAL_AGENT_DEFAULT_REASONING_MODEL = 'deepseek-v4-pro';
 
-export function normalizeSocialAgentModel(value?: string | null): string | null {
+export function normalizeSocialAgentModel(
+  value?: string | null,
+): string | null {
   const model = `${value ?? ''}`.trim();
   if (!model) return null;
   if (model === 'deepseek-v4') return SOCIAL_AGENT_DEFAULT_REASONING_MODEL;
@@ -63,12 +65,12 @@ export class SocialAgentModelRouterService {
         );
       case 'final_response':
         return (
-          this.firstModel([
-            'AGENT_FINAL_RESPONSE_MODEL',
-            'DEEPSEEK_CHAT_MODEL',
-          ], {
-            allowFast: false,
-          }) ??
+          this.firstModel(
+            ['AGENT_FINAL_RESPONSE_MODEL', 'DEEPSEEK_CHAT_MODEL'],
+            {
+              allowFast: false,
+            },
+          ) ??
           this.chatCompatibleLegacyModel() ??
           this.defaultChatModel()
         );
@@ -138,13 +140,10 @@ export class SocialAgentModelRouterService {
 
   private plannerModel(): string {
     return (
-      this.firstModel(
-        ['AGENT_PLANNER_MODEL', 'DEEPSEEK_CHAT_MODEL'],
-        {
-          fallback: SOCIAL_AGENT_DEFAULT_REASONING_MODEL,
-          allowFast: false,
-        },
-      ) ?? SOCIAL_AGENT_DEFAULT_REASONING_MODEL
+      this.firstModel(['AGENT_PLANNER_MODEL', 'DEEPSEEK_CHAT_MODEL'], {
+        fallback: SOCIAL_AGENT_DEFAULT_REASONING_MODEL,
+        allowFast: false,
+      }) ?? SOCIAL_AGENT_DEFAULT_REASONING_MODEL
     );
   }
 
@@ -162,14 +161,10 @@ export class SocialAgentModelRouterService {
 
   private reasoningToolModel(specificKeys: string[]): string {
     return (
-      this.firstModel(
-        [...specificKeys, 'DEEPSEEK_CHAT_MODEL'],
-        {
-          fallback: SOCIAL_AGENT_DEFAULT_REASONING_MODEL,
-          allowFast: false,
-        },
-      ) ??
-      SOCIAL_AGENT_DEFAULT_REASONING_MODEL
+      this.firstModel([...specificKeys, 'DEEPSEEK_CHAT_MODEL'], {
+        fallback: SOCIAL_AGENT_DEFAULT_REASONING_MODEL,
+        allowFast: false,
+      }) ?? SOCIAL_AGENT_DEFAULT_REASONING_MODEL
     );
   }
 

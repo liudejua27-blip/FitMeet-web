@@ -141,9 +141,7 @@ describe('social agent candidate action approval presenter', () => {
             userId: 7,
             threadId: 'agent-task:101',
             taskId: 101,
-            recentMessages: [
-              { role: 'user', content: '今晚青岛大学附近散步' },
-            ],
+            recentMessages: [{ role: 'user', content: '今晚青岛大学附近散步' }],
             taskMemory: null,
             taskSlots: {
               time_window: { value: '今晚', state: 'completed' },

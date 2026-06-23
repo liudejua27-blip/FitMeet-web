@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/require-await */
 import { SocialAgentFinalResponseService } from './social-agent-final-response.service';
 import { SocialAgentLlmOutputCacheService } from './social-agent-llm-output-cache.service';
 import { SOCIAL_AGENT_QUALITY_CHAT_TIMEOUT_MS } from './social-agent-model-router.service';
@@ -230,7 +229,9 @@ describe('SocialAgentFinalResponseService', () => {
     const fetchMock = jest.fn().mockResolvedValue({
       ok: true,
       json: async () => ({
-        choices: [{ message: { content: '我可以帮你找搭子、安排邀请和管理偏好。' } }],
+        choices: [
+          { message: { content: '我可以帮你找搭子、安排邀请和管理偏好。' } },
+        ],
       }),
     });
     global.fetch = fetchMock as never;
@@ -430,7 +431,9 @@ describe('SocialAgentFinalResponseService', () => {
       fallbackReply: '我会继续处理。',
     };
 
-    await expect(service.generate(input)).resolves.toBe('我先帮你筛选公开候选。');
+    await expect(service.generate(input)).resolves.toBe(
+      '我先帮你筛选公开候选。',
+    );
     await expect(
       service.generate({ ...input, userMessage: '帮我继续找人' }),
     ).resolves.toBe('我继续按你的条件找人。');
@@ -656,6 +659,69 @@ describe('SocialAgentFinalResponseService', () => {
     expect(result).toContain('青岛大学附近');
     expect(result).toContain('舞蹈相关');
     expect(result).not.toContain('今晚就近试试，还是周末下午');
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  it('does not turn ordinary chat into an old task continuation', async () => {
+    global.fetch = jest.fn() as never;
+    const service = new SocialAgentFinalResponseService(makeConfig() as never);
+
+    const fallbackReply =
+      '可以，今天训练安排可以按热身、主训练、恢复三步来梳理。';
+    const result = await service.generate({
+      userMessage: '只想普通聊天，帮我梳理今天训练安排',
+      intent: 'casual_chat',
+      route: {
+        intent: 'casual_chat',
+        replyStrategy: 'conversational_answer',
+        shouldSearch: false,
+        shouldExecuteAction: false,
+        shouldReplan: false,
+      },
+      taskContext: {
+        taskSlots: {
+          activity: { value: '聊天', state: 'completed' },
+          time_window: { value: '今天', state: 'completed' },
+        },
+      },
+      fallbackReply: '今天什么时候训练？你想做跑步、羽毛球还是力量训练？',
+    });
+
+    expect(result).toBe('今天什么时候训练？你想做跑步、羽毛球还是力量训练？');
+    expect(result).not.toContain('我记得你已经补充了');
+    expect(result).not.toContain(fallbackReply);
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  it('keeps social advice questions out of task-slot continuation fallback', async () => {
+    global.fetch = jest.fn() as never;
+    const service = new SocialAgentFinalResponseService(makeConfig() as never);
+
+    const result = await service.generate({
+      userMessage:
+        '根据我的画像，推荐一些适合我的运动搭子类型，不要给真实用户，也不要搜索候选人',
+      intent: 'social_search',
+      route: {
+        intent: 'social_search',
+        replyStrategy: 'conversational_answer',
+        shouldSearch: false,
+        shouldExecuteAction: false,
+        shouldReplan: false,
+      },
+      taskContext: {
+        taskSlots: {
+          activity: { value: '跑步', state: 'completed' },
+          time_window: { value: '今天晚上', state: 'completed' },
+          location_text: { value: '青岛大学附近', state: 'completed' },
+        },
+      },
+      fallbackReply:
+        '可以先按类型判断，不搜索具体用户。建议优先看同城、时间稳定、活动强度接近的运动搭子。',
+    });
+
+    expect(result).toContain('类型');
+    expect(result).toContain('建议');
+    expect(result).not.toContain('我记得你已经补充了');
     expect(global.fetch).not.toHaveBeenCalled();
   });
 
@@ -991,8 +1057,7 @@ describe('SocialAgentFinalResponseService', () => {
           location_text: { value: '青岛大学附近', state: 'completed' },
         },
       },
-      fallbackReply:
-        '还缺一点关键信息：你更想今晚还是周末下午？地点在哪里？',
+      fallbackReply: '还缺一点关键信息：你更想今晚还是周末下午？地点在哪里？',
     });
 
     expect(result).toContain('我记得你已经补充了');
@@ -1094,7 +1159,9 @@ describe('SocialAgentFinalResponseService', () => {
     await Promise.resolve();
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    await jest.advanceTimersByTimeAsync(SOCIAL_AGENT_QUALITY_CHAT_TIMEOUT_MS - 1);
+    await jest.advanceTimersByTimeAsync(
+      SOCIAL_AGENT_QUALITY_CHAT_TIMEOUT_MS - 1,
+    );
     expect(aborts).toHaveLength(0);
     await jest.advanceTimersByTimeAsync(1);
     await expect(result).resolves.toBe('我先保留你的需求，稍后可以继续。');

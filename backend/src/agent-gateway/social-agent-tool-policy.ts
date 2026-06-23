@@ -20,19 +20,19 @@ export const SOCIAL_AGENT_HIGH_RISK_TOOL_DAILY_LIMITS: Partial<
 
 export const SOCIAL_AGENT_MANDATORY_APPROVAL_TOOLS: readonly SocialAgentToolName[] =
   [
-  SocialAgentToolName.SendMessage,
-  SocialAgentToolName.SendMessageToCandidate,
-  SocialAgentToolName.ReplyMessage,
-  SocialAgentToolName.ConnectCandidate,
-  SocialAgentToolName.AddFriend,
-  SocialAgentToolName.CreateActivity,
-  SocialAgentToolName.InviteActivity,
-  SocialAgentToolName.JoinActivity,
-  SocialAgentToolName.OfflineMeeting,
-  SocialAgentToolName.ShareLocation,
-  SocialAgentToolName.Payment,
-  SocialAgentToolName.PublishSocialRequest,
-];
+    SocialAgentToolName.SendMessage,
+    SocialAgentToolName.SendMessageToCandidate,
+    SocialAgentToolName.ReplyMessage,
+    SocialAgentToolName.ConnectCandidate,
+    SocialAgentToolName.AddFriend,
+    SocialAgentToolName.CreateActivity,
+    SocialAgentToolName.InviteActivity,
+    SocialAgentToolName.JoinActivity,
+    SocialAgentToolName.OfflineMeeting,
+    SocialAgentToolName.ShareLocation,
+    SocialAgentToolName.Payment,
+    SocialAgentToolName.PublishSocialRequest,
+  ];
 
 const MANDATORY_APPROVAL_TOOLS = new Set<SocialAgentToolName>(
   SOCIAL_AGENT_MANDATORY_APPROVAL_TOOLS,
@@ -217,7 +217,7 @@ export function getSocialAgentToolLabel(toolName: SocialAgentToolName): string {
   return labels[toolName] ?? toolName;
 }
 
-export function shouldWriteSocialAgentActionResultInbox(
+export function shouldWriteSocialAgentActionResultMessageEvent(
   toolName: SocialAgentToolName,
 ): boolean {
   return [
@@ -287,13 +287,13 @@ export function getSocialAgentToolActionType(
       return AgentActionType.Payment;
     case SocialAgentToolName.GetCurrentTaskMemory:
     case SocialAgentToolName.GetConversations:
-    case SocialAgentToolName.GetAgentInbox:
+    case SocialAgentToolName.GetAgentMessageEvents:
     case SocialAgentToolName.GetPendingApprovals:
     case SocialAgentToolName.ReadLongTermMemory:
     case SocialAgentToolName.SummarizeCurrentTask:
     case SocialAgentToolName.GetCandidatePoolDebug:
-    case SocialAgentToolName.WriteInbox:
-    case SocialAgentToolName.ReadInbox:
+    case SocialAgentToolName.WriteMessageEvent:
+    case SocialAgentToolName.ReadMessageEvents:
     case SocialAgentToolName.ReadTaskConversationMessages:
     case SocialAgentToolName.SummarizeReply:
     case SocialAgentToolName.DecideNextSocialAction:
@@ -488,8 +488,8 @@ export function getSocialAgentPermissionActionForTool(
       return SocialAgentAction.OfflineMeet;
     case SocialAgentToolName.SaveCandidate:
       return SocialAgentAction.FavoriteCandidate;
-    case SocialAgentToolName.WriteInbox:
-      return SocialAgentAction.WriteInbox;
+    case SocialAgentToolName.WriteMessageEvent:
+      return SocialAgentAction.WriteMessageEvent;
     case SocialAgentToolName.OfflineMeeting:
     case SocialAgentToolName.ShareLocation:
       return SocialAgentAction.OfflineMeet;
@@ -499,14 +499,14 @@ export function getSocialAgentPermissionActionForTool(
     case SocialAgentToolName.GetAiProfile:
     case SocialAgentToolName.GetCurrentTaskMemory:
     case SocialAgentToolName.GetConversations:
-    case SocialAgentToolName.GetAgentInbox:
+    case SocialAgentToolName.GetAgentMessageEvents:
     case SocialAgentToolName.GetPendingApprovals:
     case SocialAgentToolName.ApproveAction:
     case SocialAgentToolName.RejectAction:
     case SocialAgentToolName.ReadLongTermMemory:
     case SocialAgentToolName.SummarizeCurrentTask:
     case SocialAgentToolName.GetCandidatePoolDebug:
-    case SocialAgentToolName.ReadInbox:
+    case SocialAgentToolName.ReadMessageEvents:
     case SocialAgentToolName.ReadTaskConversationMessages:
     case SocialAgentToolName.SummarizeReply:
     case SocialAgentToolName.DecideNextSocialAction:

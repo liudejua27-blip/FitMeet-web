@@ -25,7 +25,7 @@ receives a reply, proposes a reschedule, confirms a meetup, or submits feedback.
 
 ## Tools
 
-- `read_inbox`
+- `read_message_events`
 - `resume_meet_loop`
 - `reschedule_meet_loop`
 - `confirm_activity`

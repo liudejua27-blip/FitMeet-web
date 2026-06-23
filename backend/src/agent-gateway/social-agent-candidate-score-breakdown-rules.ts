@@ -66,7 +66,11 @@ export function candidateSocialBoundaryScore(
   if (query.acceptsStrangers === false) return 0;
   if (!text.trim()) return query.acceptsStrangers === true ? 5 : 4;
   if (/不接受陌生人|只熟人|拒绝陌生|private|closed/i.test(text)) return 1;
-  if (/接受陌生人|认识新朋友|新朋友|公开|开放|低压力|慢热|边界|尊重|open|new\s*friends|low\s*pressure|boundary/i.test(text)) {
+  if (
+    /接受陌生人|认识新朋友|新朋友|公开|开放|低压力|慢热|边界|尊重|open|new\s*friends|low\s*pressure|boundary/i.test(
+      text,
+    )
+  ) {
     return query.acceptsStrangers === true ? 8 : 6;
   }
   return query.acceptsStrangers === true ? 6 : 5;

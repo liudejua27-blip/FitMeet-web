@@ -1823,7 +1823,7 @@ describe('tool-ui-schema', () => {
       meetLoopNextStep: '确认后进入“等待回复/确认到达/评价回写”的约练闭环。',
       checkinReminder: '活动开始前我会提醒你确认是否到达，不会自动替你签到。',
       reviewPrompt: '活动结束后我会请你做一次简短评价，再决定是否写入画像。',
-      lifeGraphUpdatePreview: '只有你确认后，活动结果才会作为 Life Graph 的长期记忆候选。',
+      lifeGraphUpdatePreview: '只有你确认后，活动结果才会作为长期偏好的更新建议。',
       trustScoreUpdatePreview: '完成、评价和守约情况会作为后续推荐可信度的弱信号。',
       autoPublished: false,
       publicIntentId: null,

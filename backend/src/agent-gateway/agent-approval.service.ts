@@ -311,7 +311,12 @@ export class AgentApprovalService {
       summary: this.buildSummary(type, input.payload),
       reasons: needs
         ? [...new Set(['approval_required_by_permission_engine', ...reasons])]
-        : [...new Set([`auto_execute_allowed_by_${settings.mode}`, ...reasons])],
+        : [
+            ...new Set([
+              `auto_execute_allowed_by_${settings.mode}`,
+              ...reasons,
+            ]),
+          ],
     };
   }
 
@@ -394,7 +399,9 @@ export class AgentApprovalService {
         reason: 'privacy_change_requires_explicit_approval',
       };
     }
-    if (/\b(update_sensitive_profile|sensitive_profile|sensitive_tag)\b/.test(raw)) {
+    if (
+      /\b(update_sensitive_profile|sensitive_profile|sensitive_tag)\b/.test(raw)
+    ) {
       return {
         riskLevel: ApprovalRiskLevel.High,
         reason: 'sensitive_profile_write_requires_explicit_approval',
@@ -733,7 +740,9 @@ export class AgentApprovalService {
       sideEffectBoundary: '确认前不会执行、不会触达对方、不会公开内容。',
       dataBoundary: this.dataBoundary(input.type, input.actionType),
       idempotencyKey: input.idempotencyKey,
-      ...(visibleContent ? { contentPreview: visibleContent.slice(0, 300) } : {}),
+      ...(visibleContent
+        ? { contentPreview: visibleContent.slice(0, 300) }
+        : {}),
     };
   }
 
@@ -748,7 +757,10 @@ export class AgentApprovalService {
     ) {
       return '发送前预览';
     }
-    if (type === ApprovalType.ContactRequest || /connect|friend/i.test(actionType)) {
+    if (
+      type === ApprovalType.ContactRequest ||
+      /connect|friend/i.test(actionType)
+    ) {
       return '加好友并聊天前预览';
     }
     if (type === ApprovalType.ShareLocation) return '公开位置前预览';

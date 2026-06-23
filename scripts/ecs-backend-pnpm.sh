@@ -14,12 +14,12 @@ Usage: scripts/ecs-backend-pnpm.sh [--service backend] -- <pnpm-script-or-args..
 
 Runs pnpm inside the production Docker Compose backend image with a pinned
 Corepack/pnpm toolchain. Use this for ECS one-off backend commands such as
-migrations, upload-dir checks, and smoke seeds instead of running host pnpm.
+migrations, upload-dir checks, and production verification tasks instead of
+running host pnpm.
 
 Examples:
   ./scripts/ecs-backend-pnpm.sh -- uploads:check:prod
   ./scripts/ecs-backend-pnpm.sh -- migration:run:prod
-  AGENT_SMOKE_SEED_ALLOW_PRODUCTION=true ./scripts/ecs-backend-pnpm.sh -- seed:agent-smoke:prod -- --allow-production
 
 Environment:
   APP_DIR        Deployed FitMeet root. Default: repo root.
@@ -72,30 +72,6 @@ env_args=(
   -e COREPACK_ENABLE_PROJECT_SPEC=0
   -e COREPACK_ENABLE_DOWNLOAD_PROMPT=0
 )
-
-for key in \
-  AGENT_SMOKE_SEED_ALLOW_PRODUCTION \
-  APP_SMOKE_SEED_ALLOW_PRODUCTION \
-  APP_SMOKE_SEED_PASSWORD \
-  AGENT_SMOKE_ALLOW_MUTATIONS \
-  AGENT_SMOKE_ALLOW_REMOTE \
-  AGENT_SMOKE_API_BASE_URL \
-  AGENT_SMOKE_EMAIL \
-  AGENT_SMOKE_PASSWORD \
-  AGENT_SMOKE_CITY \
-  AGENT_SMOKE_ACTIVITY \
-  AGENT_SMOKE_TIME \
-  AGENT_SMOKE_INTENSITY \
-  AGENT_SMOKE_STOP_AFTER_OPPORTUNITIES \
-  AGENT_SMOKE_RUN_20_TURN_MEMORY \
-  AGENT_SMOKE_RUN_EMPTY_CANDIDATE_FALLBACK \
-  AGENT_SMOKE_EMPTY_CANDIDATE_MESSAGE \
-  AGENT_SMOKE_REPORT_FILE \
-  AGENT_SMOKE_REPORT_STDOUT; do
-  if [[ -n "${!key:-}" ]]; then
-    env_args+=(-e "${key}=${!key}")
-  fi
-done
 
 "${compose[@]}" run --rm --no-deps "${env_args[@]}" "${SERVICE}" sh -lc \
   "export COREPACK_ENABLE_PROJECT_SPEC=0 COREPACK_ENABLE_DOWNLOAD_PROMPT=0; corepack enable; corepack prepare pnpm@${PNPM_VERSION} --activate; pnpm \"\$@\"" \

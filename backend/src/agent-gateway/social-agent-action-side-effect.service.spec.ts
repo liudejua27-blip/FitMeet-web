@@ -41,7 +41,7 @@ describe('SocialAgentActionSideEffectService', () => {
       logAgentAction: jest.fn().mockResolvedValue({ id: 1 }),
     };
     const messages = {
-      createAgentInboxEvent: jest.fn().mockResolvedValue({ id: 'evt_1' }),
+      createAgentMessageEvent: jest.fn().mockResolvedValue({ id: 'evt_1' }),
     };
     const service = new SocialAgentActionSideEffectService(
       actionLogs as never,
@@ -50,7 +50,7 @@ describe('SocialAgentActionSideEffectService', () => {
     return { service, actionLogs, messages };
   }
 
-  it('writes an audit log and action inbox event for successful social actions', async () => {
+  it('writes an audit log and action message event for successful social actions', async () => {
     const { service, actionLogs, messages } = makeService();
     const call = makeCall();
 
@@ -91,7 +91,7 @@ describe('SocialAgentActionSideEffectService', () => {
         }),
       }),
     );
-    expect(messages.createAgentInboxEvent).toHaveBeenCalledWith(
+    expect(messages.createAgentMessageEvent).toHaveBeenCalledWith(
       expect.objectContaining({
         agentConnectionId: 7,
         ownerUserId: 1,
@@ -143,7 +143,7 @@ describe('SocialAgentActionSideEffectService', () => {
         }),
       }),
     );
-    expect(messages.createAgentInboxEvent).toHaveBeenCalledWith(
+    expect(messages.createAgentMessageEvent).toHaveBeenCalledWith(
       expect.objectContaining({
         eventType: 'agent.action.succeeded',
         metadata: expect.objectContaining({
@@ -156,7 +156,7 @@ describe('SocialAgentActionSideEffectService', () => {
     );
   });
 
-  it('redacts contact and precise-location details from audit payload and inbox metadata', async () => {
+  it('redacts contact and precise-location details from audit payload and message event metadata', async () => {
     const { service, actionLogs, messages } = makeService();
     const call = makeCall({
       input: {
@@ -184,16 +184,10 @@ describe('SocialAgentActionSideEffectService', () => {
       },
     });
 
-    const auditPayload =
-      actionLogs.logAgentAction.mock.calls[0][0].payload as Record<
-        string,
-        unknown
-      >;
-    const inboxMetadata =
-      messages.createAgentInboxEvent.mock.calls[0][0].metadata as Record<
-        string,
-        unknown
-      >;
+    const auditPayload = actionLogs.logAgentAction.mock.calls[0][0]
+      .payload as Record<string, unknown>;
+    const messageEventMetadata = messages.createAgentMessageEvent.mock
+      .calls[0][0].metadata as Record<string, unknown>;
 
     expect(auditPayload.input).toMatchObject({
       text: '[redacted]',
@@ -203,12 +197,14 @@ describe('SocialAgentActionSideEffectService', () => {
       reply: '[redacted]',
       preciseLocation: '[redacted]',
     });
-    expect(inboxMetadata.output).toMatchObject({
+    expect(messageEventMetadata.output).toMatchObject({
       reply: '[redacted]',
       preciseLocation: '[redacted]',
     });
     expect(JSON.stringify(auditPayload)).not.toContain('15253005312');
     expect(JSON.stringify(auditPayload)).not.toContain('fitmeet-test');
-    expect(JSON.stringify(inboxMetadata)).not.toContain('青岛大学 3 号宿舍');
+    expect(JSON.stringify(messageEventMetadata)).not.toContain(
+      '青岛大学 3 号宿舍',
+    );
   });
 });

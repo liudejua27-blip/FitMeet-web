@@ -11,7 +11,9 @@ import type {
 } from '../../../api/socialAgentApi';
 
 export function lifecycleFromLightStatus(status: UserFacingAgentLightStatus): AgentLifecycle {
-  if (status.includes('Life Graph')) return 'reading_life_graph';
+  if (status.includes('Life Graph') || status.includes('长期偏好') || status.includes('画像')) {
+    return 'reading_life_graph';
+  }
   if (status.includes('筛选')) return 'searching_candidates';
   if (status.includes('排除')) return 'ranking_matches';
   if (status.includes('安全')) return 'checking_safety';

@@ -13,7 +13,10 @@ import {
   AgentTaskEventType,
   AgentTaskPermissionMode,
 } from './entities/agent-task.entity';
-import { createSocialAgentRunId } from './social-agent-chat-run.presenter';
+import {
+  createSocialAgentRunId,
+  readLatestSocialAgentStoredRun,
+} from './social-agent-chat-run.presenter';
 import type {
   SocialAgentAsyncRunSnapshot,
   SocialAgentChatRunBody,
@@ -47,6 +50,7 @@ export class SocialAgentQueuedRunService {
     executeRun: ExecuteRun;
     signal?: AbortSignal | null;
     visibleStepLabel: (id: string, label: string) => string;
+    waitForCompletionMs?: number;
   }): Promise<SocialAgentAsyncRunSnapshot> {
     this.assertNotAborted(input.signal);
     const goal = cleanDisplayText(input.body.goal, '').trim();
@@ -73,7 +77,7 @@ export class SocialAgentQueuedRunService {
       goal,
     });
 
-    void this.executeQueuedRun({
+    const executionPromise = this.executeQueuedRun({
       ownerUserId: input.ownerUserId,
       taskId: task.id,
       body: {
@@ -87,7 +91,24 @@ export class SocialAgentQueuedRunService {
       executeRun: input.executeRun,
       signal: input.signal ?? null,
       visibleStepLabel: input.visibleStepLabel,
-    }).catch((error) => {
+    }).catch(async (error) => {
+      const recovered = await this.recoverLatestCompletedRun({
+        ownerUserId: input.ownerUserId,
+        taskId: task.id,
+        visibleStepLabel: input.visibleStepLabel,
+      });
+      if (recovered) {
+        this.logger.warn(
+          JSON.stringify({
+            event: 'social_agent.chat_run.recovered_latest_completed_run',
+            taskId: task.id,
+            runId,
+            recoveredRunId: recovered.runId,
+            message: error instanceof Error ? error.message : String(error),
+          }),
+        );
+        return recovered;
+      }
       this.logger.error(
         JSON.stringify({
           event: 'social_agent.chat_run.background_failed',
@@ -96,7 +117,7 @@ export class SocialAgentQueuedRunService {
           message: error instanceof Error ? error.message : String(error),
         }),
       );
-      void this.markRunFailed(
+      await this.markRunFailed(
         input.ownerUserId,
         task.id,
         runId,
@@ -119,8 +140,24 @@ export class SocialAgentQueuedRunService {
           }),
         );
       });
+      return null;
     });
 
+    const waitForCompletionMs = Math.max(0, input.waitForCompletionMs ?? 0);
+    if (waitForCompletionMs > 0) {
+      const completed = await this.resolveWithin(
+        executionPromise,
+        waitForCompletionMs,
+      );
+      if (completed) return completed;
+      const recovered = await this.recoverLatestCompletedRun({
+        ownerUserId: input.ownerUserId,
+        taskId: task.id,
+        visibleStepLabel: input.visibleStepLabel,
+      });
+      if (recovered) return recovered;
+    }
+    void executionPromise.catch(() => undefined);
     return queuedRun;
   }
 
@@ -132,7 +169,7 @@ export class SocialAgentQueuedRunService {
     executeRun: ExecuteRun;
     signal?: AbortSignal | null;
     visibleStepLabel: (id: string, label: string) => string;
-  }): Promise<SocialAgentChatRunResult> {
+  }): Promise<SocialAgentAsyncRunSnapshot> {
     this.assertNotAborted(input.signal);
     const visibleSteps: SocialAgentVisibleStep[] = [];
     await this.updateRunSnapshot(input, {
@@ -143,7 +180,7 @@ export class SocialAgentQueuedRunService {
     });
     this.assertNotAborted(input.signal);
     const result = await input.executeRun(input.body, async (event) => {
-      this.assertNotAborted(input.signal);
+      if (input.signal?.aborted) return;
       if (event.type !== 'step') return;
       const existingIndex = visibleSteps.findIndex(
         (step) => step.id === event.step.id,
@@ -179,7 +216,48 @@ export class SocialAgentQueuedRunService {
         candidateCount: result.candidates.length,
       },
     );
-    return result;
+    const now = new Date().toISOString();
+    const storedRun =
+      typeof (this.runState as Partial<SocialAgentRunStateService>)
+        .readStoredRun === 'function'
+        ? this.runState.readStoredRun(task, input.runId, input.visibleStepLabel)
+        : null;
+    return (
+      storedRun ?? {
+        taskId: input.taskId,
+        runId: input.runId,
+        status: 'completed',
+        phase: 'completed',
+        message: '已完成搜索并刷新候选人',
+        visibleSteps: result.visibleSteps,
+        queuedAt: now,
+        startedAt: null,
+        updatedAt: now,
+        completedAt: now,
+        failedAt: null,
+        pollAfterMs: 1500,
+        error: null,
+        replan: null,
+        result,
+      }
+    );
+  }
+
+  private async resolveWithin<T>(
+    promise: Promise<T | null>,
+    timeoutMs: number,
+  ): Promise<T | null> {
+    let timeout: NodeJS.Timeout | undefined;
+    try {
+      return await Promise.race([
+        promise,
+        new Promise<null>((resolve) => {
+          timeout = setTimeout(() => resolve(null), timeoutMs);
+        }),
+      ]);
+    } finally {
+      if (timeout) clearTimeout(timeout);
+    }
   }
 
   private async updateRunSnapshot(
@@ -191,12 +269,57 @@ export class SocialAgentQueuedRunService {
     },
     patch: Partial<SocialAgentAsyncRunSnapshot>,
   ): Promise<AgentTask> {
-    return this.runState.updateRunSnapshot(
-      input.ownerUserId,
-      input.taskId,
-      input.runId,
-      patch,
-      input.visibleStepLabel,
+    try {
+      return await this.runState.updateRunSnapshot(
+        input.ownerUserId,
+        input.taskId,
+        input.runId,
+        patch,
+        input.visibleStepLabel,
+      );
+    } catch (error) {
+      this.logger.warn(
+        JSON.stringify({
+          event: 'social_agent.chat_run.snapshot_update_failed',
+          taskId: input.taskId,
+          runId: input.runId,
+          phase: patch.phase,
+          status: patch.status,
+          message: error instanceof Error ? error.message : String(error),
+        }),
+      );
+      return this.taskLifecycle.assertTaskOwner(
+        input.taskId,
+        input.ownerUserId,
+      );
+    }
+  }
+
+  private async recoverLatestCompletedRun(input: {
+    ownerUserId: number;
+    taskId: number;
+    visibleStepLabel: (id: string, label: string) => string;
+  }): Promise<SocialAgentAsyncRunSnapshot | null> {
+    const task = await this.taskLifecycle
+      .assertTaskOwner(input.taskId, input.ownerUserId)
+      .catch(() => null);
+    if (!task) return null;
+    const latest = readLatestSocialAgentStoredRun(task, input.visibleStepLabel);
+    if (latest?.status !== 'completed') return null;
+    if (!this.isUsableChatRunResult(latest.result)) return null;
+    return latest;
+  }
+
+  private isUsableChatRunResult(value: unknown): boolean {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      return false;
+    }
+    const result = value as Partial<SocialAgentChatRunResult>;
+    return (
+      typeof result.taskId === 'number' &&
+      Array.isArray(result.visibleSteps) &&
+      Array.isArray(result.candidates) &&
+      Array.isArray(result.cards)
     );
   }
 

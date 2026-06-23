@@ -7,7 +7,7 @@ import {
   within,
   type RenderResult,
 } from '@testing-library/react';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
@@ -395,10 +395,9 @@ describe('AgentWorkspacePage', () => {
         trainingCount: 0,
         caloriesBurned: 0,
         bestRecords: [],
-        isCoach: false,
+        meetCount: 0,
         followers: 0,
         following: 0,
-        posts: 0,
       },
     });
     vi.spyOn(socialAgentApi, 'restoreSession').mockResolvedValue(emptySession());
@@ -510,8 +509,10 @@ describe('AgentWorkspacePage', () => {
     );
     fireEvent.click(screen.getByTestId('assistant-ui-sidebar-account'));
     expect(screen.getByTestId('assistant-ui-sidebar-account-menu')).toBeInTheDocument();
-    expect(screen.getByRole('menuitem', { name: /人物画像/ })).toBeInTheDocument();
-    expect(screen.getByRole('menuitem', { name: /Life Graph/ })).toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: /个人信息/ })).toBeInTheDocument();
+    expect(screen.queryByRole('menuitem', { name: /人物画像/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('menuitem', { name: /Life Graph/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('menuitem', { name: /待处理/ })).not.toBeInTheDocument();
     expect(screen.queryByTestId('assistant-ui-reminder-toggle')).not.toBeInTheDocument();
     fireEvent.keyDown(document, { key: 'Escape' });
     expect(screen.queryByTestId('assistant-ui-sidebar-account-menu')).not.toBeInTheDocument();
@@ -1261,9 +1262,7 @@ describe('AgentWorkspacePage', () => {
     expect(recovery).toHaveAttribute('data-recovery-surface', 'single-line');
     expect(recovery).toHaveAttribute('data-recovery-card', 'false');
     expect(recovery).toHaveTextContent('这段需求还在');
-    expect(recovery).toHaveTextContent(
-      '可以继续处理，我会从这里接着处理；也可以补充新的要求。',
-    );
+    expect(recovery).toHaveTextContent('可以继续处理，我会从这里接着处理；也可以补充新的要求。');
     expect(recovery).toHaveTextContent('刚才说到：今晚青岛大学附近散步，继续帮我找人');
     expect(recovery).not.toHaveTextContent('这次处理没有完成');
     expect(recovery).not.toHaveTextContent('排序步骤暂时没有完成');
@@ -2559,19 +2558,6 @@ describe('AgentWorkspacePage', () => {
     expect(document.querySelector('[data-renderer="social_match.activity"]')).not.toBeNull();
     expect(document.querySelector('[data-renderer="life_graph.diff"]')).not.toBeNull();
     expect(document.querySelector('[data-renderer="meet_loop.timeline"]')).not.toBeNull();
-    const confirmedContextBlocks = await screen.findAllByTestId('assistant-ui-confirmed-context');
-    expect(confirmedContextBlocks.length).toBeGreaterThanOrEqual(2);
-    expect(confirmedContextBlocks[0]).toHaveAttribute('data-schema-type', 'social_match.candidate');
-    expect(confirmedContextBlocks[0]).toHaveTextContent('青岛');
-    expect(confirmedContextBlocks[0]).toHaveTextContent('周末下午');
-    expect(confirmedContextBlocks[0]).toHaveTextContent('轻松跑步');
-    expect(confirmedContextBlocks[0]).toHaveTextContent('公共场所');
-    const activityConfirmedContext = confirmedContextBlocks.find(
-      (node) => node.getAttribute('data-schema-type') === 'social_match.activity',
-    );
-    expect(activityConfirmedContext).toBeDefined();
-    expect(activityConfirmedContext).toHaveTextContent('周六 16:00');
-    expect(activityConfirmedContext).toHaveTextContent('公共活动');
     expect(
       screen
         .getAllByTestId('assistant-ui-schema-card')
@@ -2597,99 +2583,23 @@ describe('AgentWorkspacePage', () => {
       'social_match.candidate',
       'social_match.activity',
     ]);
-    expect(screen.getAllByText('推荐对象')).toHaveLength(2);
-    expect(screen.getByText('活动机会')).toBeInTheDocument();
+    expect(document.querySelectorAll('[data-product-component="CandidateCards"]')).toHaveLength(2);
+    expect(document.querySelectorAll('[data-product-component="OpportunityCard"]')).toHaveLength(1);
     expect(screen.queryByText('OpportunityCard')).not.toBeInTheDocument();
     expect(screen.queryByText('Activity Opportunity')).not.toBeInTheDocument();
-    expect(screen.getByText('和小林低压力认识')).toBeInTheDocument();
-    expect(screen.getByText('你们的活动区域和时间比较一致。')).toBeInTheDocument();
+    expect(screen.getByText('小林')).toBeInTheDocument();
+    expect(screen.getByText('阿哲')).toBeInTheDocument();
+    expect(screen.getAllByText('你们的活动区域和时间比较一致。').length).toBeGreaterThan(0);
     expect(screen.getByRole('img', { name: '小林 的头像' }).getAttribute('src')).toContain(
       '/avatars/xiaolin.png',
     );
-    const intentChips = screen.getAllByTestId('assistant-ui-candidate-intent-chips');
-    expect(intentChips).toHaveLength(2);
-    expect(intentChips[0]).toHaveTextContent('关系目标');
-    expect(intentChips[0]).toHaveTextContent('先从低压力运动搭子开始');
-    expect(intentChips[0]).toHaveTextContent('理想型');
-    expect(intentChips[0]).toHaveTextContent('同城、周末有空、愿意先站内聊');
-    expect(intentChips[0]).toHaveTextContent('邀请边界');
-    expect(intentChips[0]).toHaveTextContent('发送邀请前需要你确认');
-    expect(screen.getByText('2.4km')).toBeInTheDocument();
-    expect(screen.getAllByText('跑步').length).toBeGreaterThanOrEqual(2);
-    expect(screen.getAllByText('周末下午').length).toBeGreaterThanOrEqual(2);
-    const guardrailStrips = screen.getAllByTestId('assistant-ui-opportunity-guardrails');
-    expect(guardrailStrips.length).toBeGreaterThanOrEqual(3);
-    expect(guardrailStrips[0]).toHaveAttribute('data-schema-type', 'social_match.candidate');
-    expect(guardrailStrips[0]).toHaveAttribute('data-confirmation-required', 'true');
-    expect(guardrailStrips[0]).toHaveTextContent('来源');
-    expect(guardrailStrips[0]).toHaveTextContent('资料');
-    expect(guardrailStrips[0]).toHaveTextContent('触达');
-    expect(guardrailStrips[0]).toHaveTextContent('恢复');
-    expect(guardrailStrips[0]).toHaveTextContent('发送邀请前需要你确认');
-    const activityGuardrail = guardrailStrips.find(
-      (node) => node.getAttribute('data-schema-type') === 'social_match.activity',
-    );
-    expect(activityGuardrail).toBeDefined();
-    expect(activityGuardrail).toHaveAttribute('data-confirmation-required', 'true');
-    expect(activityGuardrail).toHaveTextContent('确认');
-    expect(activityGuardrail).toHaveTextContent('闭环');
-    const primaryReasons = screen.getAllByTestId('assistant-ui-primary-reason');
-    expect(primaryReasons.length).toBeGreaterThanOrEqual(3);
-    expect(primaryReasons[0]).toHaveTextContent('推荐理由');
-    expect(primaryReasons[2]).toHaveTextContent('适合你的原因');
-    expect(screen.getAllByText('更多推荐理由').length).toBeGreaterThanOrEqual(1);
-    expect(screen.getByText(/你们都偏好公共场所/)).toBeInTheDocument();
-    const discoverySafetyBlocks = screen.getAllByTestId('assistant-ui-candidate-discovery-safety');
-    expect(discoverySafetyBlocks).toHaveLength(2);
-    expect(discoverySafetyBlocks[0]).toHaveTextContent('可发现门槛');
-    expect(discoverySafetyBlocks[0]).toHaveTextContent('公开可发现');
-    expect(discoverySafetyBlocks[0]).toHaveTextContent('已开启 Agent 匹配');
-    expect(discoverySafetyBlocks[0]).toHaveTextContent('无拉黑/投诉风险信号');
-    const trustSignals = screen.getAllByTestId('assistant-ui-candidate-trust-signals');
-    expect(trustSignals).toHaveLength(2);
-    expect(trustSignals[0]).toHaveTextContent('推荐边界');
-    expect(trustSignals[0]).toHaveTextContent('公开可发现且已允许 Agent 推荐');
-    expect(trustSignals[0]).toHaveTextContent('资料已脱敏，邀请前需要你确认');
-    expect(trustSignals[0]).toHaveTextContent('同城：青岛');
-    expect(trustSignals[0]).toHaveTextContent('共同兴趣：跑步');
-    const preferenceHistoryBlocks = screen.getAllByTestId(
-      'assistant-ui-candidate-preference-history',
-    );
-    expect(preferenceHistoryBlocks).toHaveLength(1);
-    expect(preferenceHistoryBlocks[0]).toHaveTextContent('最近确认偏好');
-    expect(preferenceHistoryBlocks[0]).toHaveTextContent('可约时间变化');
-    expect(preferenceHistoryBlocks[0]).toHaveTextContent('周末下午');
-    const candidateExplanationTraces = screen.getAllByTestId('candidate-explanation-trace');
-    expect(candidateExplanationTraces).toHaveLength(2);
-    expect(candidateExplanationTraces[0]).toHaveAttribute(
-      'data-schema-type',
-      'social_match.candidate',
-    );
-    expect(candidateExplanationTraces[0]).not.toHaveAttribute('open');
-    expect(screen.getAllByText('推荐依据')).toHaveLength(2);
-    expect(screen.getByText('来源：周末跑步偏好')).toBeInTheDocument();
-    expect(screen.getByText('匹配：时间和强度更接近')).toBeInTheDocument();
-    expect(screen.getByText('安全：仅展示模糊区域')).toBeInTheDocument();
-    const candidatePath = document.querySelector(
-      '[data-testid="assistant-ui-opportunity-path"][data-schema-type="social_match.candidate"]',
-    );
-    expect(candidatePath).not.toBeNull();
-    expect(candidatePath).toHaveTextContent('安全推进路径');
-    expect(candidatePath).toHaveTextContent('先看详情');
-    expect(candidatePath).toHaveTextContent('收藏');
-    expect(candidatePath).toHaveTextContent('生成开场白');
-    expect(candidatePath).toHaveTextContent('发送邀请');
-    expect(candidatePath).toHaveTextContent('加好友并聊天');
-    expect(candidatePath?.querySelector('[data-schema-action="candidate.like"]')).toHaveAttribute(
-      'data-requires-confirmation',
-      'false',
-    );
-    expect(
-      candidatePath?.querySelector('[data-schema-action="opener.confirm_send"]'),
-    ).toHaveAttribute('data-requires-confirmation', 'true');
-    expect(
-      candidatePath?.querySelector('[data-schema-action="candidate.connect"]'),
-    ).toHaveAttribute('data-requires-confirmation', 'true');
+    expect(screen.queryByText('2.4km')).not.toBeInTheDocument();
+    expect(screen.getAllByText('跑步').length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText('周末下午').length).toBeGreaterThanOrEqual(1);
+    expect(screen.queryByTestId('assistant-ui-candidate-intent-chips')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('assistant-ui-opportunity-guardrails')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('candidate-explanation-trace')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('assistant-ui-candidate-discovery-safety')).not.toBeInTheDocument();
     expect(screen.getByText('需要确认的冲突')).toBeInTheDocument();
     expect(screen.getByText(/之前记录过工作日晚间也可运动/)).toBeInTheDocument();
     expect(screen.getByText(/确认边界：只更新运动偏好，不写入具体位置。/)).toBeInTheDocument();
@@ -2745,7 +2655,7 @@ describe('AgentWorkspacePage', () => {
     expect(resumeButton).toBeDefined();
     const currentResumeButton = resumeButton as HTMLButtonElement;
     expect(currentResumeButton).toHaveAttribute('data-schema-action', 'meet_loop.resume');
-    expect(screen.getAllByText('生成开场白').length).toBeGreaterThanOrEqual(2);
+    expect(screen.getAllByText('发消息').length).toBeGreaterThanOrEqual(2);
     expect(screen.getAllByRole('button', { name: '查看详情' }).length).toBeGreaterThanOrEqual(2);
     expect(screen.queryByRole('button', { name: '感兴趣' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '更多类似' })).not.toBeInTheDocument();
@@ -2770,8 +2680,7 @@ describe('AgentWorkspacePage', () => {
     expect(
       screen.getByRole('img', { name: '周末海边轻松跑 活动图' }).getAttribute('src'),
     ).toContain('/activities/sea-run.png');
-    expect(screen.getByText('3/8 人')).toBeInTheDocument();
-    expect(screen.getByText('适合你的原因')).toBeInTheDocument();
+    expect(screen.queryByText('3/8 人')).not.toBeInTheDocument();
     const activityCard = document.querySelector<HTMLElement>(
       'article[data-product-component="OpportunityCard"]',
     );
@@ -2786,65 +2695,16 @@ describe('AgentWorkspacePage', () => {
       activityActionCard.compareDocumentPosition(activityDetails) &
         Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
-    const activityExplanation = screen.getByTestId('activity-explanation-steps');
-    expect(activityExplanation).toHaveTextContent('推荐路径');
-    expect(activityExplanation).toHaveTextContent('来源：来自公开活动');
-    expect(activityExplanation).toHaveTextContent('匹配：周六下午和轻松跑');
-    expect(activityExplanation).toHaveTextContent('确认：报名、邀请或公开发起前都需要你确认');
-    const activityStatusStrip = screen.getByTestId('activity-status-strip');
-    expect(activityStatusStrip).toHaveTextContent('活动安排');
-    expect(activityStatusStrip).toHaveTextContent('周六 16:00');
-    expect(activityStatusStrip).toHaveTextContent('五四广场');
-    expect(activityStatusStrip).toHaveTextContent('安全边界');
-    expect(activityStatusStrip).toHaveTextContent('公共场所见面，不共享精确位置。');
-    expect(activityStatusStrip).toHaveTextContent('下一步确认');
-    expect(activityStatusStrip).toHaveTextContent('创建约练前必须由你确认');
-    const activityProtocol = screen.getByTestId('activity-protocol');
-    expect(activityProtocol).toHaveTextContent('约练执行协议');
-    expect(activityProtocol).toHaveTextContent('公共场所');
-    expect(activityProtocol).toHaveTextContent('五四广场');
-    expect(activityProtocol).toHaveTextContent('创建确认');
-    expect(activityProtocol).toHaveTextContent('创建约练前必须由你确认');
-    expect(activityProtocol).toHaveTextContent('公开边界');
-    expect(activityProtocol).toHaveTextContent('默认不公开发布');
-    expect(activityProtocol).toHaveTextContent('连续推进');
-    expect(activityProtocol).toHaveTextContent('等待回复/确认到达/评价回写');
-    const activitySafetyLoop = screen.getByTestId('activity-safety-loop');
-    expect(activitySafetyLoop).toHaveTextContent('安全边界');
-    expect(activitySafetyLoop).toHaveTextContent('公共场所见面，不共享精确位置。');
-    expect(activitySafetyLoop).toHaveTextContent('公开策略');
-    expect(activitySafetyLoop).toHaveTextContent('默认不公开发布');
-    expect(activitySafetyLoop).toHaveTextContent('执行边界');
-    expect(activitySafetyLoop).toHaveTextContent('创建约练前必须由你确认');
-    expect(activitySafetyLoop).toHaveTextContent('约练闭环');
-    expect(activitySafetyLoop).toHaveTextContent('等待回复/确认到达/评价回写');
-    expect(activitySafetyLoop).toHaveTextContent('签到提醒');
-    expect(activitySafetyLoop).toHaveTextContent('活动开始前我会提醒你确认是否到达。');
-    expect(activitySafetyLoop).toHaveTextContent('评价确认');
-    expect(activitySafetyLoop).toHaveTextContent('简短评价');
-    expect(activitySafetyLoop).toHaveTextContent('画像回写');
-    expect(activitySafetyLoop).toHaveTextContent('Life Graph');
-    const activityPath = document.querySelector(
-      '[data-testid="assistant-ui-opportunity-path"][data-schema-type="social_match.activity"]',
-    );
-    expect(activityPath).not.toBeNull();
-    expect(activityPath).toHaveTextContent('发布到发现');
-    expect(activityPath).toHaveTextContent('修改');
-    expect(activityPath).toHaveTextContent('暂不发布');
-    expect(
-      activityPath?.querySelector('[data-schema-action="activity.modify_time"]'),
-    ).toHaveAttribute('data-requires-confirmation', 'false');
-    expect(
-      activityPath?.querySelector('[data-schema-action="activity.modify_location"]'),
-    ).toBeNull();
-    expect(
-      activityPath?.querySelector('[data-schema-action="publish_to_discover"]'),
-    ).toHaveAttribute('data-requires-confirmation', 'true');
+    expect(screen.queryByTestId('activity-explanation-steps')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('activity-status-strip')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('activity-protocol')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('activity-safety-loop')).not.toBeInTheDocument();
     const activityModifyTimeButton = getEnabledSchemaActionButton('activity.modify_time');
     const activityModifyLocationButton = getEnabledSchemaActionButton('activity.modify_location');
     expect(activityModifyTimeButton).not.toBeNull();
     expect(activityModifyLocationButton).toBeNull();
     expect(screen.getByRole('button', { name: '发布到发现' })).toBeInTheDocument();
+    expect(screen.getByText('发布卡片')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '确认更新' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '暂不写入' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '发布到发现' })).toHaveAttribute(
@@ -2873,10 +2733,7 @@ describe('AgentWorkspacePage', () => {
       'data-schema-action',
       'life_graph.reject_update',
     );
-    expect(getEnabledSchemaActionButton('activity.view_detail')).toHaveAttribute(
-      'data-schema-action',
-      'activity.view_detail',
-    );
+    expect(getEnabledSchemaActionButton('activity.view_detail')).toBeNull();
     const messageCountBeforeDetail = screen.getAllByTestId('assistant-ui-message').length;
     fireEvent.click(getEnabledSchemaActionButton('candidate.view_detail') as HTMLButtonElement);
     expect(window.location.pathname).toBe('/user/22');
@@ -2902,9 +2759,11 @@ describe('AgentWorkspacePage', () => {
         expect.any(AbortSignal),
       ),
     );
-    expect(await screen.findByRole('button', { name: '已生成开场白' })).toHaveAttribute(
-      'data-action-state',
-      'succeeded',
+    await waitFor(() =>
+      expect(getEnabledSchemaActionButton('candidate.generate_opener')).toHaveAttribute(
+        'data-action-state',
+        'succeeded',
+      ),
     );
     await waitFor(() => expect(actionStreamSpy).toHaveBeenCalledTimes(1));
     expect(document.querySelector('.agent-gpt-result-block')).toBeNull();
@@ -2960,45 +2819,52 @@ describe('AgentWorkspacePage', () => {
     expect(screen.getByTestId('assistant-ui-generative-cards')).toHaveTextContent('1 张约练卡');
     await waitFor(() =>
       expect(
-        document.querySelector(
-          '[data-testid="assistant-ui-opportunity-path"][data-schema-type="social_match.candidate"]',
-        ),
-      ).not.toBeNull(),
+        document.querySelectorAll('[data-product-component="CandidateCards"]').length,
+      ).toBeGreaterThan(0),
     );
-    const candidatePath = document.querySelector(
-      '[data-testid="assistant-ui-opportunity-path"][data-schema-type="social_match.candidate"]',
+    const candidateCard = document.querySelector<HTMLElement>(
+      'article[data-product-component="CandidateCards"]',
     );
-    const activityPath = document.querySelector(
-      '[data-testid="assistant-ui-opportunity-path"][data-schema-type="social_match.activity"]',
+    const activityCard = document.querySelector<HTMLElement>(
+      'article[data-product-component="OpportunityCard"]',
     );
-    expect(candidatePath).not.toBeNull();
-    expect(candidatePath).toHaveTextContent('先看详情');
-    expect(candidatePath).toHaveTextContent('收藏');
-    expect(candidatePath).toHaveTextContent('生成开场白');
-    expect(candidatePath).toHaveTextContent('发送邀请');
-    expect(candidatePath).toHaveTextContent('加好友并聊天');
-    expect(candidatePath?.querySelector('[data-schema-action="candidate.like"]')).toHaveAttribute(
-      'data-requires-confirmation',
-      'false',
-    );
+    expect(candidateCard).not.toBeNull();
     expect(
-      candidatePath?.querySelector('[data-schema-action="opener.confirm_send"]'),
+      within(candidateCard as HTMLElement).getByRole('button', { name: '查看详情' }),
+    ).toBeInTheDocument();
+    expect(
+      within(candidateCard as HTMLElement).getByRole('button', { name: '收藏' }),
+    ).toBeInTheDocument();
+    expect(
+      within(candidateCard as HTMLElement).getByRole('button', { name: '生成开场白' }),
+    ).toBeInTheDocument();
+    expect(
+      within(candidateCard as HTMLElement).getByRole('button', { name: '发送邀请' }),
+    ).toBeInTheDocument();
+    expect(
+      within(candidateCard as HTMLElement).getByRole('button', { name: '加好友并聊天' }),
+    ).toBeInTheDocument();
+    expect(
+      (candidateCard as HTMLElement).querySelector('[data-schema-action="candidate.like"]'),
+    ).toHaveAttribute('data-requires-confirmation', 'false');
+    expect(
+      (candidateCard as HTMLElement).querySelector('[data-schema-action="opener.confirm_send"]'),
     ).toHaveAttribute('data-requires-confirmation', 'true');
     expect(
-      candidatePath?.querySelector('[data-schema-action="candidate.connect"]'),
+      (candidateCard as HTMLElement).querySelector('[data-schema-action="candidate.connect"]'),
     ).toHaveAttribute('data-requires-confirmation', 'true');
     expect(
-      candidatePath?.querySelector('[data-schema-action="candidate.connect"]'),
+      (candidateCard as HTMLElement).querySelector('[data-schema-action="candidate.connect"]'),
     ).toHaveAttribute('data-action-source', 'default');
-    expect(activityPath).not.toBeNull();
-    expect(activityPath).toHaveTextContent('发布到发现');
-    expect(activityPath).toHaveTextContent('修改');
-    expect(activityPath).toHaveTextContent('暂不发布');
+    expect(activityCard).not.toBeNull();
+    expect(within(activityCard as HTMLElement).getByText('发布卡片')).toBeInTheDocument();
+    expect(within(activityCard as HTMLElement).getByText('修改信息')).toBeInTheDocument();
+    expect(within(activityCard as HTMLElement).getByText('暂不发布')).toBeInTheDocument();
     expect(
-      activityPath?.querySelector('[data-schema-action="publish_to_discover"]'),
+      (activityCard as HTMLElement).querySelector('[data-schema-action="publish_to_discover"]'),
     ).toHaveAttribute('data-requires-confirmation', 'true');
     expect(
-      activityPath?.querySelector('[data-schema-action="publish_to_discover"]'),
+      (activityCard as HTMLElement).querySelector('[data-schema-action="publish_to_discover"]'),
     ).toHaveAttribute('data-action-source', 'default');
     const candidateConnectButton = getEnabledSchemaActionButton('candidate.connect');
     const activityCreateButton = getEnabledSchemaActionButton('publish_to_discover');
@@ -3100,7 +2966,7 @@ describe('AgentWorkspacePage', () => {
     );
   });
 
-  it('keeps skip-publish as a low-risk opportunity action without opening approval UI', async () => {
+  it('keeps the simplified opportunity card focused on draft publish controls', async () => {
     useRealAgentAdapter();
     useAuthStore.setState({ isLoggedIn: true, showLoginModal: false });
     vi.spyOn(socialAgentApi, 'restoreSession').mockResolvedValue(emptySession());
@@ -3123,72 +2989,21 @@ describe('AgentWorkspacePage', () => {
       onEvent({ type: 'result', result: streamed });
       return streamed;
     });
-    const actionStreamSpy = vi
-      .spyOn(socialAgentApi, 'performActionStream')
-      .mockImplementation(async (data, onEvent) => {
-        const response: UserFacingAgentResponse = {
-          ...mockResponse(),
-          assistantMessage: '好的，我先不发布这张约练卡，已经把它保留为草稿。',
-          cards: [
-            {
-              id: 'meet-loop-private-draft',
-              type: 'review_card',
-              schemaVersion: 'fitmeet.tool-ui.v1',
-              schemaType: 'meet_loop.timeline',
-              title: '邀约进展',
-              body: '这张约练卡暂时不会发布到发现。',
-              status: 'ready',
-              data: {
-                schemaType: 'meet_loop.timeline',
-                loopStage: 'activity_draft_private',
-                waitingFor: 'user_next_message',
-              },
-              actions: [],
-            },
-          ],
-          pendingConfirmations: [],
-        };
-        onEvent({ type: 'result', result: response });
-        expect(data.action).toBe('activity.skip_publish');
-        return response;
-      });
+    const actionStreamSpy = vi.spyOn(socialAgentApi, 'performActionStream');
 
     await renderAgentPage();
 
     submitPrompt('我想找青岛周末下午一起轻松跑步的新朋友');
 
-    const skipButton = await waitFor(() => {
-      const button = getEnabledSchemaActionButton('activity.skip_publish');
-      expect(button).not.toBeNull();
-      return button as HTMLButtonElement;
-    });
-    expect(skipButton).toHaveAttribute('data-requires-confirmation', 'false');
+    await waitFor(() => expect(getEnabledSchemaActionButton('publish_to_discover')).not.toBeNull());
+    expect(getEnabledSchemaActionButton('activity.modify_time')).not.toBeNull();
+    expect(getEnabledSchemaActionButton('activity.skip_publish')).not.toBeNull();
     expect(screen.queryByTestId('assistant-ui-inline-approval-panel')).not.toBeInTheDocument();
     expect(screen.queryByTestId('assistant-ui-approval-tool')).not.toBeInTheDocument();
-
-    fireEvent.click(skipButton);
-
-    await waitFor(() =>
-      expect(actionStreamSpy).toHaveBeenCalledWith(
-        expect.objectContaining({
-          taskId: 101,
-          action: 'activity.skip_publish',
-          payload: expect.not.objectContaining({
-            approvalRequired: true,
-            checkpointRequired: true,
-          }),
-        }),
-        expect.any(Function),
-        expect.any(AbortSignal),
-      ),
-    );
-    expect(await screen.findByRole('button', { name: '已暂不发布' })).toHaveAttribute(
-      'data-action-state',
-      'succeeded',
-    );
-    const outcome = await screen.findByTestId('assistant-ui-inline-outcome-preview');
-    expect(outcome).toHaveTextContent('已暂不发布');
-    expect(outcome).toHaveTextContent('保留为草稿');
+    expect(screen.getByText('发布卡片')).toBeInTheDocument();
+    expect(screen.getByText('修改信息')).toBeInTheDocument();
+    expect(screen.getByText('暂不发布')).toBeInTheDocument();
+    expect(actionStreamSpy).not.toHaveBeenCalled();
     expect(screen.queryByTestId('assistant-ui-inline-approval-panel')).not.toBeInTheDocument();
     expect(screen.queryByTestId('assistant-ui-approval-tool')).not.toBeInTheDocument();
   });
@@ -3240,7 +3055,9 @@ describe('AgentWorkspacePage', () => {
     ]);
     expect(await screen.findAllByText('推荐对象')).toHaveLength(3);
     expect(document.querySelectorAll('[data-product-component="CandidateCards"]')).toHaveLength(3);
-    expect(document.querySelectorAll('[data-product-renderer="CandidateCards"]')).toHaveLength(3);
+    expect(
+      document.querySelectorAll('article[data-product-renderer="CandidateCards"]'),
+    ).toHaveLength(3);
     const firstCandidateCard = document.querySelector<HTMLElement>(
       'article[data-product-component="CandidateCards"]',
     );
@@ -3255,51 +3072,16 @@ describe('AgentWorkspacePage', () => {
       firstCandidateActionCard.compareDocumentPosition(firstCandidateDetails) &
         Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
-    expect(screen.getByText('和小林低压力认识')).toBeInTheDocument();
-    expect(screen.getByText('和阿哲先从公开路线开始')).toBeInTheDocument();
-    expect(screen.getByText('和小周先从周末慢跑开始')).toBeInTheDocument();
-    expect(screen.getByTestId('assistant-ui-candidate-reasoning-quality')).toHaveTextContent(
-      '我先用公开资料保守推荐',
-    );
-    expect(screen.getByTestId('assistant-ui-candidate-reasoning-quality')).toHaveTextContent(
-      '更细的个性化解释稍后可重试',
-    );
-    expect(screen.getByTestId('assistant-ui-candidate-reasoning-quality')).not.toHaveTextContent(
-      /fallback|deepseek|model_unavailable|tool|trace/i,
-    );
-    expect(screen.getByTestId('assistant-ui-candidate-reasoning-quality')).toHaveAttribute(
-      'data-retryable',
-      'true',
-    );
-    expect(screen.getAllByTestId('assistant-ui-candidate-discovery-safety')).toHaveLength(3);
+    expect(screen.getByText('小林')).toBeInTheDocument();
+    expect(screen.getByText('阿哲')).toBeInTheDocument();
+    expect(screen.getByText('小周')).toBeInTheDocument();
     expect(
-      screen.getAllByTestId('assistant-ui-recommendation-protocol').length,
-    ).toBeGreaterThanOrEqual(2);
-    expect(screen.getAllByText('推荐协议').length).toBeGreaterThanOrEqual(1);
-    expect(screen.getAllByText('可发现来源').length).toBeGreaterThanOrEqual(1);
-    expect(screen.getAllByText('触达边界').length).toBeGreaterThanOrEqual(1);
-    expect(
-      screen.getAllByText('发送邀请、加好友或创建活动前必须由你确认').length,
-    ).toBeGreaterThanOrEqual(1);
-    expect(screen.getAllByText('匹配依据').length).toBeGreaterThanOrEqual(1);
-    const guardrailStrips = screen.getAllByTestId('assistant-ui-opportunity-guardrails');
-    expect(guardrailStrips).toHaveLength(3);
-    guardrailStrips.forEach((strip) => {
-      expect(strip).toHaveAttribute('data-schema-type', 'social_match.candidate');
-      expect(strip).toHaveAttribute('data-confirmation-required', 'true');
-      expect(strip).toHaveTextContent('来源');
-      expect(strip).toHaveTextContent('资料');
-      expect(strip).toHaveTextContent('触达');
-      expect(strip).toHaveTextContent('恢复');
-    });
-    const actionRhythmCards = screen.getAllByTestId('assistant-ui-candidate-action-rhythm');
-    expect(actionRhythmCards).toHaveLength(3);
-    for (const card of actionRhythmCards) {
-      expect(card).toHaveTextContent('怎么开口');
-    }
-    expect(actionRhythmCards[0]).toHaveTextContent('为什么现在');
-    expect(screen.getByText('城市/距离')).toBeInTheDocument();
-    expect(screen.getByText(/共同兴趣包含/)).toBeInTheDocument();
+      screen.queryByTestId('assistant-ui-candidate-reasoning-quality'),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByTestId('assistant-ui-candidate-discovery-safety')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('assistant-ui-recommendation-protocol')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('assistant-ui-opportunity-guardrails')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('assistant-ui-candidate-action-rhythm')).not.toBeInTheDocument();
     expect(screen.queryByText('活动机会')).not.toBeInTheDocument();
     expect(screen.queryByText('tool_call')).not.toBeInTheDocument();
     expect(screen.queryByText('traceId')).not.toBeInTheDocument();
@@ -3378,7 +3160,12 @@ describe('AgentWorkspacePage', () => {
         expect.any(AbortSignal),
       ),
     );
-    expect(await screen.findByRole('button', { name: '已跳过写入' })).toBeInTheDocument();
+    await waitFor(() =>
+      expect(getEnabledSchemaActionButton('life_graph.reject_update')).toHaveAttribute(
+        'data-action-state',
+        'succeeded',
+      ),
+    );
   });
 
   it('renders reply writeback proposals as safe Life Graph Tool UI actions', async () => {
@@ -3425,7 +3212,7 @@ describe('AgentWorkspacePage', () => {
             confidence: 0.76,
           },
         ],
-        confirmationBoundary: '这只是画像更新建议，确认前不会写入长期 Life Graph。',
+        confirmationBoundary: '这只是画像更新建议，确认前不会写入长期偏好。',
         privacyBoundary: '不保存对方私聊原文，只保存脱敏后的互动信号和下一步建议。',
         revokeHint: '确认后仍可撤回。',
       },
@@ -3479,7 +3266,12 @@ describe('AgentWorkspacePage', () => {
       ),
     );
     expect(actionStreamSpy.mock.calls[0]?.[0].payload).not.toHaveProperty('proposalId');
-    expect(await screen.findByRole('button', { name: '已确认更新' })).toBeInTheDocument();
+    await waitFor(() =>
+      expect(getEnabledSchemaActionButton('life_graph.accept_update')).toHaveAttribute(
+        'data-action-state',
+        'succeeded',
+      ),
+    );
   });
 
   it('renders canonical counterpart reply timeline and weak Life Graph signal cards', async () => {
@@ -3892,9 +3684,11 @@ describe('AgentWorkspacePage', () => {
         expect.any(AbortSignal),
       ),
     );
-    expect(await screen.findByRole('button', { name: '已记录到达' })).toHaveAttribute(
-      'data-action-state',
-      'succeeded',
+    await waitFor(() =>
+      expect(getEnabledSchemaActionButton('activity.check_in')).toHaveAttribute(
+        'data-action-state',
+        'succeeded',
+      ),
     );
 
     expect(getEnabledSchemaActionButton('review.submit')).toBeNull();
@@ -4061,9 +3855,11 @@ describe('AgentWorkspacePage', () => {
         expect.any(AbortSignal),
       ),
     );
-    expect(await screen.findByRole('button', { name: '已准备改期' })).toHaveAttribute(
-      'data-action-state',
-      'succeeded',
+    await waitFor(() =>
+      expect(getEnabledSchemaActionButton('activity.modify_time')).toHaveAttribute(
+        'data-action-state',
+        'succeeded',
+      ),
     );
 
     expect(getEnabledSchemaActionButton('activity.modify_location')).toBeNull();
@@ -4417,78 +4213,78 @@ describe('AgentWorkspacePage', () => {
                     },
                   ],
                 }
-            : {
-                ...mockResponse(),
-                assistantMessage: '已确认发送给小林，接下来等待对方回复。',
-                runtime: {
-                  checkpointId: 7101,
-                  checkpointType: 'interrupt',
-                  canReplay: true,
-                  canFork: true,
-                  resumeCursor: {
-                    threadId: 'agent-task:101',
-                    action: 'resume',
-                    stepId: 'message-sent-7101',
+              : {
+                  ...mockResponse(),
+                  assistantMessage: '已确认发送给小林，接下来等待对方回复。',
+                  runtime: {
+                    checkpointId: 7101,
+                    checkpointType: 'interrupt',
+                    canReplay: true,
+                    canFork: true,
+                    resumeCursor: {
+                      threadId: 'agent-task:101',
+                      action: 'resume',
+                      stepId: 'message-sent-7101',
+                    },
                   },
-                },
-                cards: [
-                  {
-                    id: 'meet-loop-main-chain',
-                    type: 'review_card',
-                    title: '邀约进展',
-                    body: '开场白已按你的确认发送。',
-                    status: 'ready',
-                    schemaVersion: 'fitmeet.tool-ui.v1',
-                    schemaType: 'meet_loop.timeline',
-                    data: {
-                      taskId: 101,
-                      schemaName: 'MeetLoopTimelineCard',
+                  cards: [
+                    {
+                      id: 'meet-loop-main-chain',
+                      type: 'review_card',
+                      title: '邀约进展',
+                      body: '开场白已按你的确认发送。',
+                      status: 'ready',
                       schemaVersion: 'fitmeet.tool-ui.v1',
                       schemaType: 'meet_loop.timeline',
-                      candidateUserId: 22,
-                      loopStage: 'message_sent',
-                      timeline: {
-                        title: '邀约进展',
-                        description: '开场白已发送，后续回复会继续保存在这里。',
-                        nextAction: '等待对方回复；如果时间不合适，可以继续改期。',
-                        steps: [
-                          {
-                            key: 'opener',
-                            label: '开场白已发送',
-                            state: 'done',
-                            description: '你确认后，我才发送了这条消息。',
-                          },
-                          {
-                            key: 'reply',
-                            label: '等待回复',
-                            state: 'current',
-                            description: '对方回复后，我会继续推进确认或改期。',
-                            checkpointReady: true,
-                            resumeMode: 'resume',
-                          },
-                          {
-                            key: 'review',
-                            label: '见面后评价',
-                            state: 'next',
-                            description: '完成后可以评价体验并回写画像。',
-                            resumeMode: 'memory',
-                          },
-                        ],
+                      data: {
+                        taskId: 101,
+                        schemaName: 'MeetLoopTimelineCard',
+                        schemaVersion: 'fitmeet.tool-ui.v1',
+                        schemaType: 'meet_loop.timeline',
+                        candidateUserId: 22,
+                        loopStage: 'message_sent',
+                        timeline: {
+                          title: '邀约进展',
+                          description: '开场白已发送，后续回复会继续保存在这里。',
+                          nextAction: '等待对方回复；如果时间不合适，可以继续改期。',
+                          steps: [
+                            {
+                              key: 'opener',
+                              label: '开场白已发送',
+                              state: 'done',
+                              description: '你确认后，我才发送了这条消息。',
+                            },
+                            {
+                              key: 'reply',
+                              label: '等待回复',
+                              state: 'current',
+                              description: '对方回复后，我会继续推进确认或改期。',
+                              checkpointReady: true,
+                              resumeMode: 'resume',
+                            },
+                            {
+                              key: 'review',
+                              label: '见面后评价',
+                              state: 'next',
+                              description: '完成后可以评价体验并回写画像。',
+                              resumeMode: 'memory',
+                            },
+                          ],
+                        },
                       },
+                      actions: [
+                        {
+                          id: 'meet-loop-main-chain-resume',
+                          label: '继续推进',
+                          action: 'meet_loop.resume',
+                          schemaAction: 'meet_loop.resume',
+                          requiresConfirmation: true,
+                          payload: { taskId: 101, checkpointId: 7101 },
+                        },
+                      ],
                     },
-                    actions: [
-                      {
-                        id: 'meet-loop-main-chain-resume',
-                        label: '继续推进',
-                        action: 'meet_loop.resume',
-                        schemaAction: 'meet_loop.resume',
-                        requiresConfirmation: true,
-                        payload: { taskId: 101, checkpointId: 7101 },
-                      },
-                    ],
-                  },
-                ],
-              };
+                  ],
+                };
         onEvent({ type: 'result', result: response });
         return response;
       });
@@ -4509,7 +4305,7 @@ describe('AgentWorkspacePage', () => {
 
     submitPrompt('我想找青岛周末下午一起轻松跑步的新朋友');
 
-    expect(await screen.findByText('和小林低压力认识')).toBeInTheDocument();
+    expect(await screen.findByText('小林')).toBeInTheDocument();
     await screen.findAllByRole('button', { name: '生成开场白' });
     const openerButton = getEnabledSchemaActionButton(
       'candidate.generate_opener',
@@ -4724,8 +4520,10 @@ describe('AgentWorkspacePage', () => {
     ) as HTMLButtonElement;
     fireEvent.click(openerButton);
 
-    const failedButton = await screen.findByRole('button', {
-      name: '重试生成开场白',
+    const failedButton = await waitFor(() => {
+      const button = getEnabledSchemaActionButton('candidate.generate_opener');
+      expect(button).toHaveAttribute('data-action-state', 'failed');
+      return button as HTMLButtonElement;
     });
     expect(failedButton).toHaveAttribute('data-action-state', 'failed');
     expect(failedButton).toHaveAttribute('data-action-executable', 'true');
@@ -4745,14 +4543,16 @@ describe('AgentWorkspacePage', () => {
     );
 
     await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: '重试生成开场白' }));
+      fireEvent.click(failedButton);
       await Promise.resolve();
     });
 
     await waitFor(() => expect(actionStreamSpy).toHaveBeenCalledTimes(2));
-    expect(await screen.findByRole('button', { name: '已生成开场白' })).toHaveAttribute(
-      'data-action-state',
-      'succeeded',
+    await waitFor(() =>
+      expect(getEnabledSchemaActionButton('candidate.generate_opener')).toHaveAttribute(
+        'data-action-state',
+        'succeeded',
+      ),
     );
     expect(screen.queryByTestId('assistant-ui-card-action-error')).not.toBeInTheDocument();
   });
@@ -4812,9 +4612,11 @@ describe('AgentWorkspacePage', () => {
         preference: 'running_weekend',
       }),
     });
-    expect(await screen.findByRole('button', { name: '已记录兴趣' })).toHaveAttribute(
-      'data-action-state',
-      'succeeded',
+    await waitFor(() =>
+      expect(getEnabledSchemaActionButton('candidate.like')).toHaveAttribute(
+        'data-action-state',
+        'succeeded',
+      ),
     );
     expect(screen.queryByTestId('assistant-ui-card-action-result')).not.toBeInTheDocument();
     expect(screen.getAllByRole('button', { name: '生成开场白' }).length).toBeGreaterThan(0);
@@ -4922,9 +4724,11 @@ describe('AgentWorkspacePage', () => {
         expect.any(AbortSignal),
       ),
     );
-    expect(await screen.findByRole('button', { name: '已记录兴趣' })).toHaveAttribute(
-      'data-action-state',
-      'succeeded',
+    await waitFor(() =>
+      expect(getEnabledSchemaActionButton('candidate.like')).toHaveAttribute(
+        'data-action-state',
+        'succeeded',
+      ),
     );
     expect(screen.queryByTestId('assistant-ui-inline-approval-panel')).not.toBeInTheDocument();
     expect(screen.queryByTestId('assistant-ui-approval-tool')).not.toBeInTheDocument();
@@ -4939,9 +4743,11 @@ describe('AgentWorkspacePage', () => {
         expect.any(AbortSignal),
       ),
     );
-    expect(await screen.findByRole('button', { name: '已生成开场白' })).toHaveAttribute(
-      'data-action-state',
-      'succeeded',
+    await waitFor(() =>
+      expect(getEnabledSchemaActionButton('candidate.generate_opener')).toHaveAttribute(
+        'data-action-state',
+        'succeeded',
+      ),
     );
     const inlineDraft = await screen.findByTestId('assistant-ui-inline-draft-preview');
     expect(inlineDraft).toHaveTextContent('小林 的开场白草稿');
@@ -5440,7 +5246,7 @@ describe('AgentWorkspacePage', () => {
 
     submitPrompt('我想找一个周末一起跑步的人');
 
-    expect(await screen.findByText('和小林低压力认识')).toBeInTheDocument();
+    expect(await screen.findByText('小林')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '内部调试动作' })).not.toBeInTheDocument();
     expect(actionStreamSpy).not.toHaveBeenCalled();
   });
@@ -5522,6 +5328,8 @@ describe('AgentWorkspacePage', () => {
     await renderAgentPage('/agent/chat/42');
 
     await waitFor(() => expect(socialAgentApi.restoreSession).toHaveBeenCalledWith(undefined));
+    expect(screen.getByText(/普通聊天不会自动展开旧任务/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '继续上次任务' })).toBeInTheDocument();
     expect(screen.queryByText('我可以继续上次的话题，也可以重新开始。')).not.toBeInTheDocument();
     expect(screen.queryByText(/原始目标/)).not.toBeInTheDocument();
     expect(screen.queryByText(/从已保存的步骤继续/)).not.toBeInTheDocument();
@@ -5565,7 +5373,7 @@ describe('AgentWorkspacePage', () => {
     vi.spyOn(socialAgentApi, 'listThreads').mockResolvedValue({ threads: [] });
     vi.spyOn(socialAgentApi, 'getTaskEventReplay').mockResolvedValue(emptyReplay(64));
 
-    await renderAgentPage('/agent/chat/64');
+    await renderAgentPageWithRoutes('/agent/chat/64');
 
     expect(
       await screen.findByText('今天晚上，青岛大学附近，散步，想找舞蹈相关标签的女生'),
@@ -6061,6 +5869,73 @@ describe('AgentWorkspacePage', () => {
     expect(document.body.textContent ?? '').not.toMatch(forbiddenUserArtifacts);
   });
 
+  it('sends ordinary chat without the restored social task id after showing the lightweight recovery entry', async () => {
+    useRealAgentAdapter();
+    useAuthStore.setState({ isLoggedIn: true, showLoginModal: false });
+    const staleResponse: UserFacingAgentResponse = {
+      ...mockResponse(),
+      assistantMessage: '从已保存的步骤继续：正在等待你确认。原始目标：今晚青岛大学跑步搭子',
+      lightStatus: '正在等待你确认',
+      cards: [
+        {
+          id: 'stale-opportunity-card',
+          type: 'activity_plan',
+          title: '旧约练卡片',
+          data: { status: 'draft', taskId: 42 },
+          actions: [],
+        },
+      ],
+    };
+    window.localStorage.setItem(
+      'fitmeet-agent-thread:current',
+      JSON.stringify({
+        activeTaskId: 42,
+        activeThreadId: 'agent-task:42',
+        messages: [
+          {
+            id: 'assistant-stale-task',
+            role: 'assistant',
+            content: staleResponse.assistantMessage,
+            status: 'done',
+            result: staleResponse,
+            taskId: 42,
+            conversationIntent: 'approval',
+            showSocialResult: true,
+          },
+        ],
+        userResult: staleResponse,
+        mode: 'limited_auto',
+        branchSelections: {},
+        savedAt: Date.now(),
+      }),
+    );
+    vi.spyOn(socialAgentApi, 'restoreSession').mockResolvedValue(emptySession());
+    const streamSpy = vi.spyOn(socialAgentApi, 'runUserFacingStream').mockResolvedValue({
+      ...mockResponse(),
+      assistantMessage: '可以正常聊天。你想聊什么都可以。',
+      cards: [],
+    });
+
+    await renderAgentPage();
+
+    expect(screen.getByText(/普通聊天不会自动展开旧任务/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '继续上次任务' })).toBeInTheDocument();
+    expect(screen.queryByText('旧约练卡片')).not.toBeInTheDocument();
+    expect(screen.queryByText(/青岛大学跑步搭子/)).not.toBeInTheDocument();
+
+    submitPrompt('你好，你能正常聊天吗？');
+
+    await waitFor(() => expect(streamSpy).toHaveBeenCalled());
+    expect(streamSpy.mock.calls[0]?.[0]).toMatchObject({
+      goal: '你好，你能正常聊天吗？',
+      taskId: null,
+      clientContext: expect.objectContaining({
+        conversationIntent: 'conversation',
+        threadId: null,
+      }),
+    });
+  });
+
   it('shows a latest checkpoint recovery prompt after restoring a resumable thread', async () => {
     useRealAgentAdapter();
     useAuthStore.setState({ isLoggedIn: true, showLoginModal: false });
@@ -6138,7 +6013,7 @@ describe('AgentWorkspacePage', () => {
         return resumed;
       });
 
-    await renderAgentPage('/agent/chat/42');
+    await renderAgentPageWithRoutes('/agent/chat/42');
 
     await waitFor(() => expect(latestSpy).toHaveBeenCalledWith(42));
     expect(await screen.findByTestId('assistant-ui-interrupt-resume')).toHaveAttribute(
@@ -6158,7 +6033,7 @@ describe('AgentWorkspacePage', () => {
     expect(screen.queryByTestId('assistant-ui-checkpoint-summary-steps')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: '忽略，重新开始' })).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: '继续' }));
+    fireEvent.click(screen.getByRole('button', { name: '继续上次任务' }));
 
     await waitFor(() =>
       expect(checkpointSpy).toHaveBeenCalledWith(
@@ -6852,6 +6727,7 @@ describe('AgentWorkspacePage', () => {
         reminderOptInConfirmedAt: '2026-06-15T01:30:00.000Z',
         reminderPreferenceUpdatedAt: '2026-06-15T01:40:00.000Z',
         reminderScenes: [
+          'new_match',
           'weekend_opportunities',
           'past_social_goal',
           'activity_follow_up',
@@ -6883,8 +6759,8 @@ describe('AgentWorkspacePage', () => {
 
     const reminderToggle = await screen.findByTestId('assistant-ui-reminder-toggle');
     expect(reminderToggle).toHaveAttribute('data-reminder-state', 'disabled');
-    expect(reminderToggle).toHaveTextContent('主动提醒已关闭');
-    expect(reminderToggle).toHaveTextContent('默认不打扰，可手动开启');
+    expect(reminderToggle).toHaveTextContent('约练机会提醒已关闭');
+    expect(reminderToggle).toHaveTextContent('关闭后不会主动打扰，可手动开启');
     expect(screen.getByTestId('assistant-ui-reminder-audit-status')).toHaveTextContent(/已关闭：/);
     expect(screen.getByTestId('assistant-ui-composer')).toHaveAttribute(
       'data-permission-entry',
@@ -6905,6 +6781,7 @@ describe('AgentWorkspacePage', () => {
           frequency: 'weekly',
           topics: ['friendship', 'fitness_partner', 'activity'],
           scenes: [
+            'new_match',
             'weekend_opportunities',
             'past_social_goal',
             'activity_follow_up',
@@ -6915,17 +6792,38 @@ describe('AgentWorkspacePage', () => {
         }),
       ),
     );
-    expect(await screen.findByText('主动提醒已开启')).toBeInTheDocument();
-    expect(screen.getByText(/每周 · 4 个场景 · 09:00-21:00/)).toBeInTheDocument();
+    expect(await screen.findByText('约练机会提醒已开启')).toBeInTheDocument();
+    expect(screen.getByText(/每周一次摘要 · 5 个场景 · 09:00-21:00/)).toBeInTheDocument();
     expect(screen.getByTestId('assistant-ui-reminder-toggle')).toHaveAttribute(
       'data-reminder-state',
       'enabled',
     );
     expect(screen.getByTestId('assistant-ui-reminder-settings')).toBeInTheDocument();
-    expect(screen.getByTestId('assistant-ui-reminder-settings')).toHaveTextContent('只做站内建议');
+    expect(screen.getByTestId('assistant-ui-reminder-settings')).toHaveTextContent(
+      '不会替你自动发消息',
+    );
     expect(screen.getByTestId('assistant-ui-reminder-audit-status')).toHaveTextContent(
       /已开启：.*最近更新/,
     );
+
+    expect(
+      within(screen.getByTestId('assistant-ui-reminder-scenes')).getByRole('button', {
+        name: '有新匹配时提醒',
+      }),
+    ).toHaveAttribute('data-selected', 'true');
+
+    fireEvent.change(screen.getByTestId('assistant-ui-reminder-frequency'), {
+      target: { value: 'realtime' },
+    });
+    await waitFor(() =>
+      expect(updateReminderPreferenceSpy).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          enabled: true,
+          frequency: 'realtime',
+        }),
+      ),
+    );
+    expect(screen.getByText(/实时提醒 · 5 个场景 · 09:00-21:00/)).toBeInTheDocument();
 
     fireEvent.change(screen.getByTestId('assistant-ui-reminder-frequency'), {
       target: { value: 'daily' },
@@ -6953,35 +6851,35 @@ describe('AgentWorkspacePage', () => {
 
     fireEvent.click(
       within(screen.getByTestId('assistant-ui-reminder-scenes')).getByRole('button', {
-        name: '画像确认',
+        name: '邀请快过期时提醒',
       }),
     );
     await waitFor(() =>
       expect(updateReminderPreferenceSpy).toHaveBeenLastCalledWith(
         expect.objectContaining({
           enabled: true,
-          scenes: ['weekend_opportunities', 'past_social_goal', 'activity_follow_up'],
+          scenes: ['new_match', 'weekend_opportunities', 'past_social_goal', 'activity_follow_up'],
         }),
       ),
     );
 
     fireEvent.click(
       within(screen.getByTestId('assistant-ui-reminder-scenes')).getByRole('button', {
-        name: '周末机会',
+        name: '周末前提醒我看看机会',
       }),
     );
     await waitFor(() =>
       expect(updateReminderPreferenceSpy).toHaveBeenLastCalledWith(
         expect.objectContaining({
           enabled: true,
-          scenes: ['past_social_goal', 'activity_follow_up'],
+          scenes: ['new_match', 'past_social_goal', 'activity_follow_up'],
         }),
       ),
     );
     await waitFor(() =>
       expect(
         within(screen.getByTestId('assistant-ui-reminder-scenes')).getByRole('button', {
-          name: '周末机会',
+          name: '周末前提醒我看看机会',
         }),
       ).toHaveAttribute('data-selected', 'false'),
     );
@@ -6994,21 +6892,21 @@ describe('AgentWorkspacePage', () => {
 
     fireEvent.click(
       within(screen.getByTestId('assistant-ui-reminder-scenes')).getByRole('button', {
-        name: '旧目标',
+        name: '长期没推进时提醒我继续',
       }),
     );
     await waitFor(() =>
       expect(updateReminderPreferenceSpy).toHaveBeenLastCalledWith(
         expect.objectContaining({
           enabled: true,
-          scenes: ['activity_follow_up'],
+          scenes: ['new_match', 'activity_follow_up'],
         }),
       ),
     );
     await waitFor(() =>
       expect(
         within(screen.getByTestId('assistant-ui-reminder-scenes')).getByRole('button', {
-          name: '旧目标',
+          name: '长期没推进时提醒我继续',
         }),
       ).toHaveAttribute('data-selected', 'false'),
     );
@@ -7021,7 +6919,21 @@ describe('AgentWorkspacePage', () => {
 
     fireEvent.click(
       within(screen.getByTestId('assistant-ui-reminder-scenes')).getByRole('button', {
-        name: '活动跟进',
+        name: '对方回复后提醒',
+      }),
+    );
+    await waitFor(() =>
+      expect(updateReminderPreferenceSpy).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          enabled: true,
+          scenes: ['new_match'],
+        }),
+      ),
+    );
+
+    fireEvent.click(
+      within(screen.getByTestId('assistant-ui-reminder-scenes')).getByRole('button', {
+        name: '有新匹配时提醒',
       }),
     );
     await waitFor(() =>
@@ -7032,7 +6944,7 @@ describe('AgentWorkspacePage', () => {
         }),
       ),
     );
-    expect(screen.getByText(/每日 · 未选择场景 · 10:30-21:00/)).toBeInTheDocument();
+    expect(screen.getByText(/每天一次摘要 · 未选择场景 · 10:30-21:00/)).toBeInTheDocument();
 
     fireEvent.click(screen.getByTestId('assistant-ui-reminder-toggle'));
     await waitFor(() => expect(disableRemindersSpy).toHaveBeenCalledTimes(1));
@@ -7067,7 +6979,7 @@ describe('AgentWorkspacePage', () => {
       'data-reminder-focus',
       'true',
     );
-    expect(reminderToggle).toHaveTextContent('主动提醒已关闭');
+    expect(reminderToggle).toHaveTextContent('约练机会提醒已关闭');
     expect(screen.getByTestId('assistant-ui-reminder-audit-status')).toHaveTextContent(/已关闭：/);
   });
 
@@ -7396,9 +7308,9 @@ describe('AgentWorkspacePage', () => {
     await waitFor(() => expect(streamSpy).toHaveBeenCalled());
     expect(streamSpy.mock.calls[0]?.[0]).toMatchObject({
       goal: '接着刚才的话题',
-      taskId: 77,
+      taskId: null,
       clientContext: expect.objectContaining({
-        threadId: 'agent-task:77',
+        threadId: null,
       }),
     });
   });
@@ -8210,9 +8122,7 @@ describe('AgentWorkspacePage', () => {
       'data-display-model',
       'compact-product-copy',
     );
-    expect(screen.getByTestId('assistant-ui-compact-resume-state')).toHaveTextContent(
-      '需要你确认',
-    );
+    expect(screen.getByTestId('assistant-ui-compact-resume-state')).toHaveTextContent('需要你确认');
     expect(screen.queryByTestId('assistant-ui-resume-flow')).not.toBeInTheDocument();
     expect(screen.queryByTestId('assistant-ui-resume-scope')).not.toBeInTheDocument();
     expect(screen.queryByText('恢复点 #99')).not.toBeInTheDocument();
@@ -8813,10 +8723,7 @@ describe('AgentWorkspacePage', () => {
       expect(summary).not.toBeNull();
       fireEvent.click(summary as HTMLElement);
       const compactResumeState = await screen.findByTestId('assistant-ui-compact-resume-state');
-      expect(compactResumeState).toHaveAttribute(
-        'data-display-model',
-        'compact-product-copy',
-      );
+      expect(compactResumeState).toHaveAttribute('data-display-model', 'compact-product-copy');
       expect(compactResumeState).toHaveTextContent('进度已整理');
       expect(compactResumeState).toHaveTextContent('可以继续追问、重新整理，或换一种方案。');
       expect(screen.queryByTestId('assistant-ui-resume-scope')).not.toBeInTheDocument();
@@ -9154,6 +9061,22 @@ async function renderAgentPage(route = '/agent/chat'): Promise<RenderResult> {
     result = render(
       <MemoryRouter initialEntries={[route]}>
         <AgentWorkspacePage view="chat" />
+      </MemoryRouter>,
+    );
+  });
+  await settleAgentPage();
+  return result!;
+}
+
+async function renderAgentPageWithRoutes(route = '/agent/chat'): Promise<RenderResult> {
+  let result: RenderResult;
+  await act(async () => {
+    result = render(
+      <MemoryRouter initialEntries={[route]}>
+        <Routes>
+          <Route path="/agent/chat" element={<AgentWorkspacePage view="chat" />} />
+          <Route path="/agent/chat/:taskId" element={<AgentWorkspacePage view="chat" />} />
+        </Routes>
       </MemoryRouter>,
     );
   });
@@ -9628,7 +9551,7 @@ function mockCandidateResponse(): UserFacingAgentResponse {
           meetLoopNextStep: '确认后进入“等待回复/确认到达/评价回写”的约练闭环。',
           checkinReminder: '活动开始前我会提醒你确认是否到达。',
           reviewPrompt: '活动结束后我会请你做一次简短评价，再决定是否写入画像。',
-          lifeGraphUpdatePreview: '完成后会把这次活动结果用于更新你的 Life Graph。',
+          lifeGraphUpdatePreview: '完成后会把这次活动结果用于更新你的长期偏好。',
           trustScoreUpdatePreview: '完成与评价会写入 trust score，用来提升后续推荐可信度。',
           fitReasons: ['和你的时间偏好一致', '可以先参加活动再决定是否加好友'],
           explanationSteps: [

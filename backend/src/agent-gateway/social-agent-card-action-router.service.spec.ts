@@ -197,7 +197,7 @@ describe('SocialAgentCardActionRouterService', () => {
       {
         goal: 'card_action:candidate.like',
         tool: expect.objectContaining({
-          agent: 'Social Match Agent',
+          agent: 'Match Agent',
           toolName: 'card_action_dispatch',
           input: expect.objectContaining({ action: 'candidate.like' }),
         }),
@@ -205,7 +205,7 @@ describe('SocialAgentCardActionRouterService', () => {
       {
         goal: 'card_action:candidate.generate_opener',
         tool: expect.objectContaining({
-          agent: 'Social Match Agent',
+          agent: 'Match Agent',
           toolName: 'card_action_dispatch',
           input: expect.objectContaining({
             action: 'candidate.generate_opener',
@@ -383,7 +383,6 @@ describe('SocialAgentCardActionRouterService', () => {
   it('dispatches high-risk schema actions only through AgentLoop and preserves pending approval results', async () => {
     const {
       candidateActions,
-      draftPublication,
       executeCalls,
       handleMessage,
       lifeGraphActions,
@@ -468,7 +467,7 @@ describe('SocialAgentCardActionRouterService', () => {
       routeResult({
         action: 'reply',
         profileUpdated: true,
-        assistantMessage: '已保存 Life Graph 信息。',
+        assistantMessage: '已保存画像信息。',
       }),
     );
     const cases = [
@@ -479,7 +478,7 @@ describe('SocialAgentCardActionRouterService', () => {
           checkpointRequired: true,
           resumeMode: 'resume_after_approval',
         },
-        expectedAgent: 'Social Match Agent',
+        expectedAgent: 'Match Agent',
         expectedHandler: candidateActions.connectCandidateFromCardAction,
       },
       {
@@ -489,7 +488,7 @@ describe('SocialAgentCardActionRouterService', () => {
           checkpointRequired: true,
           resumeMode: 'resume_after_approval',
         },
-        expectedAgent: 'Meet Loop Agent',
+        expectedAgent: 'Match Agent',
         expectedHandler: meetLoop.performActivityAction,
       },
       {
@@ -498,7 +497,7 @@ describe('SocialAgentCardActionRouterService', () => {
           candidateUserId: 22,
           checkpointRequired: false,
         },
-        expectedAgent: 'Meet Loop Agent',
+        expectedAgent: 'Match Agent',
         expectedHandler: meetLoop.performActivityAction,
       },
       {
@@ -518,7 +517,7 @@ describe('SocialAgentCardActionRouterService', () => {
           checkpointRequired: true,
           resumeMode: 'resume_after_approval',
         },
-        expectedAgent: 'Meet Loop Agent',
+        expectedAgent: 'Match Agent',
         expectedHandler: meetLoop.performActivityAction,
       },
     ];
@@ -788,7 +787,7 @@ describe('SocialAgentCardActionRouterService', () => {
       {
         goal: 'card_action:opener.confirm_send',
         toolInput: expect.objectContaining({
-          agent: 'Social Match Agent',
+          agent: 'Match Agent',
           input: expect.objectContaining({
             action: 'opener.confirm_send',
           }),
@@ -797,7 +796,7 @@ describe('SocialAgentCardActionRouterService', () => {
       {
         goal: 'card_action:opener.confirm_send',
         toolInput: expect.objectContaining({
-          agent: 'Social Match Agent',
+          agent: 'Match Agent',
           input: expect.objectContaining({
             action: 'opener.confirm_send',
           }),
@@ -806,7 +805,7 @@ describe('SocialAgentCardActionRouterService', () => {
       {
         goal: 'card_action:candidate.connect',
         toolInput: expect.objectContaining({
-          agent: 'Social Match Agent',
+          agent: 'Match Agent',
           input: expect.objectContaining({
             action: 'candidate.connect',
           }),
@@ -965,7 +964,8 @@ describe('SocialAgentCardActionRouterService', () => {
     expect(results[4].cards?.[0]?.data).toEqual(
       expect.objectContaining({
         publicIntentId: 'public-intent:walk-qdu',
-        discoverHref: '/public-intent/public-intent%3Awalk-qdu',
+        discoverHref: '/discover?publicIntentId=public-intent%3Awalk-qdu',
+        publicIntentHref: '/public-intent/public-intent%3Awalk-qdu',
       }),
     );
     expect(executeCalls.map((call) => call.goal)).toEqual([
@@ -1201,7 +1201,7 @@ describe('SocialAgentCardActionRouterService', () => {
         reason: 'Card actions dispatch only through AgentLoop.',
         tools: [
           {
-            agent: 'Social Match Agent',
+            agent: 'Match Agent',
             toolName: 'card_action_dispatch',
             input: expect.objectContaining({
               action: 'candidate.more_context',

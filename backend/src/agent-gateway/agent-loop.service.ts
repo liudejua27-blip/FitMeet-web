@@ -519,6 +519,12 @@ export class AgentLoopService {
     return (
       /^recommendation_/.test(tool.toolName) ||
       /^route_.*_turn$/.test(tool.toolName) ||
+      [
+        'social_match_search_turn',
+        'life_graph_profile_turn',
+        'life_graph_conversation_turn',
+        'meet_loop_action_turn',
+      ].includes(tool.toolName) ||
       tool.toolName === 'candidate_confirmation_check' ||
       tool.toolName === 'main_agent_prepare_turn'
     );

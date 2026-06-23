@@ -1,20 +1,11 @@
 import { AuiIf, ComposerPrimitive, useAuiState } from '@assistant-ui/react';
-import {
-  ArrowUp,
-  LogIn,
-  Mic,
-  Plus,
-  Square,
-  X,
-} from 'lucide-react';
+import { ArrowUp, LogIn, Mic, Plus, Square, X } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef } from 'react';
 
 import { cn } from '../../lib/utils';
 import { ChatGPTAttachment } from './attachment';
-import {
-  composerPrimaryActionMode,
-  type ComposerPrimaryActionMode,
-} from './composer-action-mode';
+import { composerPrimaryActionMode, type ComposerPrimaryActionMode } from './composer-action-mode';
+import { addAssistantComposerFocusListener, shouldFocusAssistantComposer } from './composer-focus';
 import { TooltipIconButton } from './tooltip-icon-button';
 import { type UploadProgressSummary, useUploadProgressSummary } from './upload-progress-store';
 
@@ -22,30 +13,6 @@ type ChatGPTComposerProps = {
   requiresAuth?: boolean;
   onLogin?: () => void;
 };
-
-const COMPOSER_FOCUS_EVENT = 'fitmeet-agent-focus-composer';
-const COMPOSER_FOCUS_UNTIL_ATTRIBUTE = 'data-fitmeet-focus-composer-until';
-
-export function requestAssistantComposerFocus() {
-  if (typeof window === 'undefined' || typeof document === 'undefined') return;
-  document.documentElement.setAttribute(
-    COMPOSER_FOCUS_UNTIL_ATTRIBUTE,
-    String(Date.now() + 2_000),
-  );
-  window.dispatchEvent(new Event(COMPOSER_FOCUS_EVENT));
-
-  let attempts = 0;
-  const focus = () => {
-    const input = document.querySelector<HTMLTextAreaElement>(
-      '[data-testid="assistant-ui-composer"] textarea',
-    );
-    input?.focus({ preventScroll: true });
-    if (input && document.activeElement === input) return;
-    attempts += 1;
-    if (attempts < 20) window.setTimeout(focus, 100);
-  };
-  window.setTimeout(focus, 0);
-}
 
 type ComposerSurfaceState =
   | 'auth-required'
@@ -102,18 +69,13 @@ export function ChatGPTComposer({ requiresAuth, onLogin }: ChatGPTComposerProps)
     surfaceState === 'dictating' ||
     uploadSummary.status === 'uploading';
   const focusIfRequested = useCallback(() => {
-    if (typeof document === 'undefined') return;
-    const focusUntil = Number(
-      document.documentElement.getAttribute(COMPOSER_FOCUS_UNTIL_ATTRIBUTE) ?? '0',
-    );
-    if (!Number.isFinite(focusUntil) || Date.now() > focusUntil) return;
+    if (!shouldFocusAssistantComposer()) return;
     inputRef.current?.focus({ preventScroll: true });
   }, []);
 
   useEffect(() => {
     focusIfRequested();
-    window.addEventListener(COMPOSER_FOCUS_EVENT, focusIfRequested);
-    return () => window.removeEventListener(COMPOSER_FOCUS_EVENT, focusIfRequested);
+    return addAssistantComposerFocusListener(focusIfRequested);
   }, [focusIfRequested]);
 
   return (
@@ -205,9 +167,7 @@ function ComposerQuotePreview() {
       data-testid="assistant-ui-composer-quote"
     >
       <div className="min-w-0 flex-1">
-        <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-[#8a8f98]">
-          引用
-        </p>
+        <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-[#8a8f98]">引用</p>
         <ComposerPrimitive.QuoteText className="mt-0.5 block max-h-12 overflow-hidden text-ellipsis text-xs leading-5 text-[#52525b]" />
       </div>
       <ComposerPrimitive.QuoteDismiss asChild>

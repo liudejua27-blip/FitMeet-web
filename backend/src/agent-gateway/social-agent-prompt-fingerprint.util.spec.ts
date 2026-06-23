@@ -45,7 +45,10 @@ describe('social-agent-prompt-fingerprint', () => {
       model: 'deepseek-v4-pro',
       useCase: 'tool_json',
       messages: [
-        { role: 'system', content: 'return json only and include schemaVersion' },
+        {
+          role: 'system',
+          content: 'return json only and include schemaVersion',
+        },
         { role: 'user', content: '{"candidate":"陈砚"}' },
       ],
     });

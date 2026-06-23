@@ -169,7 +169,9 @@ describe('SocialAgentThreadService', () => {
       statusReason: 'task_conversation_unbound',
     });
     const service = new SocialAgentThreadService(
-      { find: jest.fn().mockResolvedValue([failedUnboundTask, goodTask]) } as never,
+      {
+        find: jest.fn().mockResolvedValue([failedUnboundTask, goodTask]),
+      } as never,
       { getTaskSession: jest.fn() } as never,
       { assertTaskOwner: jest.fn(), createOrReuseTask: jest.fn() } as never,
     );
@@ -209,8 +211,12 @@ describe('SocialAgentThreadService', () => {
 
 describe('inferSocialAgentThreadTitle', () => {
   it('turns generic prompts into useful chat titles', () => {
-    expect(inferSocialAgentThreadTitle({ goal: '你有什么功能' })).toBe('普通聊天：功能咨询');
-    expect(inferSocialAgentThreadTitle({ goal: '今晚青岛轻松跑步' })).toBe('今晚青岛跑步搭子');
+    expect(inferSocialAgentThreadTitle({ goal: '你有什么功能' })).toBe(
+      '普通聊天：功能咨询',
+    );
+    expect(inferSocialAgentThreadTitle({ goal: '今晚青岛轻松跑步' })).toBe(
+      '今晚青岛跑步搭子',
+    );
     expect(
       inferSocialAgentThreadTitle({
         goal: '请用两句话帮我安排今天的训练恢复，不要帮我找人，也不要推荐活动。',

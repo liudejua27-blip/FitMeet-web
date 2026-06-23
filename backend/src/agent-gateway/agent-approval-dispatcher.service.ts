@@ -12,10 +12,7 @@ import {
   ApprovalStatus,
   ApprovalType,
 } from './entities/agent-approval-request.entity';
-import {
-  AgentTask,
-  AgentTaskStatus,
-} from './entities/agent-task.entity';
+import { AgentTask, AgentTaskStatus } from './entities/agent-task.entity';
 import { AgentConnection } from './entities/agent-connection.entity';
 import {
   AgentActivityLog,
@@ -353,7 +350,9 @@ export class AgentApprovalDispatcherService {
 
         case ApprovalType.PostPublish: {
           if (!this.socialRequests) {
-            throw new Error('SocialRequestsService unavailable for PostPublish');
+            throw new Error(
+              'SocialRequestsService unavailable for PostPublish',
+            );
           }
           const p = approval.payload;
           const socialRequestId = this.number(
@@ -366,7 +365,11 @@ export class AgentApprovalDispatcherService {
             socialRequestId,
             approval.userId,
           );
-          await this.markTaskPublishDispatched(approval, socialRequestId, intent);
+          await this.markTaskPublishDispatched(
+            approval,
+            socialRequestId,
+            intent,
+          );
           await this.writeLog(
             approval,
             conn,
@@ -399,8 +402,11 @@ export class AgentApprovalDispatcherService {
               socialRequestId,
               publicIntentId,
               discoverHref: publicIntentId
+                ? `/discover?publicIntentId=${encodeURIComponent(publicIntentId)}`
+                : `/discover?socialRequestId=${encodeURIComponent(String(socialRequestId))}`,
+              publicIntentHref: publicIntentId
                 ? `/public-intent/${encodeURIComponent(publicIntentId)}`
-                : `/social-request/${encodeURIComponent(String(socialRequestId))}`,
+                : `/discover?socialRequestId=${encodeURIComponent(String(socialRequestId))}`,
               status: 'published',
               synced: true,
             },
@@ -558,8 +564,11 @@ export class AgentApprovalDispatcherService {
         socialRequestId,
         publicIntentId,
         discoverHref: publicIntentId
+          ? `/discover?publicIntentId=${encodeURIComponent(publicIntentId)}`
+          : `/discover?socialRequestId=${encodeURIComponent(String(socialRequestId))}`,
+        publicIntentHref: publicIntentId
           ? `/public-intent/${encodeURIComponent(publicIntentId)}`
-          : `/social-request/${encodeURIComponent(String(socialRequestId))}`,
+          : `/discover?socialRequestId=${encodeURIComponent(String(socialRequestId))}`,
         status: 'published',
         synced: true,
       },
@@ -577,8 +586,11 @@ export class AgentApprovalDispatcherService {
       publishedSocialRequestId: socialRequestId,
       publicIntentId,
       discoverHref: publicIntentId
+        ? `/discover?publicIntentId=${encodeURIComponent(publicIntentId)}`
+        : `/discover?socialRequestId=${encodeURIComponent(String(socialRequestId))}`,
+      publicIntentHref: publicIntentId
         ? `/public-intent/${encodeURIComponent(publicIntentId)}`
-        : `/social-request/${encodeURIComponent(String(socialRequestId))}`,
+        : `/discover?socialRequestId=${encodeURIComponent(String(socialRequestId))}`,
       publishStatus: 'published',
     };
     task.memory = memory;
@@ -765,9 +777,7 @@ export class AgentApprovalDispatcherService {
 
   private number(value: unknown): number | null {
     const numberValue = Number(value);
-    return Number.isFinite(numberValue) && numberValue > 0
-      ? numberValue
-      : null;
+    return Number.isFinite(numberValue) && numberValue > 0 ? numberValue : null;
   }
 
   private async transitionApprovedActivityMeetLoop(

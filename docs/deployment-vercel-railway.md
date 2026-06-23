@@ -62,7 +62,7 @@ Required managed services or equivalents:
 - PostgreSQL: set `DATABASE_URL`.
 - MongoDB: set `MONGO_URI`.
 - Redis: set `REDIS_URL`.
-- Object storage: configure Aliyun OSS or S3 before testing avatar/feed image
+- Object storage: configure Aliyun OSS or S3 before testing avatar/profile media
   flows. If S3/R2 uses a custom endpoint, also set `S3_PUBLIC_BASE_URL` to the
   HTTPS public media domain.
 - DeepSeek: set `DEEPSEEK_API_KEY`, `DEEPSEEK_CHAT_MODEL=deepseek-v4-pro`, and
@@ -93,16 +93,10 @@ curl -fsS https://api.socialworld.world/api/ready
 curl -fsS https://api.socialworld.world/api/openapi/fitmeet-core.json
 ```
 
-Prepare dedicated staging smoke users only after the database is ready:
-
-```bash
-APP_SMOKE_SEED_PASSWORD='use-a-long-random-password' \
-APP_SMOKE_SEED_ALLOW_PRODUCTION=true \
-pnpm seed:app-smoke-users
-```
-
-Keep the printed `APP_SMOKE_*` and `FITMEET_ALPHA_STAGING_*` exports in a
-secret note or shell session, not in the repository.
+Create dedicated staging QA users through the normal signup/admin process only
+after the database is ready. Keep the `FITMEET_AGENT_BROWSER_QA_*` and
+`FITMEET_ALPHA_STAGING_*` exports in a secret note or shell session, not in the
+repository.
 
 Without GitHub auto-deploy, use the Railway dashboard or CLI to deploy the
 `backend/` service after logging in. The code-side requirement is that the
@@ -304,16 +298,22 @@ API_BASE_URL=https://api.socialworld.world/api \
 ./scripts/verify-production.sh
 ```
 
-With prepared smoke users:
+When production writes are allowed:
 
 ```bash
 BASE_URL=https://socialworld.world \
 API_BASE_URL=https://api.socialworld.world/api \
-APP_SMOKE_EMAIL=fitmeet-smoke-owner@socialworld.world \
-APP_SMOKE_PASSWORD='***' \
-APP_SMOKE_TARGET_USER_ID=123 \
-APP_SMOKE_RUN_MUTATIONS=true \
-./scripts/verify-production.sh --run-app-smoke
+./scripts/verify-production.sh --run-public-intent-write
+```
+
+Run Agent QA with real dedicated credentials:
+
+```bash
+BASE_URL=https://socialworld.world \
+API_BASE_URL=https://api.socialworld.world/api \
+FITMEET_AGENT_BROWSER_QA_EMAIL='qa@example.com' \
+FITMEET_AGENT_BROWSER_QA_PASSWORD='***' \
+./scripts/verify-agent-goal-production.sh
 ```
 
 iOS staging E2E:

@@ -162,7 +162,7 @@ export class ProfileMatchAutopilotService {
               },
             );
             summary.generatedRecommendations += profileResult.matchedCount ?? 0;
-            summary.inboxEvents += profileResult.inboxEvents ?? 0;
+            summary.messageEvents += profileResult.messageEvents ?? 0;
             summary.skippedDuplicates += profileResult.skippedDuplicates ?? 0;
             mergeProfileMatchSkippedReasons(
               summary.skippedReasons,
@@ -220,7 +220,7 @@ export class ProfileMatchAutopilotService {
     }
 
     this.logger.log(
-      `Profile Match Autopilot done (${triggeredBy}): profiles=${summary.scannedProfiles} requests=${summary.scannedRequests} profileRecommendations=${summary.generatedRecommendations} requestCandidates=${summary.generatedRequestCandidates} inboxEvents=${summary.inboxEvents} notifications=${summary.notificationsSent} duplicates=${summary.skippedDuplicates} errors=${summary.errors} skippedReasons=${formatSkippedReasons(summary.skippedReasons)}`,
+      `Profile Match Autopilot done (${triggeredBy}): profiles=${summary.scannedProfiles} requests=${summary.scannedRequests} profileRecommendations=${summary.generatedRecommendations} requestCandidates=${summary.generatedRequestCandidates} messageEvents=${summary.messageEvents} notifications=${summary.notificationsSent} duplicates=${summary.skippedDuplicates} errors=${summary.errors} skippedReasons=${formatSkippedReasons(summary.skippedReasons)}`,
     );
     this.lastSummary = summary;
     this.lastDebugSnapshot = {
@@ -336,7 +336,7 @@ export class ProfileMatchAutopilotService {
           request,
           candidates,
         );
-        summary.inboxEvents += await this.emitRequestCardInboxEvent(
+        summary.messageEvents += await this.emitRequestCardMessageEvent(
           ownerUserId,
           request,
           candidates,
@@ -407,7 +407,7 @@ export class ProfileMatchAutopilotService {
     return sent;
   }
 
-  private async emitRequestCardInboxEvent(
+  private async emitRequestCardMessageEvent(
     ownerUserId: number,
     request: UserSocialRequest,
     candidates: MatchedCandidateView[],
@@ -449,7 +449,7 @@ export class ProfileMatchAutopilotService {
         ];
 
     for (const conn of deliveryConnections) {
-      await this.messages.createAgentInboxEvent({
+      await this.messages.createAgentMessageEvent({
         agentConnectionId: conn.id,
         ownerUserId,
         eventType: 'social_request.match.recommended',
@@ -720,7 +720,7 @@ export interface ProfileMatchAutopilotSummary {
   scannedRequests: number;
   generatedRecommendations: number;
   generatedRequestCandidates: number;
-  inboxEvents: number;
+  messageEvents: number;
   notificationsSent: number;
   skippedDuplicates: number;
   skippedReasons: ProfileMatchSkippedReasons;
@@ -772,7 +772,7 @@ function emptySummary(
     scannedRequests: 0,
     generatedRecommendations: 0,
     generatedRequestCandidates: 0,
-    inboxEvents: 0,
+    messageEvents: 0,
     notificationsSent: 0,
     skippedDuplicates: 0,
     skippedReasons: createEmptyProfileMatchSkippedReasons(),

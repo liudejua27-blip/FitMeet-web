@@ -184,7 +184,6 @@ printf '\nOne-off backend commands on ECS should run through the production cont
 printf '  ./scripts/ecs-backend-pnpm.sh -- uploads:check:prod\n'
 printf '  ./scripts/ecs-backend-pnpm.sh -- migration:run:prod\n'
 printf '  ./scripts/ecs-backend-pnpm.sh -- db:check-critical-tables:prod\n'
-printf '  AGENT_SMOKE_SEED_ALLOW_PRODUCTION=true ./scripts/ecs-backend-pnpm.sh -- seed:agent-smoke:prod -- --allow-production\n'
 printf '\nPost-deploy release verification:\n'
 printf '  EXPECTED_RELEASE_COMMIT="$(node -e '"'"'const fs=require("fs");const r=JSON.parse(fs.readFileSync("release.json","utf8"));process.stdout.write(String(r.commit||"unknown"))'"'"')"\n'
 printf '  EXPECTED_RELEASE_BUILT_AT="$(node -e '"'"'const fs=require("fs");const r=JSON.parse(fs.readFileSync("release.json","utf8"));process.stdout.write(String(r.builtAt||""))'"'"')"\n'

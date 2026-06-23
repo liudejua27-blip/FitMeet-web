@@ -37,10 +37,9 @@ export function createRealAgentAdapter(
     async run(request, handlers) {
       const resolvedTaskId = resolveRequestTaskId(request.taskId, request.clientContext?.threadId);
       let observedTaskId = resolvedTaskId ?? null;
-      const useMessageStream = shouldUseConversationMessageStream(request);
-      const runStream = useMessageStream && apiClient.handleMessageStream
-        ? apiClient.handleMessageStream
-        : null;
+      const useMessageStream = shouldUseRouteMessageStream(request);
+      const runStream =
+        useMessageStream && apiClient.handleMessageStream ? apiClient.handleMessageStream : null;
       const forwardEvent = createMappedStreamEventForwarder({
         onEvent: handlers.onEvent,
         onRawEvent: (event) => {
@@ -194,8 +193,7 @@ function isDuplicatedDualProtocolAssistantDelta(
   if (!previous || previous.key !== current.key) return false;
   return (
     previous.protocol !== current.protocol &&
-    (previous.protocol === 'social_agent_event_v2' ||
-      current.protocol === 'social_agent_event_v2')
+    (previous.protocol === 'social_agent_event_v2' || current.protocol === 'social_agent_event_v2')
   );
 }
 
@@ -203,10 +201,7 @@ function assistantDeltaDedupKey(
   event: Extract<AgentStreamEvent, { type: 'assistant_delta' }>,
 ): AssistantStreamDedupKey {
   return {
-    key: [
-      event.source ?? '',
-      normalizeAssistantDeltaForDedup(event.delta ?? ''),
-    ].join('\u001f'),
+    key: [event.source ?? '', normalizeAssistantDeltaForDedup(event.delta ?? '')].join('\u001f'),
     protocol: sourceProtocolFromMappedEvent(event),
   };
 }
@@ -233,11 +228,11 @@ function withConversationIntent<
   } as T;
 }
 
-function shouldUseConversationMessageStream(request: {
+function shouldUseRouteMessageStream(request: {
   conversationIntent?: 'conversation' | 'social' | 'approval';
   taskId?: number | null;
 }) {
-  return request.conversationIntent === 'conversation';
+  return request.conversationIntent === 'conversation' || request.conversationIntent === 'social';
 }
 
 export function mapUserFacingAgentStreamEvent(
@@ -409,9 +404,9 @@ function shouldCollapseLegacyProgressEvent(
   // expanded evidence panel, so keep those expandable.
   return Boolean(
     event.metadata.stepId ||
-      event.metadata.agentName ||
-      event.metadata.toolName ||
-      explicitProcessType,
+    event.metadata.agentName ||
+    event.metadata.toolName ||
+    explicitProcessType,
   );
 }
 
@@ -422,8 +417,7 @@ function legacyProcessEventToSummary(
   >,
   explicitLifecycle: AgentLifecycle | null,
 ): AgentStreamEvent {
-  const state =
-    event.type === 'tool_call' ? 'running' : progressStateFromStatus(event.status);
+  const state = event.type === 'tool_call' ? 'running' : progressStateFromStatus(event.status);
   const lifecycle = explicitLifecycle ?? lifecycleFromLegacyProcessEvent(event);
   const stepId = legacyProcessStepId(event);
   const title = legacyProcessTitle(event.title, lifecycle, state);
@@ -500,9 +494,10 @@ function lifecycleFromLegacyProcessEvent(
     { type: 'agent_loop_step' | 'tool_call' | 'tool_result' }
   >,
 ): AgentLifecycle {
-  const text = `${event.title} ${event.detail ?? ''} ${event.type === 'agent_loop_step' ? event.phase : ''} ${
-    event.toolName ?? ''
-  }`.toLowerCase();
+  const text =
+    `${event.title} ${event.detail ?? ''} ${event.type === 'agent_loop_step' ? event.phase : ''} ${
+      event.toolName ?? ''
+    }`.toLowerCase();
   if (/approval|confirm|确认|发送邀请前/.test(text)) return 'waiting_confirmation';
   if (/candidate|search|match|筛选|候选|公开可发现|找人/.test(text)) {
     return 'searching_candidates';
@@ -911,12 +906,13 @@ function publicApprovalRuntimeMetadata(
 ): Record<string, unknown> {
   const source = isRecord(payload) ? payload : {};
   const socialCodex = isRecord(source.socialCodex) ? source.socialCodex : {};
-  const approvalPolicy = isRecord(socialCodex.approvalPolicy)
-    ? socialCodex.approvalPolicy
-    : {};
+  const approvalPolicy = isRecord(socialCodex.approvalPolicy) ? socialCodex.approvalPolicy : {};
   const policy = isRecord(source.policy) ? source.policy : {};
-  const dryRunPreview =
-    firstRecord(source.dryRunPreview, socialCodex.dryRunPreview, policy.dryRunPreview);
+  const dryRunPreview = firstRecord(
+    source.dryRunPreview,
+    socialCodex.dryRunPreview,
+    policy.dryRunPreview,
+  );
   const title = sanitizePublicV2Text(dryRunPreview?.title);
   const summary = sanitizePublicV2Text(dryRunPreview?.summary);
   const sideEffectAllowed =
@@ -1222,7 +1218,11 @@ function kindFromV2(
   ) {
     return 'tool';
   }
-  if (event.type.includes('approval') || event.type.includes('memory') || event.type.includes('slot')) {
+  if (
+    event.type.includes('approval') ||
+    event.type.includes('memory') ||
+    event.type.includes('slot')
+  ) {
     return 'status';
   }
   return 'analysis';
@@ -1360,10 +1360,7 @@ function responseFromSessionSnapshot(
     readPermissionMode(snapshot.task?.permissionMode) ??
     'limited_auto';
   return {
-    assistantMessage:
-      typeof raw.assistantMessage === 'string'
-        ? raw.assistantMessage
-        : '',
+    assistantMessage: typeof raw.assistantMessage === 'string' ? raw.assistantMessage : '',
     lightStatus: inferLightStatus(raw, cards),
     cards: cards as UserFacingAgentResponse['cards'],
     safeStatus: isSafeStatus(raw.safeStatus)

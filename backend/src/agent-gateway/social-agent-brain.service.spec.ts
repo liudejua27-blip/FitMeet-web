@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/require-await */
 import { SocialAgentBrainService } from './social-agent-brain.service';
 import { SocialAgentIntentRouterResult } from './social-agent-intent-router.service';
 import { SocialAgentLlmOutputCacheService } from './social-agent-llm-output-cache.service';
@@ -546,10 +545,7 @@ describe('SocialAgentBrainService', () => {
       });
       expect(userPayload.plannerConstraints).toMatchObject({
         treatKnownTaskSlotsAsAnswered: true,
-        knownContextSlots: expect.arrayContaining([
-          'geo_area',
-          'intensity',
-        ]),
+        knownContextSlots: expect.arrayContaining(['geo_area', 'intensity']),
         doNotRepeatQuestionsForSlots: expect.arrayContaining([
           'activity',
           'time_window',
@@ -1050,7 +1046,8 @@ describe('SocialAgentBrainService', () => {
                     },
                   ],
                   needUserConfirmation: false,
-                  responseGoal: 'Search candidates without repeating known slots.',
+                  responseGoal:
+                    'Search candidates without repeating known slots.',
                 }),
               },
             },
@@ -1505,7 +1502,8 @@ describe('SocialAgentBrainService', () => {
                   },
                 ],
                 needUserConfirmation: false,
-                responseGoal: 'Continue search without asking known slots again.',
+                responseGoal:
+                  'Continue search without asking known slots again.',
               }),
             },
           },

@@ -2,9 +2,7 @@ export type FitMeetAlphaAgentName =
   | 'FitMeet Main Agent'
   | 'Agent Brain'
   | 'Life Graph Agent'
-  | 'Social Match Agent'
-  | 'Meet Loop Agent'
-  | 'Math Agent';
+  | 'Match Agent';
 
 export type FitMeetAlphaCardType =
   | 'profile_proposal'

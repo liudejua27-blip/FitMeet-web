@@ -51,10 +51,7 @@ export function buildSocialAgentMessageSendOptions(
     stepId,
     input.metadata,
   );
-  if (
-    !task.agentConnectionId &&
-    canRunAsConfirmedUserAction(toolName, input)
-  ) {
+  if (!task.agentConnectionId && canRunAsConfirmedUserAction(toolName, input)) {
     return {
       senderType: 'user' as const,
       senderAgentId: null,

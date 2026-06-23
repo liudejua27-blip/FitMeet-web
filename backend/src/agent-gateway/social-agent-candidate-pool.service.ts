@@ -158,9 +158,14 @@ export type CandidatePoolCandidate = {
   commonTags: string[];
   distanceKm: number | null;
   distanceLabel?: string | null;
+  area?: string | null;
+  activityType?: string | null;
+  sport?: string | null;
+  timePreference?: string | null;
   locationText?: string | null;
   timeLabel?: string | null;
   timeWindow?: string | null;
+  sharedInterests?: string[];
   scoreBreakdown: Record<string, number>;
   candidateRecordId?: number | null;
   status?: SocialRequestCandidateStatus;
@@ -290,9 +295,13 @@ export class SocialAgentCandidatePoolService {
       this.cachedFind('public_intents:updated_desc', this.publicIntentRepo, {
         order: { updatedAt: 'DESC' },
       }),
-      this.cachedFind('legacy_social_requests:updated_desc', this.legacySocialRequestRepo, {
-        order: { updatedAt: 'DESC' },
-      }),
+      this.cachedFind(
+        'legacy_social_requests:updated_desc',
+        this.legacySocialRequestRepo,
+        {
+          order: { updatedAt: 'DESC' },
+        },
+      ),
       this.cachedBlockedIds(input.ownerUserId),
       this.cachedLifeGraphSignals(input.ownerUserId),
       this.loadUserInterestSummary(input.ownerUserId),
@@ -811,7 +820,12 @@ export class SocialAgentCandidatePoolService {
       user,
       profile,
       delegate,
-      city: this.firstText(intent.city, profile?.city, user.city, delegate?.city),
+      city: this.firstText(
+        intent.city,
+        profile?.city,
+        user.city,
+        delegate?.city,
+      ),
     });
     const { city, completeness, displayName } = profileSummary;
     const tags = this.uniqueStrings([
@@ -1020,10 +1034,18 @@ export class SocialAgentCandidatePoolService {
     updatedAt: Date | string | null | undefined;
   }): string[] {
     return this.uniqueStrings([
-      cleanDisplayText(input.title, '') ? `公开约练：${cleanDisplayText(input.title, '')}` : '',
-      cleanDisplayText(input.requestType, '') ? `公开类型：${cleanDisplayText(input.requestType, '')}` : '',
-      cleanDisplayText(input.timePreference, '') ? `公开时间：${cleanDisplayText(input.timePreference, '')}` : '',
-      cleanDisplayText(input.locationPreference, '') ? `公开地点：${cleanDisplayText(input.locationPreference, '')}` : '',
+      cleanDisplayText(input.title, '')
+        ? `公开约练：${cleanDisplayText(input.title, '')}`
+        : '',
+      cleanDisplayText(input.requestType, '')
+        ? `公开类型：${cleanDisplayText(input.requestType, '')}`
+        : '',
+      cleanDisplayText(input.timePreference, '')
+        ? `公开时间：${cleanDisplayText(input.timePreference, '')}`
+        : '',
+      cleanDisplayText(input.locationPreference, '')
+        ? `公开地点：${cleanDisplayText(input.locationPreference, '')}`
+        : '',
       this.updatedAtSignal(input.updatedAt),
     ]).slice(0, 4);
   }
@@ -1187,11 +1209,11 @@ export class SocialAgentCandidatePoolService {
     const needle = tag.toLowerCase();
     return Boolean(
       needle &&
-        (haystack.includes(needle) ||
-          needle
-            .split(/[,\s，、/]+/)
-            .filter(Boolean)
-            .some((part) => part.length >= 2 && haystack.includes(part))),
+      (haystack.includes(needle) ||
+        needle
+          .split(/[,\s，、/]+/)
+          .filter(Boolean)
+          .some((part) => part.length >= 2 && haystack.includes(part))),
     );
   }
 
@@ -1326,7 +1348,10 @@ export class SocialAgentCandidatePoolService {
       this.cachedCount('count:profiles', this.profileRepo),
       this.cachedCount('count:ai_delegates', this.aiDelegateRepo),
       this.cachedCount('count:public_intents', this.publicIntentRepo),
-      this.cachedCount('count:legacy_social_requests', this.legacySocialRequestRepo),
+      this.cachedCount(
+        'count:legacy_social_requests',
+        this.legacySocialRequestRepo,
+      ),
       this.cachedCount('count:activities', this.activityRepo),
     ]);
     return {

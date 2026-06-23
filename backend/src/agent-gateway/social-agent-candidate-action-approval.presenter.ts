@@ -124,8 +124,10 @@ function inferSocialAgentCandidateActionApproval(
   targetUserId: number | null,
 ) {
   const candidateLabel =
-    cleanDisplayText(candidate?.displayName ?? candidate?.nickname ?? candidate?.name, '') ||
-    (targetUserId ? '这位用户' : '对方');
+    cleanDisplayText(
+      candidate?.displayName ?? candidate?.nickname ?? candidate?.name,
+      '',
+    ) || (targetUserId ? '这位用户' : '对方');
   if (/(加好友|关注|加微信|加联系方式)/.test(message)) {
     return {
       type: ApprovalType.ContactRequest,

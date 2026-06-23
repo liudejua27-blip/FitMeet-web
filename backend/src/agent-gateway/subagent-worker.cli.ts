@@ -43,7 +43,7 @@ async function main() {
   );
   const queueNames = (
     process.env.FITMEET_SUBAGENT_WORKER_QUEUE ??
-    'fitmeet.subagent.life-graph-agent,fitmeet.subagent.social-match-agent,fitmeet.subagent.meet-loop-agent,fitmeet.subagent.math-agent'
+    'fitmeet.subagent.agent-brain,fitmeet.subagent.life-graph-agent,fitmeet.subagent.match-agent'
   )
     .split(',')
     .map((item) => item.trim())

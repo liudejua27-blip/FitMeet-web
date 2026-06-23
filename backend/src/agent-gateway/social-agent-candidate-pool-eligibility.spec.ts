@@ -220,7 +220,7 @@ describe('social agent candidate pool eligibility', () => {
     ).toBe(false);
   });
 
-  it('requires both profile discoverability and Agent matching opt-in for cold profile candidates', () => {
+  it('allows either public discoverability or Agent matching opt-in for cold profile candidates', () => {
     expect(
       isSocialAgentProfileCandidateOptedIn({
         profileDiscoverable: true,
@@ -232,13 +232,13 @@ describe('social agent candidate pool eligibility', () => {
         profileDiscoverable: true,
         agentCanRecommendMe: false,
       } as UserSocialProfile),
-    ).toBe(false);
+    ).toBe(true);
     expect(
       isSocialAgentProfileCandidateOptedIn({
         profileDiscoverable: false,
         agentCanRecommendMe: true,
       } as UserSocialProfile),
-    ).toBe(false);
+    ).toBe(true);
     expect(
       isSocialAgentProfileCandidateOptedIn({
         profileDiscoverable: false,

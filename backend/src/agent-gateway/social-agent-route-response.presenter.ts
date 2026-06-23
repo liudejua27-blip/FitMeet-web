@@ -169,9 +169,7 @@ function confirmedSocialSearchContext(task: AgentTask): string[] {
     const raw = slots[key];
     if (!isRecord(raw)) continue;
     const state = cleanDisplayText(raw.state, '');
-    if (
-      !['answered', 'confirmed', 'completed', 'modified'].includes(state)
-    ) {
+    if (!['answered', 'confirmed', 'completed', 'modified'].includes(state)) {
       continue;
     }
     push(key, label, cleanDisplayText(raw.value, ''));
@@ -225,9 +223,8 @@ function shouldSuppressAlphaClarification(
     /(哪里|地点|位置|附近|区域|城市|校|大学|商圈)/.test(cleanQuestion) &&
     (knownKeys.has('location_text') || knownKeys.has('geo_area'));
   const asksKnownActivity =
-    /(活动|做什么|运动|散步|跑步|羽毛球|篮球|健身|项目)/.test(
-      cleanQuestion,
-    ) && knownKeys.has('activity');
+    /(活动|做什么|运动|散步|跑步|羽毛球|篮球|健身|项目)/.test(cleanQuestion) &&
+    knownKeys.has('activity');
   const asksOnlyKnownCoreSlots =
     asksKnownTime || asksKnownLocation || asksKnownActivity;
   const asksUnknownCandidatePreference =

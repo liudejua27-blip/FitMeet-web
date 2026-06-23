@@ -70,8 +70,9 @@ describe('social-agent-execution-pipeline.contract', () => {
       ]),
     );
     expect(
-      tools.find((tool) => tool.toolName === 'recommendation_create_social_intent')
-        ?.input,
+      tools.find(
+        (tool) => tool.toolName === 'recommendation_create_social_intent',
+      )?.input,
     ).toMatchObject({
       mode: 'private_draft_then_auto_public_if_authorized',
       sideEffectPolicy: 'no_messages_or_candidate_contact_without_approval',
@@ -87,7 +88,7 @@ describe('social-agent-execution-pipeline.contract', () => {
         payload: { targetUserId: 22, hasMessage: true },
       }),
     ).toMatchObject({
-      agent: 'Social Match Agent',
+      agent: 'Match Agent',
       toolName: 'candidate_command_execute',
       covers: ['execute_confirmed_action'],
       requiresApproval: false,
@@ -109,6 +110,6 @@ describe('social-agent-execution-pipeline.contract', () => {
         taskId: 101,
         payload: { socialRequestId: 55 },
       }).agent,
-    ).toBe('Meet Loop Agent');
+    ).toBe('Match Agent');
   });
 });

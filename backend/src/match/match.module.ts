@@ -9,8 +9,6 @@ import { CompatibilityScorerService } from './compatibility-scorer.service';
 import { AiMatchReasonerService } from './ai-match-reasoner.service';
 import { MatchService } from './match.service';
 import { MatchPrivacySanitizer } from './match-privacy-sanitizer.service';
-import { MatchController } from './match.controller';
-import { AgentMatchController } from './agent-match.controller';
 import { SafetyModule } from '../safety/safety.module';
 import { AgentGatewayModule } from '../agent-gateway/agent-gateway.module';
 import { AgentTokenGuard } from '../agent-gateway/guards/agent-token.guard';
@@ -36,7 +34,7 @@ import { SafetyEvent } from '../agent-gateway/entities/safety-event.entity';
     SafetyModule,
     forwardRef(() => AgentGatewayModule),
   ],
-  controllers: [MatchController, AgentMatchController],
+  controllers: [],
   providers: [
     MatchService,
     CompatibilityScorerService,

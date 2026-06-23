@@ -270,7 +270,7 @@ export class LifeGraphExtractionService {
     ].filter(Boolean);
     return parts.length
       ? `我从你的描述中识别到：${parts.join('，')}。`
-      : '我还没有识别到足够明确的 Life Graph 信息，可以继续补充城市、可约时间、运动偏好和边界。';
+      : '我还没有识别到足够明确的画像信息，可以继续补充城市、可约时间、运动偏好和边界。';
   }
 
   private missingFieldsFor(fields: LifeGraphExtractedField[]) {

@@ -125,7 +125,7 @@ describe('SocialAgentLifeGraphCardActionService', () => {
       action: 'reply',
       profileUpdated: true,
       cards: [],
-      assistantMessage: expect.stringContaining('已保存 1 条 Life Graph 信息'),
+      assistantMessage: expect.stringContaining('已保存 1 条 画像信息'),
     });
     expect(harness.task.memory).toMatchObject({
       taskMemory: {

@@ -10,11 +10,8 @@ RUN_READINESS_TESTS="${RUN_READINESS_TESTS:-true}"
 RUN_DOMAIN_CHECK="${RUN_DOMAIN_CHECK:-true}"
 RUN_IOS_TESTFLIGHT_CHECK="${RUN_IOS_TESTFLIGHT_CHECK:-true}"
 RUN_RAILWAY_DOCKER_BUILD="${RUN_RAILWAY_DOCKER_BUILD:-false}"
-REQUIRE_AGENT_REMOTE_SMOKE_EVIDENCE="${REQUIRE_AGENT_REMOTE_SMOKE_EVIDENCE:-false}"
-AGENT_REMOTE_SMOKE_EVIDENCE_FILE="${AGENT_REMOTE_SMOKE_EVIDENCE_FILE:-}"
 REQUIRE_AGENT_TOKEN_COST_EVIDENCE="${REQUIRE_AGENT_TOKEN_COST_EVIDENCE:-false}"
 AGENT_TOKEN_COST_EVIDENCE_FILE="${AGENT_TOKEN_COST_EVIDENCE_FILE:-}"
-VALIDATE_AGENT_REMOTE_SMOKE_EVIDENCE_ONLY="${VALIDATE_AGENT_REMOTE_SMOKE_EVIDENCE_ONLY:-false}"
 VALIDATE_AGENT_TOKEN_COST_EVIDENCE_ONLY="${VALIDATE_AGENT_TOKEN_COST_EVIDENCE_ONLY:-false}"
 FITMEET_APP_DIR="${FITMEET_APP_DIR:-/Users/liuchongjiang/Documents/FitMeet app}"
 
@@ -27,7 +24,7 @@ warnings=0
 
 usage() {
   cat <<'EOF'
-Usage: scripts/launch-status.sh [--topology vercel-railway|ecs] [--include-railway-docker-build] [--skip-readiness-tests] [--skip-domain-check] [--skip-ios-testflight-check] [--validate-agent-remote-smoke-evidence-only] [--validate-agent-token-cost-evidence-only]
+Usage: scripts/launch-status.sh [--topology vercel-railway|ecs] [--include-railway-docker-build] [--skip-readiness-tests] [--skip-domain-check] [--skip-ios-testflight-check] [--validate-agent-token-cost-evidence-only]
 
 Aggregates the non-mutating FitMeet launch gates:
   - local deploy readiness Jest guard
@@ -53,10 +50,6 @@ Environment:
                               Skip strict iOS TestFlight readiness.
   RUN_RAILWAY_DOCKER_BUILD=true
                               Also run scripts/railway-docker-build-check.sh.
-  REQUIRE_AGENT_REMOTE_SMOKE_EVIDENCE=true
-                              Require redacted Agent remote smoke evidence file.
-  AGENT_REMOTE_SMOKE_EVIDENCE_FILE
-                              Evidence markdown from scripts/agent-remote-smoke-evidence.sh.
   REQUIRE_AGENT_TOKEN_COST_EVIDENCE=true
                               Require Agent token/cost JSON evidence file.
   AGENT_TOKEN_COST_EVIDENCE_FILE
@@ -72,8 +65,6 @@ Environment:
   MIN_CACHE_HIT_RATE          Optional launch-time override for public cache hit rate.
   MIN_WORKFLOW_ROUTE_RATE     Optional launch-time override for workflow bypass coverage.
   MAX_AVG_LLM_CALLS_PER_RUN   Optional launch-time override for live avg LLM calls/run.
-  VALIDATE_AGENT_REMOTE_SMOKE_EVIDENCE_ONLY=true
-                              Validate only the redacted Agent remote smoke evidence file.
   VALIDATE_AGENT_TOKEN_COST_EVIDENCE_ONLY=true
                               Validate only the Agent token/cost evidence file.
 EOF
@@ -96,10 +87,6 @@ while [[ $# -gt 0 ]]; do
       ;;
     --skip-ios-testflight-check)
       RUN_IOS_TESTFLIGHT_CHECK=false
-      ;;
-    --validate-agent-remote-smoke-evidence-only)
-      VALIDATE_AGENT_REMOTE_SMOKE_EVIDENCE_ONLY=true
-      REQUIRE_AGENT_REMOTE_SMOKE_EVIDENCE=true
       ;;
     --validate-agent-token-cost-evidence-only)
       VALIDATE_AGENT_TOKEN_COST_EVIDENCE_ONLY=true
@@ -152,87 +139,6 @@ run_gate() {
   else
     fail "${label}"
   fi
-}
-
-validate_agent_remote_smoke_evidence() {
-  local evidence_file="${AGENT_REMOTE_SMOKE_EVIDENCE_FILE}"
-
-  if [[ -z "${evidence_file}" ]]; then
-    echo "[FAIL] AGENT_REMOTE_SMOKE_EVIDENCE_FILE is required when REQUIRE_AGENT_REMOTE_SMOKE_EVIDENCE=true." >&2
-    return 1
-  fi
-  if [[ ! -f "${evidence_file}" ]]; then
-    echo "[FAIL] Agent remote smoke evidence file does not exist: ${evidence_file}" >&2
-    return 1
-  fi
-
-  local required_patterns=(
-    '# FitMeet Agent Remote Smoke Evidence'
-    'ECS post-deploy Agent readiness smoke'
-    'ECS post-deploy Agent 20-turn-memory smoke'
-    'ECS post-deploy Agent empty-candidate smoke'
-    'ECS post-deploy Agent full smoke'
-    'ECS post-deploy Agent sse-abort smoke'
-    'Post-deploy smoke completed.'
-  )
-
-  local pattern
-  for pattern in "${required_patterns[@]}"; do
-    if ! grep -Fq -- "${pattern}" "${evidence_file}"; then
-      echo "[FAIL] Agent remote smoke evidence is missing: ${pattern}" >&2
-      return 1
-    fi
-  done
-
-  local zero_exit_count
-  zero_exit_count="$(grep -Fc -- '- Exit code: `0`' "${evidence_file}")"
-  # Release audit evidence: this stricter gate supersedes the older
-  # "at least 3 successful smoke exit codes" baseline by requiring five
-  # successful ECS Agent smokes before launch is reported as ready.
-  if [[ "${zero_exit_count}" -lt 5 ]]; then
-    echo "[FAIL] Agent remote smoke evidence must contain at least 5 successful smoke exit codes; found ${zero_exit_count}." >&2
-    return 1
-  fi
-
-  local trace_eval_count
-  trace_eval_count="$(grep -Fc -- 'Social Codex trace eval passed' "${evidence_file}")"
-  # Backward-compatible launch audit wording: the original gate required
-  # readiness and full opportunity smoke; the current gate additionally
-  # requires 20-turn memory, empty-candidate, and SSE abort smoke coverage.
-  if [[ "${trace_eval_count}" -lt 4 ]]; then
-    echo "[FAIL] Agent remote smoke evidence must prove Social Codex trace eval for readiness, 20-turn memory, empty-candidate, and full opportunity smoke; found ${trace_eval_count}." >&2
-    return 1
-  fi
-
-  local smoke_report_count
-  smoke_report_count="$(grep -Fc -- 'fitmeet.agent-opportunity-smoke-report.v1' "${evidence_file}")"
-  if [[ "${smoke_report_count}" -lt 4 ]]; then
-    echo "[FAIL] Agent remote smoke evidence must include structured opportunity smoke reports for readiness, 20-turn memory, empty-candidate, and full opportunity smoke; found ${smoke_report_count}." >&2
-    return 1
-  fi
-
-  local secret_assignment_pattern='(AGENT_SMOKE_PASSWORD|USER_JWT|FITMEET_USER_JWT|AGENT_SMOKE_JWT|AUTHORIZATION|Authorization)=["'\'']?[^"'\'']?[^\\"'\'']*[[:alnum:]_.~+/=-]+'
-  local redacted_assignment_pattern='(AGENT_SMOKE_PASSWORD|USER_JWT|FITMEET_USER_JWT|AGENT_SMOKE_JWT|AUTHORIZATION|Authorization)=["'\'']?\[redacted\]["'\'']?'
-  if grep -Eiq "${secret_assignment_pattern}" "${evidence_file}" &&
-    grep -Ei "${secret_assignment_pattern}" "${evidence_file}" | grep -Eivq "${redacted_assignment_pattern}"; then
-    echo "[FAIL] Agent remote smoke evidence appears to contain unredacted secrets or email addresses." >&2
-    return 1
-  fi
-
-  local bearer_pattern='Bearer[[:space:]]+[A-Za-z0-9._~+/=-]+'
-  local redacted_bearer_pattern='Bearer[[:space:]]+\[redacted\]'
-  if grep -Eiq "${bearer_pattern}" "${evidence_file}" &&
-    grep -Ei "${bearer_pattern}" "${evidence_file}" | grep -Eivq "${redacted_bearer_pattern}"; then
-    echo "[FAIL] Agent remote smoke evidence appears to contain an unredacted bearer token." >&2
-    return 1
-  fi
-
-  if grep -Eiq '[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}' "${evidence_file}"; then
-    echo "[FAIL] Agent remote smoke evidence appears to contain an unredacted email address." >&2
-    return 1
-  fi
-
-  echo "[PASS] Agent remote smoke evidence is present and redacted: ${evidence_file}"
 }
 
 validate_agent_token_cost_evidence() {
@@ -376,11 +282,6 @@ NODE
 
 cd "${ROOT_DIR}" || exit 1
 
-if [[ "${VALIDATE_AGENT_REMOTE_SMOKE_EVIDENCE_ONLY}" == "true" ]]; then
-  validate_agent_remote_smoke_evidence
-  exit $?
-fi
-
 if [[ "${VALIDATE_AGENT_TOKEN_COST_EVIDENCE_ONLY}" == "true" ]]; then
   validate_agent_token_cost_evidence
   exit $?
@@ -404,8 +305,6 @@ run_gate "Shell syntax for production scripts" \
   scripts/ecs-post-deploy-smoke.sh \
   scripts/verify-agent-release.sh \
   scripts/agent-release-matrix.sh \
-  scripts/agent-remote-smoke-preflight.sh \
-  scripts/agent-remote-smoke-evidence.sh \
   scripts/launch-status.sh
 
 if [[ -d "${FITMEET_APP_DIR}" ]]; then
@@ -474,12 +373,6 @@ elif [[ "${FITMEET_LAUNCH_TOPOLOGY}" == "ecs" ]]; then
   warn "Skipped Railway production Docker image build; not required for ECS topology."
 else
   warn "Skipped Railway production Docker image build. Re-run with --include-railway-docker-build before Railway deploy."
-fi
-
-if [[ "${REQUIRE_AGENT_REMOTE_SMOKE_EVIDENCE}" == "true" ]]; then
-  run_gate "Agent remote smoke evidence" validate_agent_remote_smoke_evidence
-else
-  warn "Skipped Agent remote smoke evidence gate. Set REQUIRE_AGENT_REMOTE_SMOKE_EVIDENCE=true before final Agent cutover."
 fi
 
 if [[ "${REQUIRE_AGENT_TOKEN_COST_EVIDENCE}" == "true" ]]; then

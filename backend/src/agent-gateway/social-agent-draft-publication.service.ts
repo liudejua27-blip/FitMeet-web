@@ -145,6 +145,10 @@ export class SocialAgentDraftPublicationService {
     const publicIntentId =
       cleanDisplayText(output.publicIntentId ?? publicIntent.id, '') || null;
     const discoverHref = this.discoverHref(publicIntentId, socialRequestId);
+    const publicIntentHref = this.publicIntentHref(
+      publicIntentId,
+      socialRequestId,
+    );
     const socialRequest = this.isRecord(output.socialRequest)
       ? output.socialRequest
       : output;
@@ -157,6 +161,7 @@ export class SocialAgentDraftPublicationService {
         socialRequestId,
         publicIntentId,
         discoverHref,
+        publicIntentHref,
         status: 'published',
         toolName: SocialAgentToolName.CreateSocialRequest,
         toolCallId: publishAction.id,
@@ -172,6 +177,7 @@ export class SocialAgentDraftPublicationService {
       publishedSocialRequestId: socialRequestId,
       publicIntentId,
       discoverHref,
+      publicIntentHref,
       socialRequestId,
       publishStatus: 'published',
     });
@@ -184,6 +190,7 @@ export class SocialAgentDraftPublicationService {
         socialRequestId,
         publicIntentId,
         discoverHref,
+        publicIntentHref,
         status: 'published',
         synced: true,
         toolCallId: publishAction.id,
@@ -198,6 +205,7 @@ export class SocialAgentDraftPublicationService {
       socialRequestId,
       publicIntentId,
       discoverHref,
+      publicIntentHref,
       status: 'published',
       taskStatus: task.status,
       synced: true,
@@ -298,10 +306,7 @@ export class SocialAgentDraftPublicationService {
         approval.actionType,
         'publish_social_request',
       ),
-      summary: cleanDisplayText(
-        approval.summary,
-        '发布约练卡到发现页',
-      ),
+      summary: cleanDisplayText(approval.summary, '发布约练卡到发现页'),
       riskLevel: cleanDisplayText(approval.riskLevel, 'medium'),
       payload: this.isRecord(approval.payload) ? approval.payload : {},
       expiresAt: cleanDisplayText(approval.expiresAt, '') || null,
@@ -313,8 +318,18 @@ export class SocialAgentDraftPublicationService {
     socialRequestId: number,
   ): string {
     if (publicIntentId) {
+      return `/discover?publicIntentId=${encodeURIComponent(publicIntentId)}`;
+    }
+    return `/discover?socialRequestId=${encodeURIComponent(String(socialRequestId))}`;
+  }
+
+  private publicIntentHref(
+    publicIntentId: string | null,
+    socialRequestId: number,
+  ): string {
+    if (publicIntentId) {
       return `/public-intent/${encodeURIComponent(publicIntentId)}`;
     }
-    return `/social-request/${encodeURIComponent(String(socialRequestId))}`;
+    return `/discover?socialRequestId=${encodeURIComponent(String(socialRequestId))}`;
   }
 }

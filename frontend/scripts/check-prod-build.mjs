@@ -69,8 +69,8 @@ const requiredToolUiChunks = [
     pattern: /^tool-activity-card-.+\.js$/,
   },
   {
-    label: 'Life Graph Tool UI',
-    pattern: /^tool-life-graph-card-.+\.js$/,
+    label: 'personal profile update Tool UI',
+    pattern: /^tool-personal-profile-update-card-.+\.js$/,
   },
   {
     label: 'Meet Loop Tool UI',

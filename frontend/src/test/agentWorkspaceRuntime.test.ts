@@ -49,7 +49,10 @@ import {
 } from '../components/agent-workspace/useAgentMessageStream';
 import { reduceSingleRunAssistantMessages } from '../components/agent-workspace/agentAssistantMessageReducer';
 import type { AgentStreamEvent } from '../components/agent-workspace/api';
-import type { AgentThreadMessage, Step } from '../components/agent-workspace/socialAgentThreadStore';
+import type {
+  AgentThreadMessage,
+  Step,
+} from '../components/agent-workspace/socialAgentThreadStore';
 
 describe('agent workspace runtime fallback boundaries', () => {
   afterEach(() => {
@@ -127,9 +130,9 @@ describe('agent workspace runtime fallback boundaries', () => {
   });
 
   it('classifies explicit social matching prompts as social even with rich candidate preferences', () => {
-    expect(
-      intentForPrompt('我想在青岛大学附近，今天晚上，散步，找女生，最好喜欢编程'),
-    ).toBe('social');
+    expect(intentForPrompt('我想在青岛大学附近，今天晚上，散步，找女生，最好喜欢编程')).toBe(
+      'social',
+    );
     expect(intentForPrompt('有没有女生')).toBe('social');
     expect(intentForPrompt('最好是舞蹈生')).toBe('social');
     expect(intentForPrompt('继续刚才青岛大学散步的约练任务')).toBe('social');
@@ -153,10 +156,7 @@ describe('agent workspace runtime fallback boundaries', () => {
       actionType: 'connect_candidate',
     });
 
-    const merged = mergeUniqueApprovalDispatchCards(
-      [sendCard],
-      [replayedSendCard, connectCard],
-    );
+    const merged = mergeUniqueApprovalDispatchCards([sendCard], [replayedSendCard, connectCard]);
 
     expect(merged).toHaveLength(2);
     expect(merged.map((card) => card.data.actionType)).toEqual([
@@ -203,7 +203,8 @@ describe('agent workspace runtime fallback boundaries', () => {
       dispatchResult: {
         socialRequestId: 301,
         publicIntentId: 'public_301',
-        discoverHref: '/public-intent/public_301',
+        discoverHref: '/discover?publicIntentId=public_301',
+        publicIntentHref: '/public-intent/public_301',
         status: 'published',
         synced: true,
       },
@@ -247,9 +248,7 @@ describe('agent workspace runtime fallback boundaries', () => {
   });
 
   it('does not append a standalone approval dispatch result for inline card actions without a target', () => {
-    const current: AgentThreadMessage[] = [
-      userMessage('user-1', '给陈砚发送邀请'),
-    ];
+    const current: AgentThreadMessage[] = [userMessage('user-1', '给陈砚发送邀请')];
     const merged = mergeApprovalDispatchResponseIntoMessages({
       activeTaskId: 101,
       current,
@@ -310,7 +309,8 @@ describe('agent workspace runtime fallback boundaries', () => {
       dispatchResult: {
         socialRequestId: 301,
         publicIntentId: 'public_301',
-        discoverHref: '/public-intent/public_301',
+        discoverHref: '/discover?publicIntentId=public_301',
+        publicIntentHref: '/public-intent/public_301',
         status: 'published',
         synced: true,
       },
@@ -327,7 +327,8 @@ describe('agent workspace runtime fallback boundaries', () => {
         dispatchResult: {
           socialRequestId: 301,
           publicIntentId: 'public_301',
-          discoverHref: '/public-intent/public_301',
+          discoverHref: '/discover?publicIntentId=public_301',
+          publicIntentHref: '/public-intent/public_301',
           status: 'published',
           synced: true,
         },
@@ -349,7 +350,8 @@ describe('agent workspace runtime fallback boundaries', () => {
       title: '已发布到发现',
       data: expect.objectContaining({
         publicIntentId: 'public_301',
-        discoverHref: '/public-intent/public_301',
+        discoverHref: '/discover?publicIntentId=public_301',
+        publicIntentHref: '/public-intent/public_301',
         publishStatus: 'published',
       }),
     });
@@ -363,7 +365,8 @@ describe('agent workspace runtime fallback boundaries', () => {
         id: 'public_301',
         socialRequestId: 301,
         publicIntentId: 'public_301',
-        discoverHref: '/public-intent/public_301',
+        discoverHref: '/discover?publicIntentId=public_301',
+        publicIntentHref: '/public-intent/public_301',
         status: 'published',
         synced: true,
       },
@@ -381,7 +384,8 @@ describe('agent workspace runtime fallback boundaries', () => {
             taskId: 101,
             socialRequestId: 301,
             publicIntentId: 'public_301',
-            discoverHref: '/public-intent/public_301',
+            discoverHref: '/discover?publicIntentId=public_301',
+            publicIntentHref: '/public-intent/public_301',
             publishStatus: 'published',
           }),
           actions: [
@@ -389,7 +393,8 @@ describe('agent workspace runtime fallback boundaries', () => {
               label: '查看发现详情',
               schemaAction: 'activity.view_detail',
               payload: expect.objectContaining({
-                discoverHref: '/public-intent/public_301',
+                discoverHref: '/discover?publicIntentId=public_301',
+                publicIntentHref: '/public-intent/public_301',
               }),
             }),
           ],
@@ -399,15 +404,12 @@ describe('agent workspace runtime fallback boundaries', () => {
   });
 
   it('collapses repeated assistant delta and final text surfaces in a single run', () => {
-    const answer =
-      '谢谢你的认可！我现在会先把你的约练需求整理清楚，再继续推荐。';
+    const answer = '谢谢你的认可！我现在会先把你的约练需求整理清楚，再继续推荐。';
     const richerAnswer =
       '谢谢你的认可！我现在会先把你的约练需求整理清楚，再继续推荐具体的人和活动。';
     expect(collapseRepeatedAssistantTextBlocks(`${answer}\n\n${answer}`)).toBe(answer);
     expect(collapseRepeatedAssistantTextBlocks(`${answer}\n${answer}`)).toBe(answer);
-    expect(collapseRepeatedAssistantTextBlocks(`${answer}\n\n${richerAnswer}`)).toBe(
-      richerAnswer,
-    );
+    expect(collapseRepeatedAssistantTextBlocks(`${answer}\n\n${richerAnswer}`)).toBe(richerAnswer);
     expect(mergeAssistantDeltaText(answer, `\n\n${answer}`)).toBe(answer);
     expect(mergeAssistantDeltaText(answer, `\n${answer}`)).toBe(answer);
 
@@ -507,10 +509,8 @@ describe('agent workspace runtime fallback boundaries', () => {
   });
 
   it('merges near-duplicate final text into the current assistant message without a run anchor', () => {
-    const streamed =
-      '谢谢你的认可！我现在会先把你的约练需求整理清楚，再继续推荐具体的人和活动。';
-    const finalCopy =
-      '谢谢你的认可，我现在会先把你的约练需求整理清楚，再继续推荐具体的人和活动';
+    const streamed = '谢谢你的认可！我现在会先把你的约练需求整理清楚，再继续推荐具体的人和活动。';
+    const finalCopy = '谢谢你的认可，我现在会先把你的约练需求整理清楚，再继续推荐具体的人和活动';
     const messages: AgentThreadMessage[] = [
       userMessage('user-1', '你现在好智能'),
       {
@@ -606,8 +606,7 @@ describe('agent workspace runtime fallback boundaries', () => {
   });
 
   it('dedupes adjacent assistant answers even when a stream lacks run/message anchors', () => {
-    const answer =
-      '谢谢你的认可！我理解你想找一个节奏舒服的活动伙伴，还需要确认时间和活动类型。';
+    const answer = '谢谢你的认可！我理解你想找一个节奏舒服的活动伙伴，还需要确认时间和活动类型。';
     const finalResult = {
       ...userFacingResponseWithCards([]),
       assistantMessage: answer,
@@ -1252,12 +1251,7 @@ describe('agent workspace runtime fallback boundaries', () => {
     } satisfies FitMeetAlphaCard;
 
     const result = dedupeUserFacingResponseCards(
-      userFacingResponseWithCards([
-        candidate,
-        replayedCandidate,
-        openerDraft,
-        replayedOpenerDraft,
-      ]),
+      userFacingResponseWithCards([candidate, replayedCandidate, openerDraft, replayedOpenerDraft]),
     );
 
     expect(result.cards).toHaveLength(2);
@@ -2010,33 +2004,23 @@ describe('agent workspace runtime fallback boundaries', () => {
     expect(intentForPrompt('给我找一下隐私政策说明')).toBe('conversation');
     expect(intentForPrompt('我想找客服问问账号问题')).toBe('conversation');
     expect(intentForPrompt('FitMeet 支持找人功能吗？')).toBe('conversation');
-    expect(intentForPrompt('帮我分析一下我的理想型，先不要搜索候选人')).toBe(
-      'conversation',
-    );
+    expect(intentForPrompt('帮我分析一下我的理想型，先不要搜索候选人')).toBe('conversation');
   });
 
   it('still treats explicit opportunity discovery as social execution', () => {
-    expect(intentForPrompt('今天晚上青岛大学附近散步，帮我找人')).toBe(
-      'social',
-    );
+    expect(intentForPrompt('今天晚上青岛大学附近散步，帮我找人')).toBe('social');
     expect(intentForPrompt('推荐几个公开可发现的篮球搭子')).toBe('social');
   });
 
   it('continues opportunity clarification only for slot answers or explicit social execution', () => {
-    expect(continuesOpportunityClarification('今天晚上，青岛大学，散步')).toBe(
-      true,
-    );
+    expect(continuesOpportunityClarification('今天晚上，青岛大学，散步')).toBe(true);
     expect(continuesOpportunityClarification('女生，最好是舞蹈生')).toBe(true);
     expect(continuesOpportunityClarification('可以，帮我找人')).toBe(true);
     expect(continuesOpportunityClarification('可以，帮我看看')).toBe(true);
     expect(continuesOpportunityClarification('那就看看')).toBe(true);
-    expect(continuesOpportunityClarification('为什么你没懂我的意思')).toBe(
-      false,
-    );
+    expect(continuesOpportunityClarification('为什么你没懂我的意思')).toBe(false);
     expect(continuesOpportunityClarification('帮我找一下设置入口')).toBe(false);
-    expect(continuesOpportunityClarification('我想找回之前的聊天记录')).toBe(
-      false,
-    );
+    expect(continuesOpportunityClarification('我想找回之前的聊天记录')).toBe(false);
   });
 
   it('lets replay.summary replace old process nodes instead of accumulating a timeline', () => {
@@ -2664,7 +2648,9 @@ function userFacingResponseWithCards(cards: FitMeetAlphaCard[]): UserFacingAgent
   };
 }
 
-function replayPackage(overrides: Partial<SocialCodexReplayPackage> = {}): SocialCodexReplayPackage {
+function replayPackage(
+  overrides: Partial<SocialCodexReplayPackage> = {},
+): SocialCodexReplayPackage {
   return {
     taskId: 42,
     threadId: 'agent-task:42',

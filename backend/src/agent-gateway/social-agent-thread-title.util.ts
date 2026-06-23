@@ -11,7 +11,9 @@ const GENERIC_THREAD_TITLE_PATTERNS = [
   /^未命名对话$/i,
 ];
 
-export function isGenericSocialAgentThreadTitle(value: string | null | undefined) {
+export function isGenericSocialAgentThreadTitle(
+  value: string | null | undefined,
+) {
   const title = cleanDisplayText(value, '').trim();
   if (!title) return true;
   return GENERIC_THREAD_TITLE_PATTERNS.some((pattern) => pattern.test(title));
@@ -27,11 +29,16 @@ export function inferSocialAgentThreadTitle(input: {
     return explicitTitle.slice(0, 40);
   }
 
-  const text = cleanDisplayText(input.firstMessage, '').trim() || cleanDisplayText(input.goal, '').trim();
+  const text =
+    cleanDisplayText(input.firstMessage, '').trim() ||
+    cleanDisplayText(input.goal, '').trim();
   if (!text) return '新对话';
   if (isGenericUserPrompt(text)) return '普通聊天：功能咨询';
 
-  const compact = text.replace(/\s+/g, ' ').replace(/[。！？!?]+$/g, '').trim();
+  const compact = text
+    .replace(/\s+/g, ' ')
+    .replace(/[。！？!?]+$/g, '')
+    .trim();
   if (shouldUseOrdinaryChatTitle(compact)) {
     return ordinaryChatTitle(compact);
   }
@@ -40,7 +47,10 @@ export function inferSocialAgentThreadTitle(input: {
   const time = timeLabel(compact);
 
   if (activity) {
-    return [time, location, activity].filter(Boolean).join('').slice(0, 40) || `${activity}搭子`;
+    return (
+      [time, location, activity].filter(Boolean).join('').slice(0, 40) ||
+      `${activity}搭子`
+    );
   }
   if (/(找人|认识|交友|朋友|同频|理想型|搭子)/.test(compact)) {
     return `${location ?? ''}认识新朋友`.slice(0, 40);

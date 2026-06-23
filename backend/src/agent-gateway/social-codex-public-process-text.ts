@@ -16,7 +16,7 @@ type PublicProcessTextContext = {
 const INTERNAL_PROCESS_TEXT_RE =
   /\b(?:route_[a-z_]+|hydrate_context|planner|traceId|agentTrace|structuredIntent|tool[_\s.-]*(?:call|result|calls|results)(?:[_\s.-]*[a-z]+)?|raw\s*JSON|payload|runtime|stack|debug|internal|subagent|DeepSeek|OpenAI)\b|candidate_confirmation_check/i;
 const INTERNAL_KEY_VALUE_FRAGMENT_RE =
-  /\b(?:traceId|runId|payload|agentTrace|structuredIntent|planner|metadata|runtime|checkpointId|parentCheckpointId|resumeToken|idempotencyKey|rawJson|rawJSON|toolCallId|toolResultId)\s*[:=]\s*(?:"[^"]*"|'[^']*'|\{[^{}]{0,240}\}|\[[^\[\]]{0,240}\]|[^\s,;，。)）\]}]+)/gi;
+  /\b(?:traceId|runId|payload|agentTrace|structuredIntent|planner|metadata|runtime|checkpointId|parentCheckpointId|resumeToken|idempotencyKey|rawJson|rawJSON|toolCallId|toolResultId)\s*[:=]\s*(?:"[^"]*"|'[^']*'|\{[^{}]{0,240}\}|\[[^\][]{0,240}\]|[^\s,;，。)）\]}]+)/gi;
 const GENERIC_PROCESS_TITLE_RE = genericProcessTitlePattern();
 const GENERIC_PROCESS_DETAIL_RE = genericProcessDetailPattern();
 const DETECT_INTENT_TITLE_VALUES = new Set([

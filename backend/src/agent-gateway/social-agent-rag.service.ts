@@ -338,13 +338,16 @@ export class SocialAgentRagService {
         docText,
         this.docEmbeddingHash(doc),
       );
-      const score = doc.tags.reduce((sum, tag) => {
-        const lower = tag.toLowerCase();
-        let next = sum;
-        if (activityType && lower.includes(activityType)) next += 2;
-        if (message && message.includes(lower)) next += 1;
-        return next;
-      }, this.cosineSimilarity(queryVector, docVector));
+      const score = doc.tags.reduce(
+        (sum, tag) => {
+          const lower = tag.toLowerCase();
+          let next = sum;
+          if (activityType && lower.includes(activityType)) next += 2;
+          if (message && message.includes(lower)) next += 1;
+          return next;
+        },
+        this.cosineSimilarity(queryVector, docVector),
+      );
       return { doc, score };
     });
     const scoredDocs = await Promise.all(scored);
@@ -421,7 +424,8 @@ export class SocialAgentRagService {
 
   private docEmbeddingText(doc: TaggedRagDoc): string {
     if ('title' in doc) return [doc.title, ...doc.tags].join(' ');
-    if ('scenario' in doc) return [doc.scenario, doc.template, ...doc.tags].join(' ');
+    if ('scenario' in doc)
+      return [doc.scenario, doc.template, ...doc.tags].join(' ');
     if ('activityType' in doc) {
       return [doc.activityType, ...doc.checklist, ...doc.tags].join(' ');
     }

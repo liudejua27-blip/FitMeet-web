@@ -323,9 +323,6 @@ for (const phrase of [
   'fallback_not_streamed_as_llm_answer',
   'admin_debug_tools_hidden_from_user_runtime',
   '--backend',
-  '--api-readiness',
-  '--api-full',
-  '--api-sse-abort',
   '--report',
 ]) {
   if (!runnerSource.includes(phrase)) {

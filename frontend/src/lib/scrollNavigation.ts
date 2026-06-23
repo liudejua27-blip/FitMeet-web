@@ -2,22 +2,6 @@ import type { NavigateFunction, NavigateOptions } from 'react-router-dom';
 
 export const DISCOVER_PATH = '/discover';
 const DISCOVER_SCROLL_STATE_KEY = '__fitmeet_scroll_top_on_navigate';
-export const DISCOVER_ALIAS_ROUTES = [
-  '/human',
-  '/nearby',
-  '/meet',
-  '/hall',
-  '/social-hall',
-  '/agent-connect/social-hall',
-];
-
-export const ENTRY_ALIAS_ROUTES: Record<string, string> = {
-  ...Object.fromEntries(DISCOVER_ALIAS_ROUTES.map((path) => [path, DISCOVER_PATH])),
-  '/app': '/download',
-  '/app/': '/download',
-  '/download-app': '/download',
-  '/download-app/': '/download',
-};
 
 type ScrollBehaviorValue = ScrollBehavior;
 
@@ -112,18 +96,7 @@ export const scrollToTopBeforeNavigate = (behavior: ScrollBehaviorValue = 'auto'
 };
 
 export const resolveNavigationAlias = (target: string) => {
-  const { path, query, hash } = parseRoutePath(target);
-
-  if (!path.startsWith('/')) {
-    return target;
-  }
-
-  const canonicalPath = ENTRY_ALIAS_ROUTES[path] || path;
-  if (canonicalPath === path) {
-    return target;
-  }
-
-  return `${canonicalPath}${query}${hash}`;
+  return target;
 };
 
 export const buildDiscoverPath = (options?: {

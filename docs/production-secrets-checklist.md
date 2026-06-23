@@ -108,22 +108,14 @@ cd "/Users/liuchongjiang/Documents/FitMeet app"
 Scripts/testflight-readiness-check.sh --strict --require-staging
 ```
 
-## Staging And Smoke Credentials
+## Staging And QA Credentials
 
-Prepare dedicated smoke users after the deployed database, migrations, and
-object storage are ready:
+Create dedicated QA users through the normal signup/admin process after the
+deployed database, migrations, and object storage are ready. Keep the credentials
+in a local secret note or platform secret manager:
 
-```bash
-APP_SMOKE_SEED_PASSWORD='use-a-long-random-password' \
-APP_SMOKE_SEED_ALLOW_PRODUCTION=true \
-pnpm -C backend run seed:app-smoke-users
-```
-
-Keep the printed exports in a local secret note or platform secret manager:
-
-- `APP_SMOKE_EMAIL`
-- `APP_SMOKE_PASSWORD`
-- `APP_SMOKE_TARGET_USER_ID`
+- `FITMEET_AGENT_BROWSER_QA_EMAIL`
+- `FITMEET_AGENT_BROWSER_QA_PASSWORD`
 - `FITMEET_ALPHA_STAGING_BASE_URL`
 - `FITMEET_ALPHA_STAGING_EMAIL`
 - `FITMEET_ALPHA_STAGING_PASSWORD`
@@ -134,7 +126,17 @@ Use them for:
 ```bash
 BASE_URL=https://www.ourfitmeet.cn \
 API_BASE_URL=https://www.ourfitmeet.cn/api \
-./scripts/verify-production.sh --run-app-smoke
+./scripts/verify-production.sh --run-public-intent-write
+```
+
+and:
+
+```bash
+BASE_URL=https://www.ourfitmeet.cn \
+API_BASE_URL=https://www.ourfitmeet.cn/api \
+FITMEET_AGENT_BROWSER_QA_EMAIL='qa@example.com' \
+FITMEET_AGENT_BROWSER_QA_PASSWORD='***' \
+./scripts/verify-agent-goal-production.sh
 ```
 
 and:

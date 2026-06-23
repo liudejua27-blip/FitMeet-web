@@ -1,15 +1,8 @@
 import { useCallback, type MutableRefObject } from 'react';
 
-import type {
-  AgentApprovalDispatchResult,
-} from '../../api/agentApprovalsApi';
-import type {
-  FitMeetAlphaCard,
-  UserFacingAgentResponse,
-} from '../../api/socialAgentApi';
-import type {
-  AgentThreadMessage,
-} from './socialAgentThreadStore';
+import type { AgentApprovalDispatchResult } from '../../api/agentApprovalsApi';
+import type { FitMeetAlphaCard, UserFacingAgentResponse } from '../../api/socialAgentApi';
+import type { AgentThreadMessage } from './socialAgentThreadStore';
 import { agentCardApprovalId, mergeUniqueAgentCards } from './agentCardIdentity';
 
 type SetState<T> = (value: T | ((current: T) => T)) => void;
@@ -254,28 +247,28 @@ function publishResponseFromApprovalDispatch(
   result: AgentApprovalDispatchResult,
 ): UserFacingAgentResponse | null {
   const actionType =
-    stringFromUnknown(input.actionType) ??
-    stringFromUnknown(result.actionType) ??
-    '';
+    stringFromUnknown(input.actionType) ?? stringFromUnknown(result.actionType) ?? '';
   const publicIntentId =
-    stringIdFromUnknown(result.publicIntentId) ??
-    stringIdFromUnknown(result.id);
+    stringIdFromUnknown(result.publicIntentId) ?? stringIdFromUnknown(result.id);
   const socialRequestId = numberFromUnknown(result.socialRequestId);
   const isPublish =
-    /publish|social_request/i.test(actionType) ||
-    Boolean(publicIntentId || socialRequestId);
+    /publish|social_request/i.test(actionType) || Boolean(publicIntentId || socialRequestId);
   if (!isPublish) return null;
   const discoverHref =
     stringIdFromUnknown(result.discoverHref) ??
     (publicIntentId
-      ? `/public-intent/${encodeURIComponent(publicIntentId)}`
+      ? `/discover?publicIntentId=${encodeURIComponent(publicIntentId)}`
       : socialRequestId
-        ? `/social-request/${encodeURIComponent(String(socialRequestId))}`
+        ? `/discover?socialRequestId=${encodeURIComponent(String(socialRequestId))}`
         : '');
+  const publicIntentHref =
+    stringIdFromUnknown(result.publicIntentHref) ??
+    (publicIntentId
+      ? `/public-intent/${encodeURIComponent(publicIntentId)}`
+      : '');
   if (!discoverHref) return null;
   return {
-    assistantMessage:
-      '已按你的确认发布到发现页。附近公开可发现用户现在可以看到这张约练卡。',
+    assistantMessage: '已按你的确认发布到发现页。附近公开可发现用户现在可以看到这张约练卡。',
     lightStatus: '已整理回复',
     cards: [
       {
@@ -296,6 +289,7 @@ function publishResponseFromApprovalDispatch(
           socialRequestId,
           publicIntentId,
           discoverHref,
+          publicIntentHref,
           publishStatus: 'published',
           synced: true,
         },
@@ -306,7 +300,12 @@ function publishResponseFromApprovalDispatch(
             action: 'activity.view_detail',
             schemaAction: 'activity.view_detail',
             requiresConfirmation: false,
-            payload: { socialRequestId, publicIntentId, discoverHref },
+            payload: {
+              socialRequestId,
+              publicIntentId,
+              discoverHref,
+              publicIntentHref,
+            },
           },
         ],
       },

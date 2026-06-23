@@ -213,10 +213,14 @@ export class SocialAgentRunStateService {
       { runId, error: errorPayload },
       AgentTaskEventActor.System,
     );
-    await this.writeInboxEventBestEffort(task, 'social_agent.replan.failed', {
-      runId,
-      error: errorPayload,
-    });
+    await this.writeMessageEventEventBestEffort(
+      task,
+      'social_agent.replan.failed',
+      {
+        runId,
+        error: errorPayload,
+      },
+    );
   }
 
   async completeReplanRun(input: {
@@ -256,7 +260,7 @@ export class SocialAgentRunStateService {
       },
       AgentTaskEventActor.System,
     );
-    await this.writeInboxEventBestEffort(
+    await this.writeMessageEventEventBestEffort(
       task,
       'social_agent.replan.completed',
       {
@@ -325,14 +329,14 @@ export class SocialAgentRunStateService {
     }
   }
 
-  private async writeInboxEventBestEffort(
+  private async writeMessageEventEventBestEffort(
     task: AgentTask,
     eventType: string,
     metadata: Record<string, unknown>,
   ): Promise<void> {
     if (!task.agentConnectionId) return;
     try {
-      await this.messages.createAgentInboxEvent({
+      await this.messages.createAgentMessageEvent({
         agentConnectionId: task.agentConnectionId,
         ownerUserId: task.ownerUserId,
         eventType,
@@ -348,7 +352,7 @@ export class SocialAgentRunStateService {
     } catch (error) {
       this.logger.warn(
         JSON.stringify({
-          event: 'social_agent.run_state_inbox_event_failed',
+          event: 'social_agent.run_state_message_event_failed',
           taskId: task.id,
           eventType,
           message: error instanceof Error ? error.message : String(error),

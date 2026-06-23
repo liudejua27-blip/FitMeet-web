@@ -1141,7 +1141,7 @@ export function numberFromUnknown(value: unknown): number | null {
 
 export function stepIdFromLightStatus(status: string): string {
   if (/确认关键信息|补充信息|补齐/i.test(status)) return 'clarify';
-  if (status.includes('Life Graph')) return 'profile';
+  if (status.includes('Life Graph') || status.includes('长期偏好') || status.includes('画像')) return 'profile';
   if (status.includes('筛选')) return 'search';
   if (status.includes('排除')) return 'rank';
   if (status.includes('安全')) return 'safety_filter';

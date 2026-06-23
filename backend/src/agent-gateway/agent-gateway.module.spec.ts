@@ -69,7 +69,8 @@ jest.mock('../users/users.module', () => {
 
 import { AgentDiscoveryService } from './agent-discovery.service';
 import { AgentGatewayModule } from './agent-gateway.module';
-import { AgentUserController } from './agent-gateway.controller';
+import { AgentProfileQAController } from './agent-profile-qa.controller';
+import { PublicSocialIntentController } from './public-social-intent.controller';
 import { SocialAgentChatDeepSeekClientService } from './social-agent-chat-deepseek-client.service';
 import { SocialAgentChatLlmService } from './social-agent-chat-llm.service';
 import { SocialAgentFinalResponseService } from './social-agent-final-response.service';
@@ -189,7 +190,7 @@ describe('AgentGatewayModule startup', () => {
     moduleRef = undefined;
   });
 
-  it('starts and resolves AgentUserController dependencies', async () => {
+  it('starts and resolves retained public and profile controllers', async () => {
     moduleRef = await Test.createTestingModule({
       imports: [AgentGatewayModule],
     })
@@ -205,7 +206,12 @@ describe('AgentGatewayModule startup', () => {
     expect(app.get(AgentDiscoveryService)).toBeInstanceOf(
       AgentDiscoveryService,
     );
-    expect(app.get(AgentUserController)).toBeInstanceOf(AgentUserController);
+    expect(app.get(PublicSocialIntentController)).toBeInstanceOf(
+      PublicSocialIntentController,
+    );
+    expect(app.get(AgentProfileQAController)).toBeInstanceOf(
+      AgentProfileQAController,
+    );
 
     await app.close();
   });
@@ -226,9 +232,11 @@ describe('AgentGatewayModule startup', () => {
     expect(finalResponses).toBeInstanceOf(SocialAgentFinalResponseService);
     expect(deepSeek).toBeInstanceOf(SocialAgentChatDeepSeekClientService);
     expect(
-      (finalResponses as unknown as {
-        deepSeek?: SocialAgentChatDeepSeekClientService;
-      }).deepSeek,
+      (
+        finalResponses as unknown as {
+          deepSeek?: SocialAgentChatDeepSeekClientService;
+        }
+      ).deepSeek,
     ).toBe(deepSeek);
   });
 
@@ -247,9 +255,11 @@ describe('AgentGatewayModule startup', () => {
 
     expect(chatLlm).toBeInstanceOf(SocialAgentChatLlmService);
     expect(
-      (chatLlm as unknown as {
-        finalResponses?: SocialAgentFinalResponseService;
-      }).finalResponses,
+      (
+        chatLlm as unknown as {
+          finalResponses?: SocialAgentFinalResponseService;
+        }
+      ).finalResponses,
     ).toBe(finalResponses);
   });
 

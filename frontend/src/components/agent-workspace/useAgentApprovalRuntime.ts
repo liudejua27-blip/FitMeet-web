@@ -1,13 +1,7 @@
 import { useCallback } from 'react';
 
-import {
-  type AgentApprovalDispatchResult,
-  agentApprovalsApi,
-} from '../../api/agentApprovalsApi';
-import type {
-  AgentThreadMessage,
-  Step,
-} from './socialAgentThreadStore';
+import { type AgentApprovalDispatchResult, agentApprovalsApi } from '../../api/agentApprovalsApi';
+import type { AgentThreadMessage, Step } from './socialAgentThreadStore';
 import type { FitMeetAssistantRecovery } from './FitMeetAssistantUI.types';
 
 type SetState<T> = (value: T | ((current: T) => T)) => void;
@@ -71,7 +65,9 @@ export function useAgentApprovalRuntime({
       const result = await agentApprovalsApi.approve(approvalId);
       setMessages((current) =>
         current.map((message) =>
-          message.role === 'assistant' && message.result && messageHasApprovalId(message, approvalId)
+          message.role === 'assistant' &&
+          message.result &&
+          messageHasApprovalId(message, approvalId)
             ? {
                 ...message,
                 result: {
@@ -125,12 +121,7 @@ export function useAgentApprovalRuntime({
         return dispatchResponse;
       }
       if (result.resume?.checkpointId) {
-        await runCheckpointStream(
-          result.resume.checkpointId,
-          'resume',
-          'approved',
-          approvalStepId,
-        );
+        await runCheckpointStream(result.resume.checkpointId, 'resume', 'approved', approvalStepId);
         return dispatchResponse;
       }
       if (hasDispatchResult) return dispatchResponse;
@@ -165,7 +156,9 @@ export function useAgentApprovalRuntime({
       const result = await agentApprovalsApi.reject(approvalId);
       setMessages((current) =>
         current.map((message) =>
-          message.role === 'assistant' && message.result && messageHasApprovalId(message, approvalId)
+          message.role === 'assistant' &&
+          message.result &&
+          messageHasApprovalId(message, approvalId)
             ? {
                 ...message,
                 result: {
@@ -196,12 +189,7 @@ export function useAgentApprovalRuntime({
         return;
       }
       if (result.resume?.checkpointId) {
-        await runCheckpointStream(
-          result.resume.checkpointId,
-          'resume',
-          'rejected',
-          approvalStepId,
-        );
+        await runCheckpointStream(result.resume.checkpointId, 'resume', 'rejected', approvalStepId);
         return;
       }
       if (context?.inline === true) return;
@@ -220,7 +208,6 @@ export function useAgentApprovalRuntime({
     [
       activeTaskId,
       isRunning,
-      publicText,
       nextId,
       runCheckpointStream,
       setMessages,
@@ -284,9 +271,7 @@ function messageHasApprovalId(message: AgentThreadMessage, approvalId: number | 
   if (!message.result) return false;
   const expected = String(approvalId);
   if (
-    message.result.pendingConfirmations.some(
-      (confirmation) => String(confirmation.id) === expected,
-    )
+    message.result.pendingConfirmations.some((confirmation) => String(confirmation.id) === expected)
   ) {
     return true;
   }
@@ -328,8 +313,7 @@ function approvalActionTypeForMessage(
   const pending = message.result?.pendingConfirmations.find(
     (confirmation) => String(confirmation.id) === expected,
   );
-  const pendingActionType =
-    publicString(pending?.actionType) ?? publicString(pending?.type);
+  const pendingActionType = publicString(pending?.actionType) ?? publicString(pending?.type);
   if (pendingActionType) return pendingActionType;
 
   const card = message.result?.cards.find((item) => cardApprovalId(item.data) === expected);
@@ -358,7 +342,9 @@ function cardApprovalId(data: Record<string, unknown>) {
   return publicString(inlineApproval?.id);
 }
 
-function firstCardActionType(card: { actions?: Array<{ schemaAction?: string; action?: string }> }) {
+function firstCardActionType(card: {
+  actions?: Array<{ schemaAction?: string; action?: string }>;
+}) {
   const action = card.actions?.find((item) => item.schemaAction || item.action);
   return publicString(action?.schemaAction) ?? publicString(action?.action);
 }

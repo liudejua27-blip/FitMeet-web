@@ -95,4 +95,24 @@ describe('AgentGatewayService public social intents', () => {
       },
     );
   });
+
+  it('searches public discover cards by interest tags and generated filters', async () => {
+    const queryBuilder = makeQueryBuilder();
+    const service = makeService({
+      createQueryBuilder: jest.fn(() => queryBuilder),
+    });
+
+    await service.listPublicSocialIntents({
+      q: '羽毛球',
+    });
+
+    expect(queryBuilder.andWhere).toHaveBeenCalledWith(
+      expect.stringContaining('CAST(intent.interestTags AS TEXT)'),
+      { q: '%羽毛球%' },
+    );
+    expect(queryBuilder.andWhere).toHaveBeenCalledWith(
+      expect.stringContaining('CAST(intent.filters AS TEXT)'),
+      { q: '%羽毛球%' },
+    );
+  });
 });

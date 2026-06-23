@@ -1,8 +1,8 @@
 import { IsString, MaxLength, MinLength } from 'class-validator';
 
 /**
- * POST /api/ai-profile/sensitive-tags/confirm
- * POST /api/ai-profile/sensitive-tags/reject
+ * POST /api/users/me/social-profile/sensitive-tags/confirm
+ * POST /api/users/me/social-profile/sensitive-tags/reject
  *
  * Sensitive-tag confirmation is per-tag. The endpoint identifies the tag
  * by its raw label (the same string stored in

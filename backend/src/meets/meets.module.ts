@@ -4,14 +4,12 @@ import { MeetsController } from './meets.controller';
 import { MeetsService } from './meets.service';
 import { Meet } from './meet.entity';
 import { MeetParticipant } from './meet-participant.entity';
-import { Club } from '../clubs/club.entity';
-import { ClubMember } from '../clubs/club-member.entity';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { ActivitiesModule } from '../activities/activities.module';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Meet, MeetParticipant, Club, ClubMember]),
+    TypeOrmModule.forFeature([Meet, MeetParticipant]),
     NotificationsModule,
     forwardRef(() => ActivitiesModule),
   ],

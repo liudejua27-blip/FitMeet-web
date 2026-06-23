@@ -112,7 +112,7 @@ export class AgentSocialRequestAdapter {
         );
       }
       try {
-        await this.messages.createAgentInboxEvent({
+        await this.messages.createAgentMessageEvent({
           agentConnectionId: agent.id,
           ownerUserId: agent.userId,
           eventType: 'match.completed',
@@ -134,7 +134,7 @@ export class AgentSocialRequestAdapter {
         });
       } catch (err) {
         this.logger.warn(
-          `agent match inbox event failed: ${
+          `agent match message event failed: ${
             err instanceof Error ? err.message : String(err)
           }`,
         );

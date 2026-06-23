@@ -908,7 +908,9 @@ describe('SocialAgentRunRecommendationService', () => {
     };
     const service = new SocialAgentRunRecommendationService(
       eventRepo as never,
-      { planExistingTask: jest.fn().mockResolvedValue({ source: 'fallback' }) } as never,
+      {
+        planExistingTask: jest.fn().mockResolvedValue({ source: 'fallback' }),
+      } as never,
       { get: jest.fn().mockResolvedValue({}) } as never,
       draftSearch as never,
       recommendationResults as never,
@@ -1030,9 +1032,8 @@ describe('SocialAgentRunRecommendationService', () => {
             }),
           }),
           knownTaskSlotConstraints: expect.objectContaining({
-            candidatePreferencePolicy: expect.stringContaining(
-              '公开可发现资料',
-            ),
+            candidatePreferencePolicy:
+              expect.stringContaining('公开可发现资料'),
           }),
         }),
       }),
@@ -1241,7 +1242,7 @@ describe('SocialAgentRunRecommendationService', () => {
         autoPublished: true,
         synced: true,
         publicIntentId: 'intent_302',
-        discoverHref: '/public-intent/intent_302',
+        discoverHref: '/discover?publicIntentId=intent_302',
         publishPolicy: 'auto_after_first_public_authorization',
         blockedReason: null,
       }),
@@ -1325,7 +1326,7 @@ describe('SocialAgentRunRecommendationService', () => {
       socialRequestId: 302,
       autoPublished: true,
       publicIntentId: 'intent_302',
-      discoverHref: '/public-intent/intent_302',
+      discoverHref: '/discover?publicIntentId=intent_302',
       publishPolicy: 'auto_after_first_public_authorization',
     });
     expect(

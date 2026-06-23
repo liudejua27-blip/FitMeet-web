@@ -13,10 +13,9 @@ production cutover.
 - Backend runs the NestJS API behind Nginx or an Aliyun reverse proxy.
 - PostgreSQL, MongoDB, Redis, and object storage must be staging resources, not
   local development services.
-- `/agent` production builds default to the real adapter through `PROD` /
-  `MODE=production`; `VITE_AGENT_ADAPTER=real` remains an optional explicit
-  override, and `VITE_AGENT_ADAPTER=mock` is only for intentional local QA or
-  unit tests.
+- `/agent` uses the real API adapter in every build. `VITE_AGENT_ADAPTER=real`
+  is still accepted as an explicit no-op override; any other value is ignored
+  and logs a warning.
 
 If staging uses the ECS same-origin topology instead, use:
 
@@ -100,9 +99,8 @@ Optional explicit adapter override:
 VITE_AGENT_ADAPTER=real
 ```
 
-Do not set `VITE_AGENT_ADAPTER=mock` for staging or production. Mock mode is
-only for local QA/test runs where the backend Social Agent API is intentionally
-absent.
+Do not set `VITE_AGENT_ADAPTER=mock`. Runtime mock adapters have been removed;
+misconfigured values fall back to the real adapter and log a warning.
 
 ## Backend Deploy Checklist
 
@@ -190,16 +188,12 @@ absent.
    WantedBy=multi-user.target
    ```
 
-8. Prepare dedicated staging smoke users and candidate data:
+8. Prepare dedicated staging QA users and candidate data through the normal
+   signup/admin process. Keep those credentials only in a local secure note or
+   shell session; do not commit them.
 
-   ```bash
-   APP_SMOKE_SEED_PASSWORD='<long-random-password>' \
-   APP_SMOKE_SEED_ALLOW_PRODUCTION=true \
-   pnpm -C backend run seed:app-smoke-users
-   ```
-
-9. Store the printed smoke credentials only in a local secure note or shell
-   session. Do not commit them.
+9. Run `scripts/verify-agent-goal-production.sh` with the dedicated QA account
+   when browser QA credentials are available.
 
 ## Nginx / Reverse Proxy SSE Requirements
 
@@ -231,7 +225,7 @@ curl -N \
   -H "Authorization: Bearer ${TOKEN}" \
   -H "Content-Type: application/json" \
   -X POST https://staging-api.socialworld.world/api/social-agent/chat/stream-user \
-  --data '{"message":"今晚想找人一起喝咖啡，不想太尴尬","idempotencyKey":"staging-smoke-agent-run-001"}'
+  --data '{"message":"今晚想找人一起喝咖啡，不想太尴尬","idempotencyKey":"staging-agent-run-001"}'
 ```
 
 Expected lifecycle sequence should include most of:
@@ -302,7 +296,7 @@ curl -N \
   -H "Authorization: Bearer ${TOKEN}" \
   -H "Content-Type: application/json" \
   -X POST "${API}/social-agent/chat/stream-user" \
-  --data '{"message":"今晚想找人一起喝咖啡，不想太尴尬","idempotencyKey":"staging-smoke-agent-run-001"}'
+  --data '{"message":"今晚想找人一起喝咖啡，不想太尴尬","idempotencyKey":"staging-agent-run-001"}'
 ```
 
 Restore session:
@@ -328,40 +322,30 @@ curl -fsS \
 Repeat the same command with the same `idempotencyKey`; it must be safe and must
 not duplicate writes.
 
-## Agent Launch Gate Smoke
+## Agent Launch Gate Verification
 
 After migrations, smoke users, RBAC bootstrap, and the independent worker are
-ready, run the release gate script from a trusted terminal:
+ready, run the current release gate scripts from a trusted terminal:
 
 ```bash
-FITMEET_API_BASE_URL=https://staging-api.socialworld.world/api \
-ADMIN_JWT='<staging-admin-jwt>' \
-USER_JWT='<staging-user-jwt>' \
-RUN_SELF_IMPROVE_SANDBOX=true \
-pnpm -C backend run smoke:agent-launch-gates
+bash scripts/verify-agent-release.sh
+
+BASE_URL=https://staging.socialworld.world \
+API_BASE_URL=https://staging-api.socialworld.world/api \
+FITMEET_AGENT_BROWSER_QA_EMAIL='<qa-email>' \
+FITMEET_AGENT_BROWSER_QA_PASSWORD='<qa-password>' \
+bash scripts/verify-agent-goal-production.sh
 ```
 
-This script verifies:
+These scripts verify:
 
 - L5 dashboard and worker job APIs are reachable through RBAC.
 - Independent subagent worker heartbeat is fresh.
-- production alert sink is either explicitly disabled for first launch or configured with a real webhook.
-- high-risk tool endpoints return approval signals instead of executing.
-- self-improve runner and canary effect APIs are reachable when
-  `RUN_SELF_IMPROVE_SANDBOX=true`.
-
-Use these environment overrides only for controlled partial checks:
-
-```bash
-REQUIRE_SUBAGENT_WORKER=false
-ALLOW_LOG_ONLY_ALERTS=true
-RUN_SELF_IMPROVE_SANDBOX=false
-```
-
-Do not use these overrides for production go/no-go, except
-`ALLOW_LOG_ONLY_ALERTS=true` is unnecessary when
-`AGENT_OBSERVABILITY_ALERTS_ENABLED=false` is the intentional first-launch
-configuration.
+- production alert sink is either intentionally disabled for first launch or
+  configured with a real webhook.
+- high-risk Agent actions return approval signals before side effects.
+- ordinary chat isolation, OpportunityCard publish flow, Discover visibility,
+  candidate recovery, and browser QA pass with dedicated QA credentials.
 
 ## DeepSeek Latency Gate
 
@@ -499,7 +483,7 @@ Fill this after running against the real staging domain.
 | Session restore               | Not verified                | Refresh `/agent`; inspect `GET /session`   |
 | Action idempotency            | Not verified                | Repeat same action key                     |
 | Independent subagent worker   | Not verified                | Worker heartbeat in L5 dashboard           |
-| High-risk approval smoke      | Not verified                | `smoke:agent-launch-gates` with `USER_JWT` |
+| High-risk approval checks     | Not verified                | Manual/API approval evidence with a staging user |
 | Self-improve sandbox cycle    | Not verified                | Runner + eval + canary evidence            |
 | Alert delivery                | Not verified                | Real alert webhook receives test alert     |
 | Life Graph privacy gate       | Not verified                | Export/delete + log masking evidence       |
@@ -508,16 +492,17 @@ Fill this after running against the real staging domain.
 ## Current Local Repository Status
 
 - Backend `/api/health` and `/api/ready` endpoints exist.
-- Frontend production builds default to the real adapter via `PROD` / `MODE=production`; use `VITE_AGENT_ADAPTER=mock` only for intentional local QA.
+- Frontend builds always use the real adapter; runtime mock adapters are not part
+  of the repository.
 - Social Agent endpoints required for run, action, and restore exist in the
   OpenAPI contract and runtime routes.
 - Nginx has a dedicated no-buffering proxy location for Social Agent SSE.
 - Production env readiness now requires a DB queue subagent worker and real
   observability alert sink.
 - `docker-compose.prod.yml` includes a separate `subagent-worker` service.
-- `pnpm -C backend run smoke:agent-launch-gates` is the staging go/no-go script
-  for worker heartbeat, alert sink, high-risk approvals, and self-improve
-  sandbox reachability.
+- `scripts/verify-agent-release.sh` and `scripts/verify-agent-goal-production.sh`
+  are the staging go/no-go scripts for worker heartbeat, alert sink,
+  high-risk approvals, Discover supply, and Agent browser QA.
 - This document does not claim the Aliyun staging smoke has passed; it must be
   executed after the staging host, domain, TLS, env, migrations, and smoke users
   are ready.

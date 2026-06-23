@@ -18,6 +18,13 @@ import type {
   SocialAgentRequestDraft,
 } from './social-agent-chat.types';
 import {
+  SocialRequestSafety,
+  SocialRequestType,
+  SocialRequestVisibility,
+  UserSocialRequestStatus,
+  SocialRequestSource,
+} from '../social-requests/social-request.entity';
+import {
   SocialAgentToolExecutorService,
   SocialAgentToolName,
 } from './social-agent-tool-executor.service';
@@ -120,6 +127,117 @@ export class SocialAgentDraftSearchService {
       draft,
       card: output.card,
       profileUsed: output.profileUsed,
+    };
+  }
+
+  generateDeterministicDraftFromTask(
+    task: AgentTask,
+    goal: string,
+  ): {
+    draft: CreateSocialRequestDto;
+    card: Record<string, unknown>;
+    profileUsed: Record<string, unknown>;
+  } {
+    const taskContext = this.buildSafeTaskToolContext(task);
+    const taskSlots = this.isRecord(taskContext.taskSlots)
+      ? taskContext.taskSlots
+      : {};
+    const taskSlotSummary = this.isRecord(taskContext.taskSlotSummary)
+      ? taskContext.taskSlotSummary
+      : {};
+    const activity =
+      this.safeSlotValue(taskSlots, 'activity') ||
+      this.safeSummaryValue(taskSlotSummary, 'activity') ||
+      '约练';
+    const timePreference =
+      this.safeSlotValue(taskSlots, 'time_window') ||
+      this.safeSummaryValue(taskSlotSummary, 'time_window') ||
+      '时间待确认';
+    const locationPreference =
+      this.safeSlotValue(taskSlots, 'location_text') ||
+      this.safeSummaryValue(taskSlotSummary, 'location_text');
+    const geoArea =
+      this.safeSlotValue(taskSlots, 'geo_area') ||
+      this.safeSummaryValue(taskSlotSummary, 'geo_area');
+    const city =
+      this.inferCityFromPublicContext(locationPreference, geoArea, goal) ||
+      '同城';
+    const location = locationPreference || geoArea || `${city}公共场所`;
+    const intensity =
+      this.safeSlotValue(taskSlots, 'intensity') ||
+      this.safeSummaryValue(taskSlotSummary, 'intensity') ||
+      '轻松';
+    const safetyBoundary =
+      this.safeSlotValue(taskSlots, 'safety_boundary') ||
+      this.safeSummaryValue(taskSlotSummary, 'safety_boundary') ||
+      '首次见面优先公共场所，先在平台内沟通';
+    const title = this.safePublicToolText(
+      `${timePreference}${location ? ` ${location}` : ''}${activity}搭子`,
+    ).slice(0, 80);
+    const description = [
+      `想找一位${activity}搭子，${timePreference}在${location}一起${intensity}进行。`,
+      '先站内简单沟通，确认节奏和边界后再决定是否见面。',
+      safetyBoundary,
+    ]
+      .filter(Boolean)
+      .join(' ');
+    const interestTags = this.uniqueStrings([
+      activity,
+      intensity,
+      city,
+      location,
+      '轻松社交',
+      '站内沟通',
+      '公共场所',
+    ]).slice(0, 8);
+    const draft: CreateSocialRequestDto = this.enrichDraftWithTaskContext(
+      {
+        type: /跑|慢跑|夜跑|running/i.test(activity)
+          ? SocialRequestType.RunningPartner
+          : SocialRequestType.FitnessPartner,
+        title: title || `${activity}搭子`,
+        description,
+        rawText: this.safePublicToolText(goal) || description,
+        city: sanitizeCity(city),
+        radiusKm: 5,
+        interestTags,
+        activityType: activity,
+        safetyRequirement: SocialRequestSafety.LowRiskOnly,
+        agentAllowed: true,
+        requireUserConfirmation: true,
+        visibility: SocialRequestVisibility.Private,
+        status: UserSocialRequestStatus.Draft,
+        source: SocialRequestSource.CustomAgent,
+        metadata: {
+          agentTaskId: task.id,
+          source: 'social_agent_chat',
+          timePreference,
+          locationPreference: location,
+          intensity,
+          safetyBoundary,
+          taskSlotSummary,
+        },
+      },
+      taskContext,
+    );
+    return {
+      draft,
+      card: {
+        title: draft.title,
+        description: draft.description,
+        timePreference,
+        locationPreference: location,
+        activityType: activity,
+        interestTags,
+        safetyBoundary,
+        status: 'draft',
+      },
+      profileUsed: {
+        city,
+        activityType: activity,
+        timePreference,
+        locationPreference: location,
+      },
     };
   }
 
@@ -232,7 +350,9 @@ export class SocialAgentDraftSearchService {
       autoPublished: Boolean(publicIntentId),
       synced: output.synced === true,
       publicIntentId,
-      discoverHref: publicIntentId ? `/public-intent/${publicIntentId}` : null,
+      discoverHref: publicIntentId
+        ? `/discover?publicIntentId=${encodeURIComponent(publicIntentId)}`
+        : null,
       publishPolicy: 'auto_after_first_public_authorization',
       blockedReason: null,
     };
@@ -336,6 +456,18 @@ export class SocialAgentDraftSearchService {
     return Number.isFinite(num) && num > 0 ? num : null;
   }
 
+  private uniqueStrings(values: Array<string | null | undefined>): string[] {
+    const seen = new Set<string>();
+    const out: string[] = [];
+    for (const value of values) {
+      const text = cleanDisplayText(value, '').trim();
+      if (!text || seen.has(text)) continue;
+      seen.add(text);
+      out.push(text);
+    }
+    return out;
+  }
+
   private buildSafeTaskToolContext(task: AgentTask): Record<string, unknown> {
     const summary = summarizeSocialAgentTaskMemoryForLlm(task);
     const taskSlots = this.safeTaskSlots(summary.taskSlots);
@@ -432,10 +564,7 @@ export class SocialAgentDraftSearchService {
     if (intensity && !cleanDisplayText(nextMetadata.intensity, '')) {
       nextMetadata.intensity = intensity;
     }
-    if (
-      safetyBoundary &&
-      !cleanDisplayText(nextMetadata.safetyBoundary, '')
-    ) {
+    if (safetyBoundary && !cleanDisplayText(nextMetadata.safetyBoundary, '')) {
       nextMetadata.safetyBoundary = safetyBoundary;
     }
     if (
@@ -514,10 +643,7 @@ export class SocialAgentDraftSearchService {
     return this.isRecord(slot) ? cleanDisplayText(slot.value, '') : '';
   }
 
-  private safeSlotValue(
-    slots: Record<string, unknown>,
-    key: string,
-  ): string {
+  private safeSlotValue(slots: Record<string, unknown>, key: string): string {
     return this.safePublicToolText(
       this.isRecord(slots[key]) ? slots[key].value : '',
     );

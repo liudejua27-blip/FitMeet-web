@@ -11,6 +11,7 @@ import {
   SocialAgentToolName,
 } from './social-agent-tool-executor.service';
 import { ActivityProofPolicy } from '../activities/entities/activity-template.entity';
+import { SocialRequestType } from '../social-requests/social-request.entity';
 import { ConfirmationGuardService } from './confirmation-guard.service';
 import { SceneRiskPolicyService } from './scene-risk-policy.service';
 import { SocialAgentTargetResolverService } from './social-agent-target-resolver.service';
@@ -23,7 +24,7 @@ import { SocialAgentToolJsonModelService } from './social-agent-tool-json-model.
 import { SocialAgentPaymentIntentToolService } from './social-agent-payment-intent-tool.service';
 import { SocialAgentMessageToolService } from './social-agent-message-tool.service';
 import { SocialAgentActivityToolService } from './social-agent-activity-tool.service';
-import { SocialAgentInboxToolService } from './social-agent-inbox-tool.service';
+import { SocialAgentMessageEventToolService } from './social-agent-message-event-tool.service';
 import { SocialAgentConversationToolService } from './social-agent-conversation-tool.service';
 import { SocialAgentDecisionToolService } from './social-agent-decision-tool.service';
 import { SocialAgentTaskMemoryService } from './social-agent-task-memory.service';
@@ -153,6 +154,7 @@ function makeService(options: { agentLoop?: unknown } = {}) {
   const socialRequests = {
     aiDraft: jest.fn(),
     create: jest.fn(),
+    update: jest.fn(),
     createFromNaturalLanguage: jest.fn(),
     syncPublicIntentById: jest.fn(),
   };
@@ -168,12 +170,12 @@ function makeService(options: { agentLoop?: unknown } = {}) {
   const messages = {
     startConversation: jest.fn(),
     sendMessage: jest.fn(),
-    createAgentInboxEvent: jest.fn(),
-    getAgentInboxMessages: jest.fn(),
+    createAgentMessageEvent: jest.fn(),
+    getAgentConversationMessages: jest.fn(),
     getTaskConversationMessages: jest.fn(),
-    getAgentInboxConversations: jest.fn(),
-    getAgentInboxEvents: jest.fn(),
-    getAgentInboxEventsForOwner: jest.fn(),
+    getAgentMessageConversations: jest.fn(),
+    getAgentMessageEvents: jest.fn(),
+    getAgentMessageEventsForOwner: jest.fn(),
     getConversations: jest.fn(),
     sendAgentReply: jest.fn(),
   };
@@ -277,7 +279,7 @@ function makeService(options: { agentLoop?: unknown } = {}) {
     toolInput,
     taskMemory,
   );
-  const inboxTools = new SocialAgentInboxToolService(
+  const messageEventTools = new SocialAgentMessageEventToolService(
     messages as never,
     toolInput,
   );
@@ -323,7 +325,7 @@ function makeService(options: { agentLoop?: unknown } = {}) {
     paymentIntentTools,
     messageTools,
     activityTools,
-    inboxTools,
+    messageEventTools,
     conversationTools,
     decisionTools,
     taskMemory,
@@ -386,9 +388,9 @@ describe('SocialAgentToolExecutorService', () => {
     try {
       const { service } = makeService();
 
-      expect(readToolTimeoutMs(service, SocialAgentToolName.SearchMatches)).toBe(
-        25_000,
-      );
+      expect(
+        readToolTimeoutMs(service, SocialAgentToolName.SearchMatches),
+      ).toBe(25_000);
       expect(readToolTimeoutMs(service, SocialAgentToolName.SendMessage)).toBe(
         20_000,
       );
@@ -416,9 +418,9 @@ describe('SocialAgentToolExecutorService', () => {
     try {
       const { service } = makeService();
 
-      expect(readToolTimeoutMs(service, SocialAgentToolName.SearchMatches)).toBe(
-        30_000,
-      );
+      expect(
+        readToolTimeoutMs(service, SocialAgentToolName.SearchMatches),
+      ).toBe(30_000);
       expect(readToolTimeoutMs(service, SocialAgentToolName.SendMessage)).toBe(
         30_000,
       );
@@ -494,7 +496,7 @@ describe('SocialAgentToolExecutorService', () => {
     expect(taskRepo.findOne).toHaveBeenCalledWith({
       where: { id: 100, ownerUserId: 99 },
     });
-    expect(messages.getAgentInboxMessages).not.toHaveBeenCalled();
+    expect(messages.getAgentConversationMessages).not.toHaveBeenCalled();
     expect(messages.sendAgentReply).not.toHaveBeenCalled();
     expect(l5Runtime.transitionMeetLoop).not.toHaveBeenCalled();
   });
@@ -538,7 +540,7 @@ describe('SocialAgentToolExecutorService', () => {
           reason: 'run-next must pass through the unified AgentLoop.',
           tools: [
             expect.objectContaining({
-              agent: 'Meet Loop Agent',
+              agent: 'Match Agent',
               toolName: 'run_next_execute',
             }),
           ],
@@ -547,7 +549,7 @@ describe('SocialAgentToolExecutorService', () => {
         timeoutMs: 30_000,
       }),
     );
-    expect(messages.getAgentInboxMessages).not.toHaveBeenCalled();
+    expect(messages.getAgentConversationMessages).not.toHaveBeenCalled();
     expect(messages.getTaskConversationMessages).not.toHaveBeenCalled();
     expect(messages.sendAgentReply).not.toHaveBeenCalled();
     expect(messages.sendMessage).not.toHaveBeenCalled();
@@ -683,7 +685,7 @@ describe('SocialAgentToolExecutorService', () => {
         }),
       }),
     );
-    expect(messages.createAgentInboxEvent).toHaveBeenCalledWith(
+    expect(messages.createAgentMessageEvent).toHaveBeenCalledWith(
       expect.objectContaining({
         agentConnectionId: 7,
         ownerUserId: 1,
@@ -1034,7 +1036,11 @@ describe('SocialAgentToolExecutorService', () => {
           toolName: 'get_conversations',
           status: 'planned',
         },
-        { id: 'inbox', toolName: 'get_agent_inbox', status: 'planned' },
+        {
+          id: 'message center',
+          toolName: 'get_agent_message_events',
+          status: 'planned',
+        },
         {
           id: 'approvals',
           toolName: 'get_pending_approvals',
@@ -1073,10 +1079,10 @@ describe('SocialAgentToolExecutorService', () => {
       debug: { finalCandidates: [{ activityId: 9 }] },
     });
     messages.getConversations.mockResolvedValue([{ conversationId: 'conv_1' }]);
-    messages.getAgentInboxConversations.mockResolvedValue([
+    messages.getAgentMessageConversations.mockResolvedValue([
       { conversationId: 'agent_conv_1' },
     ]);
-    messages.getAgentInboxEvents.mockResolvedValue([{ id: 'event_1' }]);
+    messages.getAgentMessageEvents.mockResolvedValue([{ id: 'event_1' }]);
     approvals.getPending.mockResolvedValue([{ id: 11 }]);
     longTermMemory.readSnapshot.mockResolvedValue({ userId: 1, taskCount: 2 });
     candidatePool.debugCandidatePool.mockResolvedValue({
@@ -1094,7 +1100,7 @@ describe('SocialAgentToolExecutorService', () => {
       SocialAgentToolName.SearchPublicIntents,
       SocialAgentToolName.SearchActivities,
       SocialAgentToolName.GetConversations,
-      SocialAgentToolName.GetAgentInbox,
+      SocialAgentToolName.GetAgentMessageEvents,
       SocialAgentToolName.GetPendingApprovals,
       SocialAgentToolName.ReadLongTermMemory,
       SocialAgentToolName.SummarizeCurrentTask,
@@ -1307,7 +1313,7 @@ describe('SocialAgentToolExecutorService', () => {
       },
     });
     taskRepo.findOne.mockResolvedValue(task);
-    messages.getAgentInboxMessages.mockResolvedValue([
+    messages.getAgentConversationMessages.mockResolvedValue([
       {
         id: 'msg_1',
         conversationId: 'conv_1',
@@ -1368,10 +1374,14 @@ describe('SocialAgentToolExecutorService', () => {
         expect.objectContaining({ schemaAction: 'activity.confirm_create' }),
       ]),
     );
-    expect(messages.getAgentInboxMessages).toHaveBeenCalledWith('conv_1', 7, {
-      limit: 50,
-    });
-    expect(messages.createAgentInboxEvent).toHaveBeenCalledWith(
+    expect(messages.getAgentConversationMessages).toHaveBeenCalledWith(
+      'conv_1',
+      7,
+      {
+        limit: 50,
+      },
+    );
+    expect(messages.createAgentMessageEvent).toHaveBeenCalledWith(
       expect.objectContaining({
         eventType: 'social_agent.message.received',
         conversationId: 'conv_1',
@@ -1379,18 +1389,18 @@ describe('SocialAgentToolExecutorService', () => {
         fromUserId: 2,
       }),
     );
-    expect(messages.createAgentInboxEvent).toHaveBeenCalledWith(
+    expect(messages.createAgentMessageEvent).toHaveBeenCalledWith(
       expect.objectContaining({ eventType: 'social_agent.reply.summarized' }),
     );
-    expect(messages.createAgentInboxEvent).toHaveBeenCalledWith(
+    expect(messages.createAgentMessageEvent).toHaveBeenCalledWith(
       expect.objectContaining({
         eventType: 'social_agent.next_action.decided',
       }),
     );
-    const nextActionInboxEvent = messages.createAgentInboxEvent.mock.calls
+    const nextActionMessageEvent = messages.createAgentMessageEvent.mock.calls
       .map((call) => call[0] as Record<string, unknown>)
       .find((event) => event.eventType === 'social_agent.next_action.decided');
-    expect(nextActionInboxEvent).toMatchObject({
+    expect(nextActionMessageEvent).toMatchObject({
       conversationId: 'conv_1',
       messageId: 'msg_2',
       fromUserId: 2,
@@ -1407,7 +1417,7 @@ describe('SocialAgentToolExecutorService', () => {
       }),
     });
     const proposal = (
-      nextActionInboxEvent?.metadata as Record<string, unknown> | undefined
+      nextActionMessageEvent?.metadata as Record<string, unknown> | undefined
     )?.lifeGraphWritebackProposal;
     expect(JSON.stringify(proposal)).not.toContain(
       'Sure, let us confirm the route and meeting point first.',
@@ -1484,7 +1494,7 @@ describe('SocialAgentToolExecutorService', () => {
 
     const result = await service.runNext(100, 1);
 
-    expect(messages.getAgentInboxMessages).not.toHaveBeenCalled();
+    expect(messages.getAgentConversationMessages).not.toHaveBeenCalled();
     expect(messages.getTaskConversationMessages).toHaveBeenCalledWith(100, {
       conversationId: undefined,
       limit: 50,
@@ -1534,7 +1544,7 @@ describe('SocialAgentToolExecutorService', () => {
       },
     });
     taskRepo.findOne.mockResolvedValue(task);
-    messages.getAgentInboxMessages.mockResolvedValue([
+    messages.getAgentConversationMessages.mockResolvedValue([
       {
         id: 'msg_1',
         conversationId: 'conv_1',
@@ -1679,7 +1689,7 @@ describe('SocialAgentToolExecutorService', () => {
         }),
       }),
     );
-    expect(messages.createAgentInboxEvent).toHaveBeenCalledWith(
+    expect(messages.createAgentMessageEvent).toHaveBeenCalledWith(
       expect.objectContaining({
         eventType: 'agent.action.succeeded',
         metadata: expect.objectContaining({
@@ -2604,7 +2614,7 @@ describe('SocialAgentToolExecutorService', () => {
         }),
       }),
     );
-    expect(messages.createAgentInboxEvent).toHaveBeenCalledWith(
+    expect(messages.createAgentMessageEvent).toHaveBeenCalledWith(
       expect.objectContaining({
         eventType: 'agent.action.succeeded',
         metadata: expect.objectContaining({
@@ -2697,7 +2707,7 @@ describe('SocialAgentToolExecutorService', () => {
         }),
       }),
     );
-    expect(messages.createAgentInboxEvent).toHaveBeenCalledWith(
+    expect(messages.createAgentMessageEvent).toHaveBeenCalledWith(
       expect.objectContaining({
         eventType: 'agent.action.succeeded',
         metadata: expect.objectContaining({
@@ -2944,6 +2954,66 @@ describe('SocialAgentToolExecutorService', () => {
       }),
     );
     expect(approvals.create).not.toHaveBeenCalled();
+  });
+
+  it('publishes an inline-confirmed Discover card without creating another approval', async () => {
+    const { service, taskRepo, connectionRepo, socialRequests, approvals } =
+      makeService();
+    const task = makeTask({
+      permissionMode: AgentTaskPermissionMode.Confirm,
+      agentConnectionId: 7,
+    });
+    taskRepo.findOne.mockResolvedValue(task);
+    connectionRepo.findOne.mockResolvedValue({ id: 7, userId: 1 });
+    socialRequests.update.mockResolvedValue({
+      id: 301,
+      status: 'matching',
+    });
+    socialRequests.syncPublicIntentById.mockResolvedValue({
+      id: 'social_request_301',
+      status: 'active',
+    });
+
+    const call = await service.executeToolAction(
+      100,
+      SocialAgentToolName.CreateSocialRequest,
+      {
+        mode: 'publish',
+        publish: true,
+        syncPublicIntent: true,
+        socialRequestId: 301,
+        type: SocialRequestType.RunningPartner,
+        title: '今天晚上青岛大学跑步搭子',
+        city: '青岛',
+        activityType: '跑步',
+        confirmedPublish: true,
+        approved: true,
+        confirmed: true,
+        metadata: {
+          publishSource: 'agent_card_action',
+        },
+      },
+      1,
+    );
+
+    expect(call.status).toBe('succeeded');
+    expect(call.output).toMatchObject({
+      socialRequestId: 301,
+      publicIntentId: 'social_request_301',
+      synced: true,
+    });
+    expect(approvals.create).not.toHaveBeenCalled();
+    expect(socialRequests.update).toHaveBeenCalledWith(
+      301,
+      1,
+      expect.objectContaining({
+        type: SocialRequestType.RunningPartner,
+        mode: 'publish',
+        syncPublicIntent: true,
+      }),
+      { id: 7, userId: 1 },
+    );
+    expect(socialRequests.syncPublicIntentById).toHaveBeenCalledWith(301, 1);
   });
 
   it('does not fail a completed social action when its audit log is unavailable', async () => {

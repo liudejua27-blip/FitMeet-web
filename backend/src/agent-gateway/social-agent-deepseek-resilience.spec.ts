@@ -42,15 +42,15 @@ describe('social-agent-deepseek-resilience', () => {
   });
 
   it('classifies transient DeepSeek failures without retrying permanent failures', () => {
-    expect(
-      isRetryableSocialAgentDeepSeekFailure('DeepSeek HTTP 503'),
-    ).toBe(true);
-    expect(
-      isRetryableSocialAgentDeepSeekFailure('DeepSeek HTTP 429'),
-    ).toBe(true);
-    expect(
-      isRetryableSocialAgentDeepSeekFailure('deepseek_timeout'),
-    ).toBe(false);
+    expect(isRetryableSocialAgentDeepSeekFailure('DeepSeek HTTP 503')).toBe(
+      true,
+    );
+    expect(isRetryableSocialAgentDeepSeekFailure('DeepSeek HTTP 429')).toBe(
+      true,
+    );
+    expect(isRetryableSocialAgentDeepSeekFailure('deepseek_timeout')).toBe(
+      false,
+    );
     expect(
       isRetryableSocialAgentDeepSeekFailure('deepseek_timeout', {
         includeTimeoutFailures: true,
@@ -61,9 +61,9 @@ describe('social-agent-deepseek-resilience', () => {
         includeJsonFormatErrors: true,
       }),
     ).toBe(true);
-    expect(
-      isRetryableSocialAgentDeepSeekFailure('DeepSeek HTTP 401'),
-    ).toBe(false);
+    expect(isRetryableSocialAgentDeepSeekFailure('DeepSeek HTTP 401')).toBe(
+      false,
+    );
     expect(
       isRetryableSocialAgentDeepSeekFailure('Unexpected token < in JSON'),
     ).toBe(false);
@@ -74,11 +74,13 @@ describe('social-agent-deepseek-resilience', () => {
     error.name = 'AbortError';
     expect(isSocialAgentAbortError(error)).toBe(true);
     expect(socialAgentDeepSeekFailureReason(error)).toBe('deepseek_timeout');
-    expect(socialAgentDeepSeekFailureReason(new Error('deepseek_timeout'))).toBe(
-      'deepseek_timeout',
-    );
     expect(
-      socialAgentDeepSeekFailureReason(new Error('DeepSeek timeout after 18000ms')),
+      socialAgentDeepSeekFailureReason(new Error('deepseek_timeout')),
+    ).toBe('deepseek_timeout');
+    expect(
+      socialAgentDeepSeekFailureReason(
+        new Error('DeepSeek timeout after 18000ms'),
+      ),
     ).toBe('deepseek_timeout');
     expect(socialAgentDeepSeekFailureReason(new Error('network down'))).toBe(
       'network down',

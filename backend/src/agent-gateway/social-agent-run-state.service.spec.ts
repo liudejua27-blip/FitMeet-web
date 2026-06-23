@@ -62,7 +62,7 @@ function makeHarness(task = makeTask()) {
     }),
   };
   const messages = {
-    createAgentInboxEvent: jest.fn().mockResolvedValue(undefined),
+    createAgentMessageEvent: jest.fn().mockResolvedValue(undefined),
   };
   const service = new SocialAgentRunStateService(
     taskRepo as never,
@@ -203,7 +203,7 @@ describe('SocialAgentRunStateService', () => {
     expect(taskRepo.save).toHaveBeenCalledWith(task);
   });
 
-  it('marks failed runs, writes a system event, and notifies the agent inbox', async () => {
+  it('marks failed runs, writes a system event, and notifies the agent message event', async () => {
     const { messages, savedEvents, service, task, taskRepo } = makeHarness();
 
     await service.markRunFailed(
@@ -233,7 +233,7 @@ describe('SocialAgentRunStateService', () => {
         taskId: 101,
       }),
     ]);
-    expect(messages.createAgentInboxEvent).toHaveBeenCalledWith(
+    expect(messages.createAgentMessageEvent).toHaveBeenCalledWith(
       expect.objectContaining({
         agentConnectionId: 11,
         eventType: 'social_agent.replan.failed',
@@ -243,7 +243,7 @@ describe('SocialAgentRunStateService', () => {
     expect(taskRepo.save).toHaveBeenCalledTimes(2);
   });
 
-  it('completes replan runs, writes a system event, and notifies the agent inbox', async () => {
+  it('completes replan runs, writes a system event, and notifies the agent message event', async () => {
     const { messages, savedEvents, service, task, taskRepo } = makeHarness();
     const replan = {
       replanAttempt: 2,
@@ -297,7 +297,7 @@ describe('SocialAgentRunStateService', () => {
         },
       }),
     ]);
-    expect(messages.createAgentInboxEvent).toHaveBeenCalledWith(
+    expect(messages.createAgentMessageEvent).toHaveBeenCalledWith(
       expect.objectContaining({
         agentConnectionId: 11,
         eventType: 'social_agent.replan.completed',

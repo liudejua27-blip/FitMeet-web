@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
 import {
-  FITMEET_ALPHA_NEXT_AGENT_VALUES,
+  FITMEET_ALPHA_ACCEPTED_NEXT_AGENT_VALUES,
   type FitMeetAlphaNextAgent,
 } from './fitmeet-alpha-agent-topology';
 
@@ -47,7 +47,9 @@ export const FitMeetAlphaStructuredIntentSchema = z.object({
   clarifyingQuestion: z.string().default(''),
   requiresSearch: z.boolean().default(true),
   requiresSafetyBoundary: z.boolean().default(true),
-  nextAgent: z.enum(FITMEET_ALPHA_NEXT_AGENT_VALUES).default('social_match'),
+  nextAgent: z
+    .enum(FITMEET_ALPHA_ACCEPTED_NEXT_AGENT_VALUES)
+    .default('match_agent'),
   requiresConfirmation: z.boolean().default(true),
 });
 
@@ -109,23 +111,23 @@ function parseFitMeetAlphaStructuredIntent(
 function nextAgentForStructuredIntent(
   intent: FitMeetAlphaStructuredIntent,
 ): FitMeetAlphaNextAgent {
-  if (intent.intent === 'fitness_math') return 'math';
-  if (intent.intent === 'blocked') return 'answer';
+  if (intent.intent === 'fitness_math') return 'agent_brain';
+  if (intent.intent === 'blocked') return 'main_agent';
   if (
     intent.intent === 'complete_life_graph' ||
     intent.intent === 'analyze_life_rhythm' ||
     intent.intent === 'view_profile_changes'
   ) {
-    return 'life_graph';
+    return 'life_graph_agent';
   }
   if (
     intent.intent === 'general_social_need' &&
     intent.requiresSearch === false &&
     intent.readiness === 'clarify'
   ) {
-    return 'answer';
+    return 'main_agent';
   }
-  return 'social_match';
+  return 'match_agent';
 }
 
 function sideEffectFlagsForStructuredIntent(

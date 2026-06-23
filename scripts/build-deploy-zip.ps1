@@ -82,10 +82,10 @@ Invoke-Step "Install frontend dependencies" {
   }
 }
 
-Invoke-Step "Audit Agent chat release files" {
+Invoke-Step "Lint frontend release surface" {
   Push-Location (Join-Path $root "frontend")
   try {
-    pnpm run check:agent-chat-release
+    pnpm run lint
   } finally {
     Pop-Location
   }
@@ -154,8 +154,6 @@ Assert-RequiredPath "backend/src/agent-gateway/subagent-worker-queue.service.spe
 Assert-RequiredPath "backend/src/agent-gateway/social-agent-tool-executor.service.spec.ts"
 Assert-RequiredPath "backend/src/agent-gateway/social-agent-tool-json-model.service.spec.ts"
 Assert-RequiredPath "backend/src/agent-gateway/social-agent-tool-model.spec.ts"
-Assert-RequiredPath "frontend/scripts/audit-agent-chat-release.mjs"
-Assert-RequiredPath "frontend/scripts/qa-agent-chat-shell.mjs"
 Assert-RequiredPath "frontend/scripts/qa-agent-chat-production.mjs"
 Assert-RequiredPath "frontend/src/components/agent-workspace/FitMeetAssistantUI.tsx"
 Assert-RequiredPath "frontend/src/components/agent-workspace/FitMeetAssistantUI.types.ts"
@@ -219,10 +217,9 @@ Invoke-Step "Install backend dependencies" {
 
 if ($runAgentReleaseVerify -eq "true") {
   Invoke-Step "Run Agent release verification" {
-    Push-Location (Join-Path $root "backend")
+      Push-Location (Join-Path $root "backend")
     try {
       pnpm exec tsc --noEmit
-      pnpm run seed:agent-smoke:dry-run
         pnpm exec jest `
         src/agent-gateway/agent-approval.service.spec.ts `
         src/agent-gateway/agent-approval-dispatcher.service.spec.ts `
@@ -281,30 +278,14 @@ Invoke-Step "Build backend" {
   }
 }
 
-Invoke-Step "Dry-run production Agent smoke seed" {
-  Push-Location (Join-Path $root "backend")
-  try {
-    pnpm run seed:agent-smoke:prod:dry-run
-  } finally {
-    Pop-Location
-  }
-}
-
 Assert-RequiredPath "backend/src"
 Assert-RequiredPath "backend/dist/main.js"
-Assert-RequiredPath "backend/dist/scripts/prepare-agent-smoke-seed.js"
-Assert-RequiredPath "backend/dist/scripts/smoke-agent-opportunity-journey.js"
-Assert-RequiredPath "backend/dist/scripts/smoke-agent-sse-abort.js"
 Assert-RequiredPath "backend/dist/scripts/check-production-tables.js"
 Assert-RequiredPath "backend/dist/agent-gateway/subagent-worker-healthcheck.js"
 Assert-RequiredPath "backend/Dockerfile.prod"
-Assert-RequiredPath "backend/src/scripts/prepare-agent-smoke-seed.ts"
-Assert-RequiredPath "backend/src/scripts/smoke-agent-opportunity-journey.ts"
-Assert-RequiredPath "backend/src/scripts/smoke-agent-sse-abort.ts"
 Assert-RequiredPath "nginx/nginx.conf"
 Assert-RequiredPath "docker-compose.prod.yml"
 Assert-RequiredPath "deploy/env.production.ecs.example"
-Assert-RequiredPath "deploy/agent-smoke.remote.env.example"
 Assert-RequiredPath "scripts/deploy-production.sh"
 Assert-RequiredPath "scripts/lib/toolchain.sh"
 Assert-RequiredPath "scripts/ecs-install-release.sh"
@@ -318,9 +299,6 @@ Assert-RequiredPath "scripts/verify-agent-release.sh"
 Assert-RequiredPath "scripts/agent-release-matrix.sh"
 Assert-RequiredPath "scripts/agent-release-worktree-audit.sh"
 Assert-RequiredPath "scripts/stage-agent-release-bucket.sh"
-Assert-RequiredPath "scripts/test-agent-release-worktree-audit.sh"
-Assert-RequiredPath "scripts/agent-remote-smoke-preflight.sh"
-Assert-RequiredPath "scripts/agent-remote-smoke-evidence.sh"
 Assert-RequiredPath "docs/agent-release-e2e-matrix.md"
 Assert-RequiredPath "docs/social-codex-runtime.md"
 
@@ -349,65 +327,17 @@ Assert-RequiredPath "backend/src/agent-gateway/social-codex-runtime-model.spec.t
 Assert-RequiredPath "backend/src/agent-gateway/social-codex-trace-eval.service.ts"
 Assert-RequiredPath "backend/src/agent-gateway/social-codex-trace-eval.service.spec.ts"
 
-Assert-FileContains "docs/agent-release-e2e-matrix.md" @(
-  "FitMeet Agent Release E2E Matrix",
-  "scripts/agent-release-matrix.sh",
-  "scripts/agent-release-worktree-audit.sh",
-  "Remote smoke safety preflight",
-  "Remote smoke env template",
-  "deploy/agent-smoke.remote.env.example",
-  "scripts/agent-remote-smoke-preflight.sh --readiness",
-  "Remote smoke evidence capture",
-  "scripts/agent-remote-smoke-evidence.sh --all --prepare-agent-smoke-seed",
-  "Production browser QA",
-  "pnpm --dir frontend run qa:agent-chat:production",
-  "Final Agent cutover status",
-  "REQUIRE_AGENT_REMOTE_SMOKE_EVIDENCE=true",
-  "Opportunity readiness smoke",
-  "Full opportunity smoke",
-  "Opportunity smoke report",
-  "Ordinary chat does not trigger social UI",
-  "Life Graph remains proposal-based"
+Assert-FileContains "frontend/src/routes/AppRoutes.tsx" @(
+  'path="/public-intent/:id"',
+  'path="/messages"'
 )
-Assert-FileContains "docs/agent-skills/README.md" @(
-  "AGENT_SMOKE_REPORT_FILE"
+Assert-FileContains "frontend/src/test/toolCardActions.test.ts" @(
+  "discoverHref",
+  "/public-intent/intent_302"
 )
 Assert-FileContains "scripts/agent-release-matrix.sh" @(
-  "--opportunity-readiness-smoke",
-  "--opportunity-full-smoke",
   "scripts/agent-release-worktree-audit.sh",
   "scripts/verify-agent-release.sh"
-)
-Assert-FileContains "scripts/agent-release-worktree-audit.sh" @(
-  "frontend/src/dev/agent/mockAgentAdapter.ts",
-  "dev-only Agent mock fixture"
-)
-Assert-FileContains "scripts/agent-remote-smoke-preflight.sh" @(
-  "--readiness",
-  "--full",
-  "--sse-abort",
-  "AGENT_SMOKE_ALLOW_REMOTE",
-  "AGENT_SMOKE_ALLOW_MUTATIONS",
-  "AGENT_SMOKE_ALLOW_JWT_MUTATIONS",
-  "AGENT_SMOKE_ALLOW_NON_SMOKE_USER",
-  "looks_like_smoke_account",
-  "looks_like_placeholder_secret",
-  "AGENT_SMOKE_PASSWORD still looks like a placeholder",
-  "AGENT_SMOKE_STOP_AFTER_OPPORTUNITIES=true"
-)
-Assert-FileContains "scripts/agent-remote-smoke-evidence.sh" @(
-  "FitMeet Agent Remote Smoke Evidence",
-  "--all",
-  "--20-turn-memory",
-  "--empty-candidate",
-  "run_post_deploy_smoke 20-turn-memory",
-  "run_post_deploy_smoke empty-candidate",
-  "scripts/ecs-post-deploy-smoke.sh",
-  "fitmeet.agent-opportunity-smoke-report.v1",
-  "prepare_agent_smoke_seed_once",
-  "export AGENT_SMOKE_ALLOW_MUTATIONS=true",
-  "redact()",
-  "[redacted-email]"
 )
 Assert-FileContains "frontend/scripts/qa-agent-chat-production.mjs" @(
   "FitMeet Agent Production Browser QA",
@@ -430,96 +360,9 @@ Assert-FileContains "frontend/src/test/toolProcessModel.test.ts" @(
   "displayMode: 'covering_status'"
 )
 Assert-FileContains "scripts/launch-status.sh" @(
-  "VALIDATE_AGENT_REMOTE_SMOKE_EVIDENCE_ONLY",
-  "--validate-agent-remote-smoke-evidence-only",
-  "secret_assignment_pattern",
-  "redacted_assignment_pattern",
-  "redacted_bearer_pattern",
-  "unredacted bearer token",
-  "unredacted email address",
-  "Social Codex trace eval passed",
-  "structured opportunity smoke reports",
-  "ECS post-deploy Agent 20-turn-memory smoke",
-  "ECS post-deploy Agent empty-candidate smoke",
-  "readiness, 20-turn memory, empty-candidate, and full opportunity smoke"
-)
-Assert-FileContains "deploy/agent-smoke.remote.env.example" @(
-  "FitMeet Agent remote smoke environment template",
-  "Never use a real user account for mutating Agent smoke",
-  "AGENT_SMOKE_ALLOW_REMOTE=true",
-  "AGENT_SMOKE_ALLOW_MUTATIONS=true",
-  "AGENT_SMOKE_STOP_AFTER_OPPORTUNITIES=true",
-  "AGENT_SMOKE_RUN_20_TURN_MEMORY=false",
-  "AGENT_SMOKE_REPORT_STDOUT=true"
-)
-Assert-FileContains "docs/deployment-aliyun-ecs.md" @(
-  "preflight rejects",
-  "replace-with-dedicated-smoke-password"
-)
-Assert-FileContains "backend/src/scripts/smoke-agent-opportunity-journey.ts" @(
-  "AGENT_SMOKE_ALLOW_MUTATIONS",
-  "AGENT_SMOKE_CITY",
-  "AGENT_SMOKE_ACTIVITY",
-  "AGENT_SMOKE_TIME",
-  "AGENT_SMOKE_INTENSITY",
-  "assertMutationSmokeSafety",
-  "looksLikeSmokeAccount",
-  "AGENT_SMOKE_STOP_AFTER_OPPORTUNITIES",
-  "readiness-only smoke stopped before high-risk card actions",
-  "search-critical context without over-asking stranger/public policy",
-  "assertNoPendingApproval('clarified search', clarified)",
-  "candidate preference correction preserves time/place/activity",
-  "AGENT_SMOKE_SKIP_CORRECTION_MEMORY",
-  "AGENT_SMOKE_RUN_20_TURN_MEMORY",
-  "AGENT_SMOKE_REPORT_STDOUT",
-  "20-turn social task memory preserves task continuity"
+  "Social Codex trace eval passed"
 )
 Assert-FileContains "scripts/verify-agent-release.sh" @(
-  "RUN_AGENT_20_TURN_MEMORY_SMOKE=true"
-)
-Assert-FileContains "backend/src/scripts/smoke-agent-sse-abort.ts" @(
-  "AGENT_SMOKE_ALLOW_NON_SMOKE_USER",
-  "AGENT_SMOKE_ALLOW_JWT_MUTATIONS",
-  "assertRemoteSmokeAccountSafety",
-  "looksLikeSmokeAccount"
-)
-Assert-FileContains "scripts/ecs-post-deploy-smoke.sh" @(
-  "--run-agent-opportunity-readiness-smoke",
-  "--run-agent-20-turn-memory-smoke",
-  "--run-agent-empty-candidate-smoke",
-  "RUN_AGENT_OPPORTUNITY_SMOKE=readiness",
-  "AGENT_SMOKE_RUN_20_TURN_MEMORY=true",
-  "AGENT_SMOKE_RUN_EMPTY_CANDIDATE_FALLBACK=true",
-  "AGENT_SMOKE_REPORT_STDOUT",
-  "./scripts/ecs-backend-pnpm.sh -- seed:agent-smoke:prod",
-  "./scripts/ecs-backend-pnpm.sh -- smoke:agent-opportunity:prod",
-  "./scripts/ecs-backend-pnpm.sh -- smoke:agent-sse-abort:prod",
-  "run_agent_remote_preflight",
-  "scripts/agent-remote-smoke-preflight.sh",
-  "AGENT_SMOKE_STOP_AFTER_OPPORTUNITIES=",
-  "Running real Agent opportunity readiness smoke",
-  "AGENT_SMOKE_ALLOW_MUTATIONS=true",
-  'AGENT_SMOKE_ACTIVITY="${AGENT_SMOKE_ACTIVITY:-咖啡轻聊天}"',
-  'AGENT_SMOKE_TIME="${AGENT_SMOKE_TIME:-周末下午}"',
-  'AGENT_SMOKE_INTENSITY="${AGENT_SMOKE_INTENSITY:-轻松}"'
-)
-Assert-FileContains "scripts/ecs-backend-pnpm.sh" @(
-  "AGENT_SMOKE_RUN_20_TURN_MEMORY",
-  "AGENT_SMOKE_RUN_EMPTY_CANDIDATE_FALLBACK",
-  "AGENT_SMOKE_REPORT_STDOUT"
-)
-Assert-FileContains "scripts/verify-agent-release.sh" @(
-  "AGENT_SMOKE_ALLOW_MUTATIONS",
-  "dedicated smoke account",
-  "agent_smoke_is_remote",
-  "RUN_AGENT_OPPORTUNITY_SMOKE accepts",
-  "AGENT_SMOKE_STOP_AFTER_OPPORTUNITIES=true",
-  "RUN_AGENT_20_TURN_MEMORY_SMOKE=true",
-  "--api-20-turn-memory",
-  "RUN_AGENT_EMPTY_CANDIDATE_SMOKE=true",
-  "--api-empty-candidate",
-  "run_agent_smoke_preflight",
-  "scripts/agent-remote-smoke-preflight.sh",
   "social-agent-context-hydrator.service.spec.ts",
   "social-agent-event-store.service.spec.ts",
   "social-agent-event-v2.service.spec.ts",
@@ -542,7 +385,6 @@ Assert-FileContains "scripts/verify-agent-release.sh" @(
   "fitmeet-subagent-worker.service.spec.ts",
   "subagent-worker-queue.service.spec.ts",
   "social-agent-tool-execution-policy.service.spec.ts",
-  "fitmeet-agent-tool-registry.controller.spec.ts",
   "social-agent-tool-executor.service.spec.ts",
   "social-agent-tool-json-model.service.spec.ts",
   "social-agent-tool-model.spec.ts",
@@ -571,7 +413,6 @@ Invoke-Step "Create deploy zip" {
       "--exclude=*.log",
       "--exclude=.env*",
       "--exclude=*/.env*",
-      "--exclude=deploy/agent-smoke.remote.env",
       "--exclude=*.zip",
       "--exclude=fitmeet-deploy.zip",
       "--exclude=fitmeet.zip",
@@ -614,10 +455,10 @@ Invoke-Step "Create deploy zip" {
       "--exclude=scripts/fix-meetmodal.mjs",
       "--exclude=scripts/fix-postmodal.mjs",
       "--exclude=nginx/ssl",
-      "--exclude=SOCIAL_SKILLS_OPENCLAW_SPEC.md",
-      "--exclude=integrations/openclaw/social-skills",
-      "--exclude=integrations/openclaw/fitmeet-social-skills.ts",
-      "--exclude=backend/scripts/test-social-skills-runtime-flow.ts",
+      "--exclude=",
+      "--exclude=",
+      "--exclude=",
+      "--exclude=",
       "."
     )
     & tar.exe @tarArgs
@@ -639,8 +480,6 @@ Invoke-Step "Scan deploy zip" {
     TotalEntries = $entries.Count
     HasFrontendIndex = [bool]($entries | Where-Object { $_ -match '(^|/)frontend/dist/index\.html$' })
     HasFrontendAssets = [bool]($entries | Where-Object { $_ -match '(^|/)frontend/dist/assets/' })
-    HasAgentReleaseAudit = [bool]($entries | Where-Object { $_ -match '(^|/)frontend/scripts/audit-agent-chat-release\.mjs$' })
-    HasAgentBrowserQa = [bool]($entries | Where-Object { $_ -match '(^|/)frontend/scripts/qa-agent-chat-shell\.mjs$' })
     HasAgentProductionBrowserQa = [bool]($entries | Where-Object { $_ -match '(^|/)frontend/scripts/qa-agent-chat-production\.mjs$' })
     HasFitMeetAssistantAdapter = [bool]($entries | Where-Object { $_ -match '(^|/)frontend/src/components/agent-workspace/FitMeetAssistantUI\.tsx$' })
     HasFitMeetAssistantTypes = [bool]($entries | Where-Object { $_ -match '(^|/)frontend/src/components/agent-workspace/FitMeetAssistantUI\.types\.ts$' })
@@ -692,13 +531,7 @@ Invoke-Step "Scan deploy zip" {
     HasSocialCodexProcessCopy = [bool]($entries | Where-Object { $_ -match '(^|/)frontend/src/lib/socialCodexProcessCopy\.ts$' })
     HasToolUiActionCopyTest = [bool]($entries | Where-Object { $_ -match '(^|/)frontend/src/test/toolUiActionCopy\.test\.ts$' })
     HasBackendSrc = [bool]($entries | Where-Object { $_ -match '(^|/)backend/src/' })
-    HasAgentSmokeSeedSource = [bool]($entries | Where-Object { $_ -match '(^|/)backend/src/scripts/prepare-agent-smoke-seed\.ts$' })
-    HasAgentOpportunitySmokeSource = [bool]($entries | Where-Object { $_ -match '(^|/)backend/src/scripts/smoke-agent-opportunity-journey\.ts$' })
-    HasAgentSseAbortSmokeSource = [bool]($entries | Where-Object { $_ -match '(^|/)backend/src/scripts/smoke-agent-sse-abort\.ts$' })
     HasBackendMain = [bool]($entries | Where-Object { $_ -match '(^|/)backend/dist/main\.js$' })
-    HasAgentSmokeSeed = [bool]($entries | Where-Object { $_ -match '(^|/)backend/dist/scripts/prepare-agent-smoke-seed\.js$' })
-    HasAgentOpportunitySmoke = [bool]($entries | Where-Object { $_ -match '(^|/)backend/dist/scripts/smoke-agent-opportunity-journey\.js$' })
-    HasAgentSseAbortSmoke = [bool]($entries | Where-Object { $_ -match '(^|/)backend/dist/scripts/smoke-agent-sse-abort\.js$' })
     HasProductionTableCheck = [bool]($entries | Where-Object { $_ -match '(^|/)backend/dist/scripts/check-production-tables\.js$' })
     HasSubagentWorkerHealthcheck = [bool]($entries | Where-Object { $_ -match '(^|/)backend/dist/agent-gateway/subagent-worker-healthcheck\.js$' })
     HasBackendSqlScripts = [bool]($entries | Where-Object { $_ -match '(^|/)backend/scripts/[^/]+\.sql$' })
@@ -717,9 +550,6 @@ Invoke-Step "Scan deploy zip" {
     HasAgentSkillEvalRunner = [bool]($entries | Where-Object { $_ -match '(^|/)scripts/run-agent-skill-evals\.mjs$' })
     HasAgentReleaseMatrix = [bool]($entries | Where-Object { $_ -match '(^|/)scripts/agent-release-matrix\.sh$' })
     HasAgentReleaseWorktreeAudit = [bool]($entries | Where-Object { $_ -match '(^|/)scripts/agent-release-worktree-audit\.sh$' })
-    HasAgentRemoteSmokePreflight = [bool]($entries | Where-Object { $_ -match '(^|/)scripts/agent-remote-smoke-preflight\.sh$' })
-    HasAgentRemoteSmokeEvidence = [bool]($entries | Where-Object { $_ -match '(^|/)scripts/agent-remote-smoke-evidence\.sh$' })
-    HasAgentRemoteSmokeEnvExample = [bool]($entries | Where-Object { $_ -match '(^|/)deploy/agent-smoke\.remote\.env\.example$' })
     HasAgentApprovalServiceSpec = [bool]($entries | Where-Object { $_ -match '(^|/)backend/src/agent-gateway/agent-approval\.service\.spec\.ts$' })
     HasAgentApprovalDispatcherSpec = [bool]($entries | Where-Object { $_ -match '(^|/)backend/src/agent-gateway/agent-approval-dispatcher\.service\.spec\.ts$' })
     HasUserFacingAgentResponseSpec = [bool]($entries | Where-Object { $_ -match '(^|/)backend/src/agent-gateway/user-facing-agent-response\.spec\.ts$' })
@@ -757,16 +587,13 @@ Invoke-Step "Scan deploy zip" {
     HasAgentInvitationSkill = [bool]($entries | Where-Object { $_ -match '(^|/)docs/agent-skills/invitation\.md$' })
     HasAgentMeetLoopSkill = [bool]($entries | Where-Object { $_ -match '(^|/)docs/agent-skills/meet-loop\.md$' })
     HasAgentLifeGraphMemorySkill = [bool]($entries | Where-Object { $_ -match '(^|/)docs/agent-skills/life-graph-memory\.md$' })
-    HasFilledAgentRemoteSmokeEnv = [bool]($entries | Where-Object { $_ -match '(^|/)deploy/agent-smoke\.remote\.env$' })
     HasNginxSsl = [bool]($entries | Where-Object { $_ -match '(^|/)nginx/ssl(/|$)' })
     HasCompose = [bool]($entries | Where-Object { $_ -match '(^|/)docker-compose\.prod\.yml$' })
-    HasSocialSkills = [bool]($entries | Select-String -Pattern '(^|/)(SOCIAL_SKILLS_OPENCLAW_SPEC\.md|integrations/openclaw/(social-skills|fitmeet-social-skills\.ts)|backend/scripts/test-social-skills-runtime-flow\.ts)(/|$)')
     HasEnvFiles = [bool]($entries | Where-Object {
-      $_ -match '(^|/)\.env[^/]*$|(^|/)[^/]*\.env(\.|$)' -and
-      $_ -notmatch '(^|/)deploy/agent-smoke\.remote\.env\.example$'
+      $_ -match '(^|/)\.env[^/]*$|(^|/)[^/]*\.env(\.|$)'
     })
     HasQaArtifacts = [bool]($entries | Where-Object { $_ -match '(^|/)(artifacts|docs/qa|frontend/qa|qa-gsap-round2)(/|$)|(^|/)(agent-gsap-qa|agent-reference-qa|homepage-gsap-qa)\.png$' })
-    HasLegacyAgentShell = [bool]($entries | Where-Object { $_ -match '(^|/)frontend/src/components/agent-workspace/(CodexAntPet\.tsx|useAgentFlow\.tsx?)$|(^|/)frontend/src/components/agent-loop/(ActivityIcebreakerCard|ActivityProofUploader|AgentApprovalCard)\.tsx$|(^|/)frontend/src/components/agent/AgentConnectionCard\.tsx$|(^|/)frontend/src/types/agent\.ts$|(^|/)frontend/src/components/agent-workspace/api/mockAgentAdapter\.ts$|(^|/)frontend/src/dev(/|$)|(^|/)frontend/src/dev/agent/mockAgentAdapter\.ts$|(^|/)frontend/src/components/agent/ant-guide(/|$)|(^|/)frontend/src/assets/agent/ant-guide(/|$)|(^|/)frontend/src/components/ai-elements(/|$)|(^|/)frontend/src/debug(/|$)|(^|/)frontend/src/pages/(HomePage(\.legacy)?|DemoAgentSocialLoopPage|DemoInvestorPage)\.tsx$|(^|/)frontend/src/components/hero(/|$)|(^|/)frontend/src/components/showcase(/|$)|(^|/)frontend/src/components/three/(EarthScene|OrbitingEntities)\.tsx$|(^|/)frontend/src/components/ui/(GatewayPortalCard|SectionHeading)\.tsx$|(^|/)frontend/src/data/(gateways|heroCopy)\.ts$|(^|/)frontend/src/styles/(agent-workspace|agent-gpt-copy-shell|fitmeet-assistant-ui)\.css$|(^|/)scripts/fix-(aimatch|loginmodal|meetmodal|postmodal)' })
+    HasLegacyAgentShell = [bool]($entries | Where-Object { $_ -match '(^|/)frontend/src/components/agent-workspace/(CodexAntPet\.tsx|useAgentFlow\.tsx?)$|(^|/)frontend/src/components/agent-loop/(ActivityIcebreakerCard|ActivityProofUploader|AgentApprovalCard)\.tsx$|(^|/)frontend/src/components/agent/AgentConnectionCard\.tsx$|(^|/)frontend/src/types/agent\.ts$|(^|/)frontend/src/components/agent-workspace/api/mockAgentAdapter\.ts$|(^|/)frontend/src/dev(/|$)|(^|/)frontend/src/dev/agent/mockAgentAdapter\.ts$|(^|/)frontend/src/components/agent/ant-guide(/|$)|(^|/)frontend/src/assets/agent/ant-guide(/|$)|(^|/)frontend/src/components/ai-elements(/|$)|(^|/)frontend/src/debug(/|$)|(^|/)frontend/src/pages/(HomePage(\.legacy)?|DemoAgentSocialLoopPage|DemoInvestorPage)\.tsx$|(^|/)frontend/src/components/hero(/|$)|(^|/)frontend/src/components/showcase(/|$)|(^|/)frontend/src/components/three(/|$)|(^|/)frontend/src/components/ui/(GatewayPortalCard|SectionHeading)\.tsx$|(^|/)frontend/src/data/(gateways|heroCopy)\.ts$|(^|/)frontend/src/styles/(agent-workspace|agent-gpt-copy-shell|fitmeet-assistant-ui)\.css$|(^|/)scripts/fix-(aimatch|loginmodal|meetmodal|postmodal)' })
     HasZipFiles = [bool]($entries | Where-Object { $_ -match '\.zip$' })
     HasDeployStaging = [bool]($entries | Where-Object { $_ -match '(^|/)\.deploy-staging(/|$)' })
     HasNodeModules = [bool]($entries | Select-String -SimpleMatch 'node_modules')
@@ -830,13 +657,7 @@ Invoke-Step "Scan deploy zip" {
     -not $scan.HasAssistantThinkingDots -or
     -not $scan.HasSocialCodexProcessCopy -or
     -not $scan.HasToolUiActionCopyTest -or
-    -not $scan.HasAgentSmokeSeedSource -or
-    -not $scan.HasAgentOpportunitySmokeSource -or
-    -not $scan.HasAgentSseAbortSmokeSource -or
     -not $scan.HasBackendMain -or
-    -not $scan.HasAgentSmokeSeed -or
-    -not $scan.HasAgentOpportunitySmoke -or
-    -not $scan.HasAgentSseAbortSmoke -or
     -not $scan.HasProductionTableCheck -or
     -not $scan.HasSubagentWorkerHealthcheck -or
     -not $scan.HasDeployProduction -or
@@ -852,9 +673,6 @@ Invoke-Step "Scan deploy zip" {
     -not $scan.HasAgentSkillEvalRunner -or
     -not $scan.HasAgentReleaseMatrix -or
     -not $scan.HasAgentReleaseWorktreeAudit -or
-    -not $scan.HasAgentRemoteSmokePreflight -or
-    -not $scan.HasAgentRemoteSmokeEvidence -or
-    -not $scan.HasAgentRemoteSmokeEnvExample -or
     -not $scan.HasAgentApprovalServiceSpec -or
     -not $scan.HasAgentApprovalDispatcherSpec -or
     -not $scan.HasUserFacingAgentResponseSpec -or
@@ -893,11 +711,9 @@ Invoke-Step "Scan deploy zip" {
     -not $scan.HasAgentMeetLoopSkill -or
     -not $scan.HasAgentLifeGraphMemorySkill -or
     $scan.HasEnvFiles -or
-    $scan.HasFilledAgentRemoteSmokeEnv -or
     $scan.HasZipFiles -or
     $scan.HasNginxSsl -or
     $scan.HasDeployStaging -or
-    $scan.HasSocialSkills -or
     $scan.HasQaArtifacts -or
     $scan.HasLegacyAgentShell -or
     $scan.HasNodeModules -or

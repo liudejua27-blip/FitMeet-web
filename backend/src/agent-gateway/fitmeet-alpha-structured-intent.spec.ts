@@ -4,7 +4,7 @@ import {
 } from './fitmeet-alpha-structured-intent';
 
 describe('FitMeet Alpha structured intent normalization', () => {
-  it('clamps fitness math to Math Agent with no side effects', () => {
+  it('clamps fitness math to Agent Brain with no side effects', () => {
     const intent = enforceFitMeetAlphaStructuredIntentHandoff({
       intent: 'fitness_math',
       nextAgent: 'social_match',
@@ -16,7 +16,7 @@ describe('FitMeet Alpha structured intent normalization', () => {
 
     expect(intent).toMatchObject({
       intent: 'fitness_math',
-      nextAgent: 'math',
+      nextAgent: 'agent_brain',
       needState: 'fitness_math',
       readiness: 'answer',
       requiresSearch: false,
@@ -39,7 +39,7 @@ describe('FitMeet Alpha structured intent normalization', () => {
         }),
       ).toMatchObject({
         intent: intentName,
-        nextAgent: 'life_graph',
+        nextAgent: 'life_graph_agent',
         requiresSearch: false,
       });
     }
@@ -56,7 +56,7 @@ describe('FitMeet Alpha structured intent normalization', () => {
 
     expect(intent).toMatchObject({
       intent: 'general_social_need',
-      nextAgent: 'answer',
+      nextAgent: 'main_agent',
       readiness: 'clarify',
       requiresSearch: false,
     });
@@ -74,7 +74,7 @@ describe('FitMeet Alpha structured intent normalization', () => {
 
     expect(fromJson).toMatchObject({
       intent: 'view_profile_changes',
-      nextAgent: 'life_graph',
+      nextAgent: 'life_graph_agent',
     });
 
     const fallback = normalizeFitMeetAlphaStructuredIntentOutput({
@@ -88,8 +88,20 @@ describe('FitMeet Alpha structured intent normalization', () => {
 
     expect(fallback).toMatchObject({
       intent: 'fitness_math',
-      nextAgent: 'math',
+      nextAgent: 'agent_brain',
       modelOutput: 'not-json-model-output',
+    });
+  });
+
+  it('accepts old model nextAgent names but normalizes to the 3-agent topology', () => {
+    expect(
+      enforceFitMeetAlphaStructuredIntentHandoff({
+        intent: 'recommend_weekly_activity',
+        nextAgent: 'meet_loop',
+      }),
+    ).toMatchObject({
+      intent: 'recommend_weekly_activity',
+      nextAgent: 'match_agent',
     });
   });
 });

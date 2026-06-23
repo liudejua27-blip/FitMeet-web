@@ -3,10 +3,8 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { User } from './user.entity';
 import { Follow } from '../friends/follow.entity';
-import { Post } from '../posts/post.entity';
 import { Meet } from '../meets/meet.entity';
 import { MeetParticipant } from '../meets/meet-participant.entity';
-import { Coach } from '../coaches/coach.entity';
 
 @Injectable()
 export class UsersService {
@@ -15,14 +13,10 @@ export class UsersService {
     private readonly userRepo: Repository<User>,
     @InjectRepository(Follow)
     private readonly followRepo: Repository<Follow>,
-    @InjectRepository(Post)
-    private readonly postRepo: Repository<Post>,
     @InjectRepository(Meet)
     private readonly meetRepo: Repository<Meet>,
     @InjectRepository(MeetParticipant)
     private readonly participantRepo: Repository<MeetParticipant>,
-    @InjectRepository(Coach)
-    private readonly coachRepo: Repository<Coach>,
   ) {}
 
   async findById(id: number) {
@@ -35,27 +29,17 @@ export class UsersService {
     const followingCount = await this.followRepo.count({
       where: { followerId: id },
     });
-    const postsCount = await this.postRepo.count({ where: { userId: id } });
     const meetHosted = await this.meetRepo.count({ where: { userId: id } });
     const meetJoined = await this.participantRepo.count({
       where: { userId: id },
     });
-    const coach = await this.coachRepo.findOne({ where: { userId: id } });
 
     const rest = this.sanitizeUser(user);
     return {
       ...rest,
       followers: followersCount,
       following: followingCount,
-      posts: postsCount,
       meetCount: meetHosted + meetJoined,
-      coachSpecialty: coach?.specialty,
-      coachExperience: coach?.experience,
-      coachPrice: coach?.price,
-      coachRating: coach ? Number(coach.rating) : undefined,
-      coachStudents: coach?.students,
-      coachCerts: coach?.coachCerts,
-      coachIncome: coach?.income,
     };
   }
 

@@ -19,7 +19,7 @@ describe('FitMeetSubagentWorkerRuntimeService', () => {
     });
 
     const first = runtime.submit({
-      agent: 'Social Match Agent',
+      agent: 'Match Agent',
       runId: 'run-a',
       job: async () => {
         order.push('a:start');
@@ -29,7 +29,7 @@ describe('FitMeetSubagentWorkerRuntimeService', () => {
       },
     });
     const second = runtime.submit({
-      agent: 'Social Match Agent',
+      agent: 'Match Agent',
       runId: 'run-b',
       job: async () => {
         await Promise.resolve();
@@ -85,7 +85,7 @@ describe('FitMeetSubagentWorkerRuntimeService', () => {
     const runtime = new FitMeetSubagentWorkerRuntimeService();
 
     const model = await runtime.submit({
-      agent: 'Social Match Agent',
+      agent: 'Match Agent',
       runId: 'run-quality-default',
       job: async (context) => {
         await Promise.resolve();
@@ -94,9 +94,9 @@ describe('FitMeetSubagentWorkerRuntimeService', () => {
     });
 
     expect(model).toBe('deepseek-v4-pro');
-    expect(runtime.snapshot('Social Match Agent')[0]).toEqual(
+    expect(runtime.snapshot('Match Agent')[0]).toEqual(
       expect.objectContaining({
-        agent: 'Social Match Agent',
+        agent: 'Match Agent',
         modelUseCase: 'candidate_summary',
         model: 'deepseek-v4-pro',
       }),
@@ -104,21 +104,20 @@ describe('FitMeetSubagentWorkerRuntimeService', () => {
   });
 
   it('does not let per-agent worker model env silently downgrade quality lanes to fast models', async () => {
-    process.env.FITMEET_SOCIAL_MATCH_AGENT_WORKER_MODEL =
-      'deepseek-v4-flash';
+    process.env.FITMEET_MATCH_AGENT_WORKER_MODEL = 'deepseek-v4-flash';
     const runtime = new FitMeetSubagentWorkerRuntimeService({
       getModel: jest.fn().mockReturnValue('deepseek-v4-pro'),
       getTimeout: jest.fn().mockReturnValue(12000),
     } as never);
 
     const model = await runtime.submit({
-      agent: 'Social Match Agent',
+      agent: 'Match Agent',
       runId: 'run-fast-model-env',
       job: async (context) => context.model,
     });
 
     expect(model).toBe('deepseek-v4-pro');
-    expect(runtime.snapshot('Social Match Agent')[0]).toEqual(
+    expect(runtime.snapshot('Match Agent')[0]).toEqual(
       expect.objectContaining({
         modelUseCase: 'candidate_summary',
         model: 'deepseek-v4-pro',
@@ -128,21 +127,20 @@ describe('FitMeetSubagentWorkerRuntimeService', () => {
 
   it('does not let global fast routing mode downgrade subagent worker reasoning', async () => {
     process.env.SOCIAL_AGENT_MODEL_ROUTING_MODE = 'fast';
-    process.env.FITMEET_SOCIAL_MATCH_AGENT_WORKER_MODEL =
-      'deepseek-v4-flash';
+    process.env.FITMEET_MATCH_AGENT_WORKER_MODEL = 'deepseek-v4-flash';
     const runtime = new FitMeetSubagentWorkerRuntimeService({
       getModel: jest.fn().mockReturnValue('deepseek-v4-pro'),
       getTimeout: jest.fn().mockReturnValue(12000),
     } as never);
 
     const model = await runtime.submit({
-      agent: 'Social Match Agent',
+      agent: 'Match Agent',
       runId: 'run-global-fast-mode',
       job: async (context) => context.model,
     });
 
     expect(model).toBe('deepseek-v4-pro');
-    expect(runtime.snapshot('Social Match Agent')[0]).toEqual(
+    expect(runtime.snapshot('Match Agent')[0]).toEqual(
       expect.objectContaining({
         modelUseCase: 'candidate_summary',
         model: 'deepseek-v4-pro',
@@ -151,9 +149,8 @@ describe('FitMeetSubagentWorkerRuntimeService', () => {
   });
 
   it('ignores explicit fast worker overrides so subagent lanes keep quality reasoning', async () => {
-    process.env.FITMEET_SOCIAL_MATCH_AGENT_WORKER_MODEL =
-      'deepseek-v4-flash';
-    process.env.FITMEET_SOCIAL_MATCH_AGENT_WORKER_ALLOW_FAST_MODEL = 'true';
+    process.env.FITMEET_MATCH_AGENT_WORKER_MODEL = 'deepseek-v4-flash';
+    process.env.FITMEET_MATCH_AGENT_WORKER_ALLOW_FAST_MODEL = 'true';
     process.env.FITMEET_SUBAGENT_WORKER_ALLOW_FAST_MODEL = 'true';
     const runtime = new FitMeetSubagentWorkerRuntimeService({
       getModel: jest.fn().mockReturnValue('deepseek-v4-pro'),
@@ -161,7 +158,7 @@ describe('FitMeetSubagentWorkerRuntimeService', () => {
     } as never);
 
     const model = await runtime.submit({
-      agent: 'Social Match Agent',
+      agent: 'Match Agent',
       runId: 'run-explicit-fast-model-env',
       job: async (context) => context.model,
     });
@@ -170,14 +167,14 @@ describe('FitMeetSubagentWorkerRuntimeService', () => {
   });
 
   it('ignores legacy DeepSeek aliases in per-agent worker model env', async () => {
-    process.env.FITMEET_SOCIAL_MATCH_AGENT_WORKER_MODEL = 'deepseek-chat';
+    process.env.FITMEET_MATCH_AGENT_WORKER_MODEL = 'deepseek-chat';
     const runtime = new FitMeetSubagentWorkerRuntimeService({
       getModel: jest.fn().mockReturnValue('deepseek-v4-pro'),
       getTimeout: jest.fn().mockReturnValue(12000),
     } as never);
 
     const model = await runtime.submit({
-      agent: 'Social Match Agent',
+      agent: 'Match Agent',
       runId: 'run-legacy-worker-alias',
       job: async (context) => context.model,
     });
@@ -186,12 +183,10 @@ describe('FitMeetSubagentWorkerRuntimeService', () => {
   });
 
   it('does not silently fallback to local execution when queue mode has no DB queue', async () => {
-    process.env.FITMEET_SOCIAL_MATCH_AGENT_WORKER_MODE = 'queue';
-    process.env.FITMEET_SOCIAL_MATCH_AGENT_WORKER_MODEL =
-      'deepseek-social-match-worker';
-    process.env.FITMEET_SOCIAL_MATCH_AGENT_WORKER_TIMEOUT_MS = '2500';
-    process.env.FITMEET_SOCIAL_MATCH_AGENT_WORKER_QUEUE =
-      'fitmeet.queue.social-match';
+    process.env.FITMEET_MATCH_AGENT_WORKER_MODE = 'queue';
+    process.env.FITMEET_MATCH_AGENT_WORKER_MODEL = 'deepseek-match-worker';
+    process.env.FITMEET_MATCH_AGENT_WORKER_TIMEOUT_MS = '2500';
+    process.env.FITMEET_MATCH_AGENT_WORKER_QUEUE = 'fitmeet.queue.match-agent';
     const runtime = new FitMeetSubagentWorkerRuntimeService({
       getModel: jest.fn().mockReturnValue('fallback-model'),
       getTimeout: jest.fn().mockReturnValue(9000),
@@ -200,7 +195,7 @@ describe('FitMeetSubagentWorkerRuntimeService', () => {
 
     await expect(
       runtime.submit({
-        agent: 'Social Match Agent',
+        agent: 'Match Agent',
         runId: 'run-queue',
         job: localJob,
       }),
@@ -209,15 +204,15 @@ describe('FitMeetSubagentWorkerRuntimeService', () => {
     );
 
     expect(localJob).not.toHaveBeenCalled();
-    expect(runtime.snapshot('Social Match Agent')[0]).toEqual(
+    expect(runtime.snapshot('Match Agent')[0]).toEqual(
       expect.objectContaining({
         mode: 'queue_worker_ready',
-        queueName: 'fitmeet.queue.social-match',
+        queueName: 'fitmeet.queue.match-agent',
         timeoutMs: 9000,
         crashIsolation: true,
         scalable: true,
         modelUseCase: 'candidate_summary',
-        model: 'deepseek-social-match-worker',
+        model: 'deepseek-match-worker',
         status: 'failed',
         failedRuns: 1,
         activeRunId: null,
@@ -226,13 +221,13 @@ describe('FitMeetSubagentWorkerRuntimeService', () => {
   });
 
   it('uses DB queue result in queue mode instead of executing the local closure', async () => {
-    process.env.FITMEET_SOCIAL_MATCH_AGENT_WORKER_MODE = 'db_queue';
+    process.env.FITMEET_MATCH_AGENT_WORKER_MODE = 'db_queue';
     process.env.FITMEET_SUBAGENT_WORKER_RESULT_POLL_MS = '1';
     const dbQueue = {
       enqueue: jest.fn().mockResolvedValue({ id: 44 }),
       waitForCompletion: jest.fn().mockResolvedValue({
         loop: { runId: 'external-loop' },
-        handoff: { agent: 'Social Match Agent' },
+        handoff: { agent: 'Match Agent' },
         workerOutput: { observation: { handled: true } },
       }),
     };
@@ -247,13 +242,13 @@ describe('FitMeetSubagentWorkerRuntimeService', () => {
     const localJob = jest.fn().mockResolvedValue({ local: true });
 
     const result = await runtime.submit({
-      agent: 'Social Match Agent',
+      agent: 'Match Agent',
       runId: 'run-db-queue',
       serializedPayload: {
         kind: 'route_branch',
         ownerUserId: 7,
         taskId: 101,
-        agent: 'Social Match Agent',
+        agent: 'Match Agent',
         goal: 'find running partner',
         plannerInput: {
           route: { intent: 'find_partner' },
@@ -302,8 +297,8 @@ describe('FitMeetSubagentWorkerRuntimeService', () => {
     expect(localJob).not.toHaveBeenCalled();
     expect(dbQueue.enqueue).toHaveBeenCalledWith(
       expect.objectContaining({
-        agentName: 'Social Match Agent',
-        queueName: 'fitmeet.subagent.social-match-agent',
+        agentName: 'Match Agent',
+        queueName: 'fitmeet.subagent.match-agent',
         payload: expect.objectContaining({
           contract: 'fitmeet.subagent.worker.command',
           version: 1,
@@ -476,15 +471,15 @@ describe('FitMeetSubagentWorkerRuntimeService', () => {
   });
 
   it('accepts a versioned worker command in DB queue mode without repacking through legacy payloads', async () => {
-    process.env.FITMEET_SOCIAL_MATCH_AGENT_WORKER_MODE = 'db_queue';
+    process.env.FITMEET_MATCH_AGENT_WORKER_MODE = 'db_queue';
     process.env.FITMEET_SUBAGENT_WORKER_RESULT_POLL_MS = '1';
     const command = buildFitMeetSubagentWorkerCommand({
       runId: 'run-versioned-command',
       traceId: 'trace-versioned-command',
       commandId: 'cmd-versioned-command',
       submittedAt: '2026-06-17T00:00:00.000Z',
-      agentName: 'Social Match Agent',
-      queueName: 'fitmeet.subagent.social-match-agent',
+      agentName: 'Match Agent',
+      queueName: 'fitmeet.subagent.match-agent',
       ownerUserId: 7,
       taskId: 101,
       threadId: 'agent-task:101',
@@ -518,7 +513,7 @@ describe('FitMeetSubagentWorkerRuntimeService', () => {
       route: { intent: 'find_partner' } as never,
       workerRuntime: {
         mode: 'queue_worker_ready',
-        queueName: 'fitmeet.subagent.social-match-agent',
+        queueName: 'fitmeet.subagent.match-agent',
         timeoutMs: 15000,
         crashIsolation: true,
         scalable: true,
@@ -531,7 +526,7 @@ describe('FitMeetSubagentWorkerRuntimeService', () => {
       enqueue: jest.fn().mockResolvedValue({ id: 45 }),
       waitForCompletion: jest.fn().mockResolvedValue({
         loop: { runId: 'external-loop-versioned' },
-        handoff: { agent: 'Social Match Agent' },
+        handoff: { agent: 'Match Agent' },
       }),
     };
     const runtime = new FitMeetSubagentWorkerRuntimeService(
@@ -545,7 +540,7 @@ describe('FitMeetSubagentWorkerRuntimeService', () => {
     const localJob = jest.fn().mockResolvedValue({ local: true });
 
     const result = await runtime.submit({
-      agent: 'Social Match Agent',
+      agent: 'Match Agent',
       runId: 'run-versioned-command',
       serializedPayload: command,
       job: localJob,
@@ -554,8 +549,8 @@ describe('FitMeetSubagentWorkerRuntimeService', () => {
     expect(localJob).not.toHaveBeenCalled();
     expect(dbQueue.enqueue).toHaveBeenCalledWith(
       expect.objectContaining({
-        agentName: 'Social Match Agent',
-        queueName: 'fitmeet.subagent.social-match-agent',
+        agentName: 'Match Agent',
+        queueName: 'fitmeet.subagent.match-agent',
         payload: command,
         runId: 'run-versioned-command',
         traceId: 'run-versioned-command',
@@ -569,7 +564,7 @@ describe('FitMeetSubagentWorkerRuntimeService', () => {
   });
 
   it('does not let short result wait env make DB queue subagents fail before the worker budget', async () => {
-    process.env.FITMEET_SOCIAL_MATCH_AGENT_WORKER_MODE = 'db_queue';
+    process.env.FITMEET_MATCH_AGENT_WORKER_MODE = 'db_queue';
     process.env.FITMEET_SUBAGENT_WORKER_RESULT_TIMEOUT_MS = '1';
     const dbQueue = {
       enqueue: jest.fn().mockResolvedValue({ id: 46 }),
@@ -587,13 +582,13 @@ describe('FitMeetSubagentWorkerRuntimeService', () => {
     );
 
     await runtime.submit({
-      agent: 'Social Match Agent',
+      agent: 'Match Agent',
       runId: 'run-result-timeout-floor',
       serializedPayload: {
         kind: 'route_branch',
         ownerUserId: 7,
         taskId: 101,
-        agent: 'Social Match Agent',
+        agent: 'Match Agent',
         goal: 'find a walking partner',
         plannerInput: { route: { intent: 'find_partner' } },
         tools: [{ toolName: 'social_match_search_turn', input: {} }],
@@ -611,10 +606,10 @@ describe('FitMeetSubagentWorkerRuntimeService', () => {
   });
 
   it('rejects versioned worker commands that target a different queue lane', async () => {
-    process.env.FITMEET_SOCIAL_MATCH_AGENT_WORKER_MODE = 'db_queue';
+    process.env.FITMEET_MATCH_AGENT_WORKER_MODE = 'db_queue';
     const command = buildFitMeetSubagentWorkerCommand({
       runId: 'run-wrong-lane',
-      agentName: 'Social Match Agent',
+      agentName: 'Match Agent',
       queueName: 'fitmeet.subagent.other-lane',
       ownerUserId: 7,
       taskId: 101,
@@ -642,7 +637,7 @@ describe('FitMeetSubagentWorkerRuntimeService', () => {
 
     await expect(
       runtime.submit({
-        agent: 'Social Match Agent',
+        agent: 'Match Agent',
         runId: 'run-wrong-lane',
         serializedPayload: command,
         job: jest.fn(),
@@ -654,7 +649,7 @@ describe('FitMeetSubagentWorkerRuntimeService', () => {
   });
 
   it('rejects malformed DB queue payloads before enqueueing worker jobs', async () => {
-    process.env.FITMEET_SOCIAL_MATCH_AGENT_WORKER_MODE = 'db_queue';
+    process.env.FITMEET_MATCH_AGENT_WORKER_MODE = 'db_queue';
     const dbQueue = {
       enqueue: jest.fn(),
       waitForCompletion: jest.fn(),
@@ -671,7 +666,7 @@ describe('FitMeetSubagentWorkerRuntimeService', () => {
 
     await expect(
       runtime.submit({
-        agent: 'Social Match Agent',
+        agent: 'Match Agent',
         runId: 'run-malformed-payload',
         serializedPayload: { malformed: true },
         job: localJob,
@@ -685,7 +680,7 @@ describe('FitMeetSubagentWorkerRuntimeService', () => {
   });
 
   it('marks worker lane failures when a subagent job times out', async () => {
-    process.env.FITMEET_MEET_LOOP_AGENT_WORKER_TIMEOUT_MS = '1';
+    process.env.FITMEET_MATCH_AGENT_WORKER_TIMEOUT_MS = '1';
     const runtime = new FitMeetSubagentWorkerRuntimeService({
       getModel: jest.fn().mockReturnValue('deepseek-worker-test'),
       getTimeout: jest.fn().mockReturnValue(1),
@@ -695,7 +690,7 @@ describe('FitMeetSubagentWorkerRuntimeService', () => {
 
     await expect(
       runtime.submit({
-        agent: 'Meet Loop Agent',
+        agent: 'Match Agent',
         runId: 'run-timeout',
         job: async (context) => {
           jobSignalRef.current = context.signal ?? null;
@@ -713,7 +708,7 @@ describe('FitMeetSubagentWorkerRuntimeService', () => {
     expect((jobSignalRef.current?.reason as Error | undefined)?.message).toBe(
       'Subagent worker timed out after 1ms.',
     );
-    expect(runtime.snapshot('Meet Loop Agent')[0]).toEqual(
+    expect(runtime.snapshot('Match Agent')[0]).toEqual(
       expect.objectContaining({
         status: 'failed',
         failedRuns: 1,
@@ -734,7 +729,7 @@ describe('FitMeetSubagentWorkerRuntimeService', () => {
     });
 
     const run = runtime.submit({
-      agent: 'Social Match Agent',
+      agent: 'Match Agent',
       runId: 'run-client-abort',
       signal: controller.signal,
       job: async (context) => {
@@ -757,7 +752,7 @@ describe('FitMeetSubagentWorkerRuntimeService', () => {
     expect((jobSignalRef.current?.reason as Error | undefined)?.message).toBe(
       'client_aborted',
     );
-    expect(runtime.snapshot('Social Match Agent')[0]).toEqual(
+    expect(runtime.snapshot('Match Agent')[0]).toEqual(
       expect.objectContaining({
         status: 'failed',
         failedRuns: 1,

@@ -570,7 +570,7 @@ export class SocialAgentAutopilotService {
       SocialAgentToolName.ReadTaskConversationMessages,
       SocialAgentToolName.SummarizeReply,
       SocialAgentToolName.DecideNextSocialAction,
-      SocialAgentToolName.ReadInbox,
+      SocialAgentToolName.ReadMessageEvents,
     ]);
     return result.toolCalls.filter(
       (call) =>

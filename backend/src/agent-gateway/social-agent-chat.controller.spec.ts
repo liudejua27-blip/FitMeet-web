@@ -189,26 +189,23 @@ describe('SocialAgentChatController user interest events', () => {
     const controller = createController(interestEvents);
 
     await expect(
-      controller.recordInterestEvent(
-        { user: { id: 7 } } as never,
-        {
-          eventType: 'discover_click',
-          targetUserId: 11,
-          socialRequestId: 23,
-          activityId: 45,
-          activityTags: ['散步', '低压力'],
-          candidatePreferenceTags: ['女生'],
-          city: '青岛',
-          locationText: '青岛大学附近',
-          timeWindow: '今天晚上',
-          source: 'discover_page',
-          dedupeKey: 'discover:publicIntent:abc:2026-06-22',
-          metadata: {
-            detailHref: '/public-intent/abc',
-            ignoredNested: { unsafe: true },
-          },
+      controller.recordInterestEvent({ user: { id: 7 } } as never, {
+        eventType: 'discover_click',
+        targetUserId: 11,
+        socialRequestId: 23,
+        activityId: 45,
+        activityTags: ['散步', '低压力'],
+        candidatePreferenceTags: ['女生'],
+        city: '青岛',
+        locationText: '青岛大学附近',
+        timeWindow: '今天晚上',
+        source: 'discover_page',
+        dedupeKey: 'discover:publicIntent:abc:2026-06-22',
+        metadata: {
+          detailHref: '/public-intent/abc',
+          ignoredNested: { unsafe: true },
         },
-      ),
+      }),
     ).resolves.toEqual({ ok: true, recorded: true, eventId: 91 });
 
     expect(interestEvents.recordEvent).toHaveBeenCalledWith(
@@ -233,10 +230,9 @@ describe('SocialAgentChatController user interest events', () => {
     const controller = createController({ recordEvent: jest.fn() });
 
     await expect(
-      controller.recordInterestEvent(
-        { user: { id: 7 } } as never,
-        { eventType: 'raw_tool_call_started' },
-      ),
+      controller.recordInterestEvent({ user: { id: 7 } } as never, {
+        eventType: 'raw_tool_call_started',
+      }),
     ).rejects.toThrow('Unsupported social agent interest event type');
   });
 });
@@ -1317,9 +1313,7 @@ describe('SocialAgentChatController user-facing stream', () => {
       recordAssistantMessage: jest.fn().mockResolvedValue(undefined),
     };
     const taskLifecycle = {
-      assertTaskOwner: jest
-        .fn()
-        .mockResolvedValue({ id: 515, ownerUserId: 7 }),
+      assertTaskOwner: jest.fn().mockResolvedValue({ id: 515, ownerUserId: 7 }),
     };
     const controller = new SocialAgentChatController(
       chat as unknown as SocialAgentChatService,
@@ -1559,7 +1553,7 @@ describe('SocialAgentChatController user-facing stream', () => {
             taskId: 101,
             status: AgentTaskStatus.Succeeded,
             visibleSteps: [],
-            assistantMessage: '我会先结合你的 Life Graph，再筛选合适的人。',
+            assistantMessage: '我会先结合你的长期偏好，再筛选合适的人。',
             socialRequestDraft: null,
             candidates: [],
             approvalRequiredActions: [],
@@ -2794,49 +2788,51 @@ describe('SocialAgentChatController user-facing stream', () => {
       releaseAction = resolve;
     });
     const chat = {
-      performCardActionStream: jest.fn(async (_userId, _taskId, _body, emit) => {
-        downstreamStarted = true;
-        await downstreamGate;
-        await emit({
-          type: 'assistant_delta',
-          messageId: 'slow-action-1',
-          delta: '我会先确认安全边界，再继续。',
-          source: 'llm',
-        });
-        await emit({
-          type: 'assistant_done',
-          messageId: 'slow-action-1',
-          source: 'llm',
-        });
-        return {
-          taskId: 101,
-          status: AgentTaskStatus.Succeeded,
-          intent: 'candidate_followup',
-          confidence: 0.9,
-          entities: {},
-          shouldSearch: false,
-          shouldReplan: false,
-          shouldUpdateProfile: false,
-          shouldExecuteAction: true,
-          replyStrategy: 'action',
-          source: 'rules',
-          action: 'await_confirmation',
-          savedContext: false,
-          profileUpdated: false,
-          shouldQueueRun: false,
-          runMode: null,
-          assistantMessage: '我会先确认安全边界，再继续。',
-          cards: [],
-          permissionMode: 'confirm',
-          safety: {
-            blocked: false,
-            level: 'low',
-            reasons: [],
-            boundaryNotes: ['确认前不会发送。'],
-            requiredConfirmations: ['发送消息'],
-          },
-        };
-      }),
+      performCardActionStream: jest.fn(
+        async (_userId, _taskId, _body, emit) => {
+          downstreamStarted = true;
+          await downstreamGate;
+          await emit({
+            type: 'assistant_delta',
+            messageId: 'slow-action-1',
+            delta: '我会先确认安全边界，再继续。',
+            source: 'llm',
+          });
+          await emit({
+            type: 'assistant_done',
+            messageId: 'slow-action-1',
+            source: 'llm',
+          });
+          return {
+            taskId: 101,
+            status: AgentTaskStatus.Succeeded,
+            intent: 'candidate_followup',
+            confidence: 0.9,
+            entities: {},
+            shouldSearch: false,
+            shouldReplan: false,
+            shouldUpdateProfile: false,
+            shouldExecuteAction: true,
+            replyStrategy: 'action',
+            source: 'rules',
+            action: 'await_confirmation',
+            savedContext: false,
+            profileUpdated: false,
+            shouldQueueRun: false,
+            runMode: null,
+            assistantMessage: '我会先确认安全边界，再继续。',
+            cards: [],
+            permissionMode: 'confirm',
+            safety: {
+              blocked: false,
+              level: 'low',
+              reasons: [],
+              boundaryNotes: ['确认前不会发送。'],
+              requiredConfirmations: ['发送消息'],
+            },
+          };
+        },
+      ),
     };
     const controller = new SocialAgentChatController(
       chat as unknown as SocialAgentChatService,
@@ -3459,7 +3455,9 @@ describe('SocialAgentChatController user-facing stream', () => {
     expect(chat.handleMessageStream).not.toHaveBeenCalled();
     expect(early).toContain('"type":"run.started"');
     expect(early).toContain('"title":"正在重新整理"');
-    expect(early).toContain('会接着刚才的进度继续处理，不会重复执行已经完成的动作。');
+    expect(early).toContain(
+      '会接着刚才的进度继续处理，不会重复执行已经完成的动作。',
+    );
     expect(early).toContain('"type":"visible_process.delta"');
     expect(early).toContain('"title":"正在接着刚才的进度"');
     expect(early).toContain('不会重复执行已经完成的内容');

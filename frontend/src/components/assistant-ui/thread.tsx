@@ -75,10 +75,7 @@ export function ChatGPTThread({
     >
       <AssistantSelectionToolbar />
       <AuiIf condition={(state) => state.thread.isEmpty && isEmpty}>
-        <AssistantEmptyState
-          requiresAuth={requiresAuth}
-          onLogin={onLogin}
-        />
+        <AssistantEmptyState requiresAuth={requiresAuth} onLogin={onLogin} />
       </AuiIf>
 
       <AuiIf condition={(state) => !state.thread.isEmpty || shouldShowViewport}>
@@ -122,9 +119,7 @@ export function ChatGPTThread({
             {shouldShowInlineThinking ? (
               <AssistantInlineThinking status={liveProcessStatus ?? undefined} />
             ) : null}
-            {sessionRestoring ? (
-              <AssistantInlineNote>正在同步这段对话…</AssistantInlineNote>
-            ) : null}
+            {sessionRestoring ? <AssistantInlineNote>正在同步这段对话…</AssistantInlineNote> : null}
             {!isRunning && recovery ? (
               <AssistantRecoveryMessage
                 recovery={recovery}
@@ -316,7 +311,7 @@ function AssistantRecoveryMessage({
 }) {
   const isAuth = recovery.kind === 'unauthorized';
   const isCheckpoint = recovery.kind === 'checkpoint_available';
-  const actionLabel = isAuth ? '登录' : '继续';
+  const actionLabel = isAuth ? '登录' : '继续上次任务';
   const stateLabel = isAuth ? '需要登录' : isCheckpoint ? '需要确认' : '可以继续';
   const copy = sanitizedRecoveryCopy(recovery);
   const actionIcon = isAuth ? (
@@ -391,8 +386,7 @@ function sanitizedRecoveryCopy(recovery: FitMeetAssistantRecovery) {
     title: isBackendRecoveryTitle(title) ? '这段需求还在' : title || '这段需求还在',
     message: isBackendRecoveryMessage(message)
       ? '我保留了刚才的上下文。你可以点继续接着处理，也可以直接补充新的要求。'
-      : message ||
-        '我保留了刚才的上下文。你可以点继续接着处理，也可以直接补充新的要求。',
+      : message || '我保留了刚才的上下文。你可以点继续接着处理，也可以直接补充新的要求。',
   };
 }
 

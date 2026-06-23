@@ -351,9 +351,8 @@ describe('SocialAgentDraftSearchService', () => {
       7,
       { signal: null },
     );
-    const taskContext = (
-      executor.executeToolAction.mock.calls[0]?.[2] as Record<string, unknown>
-    )?.taskContext as {
+    const executedInput = executor.executeToolAction.mock.calls[0]?.[2];
+    const taskContext = executedInput?.taskContext as {
       knownTaskSlotConstraints?: {
         knownSlots?: Array<{ key: string; confirmation: string }>;
         doNotAskAgainFor?: string[];
@@ -543,7 +542,7 @@ describe('SocialAgentDraftSearchService', () => {
       autoPublished: true,
       synced: true,
       publicIntentId: 'pub_301',
-      discoverHref: '/public-intent/pub_301',
+      discoverHref: '/discover?publicIntentId=pub_301',
       publishPolicy: 'auto_after_first_public_authorization',
       blockedReason: null,
     });

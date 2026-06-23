@@ -20,6 +20,7 @@ import {
   enforceSocialIntentGate,
   explicitlyRejectsSocialExecution,
   hasExistingSocialExecutionContext,
+  hasExplicitPublishSideEffectIntent,
   hasExplicitSocialExecutionIntent,
   isConversationOnlySocialMention,
   isSocialAdviceQuestion,
@@ -223,6 +224,7 @@ export class SocialAgentIntentRouterService {
       /(发消息|发送.*(给|第一个|第二个|第三个|这个|那个|他|她|候选)|加好友|邀请(第一个|第二个|第三个|这个|那个|他|她|候选)|约他|约她|联系(第一个|第二个|第三个|这个|那个|他|她|候选)|收藏(第一个|第二个|第三个|这个|那个|他|她|候选)|确认发布|帮我发|帮我加|帮我邀请)/i.test(
         text,
       );
+    const wantsPublishAction = hasExplicitPublishSideEffectIntent(message);
     const wantsImmediateSocialSearch =
       hasSocialAgentImmediateSearchRequest(message);
     const hasCandidateDiscoveryCue = this.hasCandidateDiscoveryCue(
@@ -385,6 +387,13 @@ export class SocialAgentIntentRouterService {
         shouldSearch: true,
         shouldReplan: hasTask,
         replyStrategy: 'search_candidates',
+      });
+    }
+
+    if (wantsPublishAction) {
+      return this.result('action_request', 0.92, entities, {
+        shouldExecuteAction: true,
+        replyStrategy: 'execute_action',
       });
     }
 
@@ -707,15 +716,14 @@ export class SocialAgentIntentRouterService {
     const locationMatch = message.match(
       /((?:崂山区|市南区|市北区|李沧区|黄岛区|西海岸|城阳区|青岛大学|五四广场|奥帆中心|大学城)(?:附近|周边)?|附近|同城|身边|周边|近一点|更近|市南|市北|崂山|黄岛|李沧|城阳)/,
     );
-    const targetGender = /(女生|女孩|女孩子|女性|小姐姐|女同学|女大学生|女舞蹈生)/.test(
-      message,
-    )
-      ? '女生'
-      : /(男生|男孩|男孩子|男性|小哥哥|男同学|男大学生|男舞蹈生)/.test(
-            message,
-          )
-        ? '男生'
-        : '';
+    const targetGender =
+      /(女生|女孩|女孩子|女性|小姐姐|女同学|女大学生|女舞蹈生)/.test(message)
+        ? '女生'
+        : /(男生|男孩|男孩子|男性|小哥哥|男同学|男大学生|男舞蹈生)/.test(
+              message,
+            )
+          ? '男生'
+          : '';
     return {
       city: sanitizeCity(cityMatch?.[1] ?? ''),
       activityType: cleanDisplayText(activityMatch?.[1], ''),
@@ -761,8 +769,7 @@ export class SocialAgentIntentRouterService {
       return true;
     }
     return (
-      fallback.intent === 'casual_chat' &&
-      this.isLowCostCasualMessage(message)
+      fallback.intent === 'casual_chat' && this.isLowCostCasualMessage(message)
     );
   }
 
@@ -976,7 +983,9 @@ export class SocialAgentIntentRouterService {
   }
 
   private intentRouterCacheTtlMs(): number {
-    const raw = this.config.get<string>('SOCIAL_AGENT_INTENT_ROUTER_CACHE_TTL_MS');
+    const raw = this.config.get<string>(
+      'SOCIAL_AGENT_INTENT_ROUTER_CACHE_TTL_MS',
+    );
     if (raw === '0') return 0;
     const parsed = Number(raw);
     if (Number.isFinite(parsed) && parsed >= 0) {

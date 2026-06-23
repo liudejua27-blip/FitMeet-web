@@ -251,6 +251,11 @@ export class FitMeetAlphaAgentSdkService {
         0,
         5,
       );
+      const displayInterestTags = this.candidateDisplayInterests(
+        candidate,
+        draft,
+        interestTags,
+      );
       const safetyBoundary =
         this.stringList(candidate.boundaryNotes)[0] ||
         this.stringList(
@@ -266,7 +271,7 @@ export class FitMeetAlphaAgentSdkService {
             intensity,
             safetyBoundary,
           });
-      const explicitSuggestedOpener =
+      const rawSuggestedOpener =
         this.text(explanation.suggestedOpener) ||
         this.text(candidate.suggestedOpener) ||
         this.text(candidate.suggestedMessage);
@@ -286,7 +291,9 @@ export class FitMeetAlphaAgentSdkService {
         safetyBoundary,
       });
       const distanceLabel = this.candidateDistanceLabel(candidate);
-      const explicitRecommendationConsent = this.record(candidate.recommendationConsent);
+      const explicitRecommendationConsent = this.record(
+        candidate.recommendationConsent,
+      );
       const recommendationConsent =
         Object.keys(explicitRecommendationConsent).length > 0
           ? explicitRecommendationConsent
@@ -310,7 +317,9 @@ export class FitMeetAlphaAgentSdkService {
       const coldStartSignals = this.uniqueStrings([
         ...this.stringList(candidate.coldStartSignals),
         area ? `区域：${area}` : '',
-        interestTags.length ? `共同兴趣：${interestTags.slice(0, 2).join('、')}` : '',
+        displayInterestTags.length
+          ? `共同兴趣：${displayInterestTags.slice(0, 2).join('、')}`
+          : '',
         timePreference ? `时间：${timePreference}` : '',
       ]).slice(0, 4);
       const preferenceHistorySignals = this.stringList(
@@ -357,7 +366,7 @@ export class FitMeetAlphaAgentSdkService {
       const opportunityTitle = `和 ${displayName} 低压力认识`;
       const opportunitySubtitle = `${area} · ${activityType} · ${timePreference}`;
       const suggestedOpener =
-        explicitSuggestedOpener ||
+        this.taskAlignedOpener(rawSuggestedOpener, activityType) ||
         this.defaultCandidateOpener({
           area,
           activityType,
@@ -395,7 +404,7 @@ export class FitMeetAlphaAgentSdkService {
             area,
             time: timePreference,
             distanceLabel,
-            interests: interestTags,
+            interests: displayInterestTags,
             reasons: reasons.slice(0, 4),
             explanationSteps,
             rankingBreakdown,
@@ -410,7 +419,7 @@ export class FitMeetAlphaAgentSdkService {
             preferenceHistorySignals,
             frictionLevel: this.frictionLevel(score, candidate),
             suggestedOpener: suggestedOpener || null,
-            recommendedNextAction: '先生成邀请开场白，确认后再发送。',
+            recommendedNextAction: '先生成开场白，确认后再发送。',
             safetyBoundary,
             confirmedContext,
           },
@@ -420,7 +429,7 @@ export class FitMeetAlphaAgentSdkService {
           confirmedContext,
           confidence: this.matchConfidence(score),
           frictionLevel: this.frictionLevel(score, candidate),
-          recommendedNextAction: '先生成邀请开场白，确认后再发送。',
+          recommendedNextAction: '先生成开场白，确认后再发送。',
           relationshipGoal,
           idealType,
           invitePolicy,
@@ -434,7 +443,7 @@ export class FitMeetAlphaAgentSdkService {
           discoverySafetySignals,
           recommendationProtocol,
           preferenceHistorySignals,
-          sharedInterests: interestTags,
+          sharedInterests: displayInterestTags,
           explanationSteps,
           rankingBreakdown,
           distanceLabel,
@@ -463,10 +472,10 @@ export class FitMeetAlphaAgentSdkService {
           safetyBoundary,
           nextActions: [
             '查看详情',
-            '生成邀请开场白',
+            '生成开场白',
             '先收藏',
             '发送邀请',
-            '加好友并聊天',
+            '确认后邀请Ta',
             '更多类似的人',
             '不感兴趣',
           ],
@@ -494,7 +503,7 @@ export class FitMeetAlphaAgentSdkService {
           },
           {
             id: 'generate_invite_opener',
-            label: '生成邀请开场白',
+            label: '生成开场白',
             action: 'candidate.generate_opener',
             schemaAction: 'candidate.generate_opener',
             loopStage: 'candidate_selected',
@@ -546,9 +555,7 @@ export class FitMeetAlphaAgentSdkService {
               approvalRequired: true,
               checkpointRequired: true,
               resumeMode: 'resume_after_approval',
-              idempotencyKey: `opener-send:${taskId}:${String(
-                targetUserId ?? cardIdentity,
-              )}`,
+              idempotencyKey: `opener-send:${taskId}:${cardIdentity}`,
               suggestedOpener,
               riskLevel: 'medium',
               riskReasons: [
@@ -561,7 +568,7 @@ export class FitMeetAlphaAgentSdkService {
           },
           {
             id: 'connect_candidate',
-            label: '加好友并聊天',
+            label: '确认后邀请Ta',
             action: 'candidate.connect',
             schemaAction: 'candidate.connect',
             loopStage: 'candidate_selected',
@@ -578,9 +585,7 @@ export class FitMeetAlphaAgentSdkService {
               approvalRequired: true,
               checkpointRequired: true,
               resumeMode: 'resume_after_approval',
-              idempotencyKey: `candidate-connect:${taskId}:${String(
-                targetUserId ?? cardIdentity,
-              )}`,
+              idempotencyKey: `candidate-connect:${taskId}:${cardIdentity}`,
               suggestedOpener,
               riskLevel: 'medium',
               riskReasons: [
@@ -674,16 +679,16 @@ export class FitMeetAlphaAgentSdkService {
             schemaName: 'OpportunityCard',
             schemaVersion: 'fitmeet.tool-ui.v1',
             schemaType: 'social_match.activity',
-          socialRequestId: draft.socialRequestId ?? null,
-          autoPublished,
-          publicIntentId: publicIntentId || null,
-          discoverHref: discoverHref || null,
-          publishPolicy,
-          opportunityCard: true,
-          opportunity: {
-            id: `opportunity:${taskId}:activity`,
-            type: 'activity',
-            title: `${activityType}约练`,
+            socialRequestId: draft.socialRequestId ?? null,
+            autoPublished,
+            publicIntentId: publicIntentId || null,
+            discoverHref: discoverHref || null,
+            publishPolicy,
+            opportunityCard: true,
+            opportunity: {
+              id: `opportunity:${taskId}:activity`,
+              type: 'activity',
+              title: `${activityType}约练`,
               subtitle: `${city} · ${timePreference}`,
               summary: description,
               city,
@@ -721,10 +726,23 @@ export class FitMeetAlphaAgentSdkService {
           },
           actions: [
             {
+              id: 'view_activity_detail',
+              label: '查看详情',
+              action: 'activity.view_detail',
+              schemaAction: 'activity.view_detail',
+              loopStage: 'activity_draft_created',
+              requiresConfirmation: false,
+              payload: {
+                taskId,
+                socialRequestId: draft.socialRequestId ?? null,
+                opportunityId: `opportunity:${taskId}:activity`,
+              },
+            },
+            {
               id: 'confirm_create_activity',
-              label: '发布到发现',
+              label: '发布卡片',
               action: 'publish_to_discover',
-              schemaAction: 'publish_to_discover',
+              schemaAction: 'activity.confirm_create',
               loopStage: 'activity_draft_created',
               requiresConfirmation: true,
               payload: {
@@ -742,7 +760,7 @@ export class FitMeetAlphaAgentSdkService {
             },
             {
               id: 'modify_activity_plan',
-              label: '修改',
+              label: '修改信息',
               action: 'reschedule_meet_loop',
               schemaAction: 'activity.modify_time',
               loopStage: 'activity_draft_created',
@@ -767,7 +785,8 @@ export class FitMeetAlphaAgentSdkService {
                 socialRequestDraft: draft,
                 publicPlaceOnly: true,
                 noPreciseLocation: true,
-                safetyBoundary: '这张约练卡暂不发布；你可以继续修改或直接聊天。',
+                safetyBoundary:
+                  '这张约练卡暂不发布；你可以继续修改或直接聊天。',
               },
             },
           ],
@@ -837,7 +856,9 @@ export class FitMeetAlphaAgentSdkService {
     return cards;
   }
 
-  private shouldRenderStandaloneApprovalAudit(cards: FitMeetAlphaCard[]): boolean {
+  private shouldRenderStandaloneApprovalAudit(
+    cards: FitMeetAlphaCard[],
+  ): boolean {
     return !this.hasProductCard(cards);
   }
 
@@ -903,7 +924,8 @@ export class FitMeetAlphaAgentSdkService {
           {
             key: 'publish_to_discover',
             label: '发布到发现',
-            detail: '把这张约练卡公开给符合公开可发现条件的人看见；发布前仍需要你确认。',
+            detail:
+              '把这张约练卡公开给符合公开可发现条件的人看见；发布前仍需要你确认。',
             requiresConfirmation: true,
           },
           {
@@ -1072,16 +1094,21 @@ export class FitMeetAlphaAgentSdkService {
   }
 
   private toolNamesForSubagent(agent: FitMeetAlphaAgentName): string[] {
+    if (agent === 'Agent Brain') {
+      return ['classify_fitmeet_social_need', 'calculate_fitness_math'];
+    }
     if (agent === 'Life Graph Agent') {
       return ['get_user_profile', 'update_profile_from_agent_context'];
     }
-    if (agent === 'Social Match Agent') {
-      return ['create_social_request', 'search_real_candidates'];
+    if (agent === 'Match Agent') {
+      return [
+        'create_social_request',
+        'search_real_candidates',
+        'send_message_to_candidate',
+        'connect_candidate',
+        'create_activity',
+      ];
     }
-    if (agent === 'Meet Loop Agent') {
-      return ['send_message_to_candidate', 'create_activity'];
-    }
-    if (agent === 'Math Agent') return ['calculate_fitness_math'];
     return [];
   }
 
@@ -1126,32 +1153,22 @@ export class FitMeetAlphaAgentSdkService {
       tools: [classifyNeed],
     });
 
-    const socialMatchAgent = new Agent({
-      name: 'Social Match Agent',
+    const matchAgent = new Agent({
+      name: 'Match Agent',
       handoffDescription:
-        '社交需求解析与候选匹配智能体，把自然语言需求转为结构化请求并解释候选推荐。',
+        '匹配与约练闭环智能体，把自然语言需求转为约练卡、候选推荐、邀请、私信和活动状态。',
       instructions:
-        '你是 FitMeet Social Match Agent。把用户需求转成结构化社交请求，关注同城社交、约练、找搭子、找朋友和相亲恋爱。输出必须包含活动类型、地点、时间、人群目标、硬约束、可选偏好、缺失信息、推荐原因和安全边界。',
+        '你是 FitMeet Match Agent。把用户需求转成结构化社交请求，关注同城社交、约练、找搭子、找朋友和相亲恋爱。先生成约练卡片，再搜索真实候选；所有发布、发消息、加好友、创建活动、交换联系方式都必须等待用户确认。输出只保留活动类型、地点、时间、人群目标、硬约束、推荐原因、安全边界和下一步动作。',
       outputType: StructuredIntentSchema,
       tools: [classifyNeed],
     });
 
-    const meetLoopAgent = new Agent({
-      name: 'Meet Loop Agent',
+    const brainAgent = new Agent({
+      name: 'Agent Brain',
       handoffDescription:
-        '约练/线下活动闭环智能体，负责开场白、邀请、活动创建、签到、评价和回写建议。',
+        '低成本意图判断与普通聊天智能体，处理普通对话、路由、配速、时间和距离等轻量计算。',
       instructions:
-        '你是 FitMeet Meet Loop Agent。你负责把候选推进为可确认动作：开场白、邀请、活动创建、签到、评价和 Life Graph 回写建议。任何发消息、加好友、创建线下活动、交换联系方式、签到、评价都必须等待用户确认。',
-      outputType: StructuredIntentSchema,
-      tools: [classifyNeed],
-    });
-
-    const mathAgent = new Agent({
-      name: 'Math Agent',
-      handoffDescription:
-        '轻量运动计算智能体，处理配速、时间、距离和基础热量估算，不读写用户数据。',
-      instructions:
-        '你是 FitMeet Math Agent。只做无副作用运动计算，例如配速、距离、时间、粗略热量估算和训练节奏解释。不要给医疗建议，不要读取或写入用户画像，不要搜索候选人，不要创建活动。输出必须说明估算前提。',
+        '你是 FitMeet Agent Brain。优先用短上下文和确定性规则完成普通聊天、意图判断、继续任务入口和无副作用运动计算。不要读取或写入用户画像，不要搜索候选人，不要创建活动。需要社交执行时只输出下一步路由，不扩展多余中间推理。',
       outputType: StructuredIntentSchema,
       tools: [classifyNeed],
     });
@@ -1173,8 +1190,8 @@ export class FitMeetAlphaAgentSdkService {
       name: 'FitMeet Main Agent',
       handoffDescription: 'FitMeet Agent 总入口、总调度器和安全边界控制器。',
       instructions:
-        '你是 FitMeet Main Agent。先做安全过滤，再判断意图，必要时 handoff 给 Life Graph Agent、Social Match Agent、Meet Loop Agent 或 Math Agent。不要直接执行数据库或外部动作；所有发消息、加好友、创建线下活动和敏感画像更新都必须用户确认。输出必须符合结构化 schema，并给出 Beta 阶段可执行的 agentPlan。',
-      handoffs: [lifeGraphAgent, socialMatchAgent, meetLoopAgent, mathAgent],
+        '你是 FitMeet Main Agent。先做安全过滤，再用最短路径判断意图：普通聊天交给 Agent Brain；画像补充交给 Life Graph Agent；约练卡、候选匹配、发消息、加好友、活动闭环交给 Match Agent。不要直接执行数据库或外部动作；所有发消息、加好友、创建线下活动和敏感画像更新都必须用户确认。输出必须符合结构化 schema，并给出可执行但简洁的 agentPlan。',
+      handoffs: [brainAgent, lifeGraphAgent, matchAgent],
       inputGuardrails: [inputGuardrail],
       outputType: StructuredIntentSchema,
       tools: [classifyNeed],
@@ -1333,7 +1350,7 @@ export class FitMeetAlphaAgentSdkService {
     if (ambiguous) {
       return {
         intent: 'general_social_need',
-        nextAgent: 'answer',
+        nextAgent: 'main_agent',
         activityType,
         locationText,
         timePreference,
@@ -1345,7 +1362,7 @@ export class FitMeetAlphaAgentSdkService {
         agentPlan: [
           'Main Agent 先理解用户想要轻松陪伴',
           '先温和补问时间和社交压力偏好',
-          '用户补充后再进入 Life Graph 和 Social Match',
+          '用户补充后再进入个人信息整理和匹配流程',
         ],
         betaScore: 70,
         needState: 'ambiguous_companionship',
@@ -1361,7 +1378,7 @@ export class FitMeetAlphaAgentSdkService {
     if (this.isFitnessMathRequest(text)) {
       return {
         intent: 'fitness_math',
-        nextAgent: 'math',
+        nextAgent: 'agent_brain',
         activityType: activityType || '运动',
         locationText,
         timePreference,
@@ -1371,7 +1388,7 @@ export class FitMeetAlphaAgentSdkService {
         requiredConstraints,
         optionalPreferences,
         agentPlan: [
-          'Math Agent 识别距离、时间、体重或配速信息',
+          'Agent Brain 识别距离、时间、体重或配速信息',
           '只做无副作用估算，不读取或写入用户数据',
           '输出计算结果和估算前提',
         ],
@@ -1389,7 +1406,7 @@ export class FitMeetAlphaAgentSdkService {
     if (/变化|记录|更新|审计/.test(text)) {
       return {
         intent: 'view_profile_changes',
-        nextAgent: 'life_graph',
+        nextAgent: 'life_graph_agent',
         activityType,
         locationText,
         timePreference,
@@ -1416,7 +1433,7 @@ export class FitMeetAlphaAgentSdkService {
     if (/life graph|画像|完善|补全|资料|边界/.test(text)) {
       return {
         intent: 'complete_life_graph',
-        nextAgent: 'life_graph',
+        nextAgent: 'life_graph_agent',
         activityType,
         locationText,
         timePreference,
@@ -1449,7 +1466,7 @@ export class FitMeetAlphaAgentSdkService {
     if (/节奏|作息|生活|分析/.test(text)) {
       return {
         intent: 'analyze_life_rhythm',
-        nextAgent: 'life_graph',
+        nextAgent: 'life_graph_agent',
         activityType,
         locationText,
         timePreference,
@@ -1476,7 +1493,7 @@ export class FitMeetAlphaAgentSdkService {
     if (this.isActivityRecommendationIntent(text) && !wantsPersonMatch) {
       return {
         intent: 'recommend_weekly_activity',
-        nextAgent: 'social_match',
+        nextAgent: 'match_agent',
         activityType,
         locationText,
         timePreference: timePreference || '本周',
@@ -1506,7 +1523,7 @@ export class FitMeetAlphaAgentSdkService {
     }
     return {
       intent: 'find_nearby_partner',
-      nextAgent: 'social_match',
+      nextAgent: 'match_agent',
       activityType,
       timePreference,
       locationText,
@@ -1861,8 +1878,8 @@ export class FitMeetAlphaAgentSdkService {
       missingInformation.length > 0
         ? `先补问：${missingInformation.slice(0, 3).join('、')}`
         : '信息足够，进入候选搜索',
-      'Social Match Agent 生成候选人/活动与推荐解释',
-      'Meet Loop Agent 准备开场白、连接或活动创建，等待用户确认后执行',
+      'Match Agent 生成候选人/活动与推荐解释',
+      'Match Agent 准备开场白、连接或活动创建，等待用户确认后执行',
       '执行结果写入审计，并回写 Life Graph 与 trust score 建议',
     ];
   }
@@ -1901,13 +1918,38 @@ export class FitMeetAlphaAgentSdkService {
     draft?: Record<string, unknown> | null,
   ): string[] {
     return this.uniqueStrings([
-      ...this.stringList(candidate.commonTags),
+      this.text(draft?.activityType),
+      this.text(candidate.activityType),
       ...this.stringList(candidate.sharedInterests),
+      ...this.stringList(candidate.commonTags),
       ...this.stringList(candidate.interestTags),
       ...this.stringList(candidate.tags),
-      this.text(draft?.activityType),
       this.text(candidate.sport),
     ]);
+  }
+
+  private candidateDisplayInterests(
+    candidate: Record<string, unknown>,
+    draft: Record<string, unknown> | null | undefined,
+    fallback: string[],
+  ): string[] {
+    const taskInterests = this.uniqueStrings([
+      this.text(draft?.activityType),
+      this.text(draft?.sport),
+      ...this.stringList(draft?.interestTags),
+    ]).slice(0, 5);
+    if (taskInterests.length > 0) return taskInterests;
+    return this.uniqueStrings([
+      ...this.stringList(candidate.sharedInterests),
+      ...this.stringList(candidate.commonTags),
+      ...fallback,
+    ]).slice(0, 5);
+  }
+
+  private taskAlignedOpener(opener: string, activityType: string): string {
+    if (!opener) return '';
+    if (!activityType) return opener;
+    return opener.includes(activityType) ? opener : '';
   }
 
   private candidateDistanceLabel(
@@ -1979,11 +2021,8 @@ export class FitMeetAlphaAgentSdkService {
     safetyBoundary: string;
   }): string[] {
     const explicit = this.stringList(input.candidate.discoverySafetySignals);
-    if (explicit.length > 0) return explicit.slice(0, 5);
     const blockedSignals = this.stringList(
-      input.candidate.blockedSignals ??
-        input.candidate.complaintSignals ??
-        input.candidate.riskWarnings,
+      input.candidate.blockedSignals ?? input.candidate.complaintSignals,
     );
     return this.uniqueStrings([
       input.recommendationConsent.profileDiscoverable === true ||
@@ -2001,6 +2040,7 @@ export class FitMeetAlphaAgentSdkService {
         ? '无拉黑/投诉风险信号'
         : '存在风险信号，需降低触达强度',
       input.safetyBoundary ? '邀请前保留确认边界' : '',
+      ...explicit,
     ]).slice(0, 5);
   }
 
@@ -2092,7 +2132,12 @@ export class FitMeetAlphaAgentSdkService {
     interestTags: string[];
     relationshipGoal: string;
     safetyBoundary: string;
-  }): Array<{ key: string; label: string; score: number | null; reason: string }> {
+  }): Array<{
+    key: string;
+    label: string;
+    score: number | null;
+    reason: string;
+  }> {
     const breakdown = this.record(input.candidate.scoreBreakdown);
     const numberValue = (value: unknown): number | null => {
       const parsed =
@@ -2107,13 +2152,19 @@ export class FitMeetAlphaAgentSdkService {
       {
         key: 'location',
         label: '城市/距离',
-        score: numberValue(breakdown.distance ?? breakdown.cityMatch ?? breakdown.locationFit),
-        reason: input.area ? `区域在 ${input.area} 附近，适合先低压力了解。` : '区域信息已模糊处理。',
+        score: numberValue(
+          breakdown.distance ?? breakdown.cityMatch ?? breakdown.locationFit,
+        ),
+        reason: input.area
+          ? `区域在 ${input.area} 附近，适合先低压力了解。`
+          : '区域信息已模糊处理。',
       },
       {
         key: 'interest',
         label: '共同兴趣',
-        score: numberValue(breakdown.interestSimilarity ?? breakdown.commonTags),
+        score: numberValue(
+          breakdown.interestSimilarity ?? breakdown.commonTags,
+        ),
         reason: input.interestTags.length
           ? `共同兴趣包含 ${input.interestTags.slice(0, 3).join('、')}。`
           : `${input.activityType} 与这次需求相关。`,
@@ -2133,7 +2184,9 @@ export class FitMeetAlphaAgentSdkService {
       {
         key: 'life_graph',
         label: '画像偏好',
-        score: numberValue(breakdown.lifeGraphBehaviorFit ?? breakdown.profileFit),
+        score: numberValue(
+          breakdown.lifeGraphBehaviorFit ?? breakdown.profileFit,
+        ),
         reason: `${input.relationshipGoal}，${input.intensity}节奏更贴近你的偏好。`,
       },
     ].filter((item) => item.reason);
@@ -2189,11 +2242,31 @@ export class FitMeetAlphaAgentSdkService {
   ): Record<string, unknown> | null | undefined {
     if (!draft) return draft;
     const next: Record<string, unknown> = { ...draft };
-    this.assignDraftSlotIfMissing(next, 'activityType', taskSlotSummary.activity);
-    this.assignDraftSlotIfMissing(next, 'timePreference', taskSlotSummary.time_window);
-    this.assignDraftSlotIfMissing(next, 'preferredTime', taskSlotSummary.time_window);
-    this.assignDraftSlotIfMissing(next, 'locationName', taskSlotSummary.location_text);
-    this.assignDraftSlotIfMissing(next, 'location', taskSlotSummary.location_text);
+    this.assignDraftSlotIfMissing(
+      next,
+      'activityType',
+      taskSlotSummary.activity,
+    );
+    this.assignDraftSlotIfMissing(
+      next,
+      'timePreference',
+      taskSlotSummary.time_window,
+    );
+    this.assignDraftSlotIfMissing(
+      next,
+      'preferredTime',
+      taskSlotSummary.time_window,
+    );
+    this.assignDraftSlotIfMissing(
+      next,
+      'locationName',
+      taskSlotSummary.location_text,
+    );
+    this.assignDraftSlotIfMissing(
+      next,
+      'location',
+      taskSlotSummary.location_text,
+    );
     this.assignDraftSlotIfMissing(next, 'city', taskSlotSummary.geo_area);
     this.assignDraftSlotIfMissing(next, 'intensity', taskSlotSummary.intensity);
     this.assignDraftSlotIfMissing(
@@ -2201,7 +2274,11 @@ export class FitMeetAlphaAgentSdkService {
       'candidatePreference',
       taskSlotSummary.candidate_preference,
     );
-    this.assignDraftSlotIfMissing(next, 'safetyBoundary', taskSlotSummary.safety_boundary);
+    this.assignDraftSlotIfMissing(
+      next,
+      'safetyBoundary',
+      taskSlotSummary.safety_boundary,
+    );
     return next;
   }
 

@@ -6,7 +6,7 @@ tool routing, approval gates, memory writes, frontend Tool UI, and evals.
 
 ## Runtime Skill Order
 
-The first production social/meet-up chain uses these skills:
+The first production social/meet-up chain uses these product skills:
 
 1. `profile_onboarding_skill`
 2. `social_intent_clarifier_skill`
@@ -18,6 +18,32 @@ The first production social/meet-up chain uses these skills:
 8. `invitation_skill`
 9. `meet_loop_skill`
 10. `life_graph_memory_skill`
+
+These are workflow contracts, not one runtime subagent per file. The runtime is
+kept to three execution agents:
+
+- `Agent Brain`: ordinary chat, lightweight planning, and deterministic fitness
+  calculations.
+- `Life Graph Agent`: personal information completion and governed memory
+  proposals.
+- `Match Agent`: OpportunityCard publish, Discover sync, candidate
+  recall/ranking, opener preview, invite/message/friend actions, and meet-loop
+  state.
+
+`FitMeet Main Agent` remains the orchestrator. It routes the turn, enforces
+approval boundaries, and composes the user-visible answer. This keeps the
+workflow testable without multiplying model calls for normal users.
+
+Cost boundary:
+
+- Ordinary chat uses `Agent Brain` only and should avoid profile hydration.
+- `Agent Brain` gets at most 1 tool call and no retry.
+- `Life Graph Agent` gets at most 2 tool calls and must stop at an update
+  preview until the user confirms.
+- `Match Agent` gets at most 3 tool calls and must reuse current task slots,
+  cached results, and approved state before asking the model for more work.
+- Workflow skills should reduce prompt size by providing deterministic routing
+  and acceptance checks; they must not be treated as extra model agents.
 
 Ordinary chat must not enter this chain unless the user explicitly expresses a
 social, meet-up, activity, friend-making, candidate, or invite goal.
@@ -48,7 +74,7 @@ empty candidate fallback, and release acceptance.
 - `CandidateEmptyStateCard`
 - `ApprovalPanel`
 - `MeetLoopTimeline`
-- `LifeGraphDiffCard`
+- `PersonalProfileUpdateCard` (`life_graph.diff` schema)
 
 All tool outputs should follow [tool-contract.md](./tool-contract.md).
 
@@ -79,42 +105,23 @@ Write a report artifact for release evidence:
 node scripts/run-agent-skill-evals.mjs --backend --report .agent-eval-report.json
 ```
 
-Use API modes when a local/staging backend and dedicated smoke credentials are
-available:
+When you need durable release evidence for the skill contracts, write a report
+from the current eval runner:
 
 ```bash
-node scripts/run-agent-skill-evals.mjs --api-readiness
-node scripts/run-agent-skill-evals.mjs --api-20-turn-memory
-node scripts/run-agent-skill-evals.mjs --api-empty-candidate
-node scripts/run-agent-skill-evals.mjs --api-sse-abort
-RUN_AGENT_SKILL_EVAL_API=readiness bash scripts/verify-agent-release.sh
-RUN_AGENT_SKILL_EVAL_API=20-turn-memory bash scripts/verify-agent-release.sh
-RUN_AGENT_EMPTY_CANDIDATE_SMOKE=true bash scripts/verify-agent-release.sh
+node scripts/run-agent-skill-evals.mjs \
+  --backend \
+  --report artifacts/agent-release-evidence/agent-skill-eval.json
 ```
 
-When you need durable release evidence, set `AGENT_SMOKE_REPORT_FILE` on any
-real API smoke run. The backend smoke writes
-`fitmeet.agent-opportunity-smoke-report.v1` JSON with the passed Social Codex
-milestones, scenario knobs, and failure reason when a step breaks:
+For deployed environments, use the production goal verifier with dedicated QA
+credentials. It checks Discover supply, stale production copy, ordinary-chat
+isolation, and the Agent browser QA path:
 
 ```bash
-AGENT_SMOKE_REPORT_FILE=artifacts/agent-release-evidence/opportunity-smoke.json \
-RUN_AGENT_OPPORTUNITY_SMOKE=true \
-bash scripts/verify-agent-release.sh
+BASE_URL=https://www.ourfitmeet.cn \
+API_BASE_URL=https://www.ourfitmeet.cn/api \
+FITMEET_AGENT_BROWSER_QA_EMAIL='<qa-email>' \
+FITMEET_AGENT_BROWSER_QA_PASSWORD='<qa-password>' \
+bash scripts/verify-agent-goal-production.sh
 ```
-
-`--api-readiness` runs the real Agent opportunity smoke in
-`AGENT_SMOKE_STOP_AFTER_OPPORTUNITIES=true` mode. It checks ordinary-chat
-isolation, clarification, OpportunityCard readiness, and the correction-memory
-path where a user updates candidate preference without losing the already
-answered time/place/activity slots.
-`node scripts/run-agent-skill-evals.mjs --api-20-turn-memory` runs the real
-smoke harness through a 20-turn continuation and requires the Agent to preserve
-task continuity and completed time/place/activity slots without repeat
-questions.
-`RUN_AGENT_EMPTY_CANDIDATE_SMOKE=true` runs the same real smoke harness through
-an impossible public-candidate request and requires `CandidateEmptyStateCard`
-with safe recovery actions instead of fabricated candidates.
-`node scripts/run-agent-skill-evals.mjs --api-empty-candidate` exposes that same
-real API path from the skill eval runner, so skill evidence can be replayed
-without running the full release script.

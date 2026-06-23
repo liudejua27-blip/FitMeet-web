@@ -336,7 +336,7 @@ export class SocialAgentRouteAgentLoopRunnerService {
         return this.runSearchBranch(contextualInput);
       }
       return this.runWorkerBranch(contextualInput, {
-        agent: 'Social Match Agent',
+        agent: 'Match Agent',
         workerToolName: 'social_match_search_turn',
         memoryScope: 'matching.worker_search_turn',
         run: () => this.runSearchBranch(contextualInput),
@@ -347,7 +347,6 @@ export class SocialAgentRouteAgentLoopRunnerService {
         input.route,
         input.message,
         input.taskContext,
-        input.conversationIntent,
       )
     ) {
       return this.skippedBranch(contextualInput, {
@@ -367,14 +366,14 @@ export class SocialAgentRouteAgentLoopRunnerService {
       return this.runActionBranch(contextualInput);
     }
     return this.runWorkerBranch(contextualInput, {
-      agent: 'Meet Loop Agent',
+      agent: 'Match Agent',
       workerToolName: 'meet_loop_action_turn',
       memoryScope: 'meet_loop.worker_action_turn',
       run: () => this.runActionBranch(contextualInput),
     });
   }
 
-  private async skippedBranch(
+  private skippedBranch(
     input: {
       task: AgentTask;
       state: SocialAgentRouteTurnState;
@@ -383,11 +382,11 @@ export class SocialAgentRouteAgentLoopRunnerService {
       branch: 'search' | 'action';
       reason: string;
     },
-  ): Promise<{
+  ): {
     task: AgentTask;
     state: SocialAgentRouteTurnState;
     observation: Record<string, unknown>;
-  }> {
+  } {
     return {
       task: input.task,
       state: input.state,
@@ -628,11 +627,12 @@ export class SocialAgentRouteAgentLoopRunnerService {
       },
       memoryScope: options.memoryScope,
       maxToolCalls: 1,
-      maxRetries: options.agent === 'Meet Loop Agent' ? 1 : 0,
+      maxRetries: options.agent === 'Match Agent' ? 1 : 0,
       signal: input.signal,
       tools: [
         {
           toolName: options.workerToolName,
+          requiresApproval: false,
           input: {
             taskId: input.task.id,
             intent: input.route.intent,
@@ -800,7 +800,8 @@ export class SocialAgentRouteAgentLoopRunnerService {
         hasExplicitSocialSideEffectIntent(message) &&
         (hasExistingSocialActionContext({
           taskContext: decision.taskContext,
-        }) || this.hasExistingPublishContext(message, decision.taskContext))
+        }) ||
+          this.hasExistingPublishContext(message, decision.taskContext))
       );
     }
     const allowed = shouldAllowSocialExecution({
@@ -841,7 +842,6 @@ export class SocialAgentRouteAgentLoopRunnerService {
     route: RouteDecision['route'],
     message: string,
     taskContext?: Record<string, unknown>,
-    _conversationIntent?: SocialAgentRouteMessageBody['conversationIntent'],
   ): boolean {
     return (
       route.intent === 'action_request' &&
@@ -905,9 +905,9 @@ export class SocialAgentRouteAgentLoopRunnerService {
     decision: RouteDecision,
   ): AgentLoopToolPlan['agent'] {
     if (toolName === 'route_profile_turn') return 'Life Graph Agent';
-    if (toolName === 'route_search_turn') return 'Social Match Agent';
-    if (toolName === 'route_action_turn') return 'Meet Loop Agent';
-    if (decision.route.intent === 'fitness_math') return 'Math Agent';
+    if (toolName === 'route_search_turn') return 'Match Agent';
+    if (toolName === 'route_action_turn') return 'Match Agent';
+    if (decision.route.intent === 'fitness_math') return 'Agent Brain';
     return 'Agent Brain';
   }
 
@@ -1064,24 +1064,22 @@ export class SocialAgentRouteAgentLoopRunnerService {
       lifeGraphFactDisplaySummaries: this.recordArray(
         context.lifeGraphFactDisplaySummaries,
       ) as SocialAgentHydratedContext['lifeGraphFactDisplaySummaries'],
-      lifeGraphGovernanceSummary:
-        (this.recordOrNull(context.lifeGraphGovernanceSummary) as
-          | SocialAgentHydratedContext['lifeGraphGovernanceSummary']
-          | null) ?? {
-          total: 0,
-          autoSaveCount: 0,
-          confirmationRequiredCount: 0,
-          blockedCount: 0,
-          sensitiveCount: 0,
-          expiringFactKeys: [],
-        },
+      lifeGraphGovernanceSummary: (this.recordOrNull(
+        context.lifeGraphGovernanceSummary,
+      ) as SocialAgentHydratedContext['lifeGraphGovernanceSummary'] | null) ?? {
+        total: 0,
+        autoSaveCount: 0,
+        confirmationRequiredCount: 0,
+        blockedCount: 0,
+        sensitiveCount: 0,
+        expiringFactKeys: [],
+      },
       lifeGraphSummary: this.recordOrNull(context.lifeGraphSummary),
       pendingApprovals:
         pendingApprovals as SocialAgentHydratedContext['pendingApprovals'],
-      candidateActions: (this.recordOrNull(context.candidateActions) ??
-        this.recordOrNull(context.candidateState)) as
-        | SocialAgentHydratedContext['candidateActions']
-        | null,
+      candidateActions:
+        this.recordOrNull(context.candidateActions) ??
+        this.recordOrNull(context.candidateState),
     };
   }
 

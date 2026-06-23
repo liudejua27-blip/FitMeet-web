@@ -21,7 +21,7 @@ import {
   getSocialAgentToolActionType,
   getSocialAgentToolRiskLevel,
   getSocialAgentToolRiskLevelForPolicy,
-  shouldWriteSocialAgentActionResultInbox,
+  shouldWriteSocialAgentActionResultMessageEvent,
 } from './social-agent-tool-policy';
 import {
   SocialAgentToolCallRecord,
@@ -124,14 +124,14 @@ export class SocialAgentActionSideEffectService {
     }
 
     if (
-      shouldWriteSocialAgentActionResultInbox(input.toolName) &&
+      shouldWriteSocialAgentActionResultMessageEvent(input.toolName) &&
       input.task.agentConnectionId
     ) {
       try {
-        await this.writeActionResultInbox(input);
+        await this.writeActionResultMessageEvent(input);
       } catch (error) {
         this.logger.warn(
-          `Failed to write action result inbox for task=${input.task.id}, tool=${input.toolName}: ${
+          `Failed to write action result message center for task=${input.task.id}, tool=${input.toolName}: ${
             error instanceof Error ? error.message : String(error)
           }`,
         );
@@ -191,12 +191,12 @@ export class SocialAgentActionSideEffectService {
     };
   }
 
-  private async writeActionResultInbox(
+  private async writeActionResultMessageEvent(
     input: RecordActionSideEffectInput,
   ): Promise<void> {
     if (!input.task.agentConnectionId) return;
 
-    await this.messages.createAgentInboxEvent({
+    await this.messages.createAgentMessageEvent({
       agentConnectionId: input.task.agentConnectionId,
       ownerUserId: input.task.ownerUserId,
       eventType: `agent.action.${input.call.status}`,

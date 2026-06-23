@@ -67,7 +67,7 @@ describe('isPublicHallIntent', () => {
       id: 'intent_1',
       userId: 2,
       linkedSocialRequestId: 10,
-      source: 'public_social_skills',
+      source: 'public_intent',
       mode: 'public',
       requestType: 'fitness_partner',
       title: '今晚一起跑步',

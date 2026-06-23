@@ -412,8 +412,7 @@ describe('SocialAgentRouteCompletionService', () => {
         shouldUpdateProfile: false,
         replyStrategy: 'direct_reply',
       }),
-      assistantMessage:
-        '连接刚才中断了。这段需求还在，可以直接继续。',
+      assistantMessage: '连接刚才中断了。这段需求还在，可以直接继续。',
       assistantMessageSource: 'fallback',
       savedContext: false,
       profileUpdated: false,

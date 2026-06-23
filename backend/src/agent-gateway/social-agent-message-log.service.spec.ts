@@ -503,8 +503,7 @@ describe('SocialAgentMessageLogService', () => {
         taskId: 101,
         status: AgentTaskStatus.AwaitingFeedback,
         visibleSteps: [],
-        assistantMessage:
-          '连接刚才中断了。这段需求还在，可以直接继续。',
+        assistantMessage: '连接刚才中断了。这段需求还在，可以直接继续。',
         socialRequestDraft: null,
         candidates: [],
         approvalRequiredActions: [],

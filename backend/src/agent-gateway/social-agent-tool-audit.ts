@@ -143,7 +143,8 @@ function auditValuePreview(value: unknown, max: number): string {
 
 function compactAuditValue(value: unknown, depth = 0): unknown {
   if (value == null) return value;
-  if (typeof value === 'string') return preview(redactSensitiveAuditText(value), 160);
+  if (typeof value === 'string')
+    return preview(redactSensitiveAuditText(value), 160);
   if (typeof value !== 'object') return value;
   if (depth >= 2) return Array.isArray(value) ? '[Array]' : '[Object]';
   if (Array.isArray(value)) {
@@ -164,11 +165,26 @@ function compactAuditValue(value: unknown, depth = 0): unknown {
 function redactSensitiveAuditText(value: string): string {
   return value
     .replace(/\b1[3-9]\d{9}\b/g, '[redacted-phone]')
-    .replace(/\b(?:wechat|weixin|wx|vx)\s*[:：]?\s*[\w.-]{3,}\b/gi, '[redacted-contact]')
-    .replace(/(微信|电话|手机号|联系方式)\s*(?:是|为|=|:|：)?\s*[\w+\-.]{3,}/gi, '$1：[redacted]')
-    .replace(/(?:经度|纬度|坐标|定位|导航|地图链接|高德|百度地图|腾讯地图|amap|gaode|baidu|geo:)[^\s,，。；;]*/gi, '[redacted-location]')
-    .replace(/[-+]?(?:[1-8]?\d(?:\.\d{4,})?|90(?:\.0{4,})?)\s*[,，]\s*[-+]?(?:1[0-7]\d|\d{1,2}|180)(?:\.\d{4,})?/g, '[redacted-coordinates]')
-    .replace(/[\u4e00-\u9fa5A-Za-z0-9·-]{0,20}(?:宿舍|寝室|门牌|楼栋|单元|住址)[\u4e00-\u9fa5A-Za-z0-9·\-\s]{0,30}/g, '[redacted-address]');
+    .replace(
+      /\b(?:wechat|weixin|wx|vx)\s*[:：]?\s*[\w.-]{3,}\b/gi,
+      '[redacted-contact]',
+    )
+    .replace(
+      /(微信|电话|手机号|联系方式)\s*(?:是|为|=|:|：)?\s*[\w+\-.]{3,}/gi,
+      '$1：[redacted]',
+    )
+    .replace(
+      /(?:经度|纬度|坐标|定位|导航|地图链接|高德|百度地图|腾讯地图|amap|gaode|baidu|geo:)[^\s,，。；;]*/gi,
+      '[redacted-location]',
+    )
+    .replace(
+      /[-+]?(?:[1-8]?\d(?:\.\d{4,})?|90(?:\.0{4,})?)\s*[,，]\s*[-+]?(?:1[0-7]\d|\d{1,2}|180)(?:\.\d{4,})?/g,
+      '[redacted-coordinates]',
+    )
+    .replace(
+      /[\u4e00-\u9fa5A-Za-z0-9·-]{0,20}(?:宿舍|寝室|门牌|楼栋|单元|住址)[\u4e00-\u9fa5A-Za-z0-9·\-\s]{0,30}/g,
+      '[redacted-address]',
+    );
 }
 
 function isSensitiveAuditKey(key: string): boolean {

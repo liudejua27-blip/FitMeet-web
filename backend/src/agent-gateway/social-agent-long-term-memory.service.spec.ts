@@ -578,8 +578,12 @@ describe('SocialAgentLongTermMemoryService', () => {
     expect(snapshot.preferences.preferredTraits).toEqual(['低压力']);
     expect(snapshot.socialGoals).toEqual(['认识运动搭子']);
     expect(snapshot.availability).toEqual(['周末下午']);
-    expect(snapshot.activityPreferences.favoriteActivityTypes).toEqual(['羽毛球']);
-    expect(snapshot.activityPreferences.favoriteTimePreferences).toEqual(['周末下午']);
+    expect(snapshot.activityPreferences.favoriteActivityTypes).toEqual([
+      '羽毛球',
+    ]);
+    expect(snapshot.activityPreferences.favoriteTimePreferences).toEqual([
+      '周末下午',
+    ]);
     expect(
       JSON.stringify({
         preferences: {

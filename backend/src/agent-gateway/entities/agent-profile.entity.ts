@@ -19,7 +19,7 @@ export enum AgentType {
 
 export enum AgentProvider {
   DeepSeek = 'deepseek',
-  OpenClaw = 'openclaw',
+  FitMeetAgent = 'fitmeet_agent',
   Codex = 'codex',
   QClaw = 'qclaw',
   Custom = 'custom',

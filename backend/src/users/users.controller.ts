@@ -1,6 +1,7 @@
 import {
   Controller,
   Get,
+  Patch,
   Post,
   Put,
   Param,
@@ -14,6 +15,8 @@ import { SocialProfileService } from './social-profile.service';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 import { UpdateLocationDto } from './dto/update-location.dto';
 import { UpdateSocialProfileDto } from './dto/update-social-profile.dto';
+import { UpdateProfilePrivacyDto } from './dto/update-ai-profile-privacy.dto';
+import { SensitiveTagActionDto } from './dto/sensitive-tag-action.dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { Public } from '../common/decorators/public.decorator';
 import type { AuthenticatedRequest } from '../common/types/authenticated-request';
@@ -144,5 +147,44 @@ export class UsersController {
   @Get('me/social-profile/completion')
   getSocialProfileCompletion(@Request() req: AuthenticatedRequest) {
     return this.socialProfileService.getCompletion(req.user.id);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Get('me/social-profile/privacy')
+  getSocialProfilePrivacy(@Request() req: AuthenticatedRequest) {
+    return this.socialProfileService.getPrivacy(req.user.id);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Patch('me/social-profile/privacy')
+  updateSocialProfilePrivacy(
+    @Request() req: AuthenticatedRequest,
+    @Body() body: UpdateProfilePrivacyDto,
+  ) {
+    return this.socialProfileService.updatePrivacy(req.user.id, body ?? {});
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Get('me/social-profile/sensitive-tags/pending')
+  getPendingSensitiveTags(@Request() req: AuthenticatedRequest) {
+    return this.socialProfileService.getPendingSensitiveTags(req.user.id);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Post('me/social-profile/sensitive-tags/confirm')
+  confirmSensitiveTag(
+    @Request() req: AuthenticatedRequest,
+    @Body() body: SensitiveTagActionDto,
+  ) {
+    return this.socialProfileService.confirmSensitiveTag(req.user.id, body.tag);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Post('me/social-profile/sensitive-tags/reject')
+  rejectSensitiveTag(
+    @Request() req: AuthenticatedRequest,
+    @Body() body: SensitiveTagActionDto,
+  ) {
+    return this.socialProfileService.rejectSensitiveTag(req.user.id, body.tag);
   }
 }

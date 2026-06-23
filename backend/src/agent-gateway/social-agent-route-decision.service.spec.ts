@@ -247,10 +247,7 @@ describe('SocialAgentRouteDecisionService', () => {
       result.task,
       brainDecision.route,
     );
-    expect(metrics.recordIntent).toHaveBeenCalledWith(
-      'social_search',
-      'rules',
-    );
+    expect(metrics.recordIntent).toHaveBeenCalledWith('social_search', 'rules');
     expect(routeContext.applyRagContext).toHaveBeenCalledWith(
       expect.objectContaining({
         task: result.task,
@@ -289,13 +286,8 @@ describe('SocialAgentRouteDecisionService', () => {
         skipBrain: true,
       }),
     };
-    const {
-      brain,
-      intentRouter,
-      metrics,
-      profileEnrichment,
-      service,
-    } = makeHarness({ workflowRouter });
+    const { brain, intentRouter, metrics, profileEnrichment, service } =
+      makeHarness({ workflowRouter });
 
     const result = await service.prepare({
       ownerUserId: 7,
@@ -717,9 +709,7 @@ describe('SocialAgentRouteDecisionService', () => {
       taskSlotSummary: {},
       knownTaskSlotConstraints: {
         treatAsHardConstraints: true,
-        knownSlots: [
-          { key: 'time_window', label: '时间', value: '周末下午' },
-        ],
+        knownSlots: [{ key: 'time_window', label: '时间', value: '周末下午' }],
         doNotAskAgainFor: ['time_window'],
         userVisibleSummary: '时间：周末下午',
         candidatePreferencePolicy: 'old policy',
@@ -780,7 +770,10 @@ describe('SocialAgentRouteDecisionService', () => {
     await service.prepare({
       ownerUserId: 7,
       task: ownedTask,
-      body: { taskId: 101, message: '今天晚上在青岛大学附近，找个女舞蹈生散步。' },
+      body: {
+        taskId: 101,
+        message: '今天晚上在青岛大学附近，找个女舞蹈生散步。',
+      },
       message: '今天晚上在青岛大学附近，找个女舞蹈生散步。',
     });
 

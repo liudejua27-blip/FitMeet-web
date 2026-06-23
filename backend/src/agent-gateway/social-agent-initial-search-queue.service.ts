@@ -31,6 +31,7 @@ export class SocialAgentInitialSearchQueueService {
     task: AgentTask;
     goal: string;
     signal?: AbortSignal | null;
+    waitForCompletionMs?: number;
   }): Promise<SocialAgentAsyncRunSnapshot> {
     this.assertNotAborted(input.signal);
     const { ownerUserId, task, goal } = input;
@@ -62,14 +63,17 @@ export class SocialAgentInitialSearchQueueService {
         permissionMode: task.permissionMode ?? AgentTaskPermissionMode.Confirm,
         idempotencyKey,
       },
-      { signal: input.signal ?? null },
+      {
+        signal: input.signal ?? null,
+        waitForCompletionMs: input.waitForCompletionMs,
+      },
     );
   }
 
   private runQueued(
     ownerUserId: number,
     body: SocialAgentChatRunBody,
-    options: { signal?: AbortSignal | null } = {},
+    options: { signal?: AbortSignal | null; waitForCompletionMs?: number } = {},
   ): Promise<SocialAgentAsyncRunSnapshot> {
     return this.queuedRuns.runQueued({
       ownerUserId,
@@ -80,6 +84,7 @@ export class SocialAgentInitialSearchQueueService {
         }),
       signal: options.signal ?? null,
       visibleStepLabel: (id, label) => this.userVisibleStepLabel(id, label),
+      waitForCompletionMs: options.waitForCompletionMs,
     });
   }
 

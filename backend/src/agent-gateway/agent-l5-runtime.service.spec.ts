@@ -31,15 +31,16 @@ describe('AgentL5RuntimeService', () => {
     await service.recordSubagentMemory({
       ownerUserId: 7,
       agentTaskId: 101,
-      agentName: 'Social Match Agent',
+      agentName: 'Match Agent',
       memoryScope: 'matching.candidate_memory',
       input: { message: '找跑步搭子' },
       observation: { candidateCount: 2, rankingScore: 0.91 },
       critique: 'usable observation',
       handoffOutput: { nextAgent: 'FitMeet Main Agent' },
       evalHints: {
-        evalRunner: 'social_match_recall_ranking_eval_v1',
-        failureReviewPolicy: 'cluster_recall_or_ranking_failures',
+        evalRunner: 'match_recall_ranking_and_meet_loop_eval_v1',
+        failureReviewPolicy:
+          'cluster_recall_ranking_or_state_transition_failures',
       },
     });
 
@@ -47,13 +48,13 @@ describe('AgentL5RuntimeService', () => {
       expect.objectContaining({
         ownerUserId: 7,
         agentTaskId: 101,
-        agentName: 'Social Match Agent',
+        agentName: 'Match Agent',
         memoryScope: 'matching.candidate_memory',
         critique: expect.objectContaining({
           text: 'usable observation',
           eval: expect.objectContaining({
-            agentName: 'Social Match Agent',
-            runner: 'social_match_recall_ranking_eval_v1',
+            agentName: 'Match Agent',
+            runner: 'match_recall_ranking_and_meet_loop_eval_v1',
             passed: true,
             checks: expect.objectContaining({
               candidateRecall: true,
@@ -62,13 +63,13 @@ describe('AgentL5RuntimeService', () => {
           }),
           failureReview: expect.objectContaining({
             required: false,
-            policy: 'cluster_recall_or_ranking_failures',
+            policy: 'cluster_recall_ranking_or_state_transition_failures',
             nextAction: 'store_as_success_trace',
           }),
         }),
         handoffOutput: expect.objectContaining({
           eval: expect.objectContaining({
-            runner: 'social_match_recall_ranking_eval_v1',
+            runner: 'match_recall_ranking_and_meet_loop_eval_v1',
           }),
           failureReview: expect.objectContaining({
             required: false,
@@ -139,8 +140,8 @@ describe('AgentL5RuntimeService', () => {
     ] as AgentOnlineReplaySample[]);
     (memoryRepo.find as jest.Mock).mockResolvedValue([
       { id: 1, agentName: 'Life Graph Agent' },
-      { id: 2, agentName: 'Social Match Agent' },
-      { id: 3, agentName: 'Social Match Agent' },
+      { id: 2, agentName: 'Match Agent' },
+      { id: 3, agentName: 'Match Agent' },
     ] as AgentSubagentMemory[]);
     (meetLoopRepo.find as jest.Mock).mockResolvedValue([
       { id: 1, completedAt: null },

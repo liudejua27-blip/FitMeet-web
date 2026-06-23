@@ -421,7 +421,7 @@ export class AgentL5RuntimeService {
         },
       };
     }
-    if (input.agentName === 'Social Match Agent') {
+    if (input.agentName === 'Match Agent') {
       return {
         ...base,
         checks: {
@@ -431,26 +431,19 @@ export class AgentL5RuntimeService {
             input,
             /explanation|reason|解释|原因/i,
           ),
+          stateMachineStage: this.containsKey(input, /stage|state|状态/i),
+          idempotencySignal: this.containsKey(input, /idempotent|retry|重试/i),
+          profileWriteback: this.containsKey(input, /life.?graph|画像|回写/i),
+          approvalBoundary: requiresApproval,
           recallFailureReviewNeeded:
             hasError || this.zeroCandidateSignal(input),
-        },
-      };
-    }
-    if (input.agentName === 'Meet Loop Agent') {
-      return {
-        ...base,
-        checks: {
-          stateMachineStage: this.containsKey(input, /stage|state|状态/i),
-          approvalBoundary: requiresApproval,
-          idempotencySignal: this.containsKey(input, /idempotent|retry|重试/i),
-          lifeGraphWriteback: this.containsKey(input, /life.?graph|画像|回写/i),
         },
       };
     }
     return {
       ...base,
       checks: {
-        deterministicToolContract: input.agentName === 'Math Agent',
+        deterministicToolContract: input.agentName === 'Agent Brain',
         boundedHandoff: true,
       },
     };
@@ -506,11 +499,10 @@ export class AgentL5RuntimeService {
   private defaultSubagentEvalRunner(agent: FitMeetAlphaAgentName): string {
     if (agent === 'Life Graph Agent')
       return 'life_graph_memory_conflict_eval_v1';
-    if (agent === 'Social Match Agent') {
-      return 'social_match_recall_ranking_eval_v1';
+    if (agent === 'Match Agent') {
+      return 'match_recall_ranking_and_meet_loop_eval_v1';
     }
-    if (agent === 'Meet Loop Agent') return 'meet_loop_state_machine_eval_v1';
-    if (agent === 'Math Agent') return 'deterministic_math_contract_eval_v1';
+    if (agent === 'Agent Brain') return 'agent_brain_low_cost_router_eval_v1';
     return 'main_agent_handoff_eval_v1';
   }
 
@@ -518,13 +510,10 @@ export class AgentL5RuntimeService {
     if (agent === 'Life Graph Agent') {
       return 'review_profile_conflicts_and_merge_boundaries';
     }
-    if (agent === 'Social Match Agent') {
-      return 'cluster_recall_or_ranking_failures';
+    if (agent === 'Match Agent') {
+      return 'cluster_recall_ranking_or_state_transition_failures';
     }
-    if (agent === 'Meet Loop Agent') {
-      return 'review_state_transition_and_idempotency';
-    }
-    if (agent === 'Math Agent') return 'review_invalid_input_or_unit_boundary';
+    if (agent === 'Agent Brain') return 'review_router_or_unit_boundary';
     return 'review_planner_handoff_failures';
   }
 

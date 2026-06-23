@@ -27,7 +27,7 @@ export function buildSocialAgentSocialRequestToolInput(
     input.socialRequestId ?? input.requestId,
   );
   const taskContext = toolInput.isRecord(input.taskContext)
-    ? (input.taskContext as Record<string, unknown>)
+    ? input.taskContext
     : null;
   const dto: CreateSocialRequestDto = {
     ...(input as Partial<CreateSocialRequestDto>),

@@ -184,6 +184,49 @@ describe('SocialCodexRuntimePolicyService', () => {
     expect(decision.sandbox.externalSideEffectAllowed).toBe(false);
   });
 
+  it('allows opportunity drafts to describe station-only contact boundaries', () => {
+    const decision = service.evaluate({
+      toolName: SocialAgentToolName.CreateSocialRequest,
+      payload: {
+        mode: 'ai_draft',
+        title: '青岛大学晨跑搭子',
+        contactMethod: '先站内聊，不展示手机号',
+        safetyBoundary: '公共场所，不交换联系方式',
+        metadata: {
+          contactInfo: {
+            method: '站内沟通',
+            boundary: '不会公开微信或手机号',
+          },
+        },
+      },
+    });
+
+    expect(decision).toMatchObject({
+      actionType: 'create_opportunity_card',
+      mode: 'allow',
+      riskLevel: 'low',
+      requiresApproval: false,
+    });
+  });
+
+  it('still blocks real contact methods in opportunity draft payloads', () => {
+    const decision = service.evaluate({
+      toolName: SocialAgentToolName.CreateSocialRequest,
+      payload: {
+        mode: 'ai_draft',
+        title: '青岛大学晨跑搭子',
+        contactMethod: '微信 fitmeet-test',
+      },
+    });
+
+    expect(decision).toMatchObject({
+      actionType: 'create_opportunity_card',
+      mode: 'blocked',
+      riskLevel: 'blocked',
+    });
+    expect(decision.reasons.join(' ')).toContain('消息内容包含联系方式');
+  });
+
   it('treats allowed tools as read-only rather than side-effect capable', () => {
     const decision = service.evaluate({
       actionType: 'summarize_intent',
@@ -231,6 +274,40 @@ describe('SocialCodexRuntimePolicyService', () => {
 
     expect(decision.mode).toBe('blocked');
     expect(decision.reasons.join(' ')).toContain('不能混在普通消息');
+  });
+
+  it('does not treat negative contact boundary text as hidden contact details', () => {
+    const decision = service.evaluate({
+      actionType: 'summarize_intent',
+      payload: {
+        message: '第一次只在公共场所，先站内聊，不展示微信或手机号。',
+      },
+    });
+
+    expect(decision).toMatchObject({
+      mode: 'allow',
+      riskLevel: 'low',
+    });
+  });
+
+  it('does not treat negative precise-location boundary text as location leakage', () => {
+    const decision = service.evaluate({
+      toolName: SocialAgentToolName.CreateSocialRequest,
+      payload: {
+        mode: 'ai_draft',
+        title: '青岛大学附近轻松跑',
+        privacyNotes: [
+          '见面地点只模糊到公共区域，不公开具体门牌号。',
+          '不要共享实时位置或精确住址。',
+        ],
+      },
+    });
+
+    expect(decision).toMatchObject({
+      actionType: 'create_opportunity_card',
+      mode: 'allow',
+      riskLevel: 'low',
+    });
   });
 
   it('blocks stranger outreach when candidate discoverability is not verified', () => {
@@ -358,6 +435,29 @@ describe('SocialCodexRuntimePolicyService', () => {
       message: '[redacted]',
       notes: ['[redacted]', '青岛大学附近'],
       nested: { reply: '[redacted]' },
+    });
+  });
+
+  it('keeps station-only contact boundaries visible in audit payloads', () => {
+    const decision = service.evaluate({
+      toolName: SocialAgentToolName.CreateSocialRequest,
+      payload: {
+        mode: 'ai_draft',
+        contactMethod: '先站内聊，不展示手机号',
+      },
+    });
+    const audit = service.buildAuditPayload({
+      userId: 1,
+      decision,
+      payload: {
+        contactMethod: '先站内聊，不展示手机号',
+        safetyBoundary: '公共场所，不交换联系方式',
+      },
+    });
+
+    expect(audit.payload).toMatchObject({
+      contactMethod: '先站内聊，不展示手机号',
+      safetyBoundary: '公共场所，不交换联系方式',
     });
   });
 

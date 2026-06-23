@@ -292,7 +292,10 @@ export class AgentSessionAssemblerService {
     for (const turn of turns) {
       if (!this.isRecord(turn)) continue;
       if (cleanDisplayText(turn.role, '') !== 'user') continue;
-      const text = cleanDisplayText(turn.text ?? turn.content ?? turn.message, '');
+      const text = cleanDisplayText(
+        turn.text ?? turn.content ?? turn.message,
+        '',
+      );
       if (text) return text;
     }
     return null;
@@ -330,7 +333,12 @@ export class AgentSessionAssemblerService {
 
   private assistantMessageSource(
     value: unknown,
-  ): 'llm' | 'fallback' | 'deterministic_route' | 'deterministic_action' | undefined {
+  ):
+    | 'llm'
+    | 'fallback'
+    | 'deterministic_route'
+    | 'deterministic_action'
+    | undefined {
     return value === 'llm' ||
       value === 'fallback' ||
       value === 'deterministic_route' ||

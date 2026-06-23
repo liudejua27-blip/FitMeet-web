@@ -448,12 +448,13 @@ export class FitMeetSubagentWorkerDispatcherService {
       signal: signal ?? null,
       buildMemoryContext: (currentTask) =>
         this.buildMemoryContextFromPayload(currentTask, payload),
-      queueInitialSearchForTask: (_ownerUserId, currentTask, goal) =>
+      queueInitialSearchForTask: (_ownerUserId, currentTask, goal, options) =>
         this.initialSearchQueue.queueInitialSearchForTask({
           ownerUserId: payload.ownerUserId,
           task: currentTask,
           goal,
-          signal: signal ?? null,
+          signal: options?.signal ?? signal ?? null,
+          waitForCompletionMs: options?.waitForCompletionMs,
         }),
       replanAndRefresh: (_ownerUserId, taskId, body) =>
         this.replanFacade.replanAndRefresh(payload.ownerUserId, taskId, body, {
@@ -554,8 +555,8 @@ export class FitMeetSubagentWorkerDispatcherService {
     ) {
       return 'Life Graph Agent';
     }
-    if (toolName === 'social_match_search_turn') return 'Social Match Agent';
-    return 'Meet Loop Agent';
+    if (toolName === 'social_match_search_turn') return 'Match Agent';
+    return 'Match Agent';
   }
 
   private loopToolInput(input: {
@@ -683,9 +684,7 @@ export class FitMeetSubagentWorkerDispatcherService {
   }
 
   private isGenericAssistantStateMessage(value: string): boolean {
-    const normalized = value
-      .replace(/\s+/g, '')
-      .replace(/[，。！？!?,.]/g, '');
+    const normalized = value.replace(/\s+/g, '').replace(/[，。！？!?,.]/g, '');
     return GENERIC_WORKER_ASSISTANT_MESSAGES.some(
       (message) => normalized === message,
     );
@@ -758,14 +757,15 @@ export class FitMeetSubagentWorkerDispatcherService {
       this.recordOrNull(payloadTaskContext?.taskSlotSummary) ??
       this.recordOrNull(taskMemory?.taskSlotSummary) ??
       {};
-    const knownTaskSlotConstraints =
-      (this.recordOrNull(snapshot.knownTaskSlotConstraints) ??
-        this.recordOrNull(nestedTaskContext?.knownTaskSlotConstraints) ??
-        this.recordOrNull(payloadTaskContext?.knownTaskSlotConstraints) ??
-        this.recordOrNull(taskMemory?.knownTaskSlotConstraints) ??
-        buildSocialAgentKnownTaskSlotConstraints(taskSlots)) as
-        | SocialAgentHydratedContext['knownTaskSlotConstraints']
-        | null;
+    const knownTaskSlotConstraints = (this.recordOrNull(
+      snapshot.knownTaskSlotConstraints,
+    ) ??
+      this.recordOrNull(nestedTaskContext?.knownTaskSlotConstraints) ??
+      this.recordOrNull(payloadTaskContext?.knownTaskSlotConstraints) ??
+      this.recordOrNull(taskMemory?.knownTaskSlotConstraints) ??
+      buildSocialAgentKnownTaskSlotConstraints(taskSlots)) as
+      | SocialAgentHydratedContext['knownTaskSlotConstraints']
+      | null;
     const pendingApprovals =
       this.arrayOrNull(snapshot.pendingApprovals) ??
       this.arrayOrNull(snapshot['pendingActions']) ??
@@ -816,9 +816,7 @@ export class FitMeetSubagentWorkerDispatcherService {
       lifeGraphSummary,
       pendingApprovals:
         pendingApprovals as SocialAgentHydratedContext['pendingApprovals'],
-      candidateActions: candidateActions as
-        | SocialAgentHydratedContext['candidateActions']
-        | null,
+      candidateActions: candidateActions,
     };
   }
 

@@ -24,6 +24,7 @@ describe('SocialAgentChatTurnCallbacksService', () => {
       999,
       { id: 101 } as never,
       '周末跑步',
+      { signal: null, waitForCompletionMs: 1234 },
     );
 
     expect(replanFacade.replanAndRefresh).toHaveBeenCalledWith(7, 101, {
@@ -34,6 +35,8 @@ describe('SocialAgentChatTurnCallbacksService', () => {
       ownerUserId: 7,
       task: { id: 101 },
       goal: '周末跑步',
+      signal: null,
+      waitForCompletionMs: 1234,
     });
   });
 });
