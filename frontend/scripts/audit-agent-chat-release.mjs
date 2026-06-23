@@ -1424,7 +1424,7 @@ const requiredContentChecks = [
     patterns: [
       "action === 'activity.modify_time'",
       "action === 'activity.modify_location'",
-      'return this.meetLoop.performActivityAction(ownerUserId, taskId, normalizedBody);',
+      'this.meetLoop.performActivityAction(',
     ],
   },
   {
