@@ -133,6 +133,15 @@ sha256_file() {
   fi
 }
 
+release_json_field() {
+  local field="$1"
+  if ! command -v unzip >/dev/null 2>&1 || ! command -v node >/dev/null 2>&1; then
+    return 0
+  fi
+  unzip -p "$ARCHIVE" FitMeet-web/release.json 2>/dev/null |
+    node -e 'let body=""; process.stdin.on("data",(chunk)=>body+=chunk); process.stdin.on("end",()=>{try{const release=JSON.parse(body); process.stdout.write(String(release[process.argv[1]]||""));}catch{}});' "$field"
+}
+
 require_file "$ARCHIVE"
 require_file "$CHECKSUM_FILE"
 require_file "$INSTALLER"
@@ -149,6 +158,13 @@ if [[ "$actual_checksum" != "$expected_checksum" ]]; then
 fi
 ok "Checksum verified for $ARCHIVE"
 
+release_commit="$(release_json_field commit)"
+release_built_at="$(release_json_field builtAt)"
+release_commit_short="${release_commit:0:8}"
+if [[ -z "$release_commit_short" ]]; then
+  release_commit_short="<unknown>"
+fi
+
 remote_dir_q="$(quote_remote "$REMOTE_DIR")"
 target_dir_q="$(quote_remote "$TARGET_DIR")"
 
@@ -157,6 +173,9 @@ printf '  SSH target:  %s\n' "${ECS_SSH_TARGET:-<set ECS_SSH_TARGET or pass --ss
 printf '  Remote dir:  %s\n' "$REMOTE_DIR"
 printf '  Target dir:  %s\n' "$TARGET_DIR"
 printf '  Files:       %s, %s, %s\n' "$ARCHIVE" "$CHECKSUM_FILE" "$INSTALLER"
+printf '  Commit:      %s\n' "${release_commit:-<unknown>}"
+printf '  Built at:    %s\n' "${release_built_at:-<unknown>}"
+printf '  SHA-256:     %s\n' "$actual_checksum"
 
 if [[ -z "$ECS_SSH_TARGET" ]]; then
   printf '\nSet ECS_SSH_TARGET or pass --ssh to enable upload, for example:\n'
@@ -169,6 +188,8 @@ printf '  ssh %s "mkdir -p %s"\n' "$ECS_SSH_TARGET" "$remote_dir_q"
 printf '  scp %s %s %s %s:%s/\n' "$ARCHIVE" "$CHECKSUM_FILE" "$INSTALLER" "$ECS_SSH_TARGET" "$remote_dir_q"
 printf '  ssh %s "cd %s && chmod +x ./fitmeet-ecs-install-release.sh && sha256sum -c ./fitmeet-ecs-deploy.zip.sha256 && ./fitmeet-ecs-install-release.sh --archive ./fitmeet-ecs-deploy.zip --checksum ./fitmeet-ecs-deploy.zip.sha256 --target %s"\n' "$ECS_SSH_TARGET" "$remote_dir_q" "$target_dir_q"
 printf '  ssh %s "cd %s && ./fitmeet-ecs-install-release.sh --archive ./fitmeet-ecs-deploy.zip --checksum ./fitmeet-ecs-deploy.zip.sha256 --target %s --install"\n' "$ECS_SSH_TARGET" "$remote_dir_q" "$target_dir_q"
+printf '  ssh %s "cd %s && EXPECTED_RELEASE_COMMIT=%s PUBLIC_API_BASE_URL=https://www.ourfitmeet.cn/api ./scripts/ecs-release-diagnose.sh"\n' "$ECS_SSH_TARGET" "$target_dir_q" "$release_commit_short"
+printf '  ssh %s "cd %s && BASE_URL=https://www.ourfitmeet.cn API_BASE_URL=https://www.ourfitmeet.cn/api EXPECTED_RELEASE_COMMIT=%s ./scripts/verify-production.sh && BASE_URL=https://www.ourfitmeet.cn API_BASE_URL=https://www.ourfitmeet.cn/api EXPECTED_RELEASE_COMMIT=%s ./scripts/verify-agent-goal-production.sh"\n' "$ECS_SSH_TARGET" "$target_dir_q" "$release_commit_short" "$release_commit_short"
 
 if [[ "$CHECK_SSH" == "true" ]]; then
   printf '\nChecking SSH access...\n'
@@ -189,3 +210,7 @@ scp "$ARCHIVE" "$CHECKSUM_FILE" "$INSTALLER" "${ECS_SSH_TARGET}:${REMOTE_DIR%/}/
 ok "Uploaded FitMeet ECS release files to ${ECS_SSH_TARGET}:${REMOTE_DIR%/}/"
 printf '\nNext server command:\n'
 printf '  ssh %s "cd %s && chmod +x ./fitmeet-ecs-install-release.sh && ./fitmeet-ecs-install-release.sh --archive ./fitmeet-ecs-deploy.zip --checksum ./fitmeet-ecs-deploy.zip.sha256 --target %s"\n' "$ECS_SSH_TARGET" "$remote_dir_q" "$target_dir_q"
+printf '\nAfter installing and deploying, verify the public release commit:\n'
+printf '  ssh %s "cd %s && EXPECTED_RELEASE_COMMIT=%s PUBLIC_API_BASE_URL=https://www.ourfitmeet.cn/api ./scripts/ecs-release-diagnose.sh"\n' "$ECS_SSH_TARGET" "$target_dir_q" "$release_commit_short"
+printf '  BASE_URL=https://www.ourfitmeet.cn API_BASE_URL=https://www.ourfitmeet.cn/api EXPECTED_RELEASE_COMMIT=%s ./scripts/verify-production.sh\n' "$release_commit_short"
+printf '  BASE_URL=https://www.ourfitmeet.cn API_BASE_URL=https://www.ourfitmeet.cn/api EXPECTED_RELEASE_COMMIT=%s ./scripts/verify-agent-goal-production.sh\n' "$release_commit_short"
