@@ -374,7 +374,7 @@ describe('AgentWorkspacePage', () => {
     expect(screen.queryByText('今天想认识什么样的人？')).not.toBeInTheDocument();
   });
 
-  it('does not show a persistent profile gate hint on ordinary empty chat', async () => {
+  it('shows a lightweight profile completion prompt without blocking ordinary empty chat', async () => {
     useRealAgentAdapter();
     useAuthStore.setState({
       isLoggedIn: true,
@@ -415,9 +415,18 @@ describe('AgentWorkspacePage', () => {
     await renderAgentPage();
 
     expect(await screen.findByTestId('assistant-ui-empty-state')).toBeInTheDocument();
-    expect(screen.queryByTestId('assistant-ui-profile-gate-hint')).not.toBeInTheDocument();
-    expect(screen.queryByText('匹配前还差一点人物画像')).not.toBeInTheDocument();
-    expect(screen.queryByText(/普通聊天可以直接开始/)).not.toBeInTheDocument();
+    expect(screen.getByTestId('assistant-ui-profile-gate-hint')).toHaveAttribute(
+      'data-blocks-chat',
+      'false',
+    );
+    expect(screen.getByText('匹配前还差一点个人信息')).toBeInTheDocument();
+    expect(screen.getByText(/普通聊天可以直接开始/)).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: '完善个人信息' })).toHaveAttribute(
+      'href',
+      '/agent/profile',
+    );
+    expect(screen.getByText('城市/大致区域')).toBeInTheDocument();
+    expect(screen.getByText('可约时间')).toBeInTheDocument();
     expect(screen.getByRole('textbox')).toHaveAttribute('placeholder', '询问任何问题');
     expect(
       screen.queryByText(/推荐给你的人|约练闭环|今天想认识什么样的人/),

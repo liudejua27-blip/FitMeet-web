@@ -1,5 +1,5 @@
 import { AuiIf, SelectionToolbarPrimitive, ThreadPrimitive } from '@assistant-ui/react';
-import { ArrowDown, LogIn, Quote, RefreshCcw, ShieldAlert } from 'lucide-react';
+import { ArrowDown, LogIn, Quote, RefreshCcw, ShieldAlert, UserRound } from 'lucide-react';
 import { type ReactNode } from 'react';
 
 import type { SocialAgentProfileGateStatus } from '../../api/socialAgentApi';
@@ -39,6 +39,7 @@ export function ChatGPTThread({
   processStatusOwnedByMessage,
   sessionRestoring,
   recovery,
+  profileGate,
   requiresAuth,
   onLogin,
   onRetryRecovery,
@@ -75,7 +76,11 @@ export function ChatGPTThread({
     >
       <AssistantSelectionToolbar />
       <AuiIf condition={(state) => state.thread.isEmpty && isEmpty}>
-        <AssistantEmptyState requiresAuth={requiresAuth} onLogin={onLogin} />
+        <AssistantEmptyState
+          profileGate={profileGate}
+          requiresAuth={requiresAuth}
+          onLogin={onLogin}
+        />
       </AuiIf>
 
       <AuiIf condition={(state) => !state.thread.isEmpty || shouldShowViewport}>
@@ -221,12 +226,15 @@ function inlineThinkingStatus(status?: string) {
 }
 
 function AssistantEmptyState({
+  profileGate,
   requiresAuth,
   onLogin,
 }: {
+  profileGate?: SocialAgentProfileGateStatus | null;
   requiresAuth?: boolean;
   onLogin?: () => void;
 }) {
+  const shouldShowProfileGate = !requiresAuth && profileGate && !profileGate.passed;
   return (
     <section
       className="flex grow flex-col items-center justify-center px-0"
@@ -264,6 +272,7 @@ function AssistantEmptyState({
             开始你的全球社交
           </p>
         </div>
+        {shouldShowProfileGate ? <AssistantProfileGateHint profileGate={profileGate} /> : null}
         <div
           className="w-full [padding-bottom:calc(env(safe-area-inset-bottom)+env(keyboard-inset-height,0px))]"
           data-testid="assistant-ui-empty-composer-slot"
@@ -276,6 +285,73 @@ function AssistantEmptyState({
       </div>
     </section>
   );
+}
+
+function AssistantProfileGateHint({ profileGate }: { profileGate: SocialAgentProfileGateStatus }) {
+  const missing = profileGate.nextActions.length
+    ? profileGate.nextActions
+    : profileGate.missing.map(profileGateMissingLabel);
+  return (
+    <div
+      className="rounded-2xl border border-black/[0.08] bg-[#f7f7f8] p-4 text-left shadow-[0_12px_34px_rgba(0,0,0,0.06)]"
+      role="status"
+      data-testid="assistant-ui-profile-gate-hint"
+      data-display-model="lightweight-profile-completion"
+      data-blocks-chat="false"
+      data-can-enter-match-pool={profileGate.canEnterMatchPool ? 'true' : 'false'}
+    >
+      <div className="flex items-start gap-3">
+        <span className="mt-0.5 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-white text-[#18181b] ring-1 ring-black/[0.06]">
+          <UserRound className="h-4 w-4" aria-hidden="true" />
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="text-sm font-semibold text-[#18181b]">匹配前还差一点个人信息</p>
+            {typeof profileGate.profileCompleteness === 'number' ? (
+              <span className="rounded-full bg-white px-2 py-0.5 text-xs font-medium text-[#71717a] ring-1 ring-black/[0.05]">
+                完成度 {Math.round(profileGate.profileCompleteness)}%
+              </span>
+            ) : null}
+          </div>
+          <p className="mt-1 text-sm leading-6 text-[#52525b]">
+            补齐后我再开始匹配、发布约练或发邀请。普通聊天可以直接开始。
+          </p>
+          {missing.length > 0 ? (
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {missing.slice(0, 4).map((item) => (
+                <span
+                  key={item}
+                  className="rounded-full bg-white px-2.5 py-1 text-xs text-[#52525b] ring-1 ring-black/[0.05]"
+                >
+                  {item}
+                </span>
+              ))}
+            </div>
+          ) : null}
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <a
+              href="/agent/profile"
+              className="inline-flex items-center rounded-full bg-[#18181b] px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-black focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black/20"
+            >
+              完善个人信息
+            </a>
+            <span className="text-xs leading-5 text-[#8a8f98]">也可以本次使用，不保存。</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function profileGateMissingLabel(field: SocialAgentProfileGateStatus['missing'][number]) {
+  const labels: Record<SocialAgentProfileGateStatus['missing'][number], string> = {
+    city: '城市/大致区域',
+    activity: '想参与的运动或社交场景',
+    availability: '可约时间',
+    boundary: '社交边界',
+    publicAuthorization: '是否公开到发现',
+  };
+  return labels[field] ?? field;
 }
 
 function AssistantDisclaimer() {
