@@ -181,7 +181,7 @@ export class CardCopywriterService {
         },
         {
           id: 'confirm_create_activity',
-          label: '发布卡片',
+          label: '确认发布',
           action: 'publish_to_discover',
           schemaAction: 'activity.confirm_create',
           loopStage: 'activity_draft_created',

@@ -112,8 +112,8 @@ function actionPathLabel(schemaAction: ToolUISchemaAction) {
   if (schemaAction === 'activity.modify_time') return '修改信息';
   if (schemaAction === 'activity.modify_location') return '调整地点';
   if (schemaAction === 'activity.skip_publish') return '暂不发布';
-  if (schemaAction === 'publish_to_discover') return '发布卡片';
-  if (schemaAction === 'activity.confirm_create') return '创建约练';
+  if (schemaAction === 'publish_to_discover') return '确认发布';
+  if (schemaAction === 'activity.confirm_create') return '确认发布';
   if (schemaAction === 'activity.check_in') return '到达签到';
   if (schemaAction === 'activity.complete') return '记录完成';
   if (schemaAction === 'review.submit') return '提交评价';

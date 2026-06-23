@@ -178,7 +178,7 @@ describe('readSocialAgentRestorableResult', () => {
       title: '今晚青岛大学散步搭子',
       actions: expect.arrayContaining([
         expect.objectContaining({
-          label: '发布到发现',
+          label: '确认发布',
           schemaAction: 'publish_to_discover',
           requiresConfirmation: true,
           payload: expect.objectContaining({

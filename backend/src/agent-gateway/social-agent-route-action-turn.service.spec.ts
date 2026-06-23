@@ -175,7 +175,7 @@ describe('SocialAgentRouteActionTurnService', () => {
           }),
           actions: expect.arrayContaining([
             expect.objectContaining({
-              label: '发布卡片',
+              label: '确认发布',
               schemaAction: 'publish_to_discover',
               requiresConfirmation: true,
               payload: expect.objectContaining({

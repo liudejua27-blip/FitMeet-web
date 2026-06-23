@@ -1453,7 +1453,7 @@ describe('SocialAgentChat acceptance flow', () => {
           type: 'activity_plan',
           actions: expect.arrayContaining([
             expect.objectContaining({
-              label: '发布卡片',
+              label: '确认发布',
               action: 'publish_to_discover',
               schemaAction: expect.stringMatching(
                 /^(publish_to_discover|activity\.confirm_create)$/,
@@ -1517,7 +1517,7 @@ describe('SocialAgentChat acceptance flow', () => {
         }),
         actions: [
           expect.objectContaining({
-            label: '发布卡片',
+            label: '确认发布',
             schemaAction: 'publish_to_discover',
           }),
           expect.objectContaining({
@@ -1569,7 +1569,7 @@ describe('SocialAgentChat acceptance flow', () => {
         }),
         actions: expect.arrayContaining([
           expect.objectContaining({
-            label: '发布卡片',
+            label: '确认发布',
             schemaAction: 'publish_to_discover',
             requiresConfirmation: true,
           }),
@@ -1740,7 +1740,7 @@ describe('SocialAgentChat acceptance flow', () => {
         }),
         actions: [
           expect.objectContaining({
-            label: '发布卡片',
+            label: '确认发布',
             schemaAction: 'publish_to_discover',
             requiresConfirmation: true,
           }),
@@ -2140,7 +2140,7 @@ describe('SocialAgentChat acceptance flow', () => {
       }),
       actions: expect.arrayContaining([
         expect.objectContaining({
-          label: '发布卡片',
+          label: '确认发布',
           action: 'publish_to_discover',
           schemaAction: expect.stringMatching(
             /^(publish_to_discover|activity\.confirm_create)$/,

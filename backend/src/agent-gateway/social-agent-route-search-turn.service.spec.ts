@@ -214,7 +214,7 @@ describe('SocialAgentRouteSearchTurnService', () => {
           }),
           actions: expect.arrayContaining([
             expect.objectContaining({
-              label: '发布卡片',
+              label: '确认发布',
               schemaAction: 'publish_to_discover',
             }),
             expect.objectContaining({
@@ -789,7 +789,7 @@ describe('SocialAgentRouteSearchTurnService', () => {
           }),
           actions: expect.arrayContaining([
             expect.objectContaining({
-              label: '发布卡片',
+              label: '确认发布',
               schemaAction: 'publish_to_discover',
             }),
             expect.objectContaining({

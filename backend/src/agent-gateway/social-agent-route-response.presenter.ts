@@ -64,7 +64,7 @@ export function socialAgentAssistantMessageForRoute(input: {
     if (!clarification.complete) return clarification.assistantMessage;
     const confirmed = confirmedSocialSearchContext(task);
     if (confirmed.length > 0) {
-      return `明白，我会按已确认的：${confirmed.join('、')} 先整理本次约练条件。需要发布时会生成约练卡片并显示“发布卡片”，确认后再同步到发现并继续匹配公开可发现的人；不会自动发送消息、加好友或发布约练。`;
+      return `明白，我会按已确认的：${confirmed.join('、')} 先整理本次约练条件。需要发布时会生成约练卡片并显示“确认发布”，确认后再同步到发现并继续匹配公开可发现的人；不会自动发送消息、加好友或发布约练。`;
     }
     const city = route.entities.city ? `${route.entities.city} ` : '';
     const activity = route.entities.activityType
@@ -237,7 +237,7 @@ function alphaClarificationFallbackFromTask(task: AgentTask): string {
   const confirmed = confirmedSocialSearchContext(task);
   const missing = missingCoreSocialSlotLabels(task);
   if (confirmed.length > 0 && missing.length === 0) {
-    return `明白，我已记住：${confirmed.join('、')}。如果这些条件不变，我会先整理约练卡片；需要发布时会显示“发布卡片”，确认后同步到发现，再继续匹配公开可发现的人。发送消息、加好友或发布约练前都会先让你确认。`;
+    return `明白，我已记住：${confirmed.join('、')}。如果这些条件不变，我会先整理约练卡片；需要发布时会显示“确认发布”，确认后同步到发现，再继续匹配公开可发现的人。发送消息、加好友或发布约练前都会先让你确认。`;
   }
   if (confirmed.length > 0) {
     return `我已记住：${confirmed.join('、')}。还差 ${missing.join('、')}，补齐后我就能继续筛选公开可发现的人。`;

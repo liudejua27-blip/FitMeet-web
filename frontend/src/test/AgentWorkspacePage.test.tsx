@@ -2712,17 +2712,17 @@ describe('AgentWorkspacePage', () => {
     const activityModifyLocationButton = getEnabledSchemaActionButton('activity.modify_location');
     expect(activityModifyTimeButton).not.toBeNull();
     expect(activityModifyLocationButton).toBeNull();
-    expect(screen.getByRole('button', { name: '发布卡片' })).toBeInTheDocument();
-    expect(screen.getByText('发布卡片')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '确认发布' })).toBeInTheDocument();
+    expect(screen.getByText('确认发布')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '确认更新' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '暂不写入' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '发布卡片' })).toHaveAttribute(
+    expect(screen.getByRole('button', { name: '确认发布' })).toHaveAttribute(
       'data-schema-action',
       'publish_to_discover',
     );
     const highRiskActionExpectations = [
       ['candidate.connect', '加好友并聊天'],
-      ['publish_to_discover', '发布卡片'],
+      ['publish_to_discover', '确认发布'],
       ['life_graph.accept_update', '确认更新'],
       ['meet_loop.resume', '继续推进'],
     ] as const;
@@ -2866,7 +2866,7 @@ describe('AgentWorkspacePage', () => {
       (candidateCard as HTMLElement).querySelector('[data-schema-action="candidate.connect"]'),
     ).toHaveAttribute('data-action-source', 'default');
     expect(activityCard).not.toBeNull();
-    expect(within(activityCard as HTMLElement).getByText('发布卡片')).toBeInTheDocument();
+    expect(within(activityCard as HTMLElement).getByText('确认发布')).toBeInTheDocument();
     expect(within(activityCard as HTMLElement).getByText('修改信息')).toBeInTheDocument();
     expect(within(activityCard as HTMLElement).getByText('暂不发布')).toBeInTheDocument();
     expect(
@@ -3009,7 +3009,7 @@ describe('AgentWorkspacePage', () => {
     expect(getEnabledSchemaActionButton('activity.skip_publish')).not.toBeNull();
     expect(screen.queryByTestId('assistant-ui-inline-approval-panel')).not.toBeInTheDocument();
     expect(screen.queryByTestId('assistant-ui-approval-tool')).not.toBeInTheDocument();
-    expect(screen.getByText('发布卡片')).toBeInTheDocument();
+    expect(screen.getByText('确认发布')).toBeInTheDocument();
     expect(screen.getByText('修改信息')).toBeInTheDocument();
     expect(screen.getByText('暂不发布')).toBeInTheDocument();
     expect(actionStreamSpy).not.toHaveBeenCalled();

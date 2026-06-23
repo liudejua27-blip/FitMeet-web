@@ -740,7 +740,7 @@ export class FitMeetAlphaAgentSdkService {
             },
             {
               id: 'confirm_create_activity',
-              label: '发布卡片',
+              label: '确认发布',
               action: 'publish_to_discover',
               schemaAction: 'publish_to_discover',
               loopStage: 'activity_draft_created',

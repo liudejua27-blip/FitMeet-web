@@ -213,7 +213,7 @@ describe('tool-card-actions runtime identity', () => {
     expect(
       activityActions.find((action) => action.action === 'publish_social_request'),
     ).toMatchObject({
-      label: '发布卡片',
+      label: '确认发布',
       requiresConfirmation: true,
     });
   });
@@ -296,9 +296,9 @@ describe('tool-card-actions runtime identity', () => {
       ],
     );
 
-    expect(actions.map((action) => action.label)).toEqual(['发布卡片', '修改信息', '暂不发布']);
+    expect(actions.map((action) => action.label)).toEqual(['确认发布', '修改信息', '暂不发布']);
     expect(actions).toHaveLength(3);
-    expect(actions.find((action) => action.label === '发布卡片')).toMatchObject({
+    expect(actions.find((action) => action.label === '确认发布')).toMatchObject({
       requiresConfirmation: true,
     });
     expect(actions.find((action) => action.label === '修改信息')).toMatchObject({

@@ -258,7 +258,7 @@ function buildRestoredOpportunityCard(
     : [
         {
           id: `publish_to_discover:${taskId}:${socialRequestId ?? 'draft'}`,
-          label: '发布到发现',
+          label: '确认发布',
           action: 'publish_to_discover',
           schemaAction: 'publish_to_discover',
           loopStage: 'activity_draft_created',
@@ -267,7 +267,7 @@ function buildRestoredOpportunityCard(
         },
         {
           id: `modify_activity_plan:${taskId}:${socialRequestId ?? 'draft'}`,
-          label: '修改',
+          label: '修改信息',
           action: 'reschedule_meet_loop',
           schemaAction: 'activity.modify_time',
           loopStage: 'activity_draft_created',

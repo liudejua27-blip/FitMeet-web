@@ -129,7 +129,7 @@ describe('social-agent-route-response.presenter', () => {
     expect(reply).toContain('地点：青岛大学附近');
     expect(reply).toContain('候选偏好：公开资料里有舞蹈相关标签的女生');
     expect(reply).toContain('先整理本次约练条件');
-    expect(reply).toContain('发布卡片');
+    expect(reply).toContain('确认发布');
     expect(reply).toContain('同步到发现');
     expect(reply).toContain('公开可发现');
     expect(reply).not.toContain('找搭子或候选人');
@@ -182,7 +182,7 @@ describe('social-agent-route-response.presenter', () => {
     expect(reply).toContain('地点：青岛大学附近');
     expect(reply).toContain('候选偏好：公开资料里有舞蹈相关标签的女生');
     expect(reply).toContain('先整理本次约练条件');
-    expect(reply).toContain('发布卡片');
+    expect(reply).toContain('确认发布');
     expect(reply).toContain('同步到发现');
     expect(reply).not.toContain('找搭子或候选人');
   });
@@ -231,7 +231,7 @@ describe('social-agent-route-response.presenter', () => {
     expect(reply).toContain('地点：青岛大学附近');
     expect(reply).toContain('候选偏好：公开资料里有舞蹈相关标签的女生');
     expect(reply).toContain('先整理本次约练条件');
-    expect(reply).toContain('发布卡片');
+    expect(reply).toContain('确认发布');
     expect(reply).toContain('同步到发现');
     expect(reply).not.toContain('找搭子或候选人');
   });
@@ -401,7 +401,7 @@ describe('social-agent-route-response.presenter', () => {
     expect(reply).toContain('活动：散步');
     expect(reply).toContain('地点：青岛大学附近');
     expect(reply).toContain('先整理约练卡片');
-    expect(reply).toContain('发布卡片');
+    expect(reply).toContain('确认发布');
     expect(reply).toContain('同步到发现');
     expect(reply).toContain('继续匹配');
     expect(reply).not.toContain('今晚附近试试');
