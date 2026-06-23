@@ -153,6 +153,32 @@ export class SocialAgentProfileEnrichmentService {
     );
     await this.taskRepo.save(task);
 
+    if (
+      this.shouldUseProfileForCurrentTaskWithoutSaving(message) &&
+      Object.keys(mergedProfile).length > 0
+    ) {
+      mergeSocialAgentStableProfileFacts(task, mergedProfile);
+      transitionSocialAgentState(task, 'profile_detected', {
+        objective: 'profile_enrichment',
+        nextStep: '等待用户确认是否开始匹配',
+        shouldSearchNow: false,
+        profileSaved: false,
+        awaitingSearchConfirmation: true,
+        waitingFor: 'profile_match_confirmation',
+        lastCompletedStep: 'profile_used_without_saving',
+      });
+      await this.taskRepo.save(task);
+      return {
+        assistantMessage: this.profileUsedWithoutSavingReply(mergedProfile),
+        assistantMessageSource: 'deterministic_route',
+        savedContext: true,
+        profileUpdated: false,
+        profileUpdateProposal: null,
+        task,
+        assistantStreamed: false,
+      };
+    }
+
     if (this.lifeGraph && Object.keys(mergedProfile).length > 0) {
       const proposal = await this.lifeGraph.extractFromChat(ownerUserId, {
         message: sourceMessage,
@@ -535,6 +561,16 @@ export class SocialAgentProfileEnrichmentService {
 
   private shouldSaveProfileFromMessage(message: string): boolean {
     return /(调用工具|保存|写入|存到|对，|对,|确认|可以保存)/i.test(message);
+  }
+
+  private shouldUseProfileForCurrentTaskWithoutSaving(
+    message: string,
+  ): boolean {
+    const text = cleanDisplayText(message, '');
+    if (!text) return false;
+    return /(本次|这次|当前|先|暂时|暂不).{0,8}(使用|用)?.{0,8}(不保存|不用保存|不要保存|别保存)|不保存.{0,8}(本次|这次|当前|先用|使用)|本次使用，不保存|本次使用不保存|先不保存|暂不保存|不用保存/i.test(
+      text,
+    );
   }
 
   private shouldStartProfileCompletionMode(
@@ -934,6 +970,19 @@ export class SocialAgentProfileEnrichmentService {
       lines.length > 0 ? `本次识别：${lines.join('；')}` : '',
       '我已允许 Agent 在匹配池中基于这些公开安全字段推荐你，但不会公开精确位置、联系方式或替你发消息。',
       '还缺少可约时间、明确边界和具体约练偏好时，你可以继续补充。准备好后我会单独问你是否开始匹配；未确认前不会自动推荐候选。',
+    ]
+      .filter(Boolean)
+      .join('\n');
+  }
+
+  private profileUsedWithoutSavingReply(
+    extractedProfile: ExtractedProfileFields,
+  ): string {
+    const lines = this.profileFieldLines(extractedProfile);
+    return [
+      '好的，这些信息本次只用于当前对话，不保存到个人信息。',
+      lines.length > 0 ? `本次使用的画像预览：${lines.join('；')}` : '',
+      '接下来要基于这些信息开始匹配吗？你可以回复“开始匹配”，我再进入候选推荐；未确认前不会推荐具体人物、发送邀请或发布约练卡。',
     ]
       .filter(Boolean)
       .join('\n');

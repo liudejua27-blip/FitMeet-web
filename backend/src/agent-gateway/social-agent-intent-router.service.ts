@@ -240,6 +240,14 @@ export class SocialAgentIntentRouterService {
       this.isProfileEnrichmentRequest(message);
     const isCorrection = this.isCorrectionOrClarification(message);
     const asksFitnessMath = this.isFitnessMathQuestion(message);
+    const profileSaveDecision = this.profileSaveDecisionIntent(
+      input.taskContext,
+      message,
+    );
+    const profileMatchConfirmation = this.profileMatchConfirmationIntent(
+      input.taskContext,
+      message,
+    );
 
     if (
       isCorrection &&
@@ -259,6 +267,27 @@ export class SocialAgentIntentRouterService {
           replyStrategy: 'search_candidates',
         },
       );
+    }
+
+    if (profileSaveDecision === 'profile_enrichment') {
+      return this.result('profile_enrichment', 0.9, entities, {
+        shouldUpdateProfile: false,
+        replyStrategy: 'conversational_answer',
+      });
+    }
+
+    if (profileMatchConfirmation === 'start_match') {
+      return this.result('social_search', 0.9, entities, {
+        shouldSearch: true,
+        shouldReplan: hasTask,
+        replyStrategy: 'search_candidates',
+      });
+    }
+
+    if (profileMatchConfirmation === 'decline_match') {
+      return this.result('casual_chat', 0.9, entities, {
+        replyStrategy: 'conversational_answer',
+      });
     }
 
     if (isCorrection) {
@@ -601,6 +630,88 @@ export class SocialAgentIntentRouterService {
     }
     return /(帮我完善.*画像|完善.*ai画像|完善.*人物画像|上面.*画像.*完善|刚才.*画像.*完善|把刚才.*写入画像|保存到.*画像|调用工具.*画像|工具.*完善.*画像|写入.*画像|存到.*画像)/i.test(
       text,
+    );
+  }
+
+  private profileSaveDecisionIntent(
+    taskContext: Record<string, unknown> | undefined,
+    message: string,
+  ): 'profile_enrichment' | null {
+    if (!this.isWaitingForProfileSaveDecision(taskContext)) return null;
+    const text = cleanDisplayText(message, '').trim();
+    if (!text) return null;
+    if (
+      /(可以保存|确认保存|保存|写入|存到|存入|本次使用，不保存|本次使用不保存|本次只用|这次只用|当前只用|先不保存|暂不保存|不用保存|不保存)/i.test(
+        text,
+      )
+    ) {
+      return 'profile_enrichment';
+    }
+    return null;
+  }
+
+  private profileMatchConfirmationIntent(
+    taskContext: Record<string, unknown> | undefined,
+    message: string,
+  ): 'start_match' | 'decline_match' | null {
+    if (!this.isWaitingForProfileMatchConfirmation(taskContext)) return null;
+    const text = cleanDisplayText(message, '').trim();
+    if (!text) return null;
+    if (
+      /(先不|暂时不|不用|不要|不需要|别).{0,10}(匹配|找人|推荐|搜索|候选|约练|搭子)/i.test(
+        text,
+      )
+    ) {
+      return 'decline_match';
+    }
+    if (
+      /^(可以|好|好的|行|继续|开始|可以开始|开始匹配|开始找|现在开始|就这样|按这个)$/i.test(
+        text,
+      ) ||
+      /(开始|继续|现在|马上|可以).{0,12}(匹配|找人|推荐|搜索|候选|搭子|约练)|匹配.{0,12}(人|用户|朋友|搭子|候选)/i.test(
+        text,
+      )
+    ) {
+      return 'start_match';
+    }
+    return null;
+  }
+
+  private isWaitingForProfileSaveDecision(
+    taskContext: Record<string, unknown> | undefined,
+  ): boolean {
+    const waitingFor = this.currentTaskWaitingFor(taskContext);
+    return [
+      'profile_save',
+      'profile_save_or_more_profile_facts',
+      'profile_save_or_search_confirmation',
+      'life_graph_profile_confirmation',
+    ].includes(waitingFor);
+  }
+
+  private isWaitingForProfileMatchConfirmation(
+    taskContext: Record<string, unknown> | undefined,
+  ): boolean {
+    return (
+      this.currentTaskWaitingFor(taskContext) === 'profile_match_confirmation'
+    );
+  }
+
+  private currentTaskWaitingFor(
+    taskContext: Record<string, unknown> | undefined,
+  ): string {
+    const currentTask = this.isRecord(taskContext?.currentTask)
+      ? taskContext?.currentTask
+      : {};
+    const taskMemory = this.isRecord(taskContext?.taskMemory)
+      ? taskContext?.taskMemory
+      : {};
+    const memoryCurrentTask = this.isRecord(taskMemory.currentTask)
+      ? taskMemory.currentTask
+      : {};
+    return cleanDisplayText(
+      currentTask.waitingFor ?? memoryCurrentTask.waitingFor,
+      '',
     );
   }
 

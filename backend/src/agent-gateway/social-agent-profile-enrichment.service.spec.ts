@@ -451,6 +451,74 @@ describe('SocialAgentProfileEnrichmentService', () => {
     expect(result.assistantMessage).not.toMatch(/city:|gender:|interestTags:/);
   });
 
+  it('uses completed profile answers for the current task without saving when the user chooses that option', async () => {
+    const { chatLlm, executor, service, taskRepo } = makeHarness();
+    chatLlm.profileFieldsFromRecord.mockImplementation((record) => record);
+    const task = makeTask({
+      memory: {
+        pendingProfileEnrichment: {
+          extractedProfile: {
+            city: '青岛',
+            interestTags: ['跑步', '咖啡'],
+            availableTimes: ['周末下午'],
+            socialBoundary: '第一次见面优先公共场所',
+          },
+          sourceMessage: '我在青岛，周末下午喜欢跑步和咖啡，只接受公共场所。',
+        },
+        socialAgentConversation: {
+          turns: [
+            {
+              id: 'turn_1',
+              role: 'user',
+              text: '我在青岛，周末下午喜欢跑步和咖啡，只接受公共场所。',
+              at: '2026-06-23T08:00:00.000Z',
+            },
+          ],
+        },
+      },
+    });
+
+    const result = await service.handleTurn({
+      ownerUserId: 7,
+      task,
+      message: '本次使用，不保存',
+      intent: 'profile_enrichment',
+      buildMemoryContext: () => null,
+    });
+
+    expect(executor.executeToolAction).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      savedContext: true,
+      profileUpdated: false,
+      profileUpdateProposal: null,
+      assistantMessageSource: 'deterministic_route',
+    });
+    expect(result.assistantMessage).toContain(
+      '本次只用于当前对话，不保存到个人信息',
+    );
+    expect(result.assistantMessage).toContain('本次使用的画像预览');
+    expect(result.assistantMessage).toContain('接下来要基于这些信息开始匹配吗');
+    expect(result.assistantMessage).not.toMatch(/city:|interestTags:/);
+    expect(task.memory).toMatchObject({
+      taskMemory: {
+        currentTask: {
+          objective: 'profile_enrichment',
+          waitingFor: 'profile_match_confirmation',
+          awaitingSearchConfirmation: true,
+          profileSaved: false,
+          lastCompletedStep: 'profile_used_without_saving',
+          state: 'profile_building',
+          stateReason: 'profile_detected',
+        },
+        stableProfileFacts: expect.objectContaining({
+          city: '青岛',
+          interestTags: ['跑步', '咖啡'],
+        }),
+      },
+    });
+    expect(taskRepo.save).toHaveBeenCalledTimes(2);
+  });
+
   it('skips LLM profile extraction when deterministic profile facts are sufficient', async () => {
     const { chatLlm, metrics, service } = makeHarness();
     const task = makeTask();

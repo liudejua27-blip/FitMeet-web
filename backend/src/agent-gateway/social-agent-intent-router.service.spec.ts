@@ -100,6 +100,71 @@ describe('SocialAgentIntentRouterService', () => {
     });
   });
 
+  it.each(['可以保存', '本次使用，不保存', '先不保存'])(
+    'routes profile save decision "%s" back to profile enrichment while waiting for save confirmation',
+    async (message) => {
+      const router = makeRouter();
+
+      const result = await router.route({
+        message,
+        taskContext: {
+          currentTask: {
+            waitingFor: 'profile_save_or_more_profile_facts',
+          },
+        },
+      });
+
+      expect(result).toMatchObject({
+        intent: 'profile_enrichment',
+        shouldSearch: false,
+        shouldUpdateProfile: false,
+        shouldExecuteAction: false,
+        replyStrategy: 'conversational_answer',
+        source: 'rules',
+      });
+    },
+  );
+
+  it('routes profile match confirmation into social search only after the user confirms', async () => {
+    const router = makeRouter();
+
+    await expect(
+      router.route({
+        message: '可以开始',
+        taskContext: {
+          taskMemory: {
+            currentTask: {
+              waitingFor: 'profile_match_confirmation',
+            },
+          },
+        },
+      }),
+    ).resolves.toMatchObject({
+      intent: 'social_search',
+      shouldSearch: true,
+      shouldExecuteAction: false,
+      replyStrategy: 'search_candidates',
+      source: 'rules',
+    });
+
+    await expect(
+      router.route({
+        message: '先不匹配',
+        taskContext: {
+          currentTask: {
+            waitingFor: 'profile_match_confirmation',
+          },
+        },
+      }),
+    ).resolves.toMatchObject({
+      intent: 'casual_chat',
+      shouldSearch: false,
+      shouldExecuteAction: false,
+      replyStrategy: 'conversational_answer',
+      source: 'rules',
+    });
+  });
+
   it('routes fitness math questions without searching or writing profile data', async () => {
     const router = makeRouter();
 
