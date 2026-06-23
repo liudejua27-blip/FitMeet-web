@@ -143,7 +143,7 @@ describe('SocialAgentRunRecommendationService', () => {
       }),
     };
     const draftSearch = {
-      generateDraftWithTool: jest.fn().mockResolvedValue({
+      generateDeterministicDraftFromTask: jest.fn().mockReturnValue({
         draft: {
           type: SocialRequestType.RunningPartner,
           rawText: '今晚青岛轻松跑步',
@@ -504,21 +504,21 @@ describe('SocialAgentRunRecommendationService', () => {
         }),
       }),
     );
-    expect(draftSearch.generateDraftWithTool).toHaveBeenCalledWith(
+    expect(draftSearch.generateDeterministicDraftFromTask).toHaveBeenCalledWith(
       task,
       expect.stringContaining('用户最新输入：可以，帮我找人'),
     );
-    expect(draftSearch.generateDraftWithTool).toHaveBeenCalledWith(
+    expect(draftSearch.generateDeterministicDraftFromTask).toHaveBeenCalledWith(
       task,
       expect.stringContaining('当前任务目标：今晚青岛大学附近散步'),
     );
-    expect(draftSearch.generateDraftWithTool).toHaveBeenCalledWith(
+    expect(draftSearch.generateDeterministicDraftFromTask).toHaveBeenCalledWith(
       task,
       expect.stringContaining(
         '已确认信息：活动=散步；时间=今晚；地点=青岛大学附近；候选偏好=公开资料里有舞蹈相关标签的人优先',
       ),
     );
-    expect(draftSearch.generateDraftWithTool).toHaveBeenCalledWith(
+    expect(draftSearch.generateDeterministicDraftFromTask).toHaveBeenCalledWith(
       task,
       expect.stringContaining('不要重复追问已确认字段'),
     );
@@ -653,7 +653,7 @@ describe('SocialAgentRunRecommendationService', () => {
       }),
     };
     const draftSearch = {
-      generateDraftWithTool: jest.fn(),
+      generateDeterministicDraftFromTask: jest.fn(),
       createPrivateDraftRequest: jest.fn(),
       autoPublishDraftIfAllowed: jest.fn(),
       searchCandidates: jest.fn(),
@@ -744,7 +744,9 @@ describe('SocialAgentRunRecommendationService', () => {
     expect(longTermMemory.readSnapshot).toHaveBeenCalledWith(7);
     expect(planner.planExistingTask).not.toHaveBeenCalled();
     expect(socialProfiles.get).not.toHaveBeenCalled();
-    expect(draftSearch.generateDraftWithTool).not.toHaveBeenCalled();
+    expect(
+      draftSearch.generateDeterministicDraftFromTask,
+    ).not.toHaveBeenCalled();
     expect(draftSearch.createPrivateDraftRequest).not.toHaveBeenCalled();
     expect(draftSearch.autoPublishDraftIfAllowed).not.toHaveBeenCalled();
     expect(draftSearch.searchCandidates).not.toHaveBeenCalled();
@@ -781,7 +783,7 @@ describe('SocialAgentRunRecommendationService', () => {
       safetyRequirement: SocialRequestSafety.LowRiskOnly,
     };
     const draftSearch = {
-      generateDraftWithTool: jest.fn().mockResolvedValue({
+      generateDeterministicDraftFromTask: jest.fn().mockReturnValue({
         draft,
         card: { title: '今晚青岛大学附近散步' },
         profileUsed: { city: '青岛' },
@@ -1081,7 +1083,7 @@ describe('SocialAgentRunRecommendationService', () => {
       get: jest.fn(),
     };
     const draftSearch = {
-      generateDraftWithTool: jest.fn(),
+      generateDeterministicDraftFromTask: jest.fn(),
       createPrivateDraftRequest: jest.fn(),
       autoPublishDraftIfAllowed: jest.fn(),
       searchCandidates: jest.fn(),
@@ -1222,7 +1224,7 @@ describe('SocialAgentRunRecommendationService', () => {
       }),
     };
     const draftSearch = {
-      generateDraftWithTool: jest.fn().mockResolvedValue({
+      generateDeterministicDraftFromTask: jest.fn().mockReturnValue({
         draft: {
           type: SocialRequestType.RunningPartner,
           rawText: '周末青岛羽毛球',

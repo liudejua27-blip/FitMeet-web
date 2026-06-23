@@ -985,7 +985,7 @@ describe('toUserFacingAgentResponse', () => {
           proposedFields: ['lifestyle.availableTimes: 周末下午'],
           confirmationBoundary: '确认前不会写入长期偏好。',
           privacyBoundary: '仅保存脱敏画像偏好，不保存私聊原文或精确敏感信息。',
-          revokeHint: '确认后仍可在 Life Graph 中查看、纠正或撤回。',
+          revokeHint: '确认后仍可在个人信息里查看、纠正或撤回。',
           diff: expect.objectContaining({
             description: '只在你确认后写入长期偏好。',
             confirmationBoundary: '确认前不会写入长期偏好。',
