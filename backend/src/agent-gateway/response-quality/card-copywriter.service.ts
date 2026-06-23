@@ -181,7 +181,7 @@ export class CardCopywriterService {
         },
         {
           id: 'confirm_create_activity',
-          label: '确认发布',
+          label: '发布卡片',
           action: 'publish_to_discover',
           schemaAction: 'activity.confirm_create',
           loopStage: 'activity_draft_created',
@@ -214,7 +214,7 @@ export class CardCopywriterService {
         },
         {
           id: 'modify_activity_plan',
-          label: '修改卡片',
+          label: '修改信息',
           action: 'reschedule_meet_loop',
           schemaAction: 'activity.modify_time',
           loopStage: 'activity_draft_created',

@@ -782,13 +782,13 @@ function visualCardActionLabel(
       action.schemaAction === 'publish_to_discover' ||
       action.schemaAction === 'activity.confirm_create'
     ) {
-      return published ? '已发布' : '确认发布';
+      return published ? '已发布' : '发布卡片';
     }
     if (
       action.schemaAction === 'activity.modify_time' ||
       action.schemaAction === 'activity.modify_location'
     ) {
-      return '修改卡片';
+      return '修改信息';
     }
     if (action.schemaAction === 'activity.skip_publish') return published ? null : '暂不发布';
     if (action.schemaAction === 'activity.view_detail') return '查看详情';
@@ -1788,10 +1788,10 @@ function normalizeVisibleActionLabel(
     return '发送邀请';
   }
   if (schemaType === 'social_match.activity' && canonicalKey === 'publish_to_discover') {
-    return '确认发布';
+    return '发布卡片';
   }
   if (schemaType === 'social_match.activity' && canonicalKey === 'activity.confirm_create') {
-    return '确认发布';
+    return '发布卡片';
   }
   if (schemaType === 'social_match.activity' && canonicalKey === 'activity.skip_publish') {
     return '暂不发布';
@@ -1800,7 +1800,7 @@ function normalizeVisibleActionLabel(
     schemaType === 'social_match.activity' &&
     (canonicalKey === 'activity.modify_time' || canonicalKey === 'activity.modify_location')
   ) {
-    return '修改卡片';
+    return '修改信息';
   }
   return label;
 }
@@ -1860,7 +1860,7 @@ function defaultCardActions(card: SchemaDrivenAssistantCard): VisibleCardAction[
     return [
       {
         id: `${card.id}:publish`,
-        label: '确认发布',
+        label: '发布卡片',
         requiresConfirmation: true,
         schemaAction: 'publish_to_discover',
         action: 'publish_to_discover',
@@ -1869,7 +1869,7 @@ function defaultCardActions(card: SchemaDrivenAssistantCard): VisibleCardAction[
       },
       {
         id: `${card.id}:edit`,
-        label: '修改卡片',
+        label: '修改信息',
         requiresConfirmation: false,
         schemaAction: 'activity.modify_time',
         action: 'activity.modify_time',

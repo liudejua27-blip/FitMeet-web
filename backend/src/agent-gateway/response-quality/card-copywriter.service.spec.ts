@@ -508,7 +508,7 @@ describe('CardCopywriterService', () => {
           requiresConfirmation: false,
         }),
         expect.objectContaining({
-          label: '确认发布',
+          label: '发布卡片',
           action: 'publish_to_discover',
           schemaAction: expect.stringMatching(
             /^(publish_to_discover|activity\.confirm_create)$/,

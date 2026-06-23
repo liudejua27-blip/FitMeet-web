@@ -215,7 +215,7 @@ export function buildSocialAgentPublishConfirmationCard(input: {
         autoPublished: published,
         recommendedNextAction: published
           ? '我会根据这张卡继续帮你找合适的人。'
-          : '确认发布后，我会同步到发现页。',
+          : '发布卡片后，我会同步到发现页。',
       },
     },
     actions: published
@@ -240,7 +240,7 @@ export function buildSocialAgentPublishConfirmationCard(input: {
       : [
           {
             id: `publish_to_discover:${task.id}`,
-            label: '确认发布',
+            label: '发布卡片',
             action: 'publish_to_discover',
             schemaAction: 'publish_to_discover',
             loopStage: 'activity_draft_created',
@@ -263,7 +263,7 @@ export function buildSocialAgentPublishConfirmationCard(input: {
           },
           {
             id: `modify_activity_plan:${task.id}`,
-            label: '修改卡片',
+            label: '修改信息',
             action: 'reschedule_meet_loop',
             schemaAction: 'activity.modify_time',
             loopStage: 'activity_draft_created',
@@ -299,18 +299,28 @@ export function shouldCreateOpportunityCardBeforeCandidates(
 ): boolean {
   const textValue = cleanDisplayText(message, '').toLowerCase();
   if (!textValue) return false;
-  if (/(不发布|不要发布|先不发布|暂不发布|不用发布)/i.test(textValue))
+  if (
+    /(不发布|不要发布|先不发布|暂不发布|不用发布|私密匹配|只私下匹配)/i.test(
+      textValue,
+    )
+  ) {
     return false;
+  }
   const hasTrainingActivity =
     /(跑步|慢跑|健身|羽毛球|篮球|网球|瑜伽|徒步|骑行|运动|训练)/i.test(
       textValue,
     );
   const hasPeopleOrDiscoveryIntent =
-    /(搭子|约练|约跑|找|一起|候选|推荐|筛选|公开可发现的人|合适的人)/i.test(
+    /(搭子|约练|约跑|找|一起|想认识|认识.{0,12}(人|朋友|搭子|伙伴)|候选|推荐|筛选|公开可发现的人|合适的人)/i.test(
       textValue,
     );
+  const hasPublishIntent =
+    /(发布|公开发起|发起活动|发布卡片|发布约练|公开发布|发布到发现|发到发现|同步到发现|发现页|公开可发现)/i.test(
+      textValue,
+    );
+  if (hasTrainingActivity && hasPublishIntent) return true;
   if (hasTrainingActivity && hasPeopleOrDiscoveryIntent) return true;
-  return /(约练|约跑|搭子|找.{0,10}(跑步|慢跑|健身|羽毛球|篮球|网球|瑜伽|徒步|骑行|运动|训练).{0,10}(人|搭子|伙伴|朋友)?|一起.{0,10}(跑步|慢跑|健身|羽毛球|篮球|网球|瑜伽|徒步|骑行|运动|训练))/i.test(
+  return /(约练|约跑|搭子|找.{0,10}(跑步|慢跑|健身|羽毛球|篮球|网球|瑜伽|徒步|骑行|运动|训练).{0,10}(人|搭子|伙伴|朋友)?|想认识.{0,20}(跑步|慢跑|健身|羽毛球|篮球|网球|瑜伽|徒步|骑行|运动|训练).{0,10}(人|搭子|伙伴|朋友)?|一起.{0,10}(跑步|慢跑|健身|羽毛球|篮球|网球|瑜伽|徒步|骑行|运动|训练))/i.test(
     textValue,
   );
 }

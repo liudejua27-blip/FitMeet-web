@@ -1328,11 +1328,11 @@ describe('assistant-ui tool fallback rendering', () => {
 
     const opportunity = screen.getByTestId('assistant-ui-schema-card');
     const actionCard = within(opportunity).getByTestId('assistant-ui-unified-action-card');
-    expect(within(actionCard).getByRole('button', { name: '确认发布' })).toHaveAttribute(
+    expect(within(actionCard).getByRole('button', { name: '发布卡片' })).toHaveAttribute(
       'data-requires-confirmation',
       'true',
     );
-    expect(within(actionCard).getByRole('button', { name: '修改卡片' })).toHaveAttribute(
+    expect(within(actionCard).getByRole('button', { name: '修改信息' })).toHaveAttribute(
       'data-requires-confirmation',
       'false',
     );
@@ -1342,7 +1342,7 @@ describe('assistant-ui tool fallback rendering', () => {
     );
     expect(screen.queryByTestId('assistant-ui-approval-tool')).not.toBeInTheDocument();
 
-    fireEvent.click(within(actionCard).getByRole('button', { name: '确认发布' }));
+    fireEvent.click(within(actionCard).getByRole('button', { name: '发布卡片' }));
     const inlineApproval = await screen.findByTestId('assistant-ui-inline-approval-panel');
     expect(onCardAction).not.toHaveBeenCalled();
     expect(inlineApproval).toHaveTextContent('确认发布到发现');
