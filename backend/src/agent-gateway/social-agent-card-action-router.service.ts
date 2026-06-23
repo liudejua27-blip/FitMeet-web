@@ -18,6 +18,7 @@ import { SocialAgentLifeGraphCardActionService } from './social-agent-life-graph
 import { SocialAgentMeetLoopService } from './social-agent-meet-loop.service';
 import { SocialAgentDraftPublicationService } from './social-agent-draft-publication.service';
 import { SocialAgentMetricsService } from './social-agent-metrics.service';
+import { cleanDisplayText } from '../common/display-text.util';
 
 type HandleMessage = (
   body: SocialAgentRouteMessageBody,
@@ -173,6 +174,9 @@ export class SocialAgentCardActionRouterService {
         ownerUserId,
         taskId,
         normalizedBody,
+        input.handleMessage,
+        input.emit,
+        input.options,
       );
     }
 
@@ -512,6 +516,9 @@ export class SocialAgentCardActionRouterService {
     ownerUserId: number,
     taskId: number,
     body: SocialAgentCardActionBody,
+    handleMessage: HandleMessage,
+    emit?: StreamEmit,
+    options?: SocialAgentStreamOptions,
   ): Promise<SocialAgentIntentRouteResult> {
     const payload = this.record(body.payload);
     const confirmed =
@@ -665,46 +672,168 @@ export class SocialAgentCardActionRouterService {
         : socialRequestId
           ? `/discover?socialRequestId=${encodeURIComponent(String(socialRequestId))}`
           : '/discover');
-    return this.simpleRouteResult({
-      taskId,
-      assistantMessage: `已发布到发现页。你可以在发现页查看这张约练卡，也可以打开详情继续查看发起人公开信息和动态。`,
-      cards: [
+    const publishedCard: NonNullable<
+      SocialAgentIntentRouteResult['cards']
+    >[number] = {
+      id: `publish_to_discover:${taskId}:${publicIntentId || 'published'}`,
+      type: 'activity_status',
+      schemaVersion: 'fitmeet.tool-ui.v1',
+      schemaType: 'social_match.activity',
+      title: '已发布到发现',
+      body: '公开可发现用户现在可以看到这张约练卡。',
+      status: 'completed',
+      data: {
+        taskId,
+        publicIntentId,
+        socialRequestId,
+        discoverHref,
+        publicIntentHref,
+        autoPublished: true,
+        publishStatus: 'published',
+      },
+      actions: [
         {
-          id: `publish_to_discover:${taskId}:${publicIntentId || 'published'}`,
-          type: 'activity_status',
-          schemaVersion: 'fitmeet.tool-ui.v1',
-          schemaType: 'social_match.activity',
-          title: '已发布到发现',
-          body: '公开可发现用户现在可以看到这张约练卡。',
-          status: 'completed',
-          data: {
+          id: 'view_public_intent',
+          label: '查看详情',
+          action: 'activity.view_detail',
+          schemaAction: 'activity.view_detail',
+          requiresConfirmation: false,
+          payload: {
             taskId,
             publicIntentId,
             socialRequestId,
             discoverHref,
             publicIntentHref,
-            autoPublished: true,
-            publishStatus: 'published',
           },
-          actions: [
-            {
-              id: 'view_public_intent',
-              label: '查看详情',
-              action: 'activity.view_detail',
-              schemaAction: 'activity.view_detail',
-              requiresConfirmation: false,
-              payload: {
-                taskId,
-                publicIntentId,
-                socialRequestId,
-                discoverHref,
-                publicIntentHref,
-              },
-            },
-          ],
         },
       ],
+    };
+    const publishResult = this.simpleRouteResult({
+      taskId,
+      assistantMessage:
+        '已发布到发现页。我会根据这张约练卡继续帮你匹配合适的人；发送邀请、加好友或私信前仍会让你确认。',
+      cards: [publishedCard],
     });
+    const matchResult = await this.runPostPublishCandidateSearch({
+      taskId,
+      body,
+      payload,
+      publicIntentId,
+      socialRequestId,
+      discoverHref,
+      publicIntentHref,
+      handleMessage,
+      emit,
+      options,
+    });
+    if (!matchResult) return publishResult;
+    return this.mergePublishAndMatchResults(publishResult, matchResult);
+  }
+
+  private async runPostPublishCandidateSearch(input: {
+    taskId: number;
+    body: SocialAgentCardActionBody;
+    payload: Record<string, unknown>;
+    publicIntentId: string;
+    socialRequestId: number | null;
+    discoverHref: string;
+    publicIntentHref: string | null;
+    handleMessage: HandleMessage;
+    emit?: StreamEmit;
+    options?: SocialAgentStreamOptions;
+  }): Promise<SocialAgentIntentRouteResult | null> {
+    try {
+      return await input.handleMessage(
+        {
+          taskId: input.taskId,
+          conversationIntent: 'social',
+          idempotencyKey: this.postPublishSearchIdempotencyKey(input),
+          message: this.postPublishSearchMessage(input),
+          clientContext: {
+            ...(input.body.clientContext ?? {}),
+            source: 'publish_to_discover_followup',
+            threadId:
+              this.text(input.body.clientContext?.threadId) ||
+              `agent-task:${input.taskId}`,
+            conversationIntent: 'social',
+          },
+        },
+        input.emit,
+        input.options,
+      );
+    } catch {
+      return null;
+    }
+  }
+
+  private postPublishSearchMessage(input: {
+    payload: Record<string, unknown>;
+    publicIntentId: string;
+    socialRequestId: number | null;
+    discoverHref: string;
+    publicIntentHref: string | null;
+  }): string {
+    const title = this.text(
+      input.payload.title ?? input.payload.opportunityTitle,
+    );
+    const activityType = this.text(
+      input.payload.activityType ?? input.payload.activity,
+    );
+    const time = this.text(
+      input.payload.timePreference ??
+        input.payload.timeWindow ??
+        input.payload.time,
+    );
+    const location = this.text(
+      input.payload.locationPreference ??
+        input.payload.locationText ??
+        input.payload.location,
+    );
+    const city = this.text(input.payload.city);
+    const details = [title, city, time, location, activityType]
+      .map((value) => value.trim())
+      .filter(Boolean);
+    return [
+      '这张约练卡已发布到发现页。',
+      details.length ? `沿用这张卡的信息：${details.join('，')}。` : '',
+      input.publicIntentId ? `publicIntentId=${input.publicIntentId}。` : '',
+      input.socialRequestId ? `socialRequestId=${input.socialRequestId}。` : '',
+      input.discoverHref ? `discoverHref=${input.discoverHref}。` : '',
+      input.publicIntentHref ? `详情页=${input.publicIntentHref}。` : '',
+      '请直接基于这张已发布的约练卡继续匹配候选，不要再次生成约练卡或重复要求发布确认。',
+    ]
+      .filter(Boolean)
+      .join(' ');
+  }
+
+  private postPublishSearchIdempotencyKey(input: {
+    taskId: number;
+    publicIntentId: string;
+    socialRequestId: number | null;
+  }): string {
+    const target =
+      input.publicIntentId ||
+      (input.socialRequestId ? String(input.socialRequestId) : 'published');
+    return `post-publish-candidate-search:${input.taskId}:${target}`;
+  }
+
+  private mergePublishAndMatchResults(
+    publishResult: SocialAgentIntentRouteResult,
+    matchResult: SocialAgentIntentRouteResult,
+  ): SocialAgentIntentRouteResult {
+    const publishMessage = cleanDisplayText(publishResult.assistantMessage, '');
+    const matchMessage = cleanDisplayText(matchResult.assistantMessage, '');
+    return {
+      ...matchResult,
+      taskId: matchResult.taskId ?? publishResult.taskId,
+      assistantMessage: [publishMessage, matchMessage]
+        .filter(Boolean)
+        .join('\n'),
+      savedContext: true,
+      cards: [...(publishResult.cards ?? []), ...(matchResult.cards ?? [])],
+      pendingApproval:
+        matchResult.pendingApproval ?? publishResult.pendingApproval ?? null,
+    };
   }
 
   private publishDraftFromPayload(

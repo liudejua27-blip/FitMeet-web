@@ -231,6 +231,69 @@ describe('SocialAgentRouteSearchTurnService', () => {
     });
   });
 
+  it('continues candidate search after an opportunity card has already been published', async () => {
+    const { service } = makeHarness();
+    const task = makeTask({
+      goal: '今天晚上青岛大学附近找轻松跑步搭子',
+      memory: {
+        shortTerm: {
+          publishStatus: 'published',
+          publicIntentId: 'public-intent:walk-qdu',
+        },
+        taskSlots: {
+          activity: { value: '跑步', state: 'completed' },
+          time_window: { value: '今天晚上', state: 'completed' },
+          location_text: { value: '青岛大学附近', state: 'completed' },
+          intensity: { value: '轻松', state: 'completed' },
+          safety_boundary: {
+            value: '公共场所，先站内聊',
+            state: 'completed',
+          },
+        },
+      },
+      result: {
+        publishSocialRequest: {
+          status: 'published',
+          publicIntentId: 'public-intent:walk-qdu',
+        },
+      },
+    });
+    const queueInitialSearchForTask = jest
+      .fn()
+      .mockResolvedValue({ status: 'queued', taskId: 101 });
+
+    const result = await service.handle({
+      ownerUserId: 7,
+      task,
+      route: makeRoute({
+        entities: {
+          city: '青岛',
+          activityType: '跑步',
+          targetGender: '',
+          timePreference: '今天晚上',
+          locationPreference: '青岛大学附近',
+        },
+      }),
+      message: '根据这张已发布的约练卡继续匹配候选',
+      replanAndRefresh: jest.fn(),
+      queueInitialSearchForTask,
+      buildMemoryContext: jest.fn(),
+    });
+
+    expect(queueInitialSearchForTask).toHaveBeenCalledTimes(1);
+    expect(result.cards).toEqual([]);
+    expect(result).toMatchObject({
+      handled: true,
+      queuedRun: { status: 'queued', taskId: 101 },
+      runMode: 'initial',
+    });
+    expect(queueInitialSearchForTask.mock.calls[0]?.[2]).toContain('已确认');
+    expect(queueInitialSearchForTask.mock.calls[0]?.[2]).toContain('跑步');
+    expect(queueInitialSearchForTask.mock.calls[0]?.[2]).toContain(
+      '青岛大学附近',
+    );
+  });
+
   it('does not repeat activity search after an empty activity result without changed criteria', async () => {
     const { activitySearch, service } = makeHarness();
     const task = makeTask({

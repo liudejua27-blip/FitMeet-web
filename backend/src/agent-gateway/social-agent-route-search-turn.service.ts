@@ -20,6 +20,7 @@ import {
   evaluateSocialOpportunityClarification,
   resolveSocialOpportunitySearchGoal,
 } from './social-agent-opportunity-clarification';
+import { readSocialAgentTaskMemory } from './social-agent-memory.util';
 import { SocialAgentProfileGateService } from './social-agent-profile-gate.service';
 import { SocialAgentProfileEnrichmentService } from './social-agent-profile-enrichment.service';
 import {
@@ -204,7 +205,10 @@ export class SocialAgentRouteSearchTurnService {
         };
       }
     }
-    if (shouldCreateOpportunityCardBeforeCandidates(clarification.searchGoal)) {
+    if (
+      shouldCreateOpportunityCardBeforeCandidates(clarification.searchGoal) &&
+      !this.hasPublishedOpportunityContext(input.task)
+    ) {
       const draft = buildSocialAgentOpportunityDraftFromTask(
         input.task,
         clarification.searchGoal,
@@ -232,6 +236,25 @@ export class SocialAgentRouteSearchTurnService {
       };
     }
     return this.queueSearch(input, clarification.searchGoal);
+  }
+
+  private hasPublishedOpportunityContext(task: AgentTask): boolean {
+    const memory = this.recordValue(task.memory);
+    const shortTerm = this.recordValue(memory?.shortTerm);
+    const result = this.recordValue(task.result);
+    const publishResult = this.recordValue(result?.publishSocialRequest);
+    const taskMemory = readSocialAgentTaskMemory(task);
+    const publishedStatus =
+      cleanDisplayText(shortTerm?.publishStatus, '') === 'published' ||
+      cleanDisplayText(publishResult?.status, '') === 'published';
+    const hasPublishedId = Boolean(
+      cleanDisplayText(shortTerm?.publicIntentId, '') ||
+      cleanDisplayText(publishResult?.publicIntentId, ''),
+    );
+    const hasPublishedTaskState =
+      taskMemory.currentTask.lastCompletedStep === 'published_to_discover' ||
+      taskMemory.currentTask.waitingFor === 'post_publish_candidate_search';
+    return (publishedStatus && hasPublishedId) || hasPublishedTaskState;
   }
 
   private emptySearchFollowupReply(

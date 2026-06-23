@@ -907,7 +907,22 @@ describe('SocialAgentCardActionRouterService', () => {
       );
     }
 
-    expect(handleMessage).not.toHaveBeenCalled();
+    expect(handleMessage).toHaveBeenCalledTimes(1);
+    expect(handleMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        taskId: 101,
+        conversationIntent: 'social',
+        message: expect.stringContaining('这张约练卡已发布到发现页'),
+        idempotencyKey:
+          'post-publish-candidate-search:101:public-intent:walk-qdu',
+        clientContext: expect.objectContaining({
+          source: 'publish_to_discover_followup',
+          conversationIntent: 'social',
+        }),
+      }),
+      undefined,
+      undefined,
+    );
     expect(
       candidateActions.performCandidatePreferenceAction,
     ).toHaveBeenCalledWith(
@@ -961,6 +976,7 @@ describe('SocialAgentCardActionRouterService', () => {
     );
     expect(results[4].pendingApproval).toBeNull();
     expect(results[4].assistantMessage).toContain('已发布到发现页');
+    expect(results[4].assistantMessage).toContain('fallback handled');
     expect(results[4].cards?.[0]?.data).toEqual(
       expect.objectContaining({
         publicIntentId: 'public-intent:walk-qdu',
@@ -975,6 +991,94 @@ describe('SocialAgentCardActionRouterService', () => {
       'card_action:candidate.connect',
       'card_action:publish_to_discover',
     ]);
+  });
+
+  it('continues matching after a successful Discover publish and keeps the published card first', async () => {
+    const { draftPublication, handleMessage, service } = makeHarness();
+    draftPublication.publishDraft.mockResolvedValue({
+      success: true,
+      status: 'published',
+      socialRequestId: 301,
+      publicIntentId: 'public-intent:walk-qdu',
+      discoverHref: '/discover?publicIntentId=public-intent%3Awalk-qdu',
+      publicIntentHref: '/public-intent/public-intent%3Awalk-qdu',
+    });
+    handleMessage.mockResolvedValue(
+      routeResult({
+        intent: 'social_search' as never,
+        action: 'queue_search',
+        shouldSearch: true,
+        shouldQueueRun: false,
+        runMode: 'initial',
+        assistantMessage: '已根据这张卡找到 2 个适合先轻松跑步的人。',
+        cards: [
+          {
+            id: 'candidate-card-chen',
+            type: 'candidate_card',
+            schemaVersion: 'fitmeet.tool-ui.v1',
+            schemaType: 'social_match.candidate',
+            title: '陈砚',
+            body: '适合从一次轻松晨跑开始。',
+            status: 'ready',
+            data: { candidateRecordId: 501, candidateUserId: 22 },
+            actions: [],
+          },
+        ],
+      }),
+    );
+
+    const result = await service.perform({
+      ownerUserId: 7,
+      taskId: 101,
+      body: {
+        action: 'publish_to_discover' as never,
+        payload: {
+          confirmedPublish: true,
+          title: '青岛大学散步约练',
+          city: '青岛',
+          timePreference: '今天晚上',
+          locationPreference: '青岛大学附近',
+          activityType: '跑步',
+          socialRequestId: 301,
+        },
+        clientContext: { threadId: 'agent-task:101' },
+      },
+      handleMessage,
+    });
+
+    expect(draftPublication.publishDraft).toHaveBeenCalled();
+    expect(handleMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        taskId: 101,
+        conversationIntent: 'social',
+        idempotencyKey:
+          'post-publish-candidate-search:101:public-intent:walk-qdu',
+        message: expect.stringContaining('不要再次生成约练卡'),
+        clientContext: expect.objectContaining({
+          threadId: 'agent-task:101',
+          source: 'publish_to_discover_followup',
+        }),
+      }),
+      undefined,
+      undefined,
+    );
+    expect(result.intent).toBe('social_search');
+    expect(result.assistantMessage).toContain('已发布到发现页');
+    expect(result.assistantMessage).toContain('找到 2 个');
+    expect(result.cards?.map((card) => card.title)).toEqual([
+      '已发布到发现',
+      '陈砚',
+    ]);
+    expect(result.cards?.[0]).toEqual(
+      expect.objectContaining({
+        schemaType: 'social_match.activity',
+        status: 'completed',
+        data: expect.objectContaining({
+          publicIntentId: 'public-intent:walk-qdu',
+          discoverHref: '/discover?publicIntentId=public-intent%3Awalk-qdu',
+        }),
+      }),
+    );
   });
 
   it('returns an inline publish confirmation card before publishing to Discover', async () => {
