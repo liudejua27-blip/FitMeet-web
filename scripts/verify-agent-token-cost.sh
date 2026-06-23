@@ -14,12 +14,11 @@ usage() {
   cat <<'EOF'
 Usage: scripts/verify-agent-token-cost.sh
 
-Fetches production Social Agent metrics and reports token/cost optimization
-evidence:
+Fetches the admin-only Agent L5 observability endpoint and reports token/cost
+optimization evidence:
   - avg LLM calls per run
   - prompt tokens
   - cached tokens and DeepSeek cache hit rate
-  - workflow bypass/avoidance rate
   - final/planner/brain stage cost buckets
   - prompt prefix hash reuse
 
@@ -29,15 +28,10 @@ Environment:
   REQUIRE_AGENT_COST_DATA=true          Fail if live run/cost evidence is missing
   REQUIRE_STAGE_COSTS=csv               Required LLM use-case buckets when REQUIRE_AGENT_COST_DATA=true
   AGENT_TOKEN_COST_EVIDENCE_FILE=path    Optional JSON evidence output path for release archives
-  MIN_PROMPT_PREFIX_REUSE_RATE=0.70     Optional fail threshold for stable prompt prefix reuse
   MIN_STAGE_PROMPT_PREFIX_REUSE_RATE=0.70
                                       Optional fail threshold applied to each required LLM stage
-  MAX_PROMPT_PREFIX_DISTINCT_RATIO=0.30
-                                      Optional fail threshold for distinct prefix hashes / observations
   MAX_STAGE_PROMPT_PREFIX_DISTINCT_RATIO=0.30
                                       Optional fail threshold for distinct prefix hashes / calls per stage
-  MIN_CACHE_HIT_RATE=0.30               Optional fail threshold for combined/public cache hit rate
-  MIN_WORKFLOW_ROUTE_RATE=0.30          Optional fail threshold for workflow bypass coverage
   MAX_AVG_LLM_CALLS_PER_RUN=3           Optional fail threshold for live avg LLM calls per run
   TIMEOUT_SECONDS=20                    curl timeout
 
@@ -109,9 +103,6 @@ curl_json() {
   printf '%s\n' "${output}"
 }
 
-metrics_file="$(curl_json "Social Agent metrics" "${API_BASE_URL}/social-agent/metrics")"
-ok "Fetched Social Agent public metrics"
-
 observability_file=""
 if [[ -n "${ADMIN_JWT}" ]]; then
   observability_file="$(curl_json "Agent L5 observability" "${API_BASE_URL}/social-agent/l5/observability" "${ADMIN_JWT}")"
@@ -119,13 +110,13 @@ if [[ -n "${ADMIN_JWT}" ]]; then
 elif is_truthy "${REQUIRE_AGENT_COST_DATA}"; then
   fail "FITMEET_ADMIN_JWT or ADMIN_JWT is required when REQUIRE_AGENT_COST_DATA=true."
 else
-  warn "Skipping L5 observability. Set FITMEET_ADMIN_JWT or ADMIN_JWT to verify live LLM token cost."
+  warn "Skipping admin-only Agent L5 observability. Set FITMEET_ADMIN_JWT or ADMIN_JWT to verify live LLM token cost."
 fi
 
-node - "${metrics_file}" "${observability_file}" "${REQUIRE_AGENT_COST_DATA}" "${REQUIRE_STAGE_COSTS}" <<'NODE'
+node - "${observability_file}" "${REQUIRE_AGENT_COST_DATA}" "${REQUIRE_STAGE_COSTS}" <<'NODE'
 const fs = require('fs');
 
-const [metricsPath, observabilityPath, requireDataRaw, requiredStagesRaw] =
+const [observabilityPath, requireDataRaw, requiredStagesRaw] =
   process.argv.slice(2);
 const requireData = /^(1|true|yes)$/i.test(requireDataRaw || '');
 const requiredStages = String(requiredStagesRaw || '')
@@ -152,73 +143,16 @@ const envNumber = (key) => {
   return parsed;
 };
 
-const metrics = readJson(metricsPath) || {};
-const token = metrics.tokenOptimizationSummary || {};
-const workflow = metrics.workflowEfficiencySummary || {};
-const cache = metrics.cacheEfficiencySummary?.combined || {};
-const publicWorkflowRouteRate = workflow.workflowRouteRate;
-const publicCacheHitRate = token.cacheHitRate ?? cache.hitRate;
-const publicPromptPrefixReuseRate = token.promptPrefixReuseRate;
-
-const publicRows = [
-  ['workflow route total', number(workflow.total)],
-  ['workflow route rate', rate(publicWorkflowRouteRate)],
-  ['estimated avoided LLM calls', number(token.estimatedAvoidedLlmCalls)],
-  ['cache total', number(token.cacheTotal ?? cache.total)],
-  ['cache hit rate', rate(publicCacheHitRate)],
-  ['saved approx prompt chars', number(token.savedApproxPromptChars ?? cache.savedApproxPromptChars)],
-  ['prompt prefix observations', number(token.promptFingerprintObservations)],
-  ['prompt prefix reuse rate', rate(publicPromptPrefixReuseRate)],
-];
-
-console.log('\nSocial Agent token optimization snapshot');
-for (const [label, value] of publicRows) {
-  console.log(`- ${label}: ${value}`);
-}
-
 const missing = [];
-if (requireData && number(token.promptFingerprintObservations) < 1) {
-  missing.push('prompt prefix observations');
-}
-const minWorkflowRouteRate = envNumber('MIN_WORKFLOW_ROUTE_RATE');
-const minCacheHitRate = envNumber('MIN_CACHE_HIT_RATE');
-const minPromptPrefixReuseRate = envNumber('MIN_PROMPT_PREFIX_REUSE_RATE');
 const minStagePromptPrefixReuseRate = envNumber('MIN_STAGE_PROMPT_PREFIX_REUSE_RATE');
-const maxPromptPrefixDistinctRatio = envNumber('MAX_PROMPT_PREFIX_DISTINCT_RATIO');
 const maxStagePromptPrefixDistinctRatio = envNumber(
   'MAX_STAGE_PROMPT_PREFIX_DISTINCT_RATIO',
 );
 const maxAvgLlmCallsPerRun = envNumber('MAX_AVG_LLM_CALLS_PER_RUN');
 const thresholds = {
-  minWorkflowRouteRate,
-  minCacheHitRate,
-  minPromptPrefixReuseRate,
   minStagePromptPrefixReuseRate,
-  maxPromptPrefixDistinctRatio,
   maxStagePromptPrefixDistinctRatio,
   maxAvgLlmCallsPerRun,
-};
-const publicPromptPrefixDistinctRatio =
-  number(token.promptFingerprintObservations) > 0
-    ? number(token.distinctPromptPrefixHashes) /
-      number(token.promptFingerprintObservations)
-    : null;
-const publicEvidence = {
-  workflowRouteTotal: number(workflow.total),
-  workflowRouteRate: number(publicWorkflowRouteRate),
-  estimatedAvoidedLlmCalls: number(token.estimatedAvoidedLlmCalls),
-  cacheTotal: number(token.cacheTotal ?? cache.total),
-  cacheHitRate: number(publicCacheHitRate),
-  savedApproxPromptChars: number(
-    token.savedApproxPromptChars ?? cache.savedApproxPromptChars,
-  ),
-  promptPrefixObservations: number(token.promptFingerprintObservations),
-  distinctPromptPrefixHashes: number(token.distinctPromptPrefixHashes),
-  promptPrefixReuseRate: number(publicPromptPrefixReuseRate),
-  promptPrefixDistinctRatio:
-    publicPromptPrefixDistinctRatio === null
-      ? null
-      : Number(publicPromptPrefixDistinctRatio.toFixed(4)),
 };
 let l5Evidence = null;
 
@@ -233,33 +167,12 @@ const writeEvidence = (status, missingItems) => {
     thresholds,
     status,
     missing: missingItems,
-    publicMetrics: publicEvidence,
     l5Observability: l5Evidence,
   };
   fs.mkdirSync(require('path').dirname(evidenceFile), { recursive: true });
   fs.writeFileSync(evidenceFile, `${JSON.stringify(payload, null, 2)}\n`);
   console.log(`\nWrote token-cost evidence: ${evidenceFile}`);
 };
-
-if (minWorkflowRouteRate !== null && number(publicWorkflowRouteRate) < minWorkflowRouteRate) {
-  missing.push(`workflow route rate >= ${minWorkflowRouteRate}`);
-}
-if (minCacheHitRate !== null && number(publicCacheHitRate) < minCacheHitRate) {
-  missing.push(`cache hit rate >= ${minCacheHitRate}`);
-}
-if (
-  minPromptPrefixReuseRate !== null &&
-  number(publicPromptPrefixReuseRate) < minPromptPrefixReuseRate
-) {
-  missing.push(`prompt prefix reuse rate >= ${minPromptPrefixReuseRate}`);
-}
-if (maxPromptPrefixDistinctRatio !== null) {
-  if (publicPromptPrefixDistinctRatio === null) {
-    missing.push('prompt prefix distinct ratio');
-  } else if (publicPromptPrefixDistinctRatio > maxPromptPrefixDistinctRatio) {
-    missing.push(`prompt prefix distinct ratio <= ${maxPromptPrefixDistinctRatio}`);
-  }
-}
 
 const observability = readJson(observabilityPath);
 if (!observability) {

@@ -21,8 +21,8 @@ Verifies the production fixes for the FitMeet Agent/Discover regression set:
   - public social intents contain at least one real discoverable item
   - production Agent browser QA catches ordinary-chat social leakage, stale
     checkpoint recovery, account menu blocking, and ordinary thread title drift
-  - Social Agent token/cost metrics are fetchable; when
-    REQUIRE_AGENT_COST_DATA=true, live LLM cost buckets must be present
+  - Agent token/cost evidence is checked through admin-only L5 observability;
+    when REQUIRE_AGENT_COST_DATA=true, live LLM cost buckets must be present
 
 Environment:
   BASE_URL / API_BASE_URL              Production Web/API origins.

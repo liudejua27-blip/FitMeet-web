@@ -25,13 +25,13 @@ Verifies a deployed FitMeet Web/API stack from macOS or Linux:
   - runtime FitMeet core OpenAPI App contract
   - Discover public-intent reachability
   - auth guards on App-protected endpoints
-  - optional agent manifest with token
+  - optional Agent permissions check with token
   - optional public social intent write/read-back
 
 Environment:
   BASE_URL                         Public Web origin. Defaults to https://www.ourfitmeet.cn.
   API_BASE_URL                     Backend API base URL. Defaults to https://www.ourfitmeet.cn/api.
-  AGENT_TOKEN                      Optional X-Agent-Token for authorized agent manifest check.
+  AGENT_TOKEN                      Optional X-Agent-Token for authorized Agent permissions check.
   VERIFY_USER_EMAIL/PASSWORD       Optional login credentials for authenticated Agent session UX checks.
   EXPECTED_RELEASE_COMMIT          Optional backend release commit prefix expected from /api/health.
   RUN_PUBLIC_INTENT_WRITE=true     Exercise public social intent write/read-back.
@@ -280,7 +280,7 @@ ok "Health, readiness, and public-intent payload shapes are readable"
 curl_status "Profile without token is protected" "${API_BASE_URL}/auth/profile" "401" >/dev/null
 curl_status "Social Agent session without token is protected" "${API_BASE_URL}/social-agent/chat/session" "401" >/dev/null
 curl_status "Messages without token are protected" "${API_BASE_URL}/messages/conversations" "401" >/dev/null
-curl_status "Agent manifest without token rejects auth" "${API_BASE_URL}/agent/skills/manifest" "401" >/dev/null
+curl_status "Agent permissions without token rejects auth" "${API_BASE_URL}/agent/permissions" "401" >/dev/null
 
 if [[ -n "${VERIFY_USER_EMAIL}" && -n "${VERIFY_USER_PASSWORD}" ]]; then
   login_output="${TMP_DIR}/verify_login.json"
@@ -359,16 +359,16 @@ else
 fi
 
 if [[ -n "${AGENT_TOKEN}" ]]; then
-  agent_output="${TMP_DIR}/agent_manifest.json"
+  agent_output="${TMP_DIR}/agent_permissions.json"
   status="$(
     curl -sS -m "${TIMEOUT_SECONDS}" -o "${agent_output}" -w '%{http_code}' \
       -H "X-Agent-Token: ${AGENT_TOKEN}" \
-      "${API_BASE_URL}/agent/skills/manifest"
+      "${API_BASE_URL}/agent/permissions"
   )"
-  [[ "${status}" == "200" ]] || fail "Agent manifest with token -> ${status}, expected 200"
-  ok "Agent manifest with token -> 200"
+  [[ "${status}" == "200" ]] || fail "Agent permissions with token -> ${status}, expected 200"
+  ok "Agent permissions with token -> 200"
 else
-  skip "Agent manifest with token. Set AGENT_TOKEN or pass --agent-token."
+  skip "Agent permissions with token. Set AGENT_TOKEN or pass --agent-token."
 fi
 
 if [[ "${RUN_PUBLIC_INTENT_WRITE}" == "true" ]]; then
