@@ -125,6 +125,14 @@ require_file() {
   ok "Found $1"
 }
 
+sha256_file() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$1" | awk '{print $1}'
+  else
+    shasum -a 256 "$1" | awk '{print $1}'
+  fi
+}
+
 require_file "$ARCHIVE"
 require_file "$CHECKSUM_FILE"
 require_file "$INSTALLER"
@@ -132,11 +140,14 @@ require_file "$INSTALLER"
 if ! command -v sha256sum >/dev/null 2>&1 && ! command -v shasum >/dev/null 2>&1; then
   fail "Missing required command: sha256sum or shasum"
 fi
-if command -v sha256sum >/dev/null 2>&1; then
-  sha256sum -c "$CHECKSUM_FILE"
-else
-  shasum -a 256 -c "$CHECKSUM_FILE"
+
+expected_checksum="$(awk 'NF >= 1 { print $1; exit }' "$CHECKSUM_FILE")"
+[[ -n "$expected_checksum" ]] || fail "Checksum file is empty: $CHECKSUM_FILE"
+actual_checksum="$(sha256_file "$ARCHIVE")"
+if [[ "$actual_checksum" != "$expected_checksum" ]]; then
+  fail "Checksum mismatch for $ARCHIVE. Expected $expected_checksum, got $actual_checksum."
 fi
+ok "Checksum verified for $ARCHIVE"
 
 remote_dir_q="$(quote_remote "$REMOTE_DIR")"
 target_dir_q="$(quote_remote "$TARGET_DIR")"
