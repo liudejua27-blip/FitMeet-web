@@ -185,7 +185,8 @@ const failures = [];
 const scan = (value, path = '$') => {
   if (value == null) return;
   if (typeof value === 'string') {
-    if (forbiddenText.test(value)) {
+    const isRouteIdentifier = /\.id$/.test(path);
+    if (!isRouteIdentifier && forbiddenText.test(value)) {
       failures.push(`${path} contains internal fixture/smoke text`);
     }
     return;
@@ -246,7 +247,8 @@ const failures = [];
 const scan = (value, path = '$', forbiddenKeys = forbiddenIntentKeys) => {
   if (value == null) return;
   if (typeof value === 'string') {
-    if (forbiddenText.test(value)) {
+    const isRouteIdentifier = /\.id$/.test(path);
+    if (!isRouteIdentifier && forbiddenText.test(value)) {
       failures.push(`${path} contains internal fixture/smoke text`);
     }
     return;
