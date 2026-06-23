@@ -9,10 +9,15 @@ publish, invite, or message on behalf of a user.
 
 - User is new or `profileCompleteness` is below the match threshold.
 - User attempts a social execution action: match, publish, invite, connect, or message.
+- User explicitly asks to complete their profile, answer a few questions, or
+  supplement preferences.
 
 ## Must Not Trigger
 
 - Ordinary chat, product questions, casual conversation, or general advice.
+- Candidate recommendation, opener generation, invitation sending, or Discover
+  publication before the profile gate has passed and the user has explicitly
+  asked to continue.
 
 ## Required Slots
 
@@ -34,12 +39,18 @@ publish, invite, or message on behalf of a user.
 - Sensitive or long-term Life Graph facts require `life_graph_memory_skill`.
 - Publishing consent only authorizes future low-risk Discover publication. It
   does not authorize precise location, contact exchange, invite sending, or payments.
+- Durable profile writes must show a structured update preview first. The user
+  may choose "保存", "修改后保存", "不保存", or "本次使用，不保存".
+- Each onboarding turn asks one compact group of up to 3-5 high-value questions.
+  Every question must support "暂不确定" or skip.
 
 ## Success Output
 
 - `profileGate.passed`
 - `taskSlots` updated
 - `LifeGraphDiffCard` when durable memory is proposed
+- A separate final prompt asking whether to start matching after profile
+  completion; do not enter candidate recommendation without that consent.
 
 ## Failure / Fallback
 

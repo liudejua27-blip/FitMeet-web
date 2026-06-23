@@ -145,6 +145,51 @@ describe('SocialAgentProfileGateService', () => {
     expect(result.assistantMessage).toContain('是否允许公开发起活动');
   });
 
+  it('asks all minimum profile fields at once for a vague publish-card request', async () => {
+    const service = new SocialAgentProfileGateService({
+      getLifeGraph: jest.fn().mockResolvedValue({
+        completeness: { completenessScore: 0 },
+        fields: {},
+      }),
+    } as never);
+    const task = makeTask({ goal: '帮我发布约练卡片' });
+
+    const result = await service.evaluateForSocialExecution({
+      ownerUserId: 7,
+      task,
+      route: makeRoute({
+        intent: 'action_request',
+        shouldExecuteAction: true,
+        replyStrategy: 'execute_action',
+        entities: {
+          city: '',
+          activityType: '',
+          targetGender: '',
+          timePreference: '',
+          locationPreference: '',
+        },
+      }),
+      message: '帮我发布约练卡片',
+    });
+
+    expect(result.passed).toBe(false);
+    expect(result.missing).toEqual([
+      'city',
+      'activity',
+      'availability',
+      'boundary',
+      'publicAuthorization',
+    ]);
+    expect(result.assistantMessage).toContain('一次性确认');
+    expect(result.assistantMessage).toContain('城市/大致区域');
+    expect(result.assistantMessage).toContain('想参与的运动或社交场景');
+    expect(result.assistantMessage).toContain('可约时间');
+    expect(result.assistantMessage).toContain('社交边界');
+    expect(result.assistantMessage).toContain('是否允许公开发起活动');
+    expect(result.assistantMessage).toContain('暂不确定');
+    expect(result.assistantMessage).toContain('本次使用，不保存');
+  });
+
   it('passes when the user provides city, activity, time, boundary, and public authorization', async () => {
     const service = new SocialAgentProfileGateService();
     const task = makeTask();

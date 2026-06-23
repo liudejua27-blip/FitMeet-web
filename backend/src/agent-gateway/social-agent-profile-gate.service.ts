@@ -350,7 +350,8 @@ export class SocialAgentProfileGateService {
       .join('、');
     const examples = [
       '可以，我先把最低画像补齐，这样不会乱推荐，也不会误公开你的需求。',
-      `还差：${missingText}。`,
+      `我会一次性确认这些信息，还差：${missingText}。`,
+      '你可以直接一句话补齐；每一项都可以说“暂不确定”，也可以选择“本次使用，不保存”。',
       this.profileGateExample(missing),
     ];
     if (missing.includes('publicAuthorization')) {
@@ -478,7 +479,7 @@ export class SocialAgentProfileGateService {
   private extractActivity(text: string) {
     return cleanDisplayText(
       text.match(
-        /(跑步|慢跑|夜跑|羽毛球|瑜伽|健身|撸铁|普拉提|徒步|户外|骑行|篮球|足球|网球|游泳|飞盘|咖啡|散步|拍照|city\s*walk|citywalk|约练|训练|低压力社交|认识新朋友|新朋友)/i,
+        /(跑步|慢跑|夜跑|羽毛球|瑜伽|健身|撸铁|普拉提|徒步|户外|骑行|篮球|足球|网球|游泳|飞盘|咖啡|散步|拍照|city\s*walk|citywalk)/i,
       )?.[1],
       '',
     );
