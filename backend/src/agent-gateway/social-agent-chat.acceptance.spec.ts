@@ -3255,7 +3255,7 @@ describe('SocialAgentChat acceptance flow', () => {
 
       const filled = await service.routeMessage(7, {
         taskId: clarification.taskId,
-        message: '今天晚上在青岛大学附近，找个女舞蹈生散步。',
+        message: '今天晚上在青岛大学附近，找个女舞蹈生散步，公共场所先站内聊。',
       });
 
       expect(filled).toMatchObject({

@@ -21,6 +21,9 @@ export type SocialAgentOpportunityDraftResult =
   | { ready: true; draft: SocialAgentOpportunityDraft }
   | { ready: false; assistantMessage: string; missing: string[] };
 
+const DEFAULT_SAFETY_BOUNDARY =
+  '首次见面优先公共场所，先站内沟通，不公开精确位置或联系方式';
+
 export function buildSocialAgentOpportunityDraftFromTask(
   task: AgentTask,
   message: string,
@@ -54,19 +57,24 @@ export function buildSocialAgentOpportunityDraftFromTask(
     cleanDisplayText(taskMemory.activeEntities.city, '') ||
     slotText(slots, slotSummary, 'city') ||
     slotText(slots, slotSummary, 'geo_area') ||
-    inferCity(location, message, task.goal) ||
-    '青岛';
+    inferCity(location, message, task.goal);
+  const safetyBoundary =
+    slotText(slots, slotSummary, 'safety_boundary') ||
+    inferSafetyBoundary(sourceText) ||
+    (allowsDefaultSafetyBoundary(sourceText) ? DEFAULT_SAFETY_BOUNDARY : '');
   const missing = [
+    city ? null : '城市/大致区域',
     activity ? null : '活动',
     time ? null : '时间',
     location ? null : '地点',
+    safetyBoundary ? null : '安全边界',
   ].filter((item): item is string => Boolean(item));
 
   if (missing.length > 0) {
     return {
       ready: false,
       missing,
-      assistantMessage: `发布约练卡前还差 ${missing.join('、')}。你补充后，我会先生成一张可确认的约练卡；确认前不会公开，也不会推荐候选。`,
+      assistantMessage: `发布约练卡前我先一次性确认：还差 ${missing.join('、')}。你可以一句话补齐；如果安全边界不确定，可以说“按安全默认值处理”。补齐后我会先生成一张可确认的约练卡；确认前不会公开，也不会推荐候选。`,
     };
   }
 
@@ -76,10 +84,6 @@ export function buildSocialAgentOpportunityDraftFromTask(
   const capacityLabel = inferCapacityLabel(sourceText);
   const intensity =
     slotText(slots, slotSummary, 'intensity') || inferIntensity(sourceText);
-  const safetyBoundary =
-    slotText(slots, slotSummary, 'safety_boundary') ||
-    inferSafetyBoundary(sourceText) ||
-    '首次见面优先公共场所，先站内沟通，不公开精确位置或联系方式';
   const title = opportunityTitle({ location, time, activity });
   const description = [
     `想找一个${time}在${location}一起${activity}的人。`,
@@ -414,6 +418,13 @@ function inferSafetyBoundary(value: string): string {
     return '优先公共场所和公开路线，不公开精确位置或联系方式';
   }
   return '';
+}
+
+function allowsDefaultSafetyBoundary(value: string): boolean {
+  const source = cleanDisplayText(value, '');
+  return /(按安全默认值处理|按默认安全边界|默认安全边界|由你按安全默认值|安全默认值|按平台安全默认)/i.test(
+    source,
+  );
 }
 
 function opportunityTitle(input: {
