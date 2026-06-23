@@ -8,7 +8,7 @@ import { recordSocialAgentPendingAction } from './social-agent-memory.util';
 import { SocialAgentCandidateActionService } from './social-agent-candidate-action.service';
 import { SocialAgentMetricsService } from './social-agent-metrics.service';
 import type { SocialAgentActionApprovalRuntimeContext } from './social-agent-candidate-action-approval.presenter';
-import { cleanDisplayText } from '../common/display-text.util';
+import { hasExplicitPublishSideEffectIntent } from './social-agent-social-intent-gate';
 import {
   buildSocialAgentOpportunityDraftFromTask,
   buildSocialAgentPublishConfirmationCard,
@@ -123,14 +123,7 @@ export class SocialAgentRouteActionTurnService {
   }
 
   private isPublishToDiscoverIntent(message: string): boolean {
-    const text = cleanDisplayText(message, '').toLowerCase();
-    if (!text) return false;
-    if (/(不|别|先不|暂不|不要|不用|无需).{0,12}(发布|公开|发现)/i.test(text)) {
-      return false;
-    }
-    return /(帮我发布|帮我发到发现|发布到发现|发布约练|发布卡片|公开发布|确认发布|发到发现|同步到发现)/i.test(
-      text,
-    );
+    return hasExplicitPublishSideEffectIntent(message);
   }
 
   private withApprovalCopy(input: {

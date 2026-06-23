@@ -149,7 +149,7 @@ describe('SocialAgentRouteActionTurnService', () => {
       ownerUserId: 7,
       task,
       route: makeRoute(),
-      message: '那你帮我发布到发现',
+      message: '发布吧',
       assistantMessage: '可以，我会先等你确认。',
     });
 

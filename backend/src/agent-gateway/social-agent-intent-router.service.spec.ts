@@ -649,6 +649,31 @@ describe('SocialAgentIntentRouterService', () => {
     });
   });
 
+  it('routes short publish follow-up to Discover publish action', async () => {
+    const router = makeRouter();
+
+    const result = await router.route({
+      message: '发布吧',
+      taskContext: {
+        hasSearchContext: true,
+        taskSlots: {
+          activity: { value: '跑步', state: 'completed' },
+          time_window: { value: '今天晚上', state: 'completed' },
+          location_text: { value: '青岛大学附近', state: 'completed' },
+          safety_boundary: { value: '公共场所，先站内聊', state: 'completed' },
+        },
+      },
+    });
+
+    expect(result).toMatchObject({
+      intent: 'action_request',
+      shouldSearch: false,
+      shouldExecuteAction: true,
+      replyStrategy: 'execute_action',
+      source: 'rules',
+    });
+  });
+
   it('does not execute send or friend actions when no candidate context exists', async () => {
     const router = makeRouter();
 

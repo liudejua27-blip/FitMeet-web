@@ -261,8 +261,18 @@ describe('social agent social intent gate', () => {
     expect(hasExplicitSocialSideEffectIntent(message)).toBe(true);
   });
 
+  it.each(['发布吧', '就发布', '发到发现吧', '把这张卡发布到发现'])(
+    'recognizes short publish follow-up "%s" as a publish side effect',
+    (message) => {
+      expect(hasExplicitSocialExecutionIntent(message)).toBe(true);
+      expect(hasExplicitPublishSideEffectIntent(message)).toBe(true);
+      expect(hasExplicitSocialSideEffectIntent(message)).toBe(true);
+    },
+  );
+
   it('keeps publish opt-out from becoming a publish side effect while preserving explicit matching', () => {
     expect(hasExplicitPublishSideEffectIntent('先不发布到发现')).toBe(false);
+    expect(hasExplicitPublishSideEffectIntent('先不要发布吧')).toBe(false);
     expect(
       shouldAllowSocialExecution({
         message: '先不发布到发现，也不要推荐人，我只是想普通聊聊',
@@ -333,7 +343,7 @@ describe('social agent social intent gate', () => {
     ).toBe(true);
     expect(
       shouldAllowSocialExecution({
-        message: '那你帮我发布到发现',
+        message: '发布吧',
         intent: 'action_request',
         taskContext: {
           taskSlots: {

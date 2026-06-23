@@ -1541,7 +1541,7 @@ describe('SocialAgentChat acceptance flow', () => {
 
     const publish = await service.routeMessage(7, {
       taskId: result.taskId,
-      message: '帮我发布这张约练卡片',
+      message: '发布吧',
     });
 
     expect(publish).toMatchObject({
