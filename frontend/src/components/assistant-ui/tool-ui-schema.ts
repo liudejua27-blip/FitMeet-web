@@ -1342,7 +1342,7 @@ function defaultCandidateEmptyRecoveryOptions(): CandidateEmptyStateRecoveryOpti
   return [
     {
       key: 'publish_to_discover',
-      label: '发布卡片',
+      label: '确认发布',
       detail: '让公开可发现的人看到你的约练卡；发布前仍需要确认。',
       requiresConfirmation: true,
     },

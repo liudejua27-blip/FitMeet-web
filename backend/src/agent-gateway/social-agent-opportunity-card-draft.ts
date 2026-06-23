@@ -240,7 +240,7 @@ export function buildSocialAgentPublishConfirmationCard(input: {
       : [
           {
             id: `publish_to_discover:${task.id}`,
-            label: '发布卡片',
+            label: '确认发布',
             action: 'publish_to_discover',
             schemaAction: 'publish_to_discover',
             loopStage: 'activity_draft_created',
@@ -263,7 +263,7 @@ export function buildSocialAgentPublishConfirmationCard(input: {
           },
           {
             id: `modify_activity_plan:${task.id}`,
-            label: '修改信息',
+            label: '修改卡片',
             action: 'reschedule_meet_loop',
             schemaAction: 'activity.modify_time',
             loopStage: 'activity_draft_created',

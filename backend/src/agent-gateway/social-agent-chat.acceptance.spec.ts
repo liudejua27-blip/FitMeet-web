@@ -1453,7 +1453,7 @@ describe('SocialAgentChat acceptance flow', () => {
           type: 'activity_plan',
           actions: expect.arrayContaining([
             expect.objectContaining({
-              label: '发布卡片',
+              label: '确认发布',
               action: 'publish_to_discover',
               schemaAction: expect.stringMatching(
                 /^(publish_to_discover|activity\.confirm_create)$/,
@@ -1461,7 +1461,7 @@ describe('SocialAgentChat acceptance flow', () => {
               requiresConfirmation: true,
             }),
             expect.objectContaining({
-              label: '修改信息',
+              label: '修改卡片',
               requiresConfirmation: false,
             }),
             expect.objectContaining({
@@ -1517,11 +1517,11 @@ describe('SocialAgentChat acceptance flow', () => {
         }),
         actions: [
           expect.objectContaining({
-            label: '发布卡片',
+            label: '确认发布',
             schemaAction: 'publish_to_discover',
           }),
           expect.objectContaining({
-            label: '修改信息',
+            label: '修改卡片',
             schemaAction: 'activity.modify_time',
           }),
           expect.objectContaining({
@@ -1569,12 +1569,12 @@ describe('SocialAgentChat acceptance flow', () => {
         }),
         actions: expect.arrayContaining([
           expect.objectContaining({
-            label: '发布卡片',
+            label: '确认发布',
             schemaAction: 'publish_to_discover',
             requiresConfirmation: true,
           }),
           expect.objectContaining({
-            label: '修改信息',
+            label: '修改卡片',
             schemaAction: 'activity.modify_time',
             requiresConfirmation: false,
           }),
@@ -1740,12 +1740,12 @@ describe('SocialAgentChat acceptance flow', () => {
         }),
         actions: [
           expect.objectContaining({
-            label: '发布卡片',
+            label: '确认发布',
             schemaAction: 'publish_to_discover',
             requiresConfirmation: true,
           }),
           expect.objectContaining({
-            label: '修改信息',
+            label: '修改卡片',
             schemaAction: 'activity.modify_time',
             requiresConfirmation: false,
           }),
@@ -2140,7 +2140,7 @@ describe('SocialAgentChat acceptance flow', () => {
       }),
       actions: expect.arrayContaining([
         expect.objectContaining({
-          label: '发布卡片',
+          label: '确认发布',
           action: 'publish_to_discover',
           schemaAction: expect.stringMatching(
             /^(publish_to_discover|activity\.confirm_create)$/,

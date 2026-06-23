@@ -109,10 +109,10 @@ function actionPathLabel(schemaAction: ToolUISchemaAction) {
     return '加好友并聊天';
   }
   if (schemaAction === 'activity.view_detail') return '查看活动';
-  if (schemaAction === 'activity.modify_time') return '修改';
+  if (schemaAction === 'activity.modify_time') return '修改卡片';
   if (schemaAction === 'activity.modify_location') return '调整地点';
   if (schemaAction === 'activity.skip_publish') return '暂不发布';
-  if (schemaAction === 'publish_to_discover') return '发布卡片';
+  if (schemaAction === 'publish_to_discover') return '确认发布';
   if (schemaAction === 'activity.confirm_create') return '创建约练';
   if (schemaAction === 'activity.check_in') return '到达签到';
   if (schemaAction === 'activity.complete') return '记录完成';

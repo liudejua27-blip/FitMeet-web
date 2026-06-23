@@ -782,15 +782,15 @@ function visualCardActionLabel(
       action.schemaAction === 'publish_to_discover' ||
       action.schemaAction === 'activity.confirm_create'
     ) {
-      return published ? '已发布' : '发布卡片';
+      return published ? '已发布' : '确认发布';
     }
     if (
       action.schemaAction === 'activity.modify_time' ||
       action.schemaAction === 'activity.modify_location'
     ) {
-      return published ? '修改卡片' : '修改信息';
+      return '修改卡片';
     }
-    if (action.schemaAction === 'activity.skip_publish') return published ? '关闭卡片' : '暂不发布';
+    if (action.schemaAction === 'activity.skip_publish') return published ? null : '暂不发布';
     if (action.schemaAction === 'activity.view_detail') return '查看详情';
   }
   if (card.schemaType === 'social_match.candidate') {
@@ -1788,10 +1788,10 @@ function normalizeVisibleActionLabel(
     return '发送邀请';
   }
   if (schemaType === 'social_match.activity' && canonicalKey === 'publish_to_discover') {
-    return '发布卡片';
+    return '确认发布';
   }
   if (schemaType === 'social_match.activity' && canonicalKey === 'activity.confirm_create') {
-    return '发布卡片';
+    return '确认发布';
   }
   if (schemaType === 'social_match.activity' && canonicalKey === 'activity.skip_publish') {
     return '暂不发布';
@@ -1800,7 +1800,7 @@ function normalizeVisibleActionLabel(
     schemaType === 'social_match.activity' &&
     (canonicalKey === 'activity.modify_time' || canonicalKey === 'activity.modify_location')
   ) {
-    return '修改';
+    return '修改卡片';
   }
   return label;
 }
@@ -1860,7 +1860,7 @@ function defaultCardActions(card: SchemaDrivenAssistantCard): VisibleCardAction[
     return [
       {
         id: `${card.id}:publish`,
-        label: '发布卡片',
+        label: '确认发布',
         requiresConfirmation: true,
         schemaAction: 'publish_to_discover',
         action: 'publish_to_discover',
@@ -1869,7 +1869,7 @@ function defaultCardActions(card: SchemaDrivenAssistantCard): VisibleCardAction[
       },
       {
         id: `${card.id}:edit`,
-        label: '修改',
+        label: '修改卡片',
         requiresConfirmation: false,
         schemaAction: 'activity.modify_time',
         action: 'activity.modify_time',
@@ -1891,7 +1891,7 @@ function defaultCardActions(card: SchemaDrivenAssistantCard): VisibleCardAction[
     return [
       {
         id: `${card.id}:publish`,
-        label: '发布卡片',
+        label: '确认发布',
         requiresConfirmation: true,
         schemaAction: 'publish_to_discover',
         action: 'publish_to_discover',

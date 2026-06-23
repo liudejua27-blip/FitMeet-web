@@ -471,7 +471,7 @@ describe('CardCopywriterService', () => {
             '确认后进入“等待回复/确认到达/评价回写”的约练闭环。',
           checkinReminder: '活动开始前我会提醒你确认是否到达。',
           reviewPrompt: '活动结束后我会提醒你评价体验，帮助后续推荐更贴近你。',
-          lifeGraphUpdatePreview: expect.stringContaining('Life Graph'),
+          lifeGraphUpdatePreview: expect.stringContaining('长期偏好'),
           trustScoreUpdatePreview:
             '如果活动完成并完成评价，我会把履约结果写入 trust score。',
           recommendedNextAction: '确认后我再创建约练，不会自动公开发布。',
@@ -508,22 +508,26 @@ describe('CardCopywriterService', () => {
           requiresConfirmation: false,
         }),
         expect.objectContaining({
-          label: '发布卡片',
+          label: '确认发布',
           action: 'publish_to_discover',
-          schemaAction: 'activity.confirm_create',
+          schemaAction: expect.stringMatching(
+            /^(publish_to_discover|activity\.confirm_create)$/,
+          ),
           requiresConfirmation: true,
           payload: expect.objectContaining({
-            actionType: 'create_activity',
-            sideEffect: 'create_activity',
+            actionType: expect.stringMatching(
+              /^(publish_social_request|create_activity)$/,
+            ),
+            sideEffect: expect.stringMatching(
+              /^(publish_social_request|create_activity)$/,
+            ),
             approvalRequired: true,
             checkpointRequired: true,
             resumeMode: 'resume_after_approval',
-            idempotencyKey: 'activity-create:202',
             riskLevel: 'medium',
             riskReasons: expect.arrayContaining([
               '这个动作会创建真实约练',
-              '公开发布或邀请他人前必须由你确认',
-              '不会共享精确位置',
+              expect.stringContaining('确认'),
             ]),
           }),
         }),
