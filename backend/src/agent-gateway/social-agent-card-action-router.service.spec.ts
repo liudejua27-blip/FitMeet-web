@@ -1088,7 +1088,7 @@ describe('SocialAgentCardActionRouterService', () => {
         }),
         actions: expect.arrayContaining([
           expect.objectContaining({
-            label: '同意并发布',
+            label: '确认发布',
             schemaAction: 'publish_to_discover',
             requiresConfirmation: true,
             payload: expect.objectContaining({

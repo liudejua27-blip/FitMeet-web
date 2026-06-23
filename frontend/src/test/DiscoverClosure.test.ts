@@ -75,6 +75,8 @@ describe('Discover closure links', () => {
     expect(meet.city).toBe('上海');
     expect(source).not.toContain('青岛 · {resolvedDistance}');
     expect(source).not.toContain('`${(index + 1) * 10} 分钟前`');
+    expect(source).not.toContain('公开社交意图');
+    expect(source).toContain('约练卡片');
     expect(source).toContain("formatRelativePublishedTime(meet.createdAt, '刚刚更新')");
   });
 

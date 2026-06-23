@@ -375,7 +375,7 @@ function isPublicTag(tag: string) {
 }
 
 function isInternalFixtureText(value?: string | null) {
-  const text = `${value ?? ''}`.trim();
+  const text = `${value ?? ''}`.trim().replace(/[_-]+/g, ' ');
   return /\b(agent\s*smoke|smoke\s*account|api\s*smoke|smoke|fixture|seed|test\s*account)\b/i.test(
     text,
   );

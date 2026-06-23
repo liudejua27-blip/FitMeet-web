@@ -94,6 +94,34 @@ describe('serializePublicSocialIntent', () => {
     expect(response.matchSignal).not.toHaveProperty('reasons');
   });
 
+  it('maps smoke fixture copy to user-facing public card copy', () => {
+    const response = serializePublicSocialIntent(
+      makeIntent({
+        id: 'public_agent_api_smoke_qingdao_walk',
+        source: 'agent_smoke_seed',
+        requestType: 'agent_smoke',
+        title: 'Agent Smoke Owner internal fixture',
+        description: 'Agent smoke 专用公开场景，请勿展示。',
+        interestTags: ['散步', 'agent smoke', 'seed'],
+        city: '青岛',
+        socialGoal: '周末下午找散步搭子',
+      }),
+    );
+
+    expect(response).toMatchObject({
+      requestType: 'custom',
+      title: '青岛同频约练',
+      description: '周末下午找散步搭子',
+      interestTags: ['散步'],
+      socialGoal: '周末下午找散步搭子',
+    });
+    const visiblePayload = { ...response };
+    delete (visiblePayload as { id?: string }).id;
+    expect(JSON.stringify(visiblePayload)).not.toMatch(
+      /agent smoke|smoke|seed/i,
+    );
+  });
+
   it('builds a deterministic match signal when metadata does not include one', () => {
     const response = serializePublicSocialIntent(
       makeIntent({ metadata: {}, matchedCount: 0 }),

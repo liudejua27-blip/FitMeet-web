@@ -78,7 +78,7 @@ export interface UserProfile {
   trainingDays: number;
   trainingCount: number;
   caloriesBurned: number;
-  bestRecords: { name: string; value: string }[];
+  bestRecords?: { name: string; value: string }[];
   meetCount?: number;
   followers: number;
   following: number;

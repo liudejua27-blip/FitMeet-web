@@ -623,7 +623,7 @@ export class SocialAgentCardActionRouterService {
             actions: [
               {
                 id: 'confirm_publish_to_discover',
-                label: '同意并发布',
+                label: '确认发布',
                 action: 'publish_to_discover',
                 schemaAction: 'publish_to_discover',
                 requiresConfirmation: true,

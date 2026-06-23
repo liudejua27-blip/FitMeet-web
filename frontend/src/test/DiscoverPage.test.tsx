@@ -63,7 +63,8 @@ describe('DiscoverPage public intent readback', () => {
     expect(target).toHaveAttribute('href', '/public-intent/social_request_401');
     expect(target).toHaveTextContent('青岛大学晨跑搭子');
     expect(target).toHaveTextContent('青岛大学操场');
-    expect(target).toHaveTextContent('公开社交意图');
+    expect(target).toHaveTextContent('约练卡片');
+    expect(target).not.toHaveTextContent('公开社交意图');
     await waitFor(() => expect(Element.prototype.scrollIntoView).toHaveBeenCalled());
   });
 });

@@ -73,6 +73,16 @@ describe('AgentGatewayService public social intents', () => {
       SocialRequestStatus.Matched,
       SocialRequestStatus.Searching,
     ]);
+    expect(queryBuilder.andWhere).toHaveBeenCalledWith(
+      expect.stringContaining(
+        "LOWER(COALESCE(intent.id, '')) NOT LIKE :fixtureSmoke",
+      ),
+      expect.objectContaining({
+        fixtureSmoke: '%smoke%',
+        fixtureSeed: '%seed%',
+        fixtureTest: '%test%',
+      }),
+    );
   });
 
   it('keeps the public mode guard when an explicit public status is requested', async () => {

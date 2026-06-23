@@ -9,7 +9,7 @@ import {
   forwardRef,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, Repository, In } from 'typeorm';
+import { DataSource, Repository, In, SelectQueryBuilder } from 'typeorm';
 import * as bcrypt from 'bcrypt';
 import * as crypto from 'crypto';
 import {
@@ -904,6 +904,7 @@ export class AgentGatewayService {
       .skip(normalized.skip);
 
     query.andWhere('intent.mode = :mode', { mode: 'public' });
+    this.excludeInternalPublicIntentFixtures(query);
 
     if (normalized.city) {
       query.andWhere('LOWER(intent.city) LIKE LOWER(:city)', {
@@ -956,6 +957,39 @@ export class AgentGatewayService {
         },
       },
     };
+  }
+
+  private excludeInternalPublicIntentFixtures(
+    query: SelectQueryBuilder<PublicSocialIntent>,
+  ) {
+    query.andWhere(
+      `(
+        LOWER(COALESCE(intent.id, '')) NOT LIKE :fixtureSmoke
+        AND LOWER(COALESCE(intent.id, '')) NOT LIKE :fixtureSeed
+        AND LOWER(COALESCE(intent.id, '')) NOT LIKE :fixtureTest
+        AND LOWER(COALESCE(intent.source, '')) NOT LIKE :fixtureSmoke
+        AND LOWER(COALESCE(intent.source, '')) NOT LIKE :fixtureSeed
+        AND LOWER(COALESCE(intent.source, '')) NOT LIKE :fixtureTest
+        AND LOWER(COALESCE(intent.title, '')) NOT LIKE :fixtureSmoke
+        AND LOWER(COALESCE(intent.title, '')) NOT LIKE :fixtureTest
+        AND LOWER(COALESCE(intent.description, '')) NOT LIKE :fixtureSmoke
+        AND LOWER(COALESCE(intent.description, '')) NOT LIKE :fixtureSeed
+        AND LOWER(COALESCE(intent.description, '')) NOT LIKE :fixtureTest
+        AND LOWER(COALESCE(intent.socialGoal, '')) NOT LIKE :fixtureSmoke
+        AND LOWER(COALESCE(intent.socialGoal, '')) NOT LIKE :fixtureTest
+        AND LOWER(COALESCE(CAST(intent.filters AS TEXT), '')) NOT LIKE :fixtureSmoke
+        AND LOWER(COALESCE(CAST(intent.filters AS TEXT), '')) NOT LIKE :fixtureSeed
+        AND LOWER(COALESCE(CAST(intent.filters AS TEXT), '')) NOT LIKE :fixtureTest
+        AND LOWER(COALESCE(CAST(intent.metadata AS TEXT), '')) NOT LIKE :fixtureSmoke
+        AND LOWER(COALESCE(CAST(intent.metadata AS TEXT), '')) NOT LIKE :fixtureSeed
+        AND LOWER(COALESCE(CAST(intent.metadata AS TEXT), '')) NOT LIKE :fixtureTest
+      )`,
+      {
+        fixtureSmoke: '%smoke%',
+        fixtureSeed: '%seed%',
+        fixtureTest: '%test%',
+      },
+    );
   }
 
   async getPublicSocialIntent(id: string) {

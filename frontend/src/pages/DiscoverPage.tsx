@@ -704,7 +704,7 @@ function MeetupMatchCard({
           </button>
           <span>{getSportLabel(meet.sport)}</span>
           <span>{formatLevel(meet.level)}</span>
-          {meet.sourceKind === 'publicIntent' ? <span>公开社交意图</span> : null}
+          {meet.sourceKind === 'publicIntent' ? <span>约练卡片</span> : null}
         </div>
         <div className="match-card__bottom">
           <div className="match-avatars" aria-label="已加入用户">
@@ -871,7 +871,8 @@ function isInternalFixtureIntent(intent: PublicSocialIntent) {
     ...(intent.interestTags ?? []),
   ]
     .filter(Boolean)
-    .join(' ');
+    .join(' ')
+    .replace(/[_-]+/g, ' ');
   return /\b(agent\s*smoke|api\s*smoke|smoke\s*seed|smoke|fixture|seed\s*intent)\b/i.test(text);
 }
 
