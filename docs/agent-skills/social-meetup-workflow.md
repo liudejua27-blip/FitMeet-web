@@ -41,7 +41,8 @@ ordinary_chat
   Discover publication, invite sending, or profile gate blocking.
 - Social intent must first reuse hydrated context: recent messages, task slots,
   Life Graph summary, pending approvals, and candidate actions.
-- Missing required slots should produce one concise clarification question.
+- Missing required slots should produce one concise clarification group with all
+  currently missing card-critical details, so the user can answer in one reply.
 - Completed slots must not be asked again unless the user changes them.
 - User corrections should update only the changed slot or public candidate
   preference. The Agent should acknowledge the correction, restate the known

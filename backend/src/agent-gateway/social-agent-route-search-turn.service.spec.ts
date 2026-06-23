@@ -562,7 +562,9 @@ describe('SocialAgentRouteSearchTurnService', () => {
     });
     expect(result.assistantMessage).toContain('城市/大致区域');
     expect(result.assistantMessage).toContain('时间');
-    expect(result.assistantMessage).toContain('场景：新朋友');
+    expect(result.assistantMessage).toContain('目标：新朋友');
+    expect(result.assistantMessage).toContain('偏好：新朋友');
+    expect(result.assistantMessage).toContain('运动或见面场景');
     expect(result.assistantMessage).not.toContain('是否接受陌生人');
     expect(result.assistantMessage).not.toContain('是否公开发起活动');
     expect(result.assistantMessage).not.toContain('运动强度');
@@ -599,6 +601,7 @@ describe('SocialAgentRouteSearchTurnService', () => {
     });
     expect(result.assistantMessage).toContain('城市/大致区域');
     expect(result.assistantMessage).toContain('时间');
+    expect(result.assistantMessage).toContain('运动或见面场景');
     expect(result.assistantMessage).not.toContain('是否接受陌生人');
     expect(result.assistantMessage).not.toContain('是否公开发起活动');
     expect(queueInitialSearchForTask).not.toHaveBeenCalled();

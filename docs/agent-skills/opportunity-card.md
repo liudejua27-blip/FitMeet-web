@@ -34,8 +34,9 @@ Turn a clear social or meet-up goal into a safe, editable OpportunityCard draft.
 
 ## Failure / Fallback
 
-If required slots are missing, return a single clarification question instead
-of generating a vague card.
+If required slots are missing, return one compact clarification group that lists
+all missing card-critical slots instead of generating a vague card or asking for
+one field per turn.
 
 ## Eval IDs
 

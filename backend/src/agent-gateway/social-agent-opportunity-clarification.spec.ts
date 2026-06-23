@@ -64,6 +64,56 @@ describe('social opportunity clarification', () => {
     });
   });
 
+  it('asks all missing publish-critical details in one turn for vague publish requests', () => {
+    const currentTask = task();
+
+    const clarification = evaluateSocialOpportunityClarification({
+      task: currentTask,
+      route: route({
+        intent: 'action_request',
+        shouldExecuteAction: true,
+        replyStrategy: 'execute_action',
+      }),
+      message: '帮我发布约练卡片',
+    });
+
+    expect(clarification.complete).toBe(false);
+    expect(clarification.missing).toEqual([
+      'city',
+      'time',
+      'activity',
+      'location',
+      'boundary',
+    ]);
+    expect(clarification.assistantMessage).toContain('一次性确认');
+    expect(clarification.assistantMessage).toContain('城市/大致区域');
+    expect(clarification.assistantMessage).toContain('活动地点或大致区域');
+    expect(clarification.assistantMessage).toContain('时间');
+    expect(clarification.assistantMessage).toContain('运动或见面场景');
+    expect(clarification.assistantMessage).toContain('社交边界');
+    expect(clarification.assistantMessage).toContain(
+      '补齐后我会先整理约练卡片',
+    );
+    expect(readSocialAgentTaskMemory(currentTask).currentTask).toMatchObject({
+      awaitingSearchConfirmation: true,
+      waitingFor: 'opportunity_clarification',
+      clarificationAskedFields: [
+        'city',
+        'time',
+        'activity',
+        'location',
+        'boundary',
+      ],
+      clarificationMissingFields: [
+        'city',
+        'time',
+        'activity',
+        'location',
+        'boundary',
+      ],
+    });
+  });
+
   it('allows a generic activity companion goal when search-critical fields are clear', () => {
     const currentTask = task();
 

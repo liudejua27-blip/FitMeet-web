@@ -3,7 +3,9 @@
 ## Purpose
 
 Decide whether a message is ordinary chat, ambiguous social intent, or an
-actionable social/meet-up goal. Clarify missing slots only when needed.
+actionable social/meet-up goal. Clarify missing slots only when needed, and ask
+all currently missing high-value slots together instead of drip-feeding one slot
+per turn.
 
 ## Trigger
 
@@ -52,7 +54,8 @@ Optional but useful:
 
 ## Failure / Fallback
 
-If intent is ambiguous, ask one concise clarification question. Do not show
+If intent is ambiguous, ask one concise clarification group with up to 3-5
+high-value items. Each item must be skippable or allow "暂不确定". Do not show
 recommendations or Discover cards yet.
 
 ## Eval IDs

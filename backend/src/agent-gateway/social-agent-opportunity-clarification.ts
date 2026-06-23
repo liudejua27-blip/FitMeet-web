@@ -392,12 +392,12 @@ function buildClarifyingQuestion(input: {
         : `新增信息已记下，现在只差 ${allMissingText}`;
     return `${knownText}${prefix}。直接补这几项就可以；如果不确定，也可以说“由你按安全默认值处理”。确认前不会公开，也不会替你联系别人。`;
   }
-  return `${knownText}还差 ${missingText}。你可以直接一句话补齐；所有问题都可以跳过，不确定也可以说“由你按安全默认值处理”。确认前不会公开，也不会替你联系别人。`;
+  return `${knownText}我先一次性确认这些信息：还差 ${missingText}。你可以直接一句话补齐；所有问题都可以跳过，不确定也可以说“由你按安全默认值处理”。补齐后我会先整理约练卡片，等你确认后再发布或匹配。确认前不会公开，也不会替你联系别人。`;
 }
 
 function extractActivity(text: string): string {
   const match = text.match(
-    /(跑步|慢跑|夜跑|羽毛球|瑜伽|健身|撸铁|普拉提|徒步|户外|骑行|篮球|足球|网球|游泳|飞盘|咖啡|散步|拍照|city\s*walk|citywalk|约练|训练|低压力社交|认识新朋友|新朋友)/i,
+    /(跑步|慢跑|夜跑|羽毛球|瑜伽|健身|撸铁|普拉提|徒步|户外|骑行|篮球|足球|网球|游泳|飞盘|咖啡|散步|拍照|city\s*walk|citywalk)/i,
   );
   return cleanDisplayText(match?.[1], '');
 }
