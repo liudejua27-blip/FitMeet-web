@@ -3402,6 +3402,80 @@ describe('SocialAgentChat acceptance flow', () => {
       });
     });
 
+    it('returns a real Discover publish confirmation card for a natural-language publish follow-up', async () => {
+      const { service, taskRepo, executor } = makeHarness();
+      taskRepo.findOne.mockResolvedValue(
+        makeTask({
+          goal: '今晚青岛大学附近散步约练',
+          memory: {
+            taskSlots: {
+              activity: { value: '散步', state: 'completed' },
+              time_window: { value: '今天晚上', state: 'completed' },
+              location_text: { value: '青岛大学附近', state: 'completed' },
+              safety_boundary: {
+                value: '首次见面只在公共场所，先站内沟通',
+                state: 'completed',
+              },
+            },
+            taskMemory: {
+              activeEntities: {
+                city: '青岛',
+                activityType: '散步',
+                targetGender: '',
+                timePreference: '今天晚上',
+                locationPreference: '青岛大学附近',
+              },
+            },
+          },
+        }),
+      );
+
+      const result = await service.handleMessage(7, {
+        message: '那你帮我发布到发现',
+        taskId: 101,
+      });
+
+      const publishCard = (result.cards ?? []).find(
+        (card) => card.type === 'activity_plan',
+      );
+      expect(publishCard).toMatchObject({
+        type: 'activity_plan',
+        schemaVersion: 'fitmeet.tool-ui.v1',
+        schemaType: 'social_match.activity',
+        status: 'waiting_confirmation',
+        data: expect.objectContaining({
+          taskId: 101,
+          schemaName: 'OpportunityCard',
+          opportunityCard: true,
+          activityType: '散步',
+          time: '今天晚上',
+          locationName: '青岛大学附近',
+        }),
+        actions: expect.arrayContaining([
+          expect.objectContaining({
+            schemaAction: 'publish_to_discover',
+            requiresConfirmation: true,
+            payload: expect.objectContaining({
+              taskId: 101,
+              socialRequestDraft: expect.objectContaining({
+                activityType: '散步',
+                timePreference: '今天晚上',
+                locationName: '青岛大学附近',
+                requireUserConfirmation: true,
+              }),
+            }),
+          }),
+        ]),
+      });
+      expect(executor.executeToolAction).not.toHaveBeenCalledWith(
+        101,
+        SocialAgentToolName.CreateSocialRequest,
+        expect.objectContaining({ mode: 'publish' }),
+        7,
+        expect.anything(),
+      );
+    });
+
     it('creates an opener draft from a canonical candidate.generate_opener card action without approval', async () => {
       const { service, taskRepo, approvals } = makeHarness();
       taskRepo.findOne.mockResolvedValue(
