@@ -49,7 +49,7 @@ function makeIntent(
 }
 
 describe('serializePublicSocialIntent', () => {
-  it('preserves the public intent response contract', () => {
+  it('returns only user-visible public intent fields', () => {
     const createdAt = new Date('2026-06-07T10:00:00.000Z');
     const intent = makeIntent({ createdAt, updatedAt: createdAt });
 
@@ -57,7 +57,6 @@ describe('serializePublicSocialIntent', () => {
       id: 'public-intent-1',
       userId: null,
       linkedSocialRequestId: null,
-      source: 'public_intent',
       mode: 'public',
       requestType: 'fitness_partner',
       title: '寻找附近约练搭子',
@@ -73,20 +72,26 @@ describe('serializePublicSocialIntent', () => {
       socialGoal: 'fitness_partner',
       riskLevel: SocialRequestRiskLevel.Low,
       requiresUserConfirmation: true,
-      filters: { verifiedOnly: true },
-      candidateUserIds: [101, 102],
       matchedCount: 2,
       matchSignal: {
         score: 82,
         confidence: 'high',
-        source: 'deterministic_fallback',
-        reasons: ['已有候选'],
         updatedAt: createdAt.toISOString(),
       },
       status: SocialRequestStatus.Active,
       createdAt,
       updatedAt: createdAt,
     });
+  });
+
+  it('does not expose internal sources, filters, candidate ids, or reasons', () => {
+    const response = serializePublicSocialIntent(makeIntent());
+
+    expect(response).not.toHaveProperty('source');
+    expect(response).not.toHaveProperty('filters');
+    expect(response).not.toHaveProperty('candidateUserIds');
+    expect(response.matchSignal).not.toHaveProperty('source');
+    expect(response.matchSignal).not.toHaveProperty('reasons');
   });
 
   it('builds a deterministic match signal when metadata does not include one', () => {
@@ -97,8 +102,8 @@ describe('serializePublicSocialIntent', () => {
     expect(response.matchSignal).toEqual(
       expect.objectContaining({
         confidence: 'low',
-        source: expect.any(String),
       }),
     );
+    expect(response.matchSignal).not.toHaveProperty('source');
   });
 });

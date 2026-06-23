@@ -722,7 +722,7 @@ function MeetupMatchCard({
           <time>{formatRelativePublishedTime(meet.createdAt, '刚刚更新')}</time>
         </div>
         <div className="match-score" style={{ '--score': `${score}%` } as CSSProperties}>
-          <strong>{score}%</strong>
+          <strong>{matchLevelLabel(score)}</strong>
           <span>匹配度</span>
         </div>
       </article>
@@ -864,7 +864,6 @@ function sportIcon(sport: string) {
 function isInternalFixtureIntent(intent: PublicSocialIntent) {
   const text = [
     intent.id,
-    intent.source,
     intent.title,
     intent.description,
     intent.socialGoal,
@@ -874,6 +873,12 @@ function isInternalFixtureIntent(intent: PublicSocialIntent) {
     .filter(Boolean)
     .join(' ');
   return /\b(agent\s*smoke|api\s*smoke|smoke\s*seed|smoke|fixture|seed\s*intent)\b/i.test(text);
+}
+
+function matchLevelLabel(score: number) {
+  if (score >= 88) return '很高';
+  if (score >= 76) return '较高';
+  return '中等';
 }
 
 export default DiscoverPage;

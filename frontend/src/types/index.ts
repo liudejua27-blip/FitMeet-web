@@ -129,7 +129,6 @@ export interface PublicSocialIntent {
   id: string;
   userId?: number | null;
   linkedSocialRequestId?: number | null;
-  source?: string;
   mode: string;
   requestType: string;
   title: string;
@@ -145,14 +144,10 @@ export interface PublicSocialIntent {
   timePreference: string;
   riskLevel: SocialRequestRiskLevel;
   requiresUserConfirmation: boolean;
-  filters: Record<string, unknown>;
-  candidateUserIds: number[];
   matchedCount: number;
   matchSignal?: {
     score: number;
     confidence?: 'low' | 'medium' | 'high' | string;
-    source?: string;
-    reasons?: string[];
     updatedAt?: string;
   };
   status: SocialRequestStatus;
