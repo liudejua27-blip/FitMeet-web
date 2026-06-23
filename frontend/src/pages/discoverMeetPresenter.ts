@@ -17,18 +17,31 @@ export function publicIntentToDiscoverMeet(
   const sport = normalizedSport === 'default' ? 'other' : normalizedSport;
   const color = ['#10a37f', '#f97316', '#4f46e5', '#d97706'][index % 4];
   const detailHref = `/public-intent/${encodeURIComponent(intent.id)}`;
+  const title = publicIntentText(intent.title) || fallbackPublicIntentTitle(intent);
+  const description =
+    publicIntentText(intent.description) ||
+    publicIntentText(intent.socialGoal) ||
+    '发起人正在寻找合适的同频伙伴，建议先站内沟通并选择公共场所见面。';
+  const city = publicIntentText(intent.city);
+  const location =
+    publicIntentText(intent.locationPreference) || publicIntentText(intent.loc) || city;
+  const time = publicIntentText(intent.timePreference) || '时间待定';
+  const participants = (intent.interestTags || [])
+    .map((tag) => publicIntentText(tag))
+    .filter((tag) => tag.length > 0 && isPublicTag(tag))
+    .slice(0, 3);
   return {
     id: publicIntentSyntheticId(intent.id, index),
     userId: intent.userId ?? undefined,
-    title: intent.title || '新的社交机会',
+    title,
     type: sport,
     sport,
     username: '同频发起人',
     color,
     colorBg: `${color}22`,
-    time: intent.timePreference || '时间待定',
-    loc: intent.locationPreference || intent.loc || intent.city || '地点待定',
-    city: intent.city,
+    time,
+    loc: location || '地点待定',
+    city,
     lat: null,
     lng: null,
     dist: intent.radiusKm ? `${intent.radiusKm}km 内` : '附近',
@@ -36,13 +49,13 @@ export function publicIntentToDiscoverMeet(
     slots: Math.max(1, intent.matchedCount || 1),
     maxSlots: Math.max(3, (intent.matchedCount || 1) + 2),
     level: publicIntentLevel(intent),
-    desc: intent.description || intent.socialGoal || '发起人正在寻找合适的同频伙伴。',
+    desc: description,
     status: 'active',
-    participants: (intent.interestTags || []).filter(isPublicTag).slice(0, 3),
+    participants,
     cert: true,
     rating: publicIntentRating(intent),
     meetCount: intent.matchedCount || 1,
-    startAt: intent.timePreference,
+    startAt: time,
     createdAt: intent.createdAt,
     sourceKind: 'publicIntent',
     publicIntentId: intent.id,
@@ -64,7 +77,11 @@ function publicIntentSyntheticId(id: string, index: number) {
 }
 
 function publicIntentLevel(intent: PublicSocialIntent) {
-  const text = `${intent.description} ${intent.socialGoal} ${intent.interestTags?.join(' ') ?? ''}`;
+  const text = [
+    publicIntentText(intent.description),
+    publicIntentText(intent.socialGoal),
+    ...(intent.interestTags ?? []).map((tag) => publicIntentText(tag)),
+  ].join(' ');
   if (/(高强度|进阶|认真|训练)/i.test(text)) return '较高强度';
   if (/(轻松|低压力|散步|新手)/i.test(text)) return '轻松';
   return '中等';
@@ -77,5 +94,31 @@ function publicIntentRating(intent: PublicSocialIntent) {
 }
 
 function isPublicTag(tag: string) {
-  return !/^(default|custom|seed|test|smoke)$/i.test(tag.trim());
+  return !/^(default|custom)$/i.test(tag.trim()) && !isInternalFixtureText(tag);
+}
+
+function fallbackPublicIntentTitle(intent: PublicSocialIntent) {
+  const city = publicIntentText(intent.city) || '附近';
+  const type = publicIntentText(intent.requestType);
+  const tags = (intent.interestTags ?? []).map((tag) => publicIntentText(tag)).join(' ');
+  const source = `${type} ${tags}`;
+  if (/run|running|跑步/i.test(source)) return `${city}轻松跑步搭子`;
+  if (/walk|city|散步/i.test(source)) return `${city}散步搭子`;
+  if (/fitness|gym|健身|约练/i.test(source)) return `${city}约练搭子`;
+  return `${city}同频约练`;
+}
+
+function publicIntentText(value?: string | null) {
+  const text = `${value ?? ''}`.trim();
+  if (!text || /^(default|unknown|null|undefined)$/i.test(text)) return '';
+  if (isInternalFixtureText(text)) return '';
+  if (/^public\s*intent$/i.test(text)) return '';
+  return text;
+}
+
+function isInternalFixtureText(value?: string | null) {
+  const text = `${value ?? ''}`.trim().replace(/[_-]+/g, ' ');
+  return /\b(agent\s*smoke|api\s*smoke|smoke\s*seed|smoke|fixture|seed\s*intent|seed|test\s*account|test|mock)\b/i.test(
+    text,
+  );
 }

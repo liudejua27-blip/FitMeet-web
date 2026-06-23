@@ -78,6 +78,32 @@ describe('Discover closure links', () => {
     expect(source).toContain("formatRelativePublishedTime(meet.createdAt, '刚刚更新')");
   });
 
+  it('sanitizes legacy public intent smoke copy before rendering Discover cards', () => {
+    const meet = publicIntentToDiscoverMeet(
+      publicIntent({
+        id: 'legacy-visible',
+        requestType: 'Public Intent',
+        title: 'Agent Smoke Owner internal fixture',
+        description: 'Agent smoke 专用公开场景，请勿展示。',
+        socialGoal: '周末下午找散步搭子',
+        interestTags: ['散步', 'agent smoke', 'seed', 'Public Intent'],
+        city: '青岛',
+        loc: 'seed intent route',
+        locationPreference: 'fixture location',
+        timePreference: 'agent smoke schedule',
+      }),
+      0,
+    );
+
+    expect(meet.title).toBe('青岛散步搭子');
+    expect(meet.desc).toBe('周末下午找散步搭子');
+    expect(meet.participants).toEqual(['散步']);
+    expect(meet.loc).toBe('青岛');
+    expect(meet.time).toBe('时间待定');
+    expect(meet.startAt).toBe('时间待定');
+    expect(JSON.stringify(meet)).not.toMatch(/agent smoke|smoke|fixture|seed|Public Intent/i);
+  });
+
   it('records real Discover and profile clicks as recommendation behavior signals', () => {
     const source = readFileSync(join(process.cwd(), 'src/pages/DiscoverPage.tsx'), 'utf8');
 
