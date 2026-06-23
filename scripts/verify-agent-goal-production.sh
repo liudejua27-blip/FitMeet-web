@@ -163,6 +163,186 @@ EOF
 fi
 ok "Public social intents expose ${public_intent_count} discoverable item(s)"
 
+public_probe_file="${TMP_DIR}/public-intent-probe.json"
+node - "${public_intents_file}" >"${public_probe_file}" <<'NODE'
+const fs = require('fs');
+const file = process.argv[2];
+const doc = JSON.parse(fs.readFileSync(file, 'utf8'));
+const listFrom = (value) => {
+  if (Array.isArray(value)) return value;
+  if (Array.isArray(value?.data)) return value.data;
+  if (Array.isArray(value?.items)) return value.items;
+  if (Array.isArray(value?.results)) return value.results;
+  if (Array.isArray(value?.data?.items)) return value.data.items;
+  if (Array.isArray(value?.data?.data)) return value.data.data;
+  return [];
+};
+const intents = listFrom(doc);
+const forbiddenKeys = new Set(['source', 'filters', 'candidateUserIds']);
+const forbiddenText =
+  /(agent[\s_-]*smoke|api[\s_-]*smoke|agent-api-smoke|agent_api_smoke|smoke[\s_-]*(account|owner)?|fixture|mock|seed)/i;
+const failures = [];
+const scan = (value, path = '$') => {
+  if (value == null) return;
+  if (typeof value === 'string') {
+    if (forbiddenText.test(value)) {
+      failures.push(`${path} contains internal fixture/smoke text`);
+    }
+    return;
+  }
+  if (Array.isArray(value)) {
+    value.forEach((item, index) => scan(item, `${path}[${index}]`));
+    return;
+  }
+  if (typeof value !== 'object') return;
+  for (const [key, child] of Object.entries(value)) {
+    if (forbiddenKeys.has(key)) {
+      failures.push(`${path}.${key} exposes internal public-intent field`);
+    }
+    scan(child, `${path}.${key}`);
+  }
+};
+intents.forEach((intent, index) => scan(intent, `intents[${index}]`));
+if (failures.length > 0) {
+  console.error(failures.slice(0, 20).join('\n'));
+  process.exit(1);
+}
+const first = intents.find((intent) => intent && intent.id);
+if (!first) {
+  console.error('No public intent id found for detail verification');
+  process.exit(1);
+}
+process.stdout.write(
+  JSON.stringify({
+    id: String(first.id),
+    ownerUserId:
+      Number.isFinite(Number(first.userId)) && Number(first.userId) > 0
+        ? Number(first.userId)
+        : null,
+  }),
+);
+NODE
+ok "Public social intent list hides smoke fixtures and internal fields"
+
+first_public_intent_id="$(
+  node -e "const fs=require('fs');const p=JSON.parse(fs.readFileSync(process.argv[1],'utf8'));process.stdout.write(p.id);" "${public_probe_file}"
+)"
+first_public_intent_owner_id="$(
+  node -e "const fs=require('fs');const p=JSON.parse(fs.readFileSync(process.argv[1],'utf8'));process.stdout.write(p.ownerUserId ? String(p.ownerUserId) : '');" "${public_probe_file}"
+)"
+
+public_intent_detail_file="$(curl_json "Public social intent detail" "${API_BASE_URL}/public/social-intents/${first_public_intent_id}")"
+public_intent_matches_file="$(curl_json "Public social intent matches" "${API_BASE_URL}/public/social-intents/${first_public_intent_id}/matches")"
+
+node - "${public_intent_detail_file}" "${public_intent_matches_file}" "${first_public_intent_owner_id}" <<'NODE'
+const fs = require('fs');
+const detail = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+const matches = JSON.parse(fs.readFileSync(process.argv[3], 'utf8'));
+const ownerUserId = Number(process.argv[4] || 0);
+const forbiddenIntentKeys = new Set(['source', 'filters', 'candidateUserIds']);
+const forbiddenText =
+  /(agent[\s_-]*smoke|api[\s_-]*smoke|agent-api-smoke|agent_api_smoke|smoke[\s_-]*(account|owner)?|fixture|mock|seed)/i;
+const failures = [];
+const scan = (value, path = '$', forbiddenKeys = forbiddenIntentKeys) => {
+  if (value == null) return;
+  if (typeof value === 'string') {
+    if (forbiddenText.test(value)) {
+      failures.push(`${path} contains internal fixture/smoke text`);
+    }
+    return;
+  }
+  if (Array.isArray(value)) {
+    value.forEach((item, index) => scan(item, `${path}[${index}]`, forbiddenKeys));
+    return;
+  }
+  if (typeof value !== 'object') return;
+  for (const [key, child] of Object.entries(value)) {
+    if (forbiddenKeys.has(key)) {
+      failures.push(`${path}.${key} exposes internal field`);
+    }
+    scan(child, `${path}.${key}`, forbiddenKeys);
+  }
+};
+const candidatesFrom = (doc) => {
+  if (Array.isArray(doc)) return doc;
+  if (Array.isArray(doc?.candidates)) return doc.candidates;
+  if (Array.isArray(doc?.data)) return doc.data;
+  if (Array.isArray(doc?.items)) return doc.items;
+  if (Array.isArray(doc?.results)) return doc.results;
+  if (Array.isArray(doc?.data?.items)) return doc.data.items;
+  return [];
+};
+scan(detail, 'detail');
+const candidates = candidatesFrom(matches);
+candidates.forEach((candidate, index) => {
+  scan(candidate, `matches.candidates[${index}]`, new Set());
+  const candidateId = Number(candidate?.profile?.id ?? candidate?.userId ?? candidate?.id);
+  if (
+    Number.isFinite(ownerUserId) &&
+    ownerUserId > 0 &&
+    Number.isFinite(candidateId) &&
+    candidateId === ownerUserId
+  ) {
+    failures.push(`matches.candidates[${index}] includes the public-intent owner`);
+  }
+});
+if (failures.length > 0) {
+  console.error(failures.slice(0, 30).join('\n'));
+  process.exit(1);
+}
+NODE
+ok "Public social intent detail/matches hide smoke data and exclude self-match"
+
+if [[ -n "${first_public_intent_owner_id}" ]]; then
+  public_user_file="$(curl_json "Public user profile" "${API_BASE_URL}/users/${first_public_intent_owner_id}")"
+  node - "${public_user_file}" <<'NODE'
+const fs = require('fs');
+const user = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+const forbiddenKeys = new Set([
+  'email',
+  'password',
+  'phone',
+  'wechatOpenId',
+  'bestRecords',
+  'lat',
+  'lng',
+  'locationUpdatedAt',
+  'acceptNearbyMatch',
+]);
+const forbiddenText =
+  /(agent[\s_-]*smoke|api[\s_-]*smoke|agent-api-smoke|agent_api_smoke|smoke[\s_-]*(account|owner)?|fixture|mock|seed)/i;
+const failures = [];
+const scan = (value, path = '$') => {
+  if (value == null) return;
+  if (typeof value === 'string') {
+    if (forbiddenText.test(value)) {
+      failures.push(`${path} contains internal fixture/smoke text`);
+    }
+    return;
+  }
+  if (Array.isArray(value)) {
+    value.forEach((item, index) => scan(item, `${path}[${index}]`));
+    return;
+  }
+  if (typeof value !== 'object') return;
+  for (const [key, child] of Object.entries(value)) {
+    if (forbiddenKeys.has(key)) {
+      failures.push(`${path}.${key} exposes private profile field`);
+    }
+    scan(child, `${path}.${key}`);
+  }
+};
+scan(user, 'user');
+if (failures.length > 0) {
+  console.error(failures.slice(0, 30).join('\n'));
+  process.exit(1);
+}
+NODE
+  ok "Public user profile hides private fields and internal smoke copy"
+else
+  skip "Public user profile privacy check. Public intent has no owner user id."
+fi
+
 should_run_browser_qa=false
 case "${RUN_AGENT_BROWSER_QA}" in
   true)
