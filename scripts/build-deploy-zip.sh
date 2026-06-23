@@ -326,7 +326,7 @@ require_file_contains "scripts/verify-production.sh" "Authenticated Social Agent
 require_file_contains "scripts/verify-agent-goal-production.sh" "Discover page still contains fake 128-person production copy"
 require_file_contains "scripts/verify-agent-goal-production.sh" "/public/social-intents returned 0 discoverable items"
 require_file_contains "scripts/verify-agent-goal-production.sh" "qa:agent-chat:production"
-require_file_contains "scripts/launch-status.sh" "Social Codex trace eval passed"
+require_file_contains "scripts/launch-status.sh" "Agent token/cost evidence is present"
 require_file_contains "scripts/verify-agent-release.sh" "social-agent-context-hydrator.service.spec.ts"
 require_file_contains "scripts/verify-agent-release.sh" "social-agent-context-window.spec.ts"
 require_file_contains "scripts/verify-agent-release.sh" "social-agent-context-window-boundary.spec.ts"
