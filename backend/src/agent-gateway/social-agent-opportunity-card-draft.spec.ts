@@ -39,7 +39,7 @@ describe('social agent opportunity card draft', () => {
           },
         },
       },
-    } as AgentTask;
+    } as unknown as AgentTask;
 
     const result = buildSocialAgentOpportunityDraftFromTask(task, '继续');
 
