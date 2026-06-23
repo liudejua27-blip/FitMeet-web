@@ -62,6 +62,8 @@ export function buildPublicSocialCandidates({
 
   return users
     .map((user) => {
+      if (isInternalFixtureUser(user)) return null;
+
       const pref = preferencesByUserId.get(user.id);
       if (pref && pref.acceptAgentMessages === false) return null;
 
@@ -201,7 +203,18 @@ function publicProfileText(value: string | null | undefined, fallback: string) {
 }
 
 function isInternalFixtureText(text: string) {
-  return /\b(agent\s*smoke|smoke\s*account|api\s*smoke|smoke|fixture|seed|test\s*account)\b/i.test(
-    text,
+  const normalized = text.replace(/[_-]+/g, ' ');
+  return /\b(agent\s*smoke|smoke\s*account|api\s*smoke|smoke|fixture|seed|test\s*account|mock)\b/i.test(
+    normalized,
   );
+}
+
+function isInternalFixtureUser(user: User) {
+  return [
+    user.email,
+    user.name,
+    user.bio,
+    user.gym,
+    ...(user.interestTags ?? []),
+  ].some((value) => isInternalFixtureText(`${value ?? ''}`));
 }

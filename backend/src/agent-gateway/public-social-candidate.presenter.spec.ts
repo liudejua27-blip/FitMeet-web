@@ -134,6 +134,40 @@ describe('public social candidate presenter', () => {
     ]);
   });
 
+  it('filters internal fixture candidates before they reach public APIs', () => {
+    const candidates = buildPublicSocialCandidates({
+      users: [
+        user({
+          id: 1,
+          email: 'agent-smoke-owner@ourfitmeet.cn',
+          name: 'Agent Smoke Owner',
+          bio: 'agent_api_smoke account',
+        }),
+        user({
+          id: 2,
+          name: 'Mock Candidate',
+          interestTags: ['running', 'mock'],
+        }),
+        user({
+          id: 3,
+          name: '林一舟',
+          bio: '周末跑步，也喜欢轻松聊天',
+          interestTags: ['running', 'fitness'],
+        }),
+      ],
+      preferencesByUserId: new Map(),
+      dto: request({ limit: 5 }),
+      ownerLat: 36.06,
+      ownerLng: 120.38,
+      radiusKm: 5,
+      city: '青岛',
+      nowMs,
+    });
+
+    expect(candidates.map((candidate) => candidate.profile.id)).toEqual([3]);
+    expect(JSON.stringify(candidates)).not.toMatch(/smoke|mock|fixture|seed/i);
+  });
+
   it('uses city fallback and stale-location penalty consistently', () => {
     const candidates = buildPublicSocialCandidates({
       users: [

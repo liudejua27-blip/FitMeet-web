@@ -153,11 +153,44 @@ describe('AgentGatewayService public social intents', () => {
       )
       .mockResolvedValue([
         {
-          profile: { id: 8 },
+          profile: {
+            id: 7,
+            name: '发起人自己',
+            bio: '同一用户',
+            interestTags: [],
+          },
+          score: 96,
+          reasonTags: [],
+          reasonText: '自匹配',
+          nextAction: 'draft_invitation',
+        },
+        {
+          profile: {
+            id: 8,
+            name: 'Agent Smoke Owner',
+            bio: 'agent_api_smoke candidate',
+            interestTags: ['smoke'],
+          },
+          score: 95,
+          reasonTags: [],
+          reasonText: 'Agent smoke fixture',
+          nextAction: 'draft_invitation',
+        },
+        {
+          profile: {
+            id: 9,
+            name: '林一舟',
+            bio: '周末喜欢轻松跑步',
+            interestTags: ['跑步'],
+          },
+          score: 82,
+          reasonTags: ['same_city'],
+          reasonText: '同在青岛，建议先站内沟通。',
+          nextAction: 'draft_invitation',
         },
       ]);
 
-    await service.getPublicSocialIntentMatches('intent-1');
+    const result = await service.getPublicSocialIntentMatches('intent-1');
 
     expect(searchSpy).toHaveBeenCalledWith(
       0,
@@ -165,7 +198,11 @@ describe('AgentGatewayService public social intents', () => {
       { excludedUserIds: [7] },
     );
     expect(publicIntentRepo.save).toHaveBeenCalledWith(
-      expect.objectContaining({ candidateUserIds: [8] }),
+      expect.objectContaining({ candidateUserIds: [9] }),
     );
+    expect(result.candidates.map((candidate) => candidate.profile.id)).toEqual([
+      9,
+    ]);
+    expect(JSON.stringify(result)).not.toMatch(/Agent Smoke|agent_api_smoke/i);
   });
 });

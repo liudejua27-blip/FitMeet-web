@@ -112,7 +112,10 @@ import {
   buildExecutedSendMessageActionLog,
   buildPendingApprovalSendMessageActionLog,
 } from './agent-gateway-message-log.mapper';
-import { buildPublicSocialCandidates } from './public-social-candidate.presenter';
+import {
+  buildPublicSocialCandidates,
+  type PublicSocialCandidateCard,
+} from './public-social-candidate.presenter';
 import {
   normalizePublicSocialIntentListFilters,
   type PublicSocialIntentListFilters,
@@ -1001,7 +1004,7 @@ export class AgentGatewayService {
   async getPublicSocialIntentMatches(id: string) {
     const intent = await this.publicIntentRepo.findOne({ where: { id } });
     if (!intent) throw new NotFoundException('Public social intent not found');
-    const candidates = await this.searchSocialCandidates(
+    const rawCandidates = await this.searchSocialCandidates(
       0,
       {
         requestType: intent.requestType,
@@ -1023,6 +1026,10 @@ export class AgentGatewayService {
         excludedUserIds: intent.userId ? [intent.userId] : [],
       },
     );
+    const candidates = this.publicVisibleSocialCandidates(
+      rawCandidates,
+      intent.userId,
+    );
     intent.candidateUserIds = candidates.map(
       (candidate) => candidate.profile.id,
     );
@@ -1041,6 +1048,31 @@ export class AgentGatewayService {
       candidates,
       matchedBy: 'fitmeet_matching_engine',
     };
+  }
+
+  private publicVisibleSocialCandidates(
+    candidates: PublicSocialCandidateCard[],
+    ownerUserId?: number | null,
+  ) {
+    const ownerId = Number(ownerUserId);
+    return candidates.filter((candidate) => {
+      const candidateId = Number(candidate.profile?.id);
+      if (!Number.isFinite(candidateId) || candidateId <= 0) return false;
+      if (Number.isFinite(ownerId) && candidateId === ownerId) return false;
+      return ![
+        candidate.profile?.name,
+        candidate.profile?.bio,
+        ...(candidate.profile?.interestTags ?? []),
+        candidate.reasonText,
+      ].some((value) => this.isInternalPublicText(value));
+    });
+  }
+
+  private isInternalPublicText(value: string | null | undefined) {
+    const normalized = `${value ?? ''}`.trim().replace(/[_-]+/g, ' ');
+    return /\b(agent\s*smoke|api\s*smoke|smoke\s*account|smoke|fixture|seed|test\s*account|mock)\b/i.test(
+      normalized,
+    );
   }
 
   async createAgentSocialRequest(
