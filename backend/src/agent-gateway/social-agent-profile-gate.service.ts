@@ -192,6 +192,7 @@ export class SocialAgentProfileGateService {
       !this.hasAny([
         routeEntities.city,
         memory.activeEntities.city,
+        taskSlots.city,
         taskSlots.geo_area,
         taskSlots.location_text,
         this.lifeGraphValue(lifeGraph.fields, 'identity', 'city'),
@@ -403,7 +404,16 @@ export class SocialAgentProfileGateService {
   private readTaskSlots(task: AgentTask): Record<string, string> {
     const memory = this.isRecord(task.memory) ? task.memory : {};
     const rawSlots = this.isRecord(memory.taskSlots) ? memory.taskSlots : {};
-    return this.readTaskSlotValues(rawSlots);
+    const taskMemory = this.isRecord(memory.taskMemory)
+      ? memory.taskMemory
+      : {};
+    const nestedSlots = this.isRecord(taskMemory.taskSlots)
+      ? taskMemory.taskSlots
+      : {};
+    return {
+      ...this.readTaskSlotValues(nestedSlots),
+      ...this.readTaskSlotValues(rawSlots),
+    };
   }
 
   private readTaskSlotValues(taskSlots: unknown): Record<string, string> {
@@ -438,7 +448,11 @@ export class SocialAgentProfileGateService {
     taskSlots: Record<string, string>,
   ) {
     if (field === 'city') {
-      return this.hasAny([taskSlots.geo_area, taskSlots.location_text]);
+      return this.hasAny([
+        taskSlots.city,
+        taskSlots.geo_area,
+        taskSlots.location_text,
+      ]);
     }
     if (field === 'activity') return this.hasAny([taskSlots.activity]);
     if (field === 'availability') return this.hasAny([taskSlots.time_window]);

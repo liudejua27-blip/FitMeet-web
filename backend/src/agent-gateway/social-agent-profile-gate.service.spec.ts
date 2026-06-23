@@ -368,6 +368,103 @@ describe('SocialAgentProfileGateService', () => {
     });
   });
 
+  it('accepts a direct city slot without requiring a location-derived geo area', async () => {
+    const service = new SocialAgentProfileGateService(
+      {
+        getLifeGraph: jest.fn().mockResolvedValue({
+          completeness: { completenessScore: 20 },
+          fields: {},
+        }),
+      } as never,
+      {
+        get: jest.fn().mockResolvedValue({
+          completion: {
+            percent: 20,
+            readinessLevel: 'profile_missing',
+            canEnterMatchPool: false,
+            nextActions: ['补齐画像'],
+          },
+        }),
+      } as never,
+    );
+
+    const result = await service.getMinimumProfileStatusWithTaskSlots(7, {
+      city: {
+        key: 'city',
+        value: '上海',
+        state: 'completed',
+      },
+      activity: {
+        key: 'activity',
+        value: '瑜伽',
+        state: 'completed',
+      },
+      time_window: {
+        key: 'time_window',
+        value: '周六下午',
+        state: 'completed',
+      },
+      safety_boundary: {
+        key: 'safety_boundary',
+        value: '首次见面优先公共场所，先站内聊',
+        state: 'answered',
+      },
+      visibility: {
+        key: 'visibility',
+        value: '可公开到发现',
+        state: 'answered',
+      },
+    });
+
+    expect(result).toMatchObject({
+      passed: true,
+      missing: [],
+      assistantMessage: '',
+      canEnterMatchPool: true,
+    });
+  });
+
+  it('uses nested direct city task slots so restored tasks do not ask city again', async () => {
+    const service = new SocialAgentProfileGateService();
+    const task = makeTask({
+      memory: {
+        taskMemory: {
+          taskSlots: {
+            city: {
+              key: 'city',
+              value: '上海',
+              state: 'completed',
+              source: 'user_message',
+            },
+            activity: {
+              key: 'activity',
+              value: '瑜伽',
+              state: 'completed',
+              source: 'user_message',
+            },
+            time_window: {
+              key: 'time_window',
+              value: '周六下午',
+              state: 'completed',
+              source: 'user_message',
+            },
+          },
+        },
+      },
+    });
+
+    const result = await service.evaluateForSocialExecution({
+      ownerUserId: 7,
+      task,
+      route: makeRoute(),
+      message: '可以，继续',
+    });
+
+    expect(result.passed).toBe(true);
+    expect(result.missing).toEqual([]);
+    expect(result.assistantMessage).toBe('');
+  });
+
   it('does not let inferred-only slots bypass the minimum gate', async () => {
     const service = new SocialAgentProfileGateService(
       {

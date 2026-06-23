@@ -478,6 +478,61 @@ describe('social opportunity clarification', () => {
     expect(clarification.searchGoal).toContain('舞蹈相关标签');
   });
 
+  it('uses taskMemory direct city slots so restored sessions do not ask city again', () => {
+    const currentTask = task({
+      memory: {
+        taskMemory: {
+          currentGoal: '周六下午上海瑜伽，公共场所先站内聊',
+          taskSlots: {
+            city: {
+              key: 'city',
+              value: '上海',
+              state: 'completed',
+              source: 'user_message',
+            },
+            activity: {
+              key: 'activity',
+              value: '瑜伽',
+              state: 'completed',
+              source: 'user_message',
+            },
+            time_window: {
+              key: 'time_window',
+              value: '周六下午',
+              state: 'completed',
+              source: 'user_message',
+            },
+            safety_boundary: {
+              key: 'safety_boundary',
+              value: '首次见面优先公共场所，先站内聊',
+              state: 'answered',
+              source: 'user_message',
+            },
+          },
+          currentTask: {
+            awaitingSearchConfirmation: true,
+            waitingFor: 'opportunity_clarification',
+            clarificationTurns: 1,
+            clarificationAskedFields: ['city', 'time', 'activity'],
+          },
+        },
+      },
+    });
+
+    const clarification = evaluateSocialOpportunityClarification({
+      task: currentTask,
+      route: route(),
+      message: '可以，继续',
+    });
+
+    expect(clarification.complete).toBe(true);
+    expect(clarification.missing).toEqual([]);
+    expect(clarification.assistantMessage).not.toContain('城市/大致区域');
+    expect(clarification.searchGoal).toContain('上海');
+    expect(clarification.searchGoal).toContain('周六下午');
+    expect(clarification.searchGoal).toContain('瑜伽');
+  });
+
   it('uses taskContext known slot constraints so hydrated route runs do not repeat answered fields', () => {
     const currentTask = task();
 

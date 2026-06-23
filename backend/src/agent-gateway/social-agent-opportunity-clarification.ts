@@ -189,12 +189,13 @@ function resolveFields(input: {
     city:
       cleanDisplayText(entities.city, '') ||
       cleanDisplayText(memory.activeEntities.city, '') ||
+      taskSlots.city ||
       taskSlots.geo_area ||
       extractCity(
-        `${combined} ${taskSlots.location_text ?? ''} ${taskSlots.geo_area ?? ''}`,
+        `${combined} ${taskSlots.city ?? ''} ${taskSlots.location_text ?? ''} ${taskSlots.geo_area ?? ''}`,
       ) ||
       inferCityFromKnownArea(
-        `${taskSlots.location_text ?? ''} ${taskSlots.geo_area ?? ''}`,
+        `${taskSlots.city ?? ''} ${taskSlots.location_text ?? ''} ${taskSlots.geo_area ?? ''}`,
       ),
     time:
       cleanDisplayText(entities.timePreference, '') ||
