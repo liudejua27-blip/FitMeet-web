@@ -75,6 +75,17 @@ export class SocialCodexEventPipelineService {
     const emittedDisplayKeys = new Set<string>();
     const emittedEvents: SocialAgentEventV2[] = [];
     return async (type, stage, title, options) => {
+      const messageId =
+        type === 'assistant.delta'
+          ? this.runScopedAssistantMessageId(options.messageId, input.runId)
+          : options.messageId;
+      const payload =
+        type === 'assistant.delta'
+          ? {
+              ...(options.payload ?? {}),
+              messageId,
+            }
+          : options.payload;
       const safeTitle = sanitizeSocialCodexProcessTitle(title, {
         type,
         stage,
@@ -93,13 +104,13 @@ export class SocialCodexEventPipelineService {
         runId: input.runId,
         stage,
         visibility: 'user_visible',
-        messageId: options.messageId,
+        messageId,
         display: {
           title: safeTitle,
           ...(safeDetail ? { detail: safeDetail } : {}),
           state: options.state,
         },
-        payload: sanitizeSocialAgentUserVisiblePayload(type, options.payload),
+        payload: sanitizeSocialAgentUserVisiblePayload(type, payload),
       });
       if (this.isTerminalRunEvent(event)) {
         event = this.withRunSummary(event, emittedEvents);
@@ -128,6 +139,21 @@ export class SocialCodexEventPipelineService {
     return event.type === 'run.completed' || event.type === 'run.failed';
   }
 
+  private runScopedAssistantMessageId(
+    messageId: string | null | undefined,
+    runId: string,
+  ): string {
+    const raw = cleanDisplayText(messageId, '').trim();
+    const run =
+      typeof runId === 'string' && runId.trim() ? runId.trim() : 'unknown-run';
+    if (!raw) return `agent-message:${run}`;
+    if (raw.includes(run) || raw.startsWith('agent-message:run:')) {
+      return raw;
+    }
+    if (/^agent-message:\d+$/.test(raw)) return `${raw}:${run}`;
+    return raw;
+  }
+
   private withRunSummary(
     event: SocialAgentEventV2,
     previousEvents: SocialAgentEventV2[],
@@ -147,7 +173,10 @@ export class SocialCodexEventPipelineService {
     const title = cleanDisplayText(event.display?.title ?? '');
     if (!title) return null;
     const detail = cleanDisplayText(event.display?.detail ?? '');
-    if (event.type === 'approval.required' || event.type === 'approval.resolved') {
+    if (
+      event.type === 'approval.required' ||
+      event.type === 'approval.resolved'
+    ) {
       return [
         event.type,
         event.stage,
@@ -157,11 +186,7 @@ export class SocialCodexEventPipelineService {
         detail,
       ].join('|');
     }
-    return [
-      event.display?.state ?? '',
-      title,
-      detail,
-    ].join('|');
+    return [event.display?.state ?? '', title, detail].join('|');
   }
 
   private approvalDisplayIdentity(event: SocialAgentEventV2): string {
@@ -193,8 +218,7 @@ export class SocialCodexEventPipelineService {
       '正在读取你的偏好',
       {
         state: 'running',
-        detail:
-          '会结合最近对话、当前任务和已确认偏好，不展示内部思考链。',
+        detail: '会结合最近对话、当前任务和已确认偏好，不展示内部思考链。',
       },
     );
   }
@@ -206,11 +230,11 @@ export class SocialCodexEventPipelineService {
     return writer(
       'visible_process.delta',
       'hydrate_context',
-      '正在恢复保存点',
+      '正在接着刚才的进度',
       {
         state: 'running',
         detail:
-          '会读取上一次任务状态和待确认动作，不会重复执行已经完成的步骤。',
+          '会读取上一次任务状态和待确认动作，不会重复执行已经完成的内容。',
         payload: {
           checkpointAction: action ?? null,
         },
@@ -260,23 +284,23 @@ export class SocialCodexEventPipelineService {
   }
 
   async writeRunFailed(writer: SocialCodexEventWriter) {
-    return writer('run.failed', 'detect_social_intent', '这次处理没有完成', {
-      state: 'failed',
-      detail: '刚才连接中断了；已保留这段需求，可以继续处理或重新发送。',
-    });
+    return writer(
+      'run.failed',
+      'detect_social_intent',
+      '连接中断了，可以继续',
+      {
+        state: 'failed',
+        detail: '这段需求还在，可以直接继续；重试会从刚才的位置接着处理。',
+      },
+    );
   }
 
   async writeRunCompleted(writer: SocialCodexEventWriter, lifecycle: string) {
     const completion = this.runCompletionDisplay(lifecycle);
-    return writer(
-      'run.completed',
-      completion.stage,
-      completion.title,
-      {
-        state: completion.state,
-        detail: completion.detail,
-      },
-    );
+    return writer('run.completed', completion.stage, completion.title, {
+      state: completion.state,
+      detail: completion.detail,
+    });
   }
 
   async writeEarlySlotInferenceEvents(
@@ -351,12 +375,16 @@ export class SocialCodexEventPipelineService {
           })
           .catch(() => null)
       : null;
+    const taskSlots = this.mergeCurrentMessageSlots(
+      context?.taskSlots,
+      input.text,
+    );
     const status = await (
       typeof this.profileGate.getMinimumProfileStatusWithTaskSlots ===
       'function'
         ? this.profileGate.getMinimumProfileStatusWithTaskSlots(
             userId,
-            context?.taskSlots,
+            taskSlots,
           )
         : this.profileGate.getMinimumProfileStatus(userId)
     ).catch(() => null);
@@ -401,13 +429,13 @@ export class SocialCodexEventPipelineService {
     await writer(
       'approval.resolved',
       'approval',
-      decision === 'approved' ? '已确认这一步' : '已取消这一步',
+      decision === 'approved' ? '已确认' : '已取消',
       {
         state: 'done',
         detail:
           decision === 'approved'
             ? '我会从同一个任务继续处理，不会重新询问已确认的信息。'
-            : '我不会执行刚才的高风险动作，会继续保留当前对话。',
+            : '这个动作已取消，不会触达对方，也不会公开位置或联系方式。',
         payload: {
           approvalId,
           decision,
@@ -505,15 +533,12 @@ export class SocialCodexEventPipelineService {
     writer: SocialCodexEventWriter,
     result: UserFacingAgentResponse,
   ): Promise<void> {
-    if (
-      result.safeStatus.boundaryNotes.length > 0 ||
-      result.safeStatus.level !== 'low'
-    ) {
+    if (this.shouldEmitSafetyProcess(result)) {
       await writer('safety_check.done', 'safety_filter', '已检查安全边界', {
         state: result.safeStatus.blocked ? 'failed' : 'done',
         detail:
           result.safeStatus.boundaryNotes.slice(0, 2).join('；') ||
-          `风险等级：${result.safeStatus.level}`,
+          '已按安全边界检查，真实触达前仍会让你确认。',
         payload: {
           level: result.safeStatus.level,
           blocked: result.safeStatus.blocked,
@@ -598,7 +623,7 @@ export class SocialCodexEventPipelineService {
         '已整理画像变化建议',
         {
           state: 'waiting',
-          detail: '确认前不会写入长期 Life Graph，你可以修改或忽略。',
+          detail: '确认前不会写入长期偏好，你可以修改或忽略。',
           payload: { proposal: result.lifeGraphWritebackProposal },
         },
       );
@@ -608,21 +633,19 @@ export class SocialCodexEventPipelineService {
       const itemPayload = this.recordValue(item.payload)
         ? (item.payload as Record<string, unknown>)
         : {};
-      const checkpointId =
-        this.positiveNumber(itemPayload.checkpointId) ??
-        this.positiveNumber(itemPayload.resumeCheckpointId) ??
-        result.runtime?.checkpointId ??
-        null;
+      const publicItemPayload = { ...itemPayload };
+      delete publicItemPayload.checkpointId;
+      delete publicItemPayload.resumeCheckpointId;
+      delete publicItemPayload.resumeCursor;
       const schemaPayload = this.approvalSchemaService().enrichPayload({
         actionType: item.actionType,
         summary: item.summary,
         riskLevel: item.riskLevel,
         payload: {
           approvalId: item.id,
-          checkpointId,
           actionType: item.actionType,
           riskLevel: item.riskLevel,
-          ...itemPayload,
+          ...publicItemPayload,
         },
       });
       const schema = schemaPayload.socialCodexApproval as
@@ -631,7 +654,7 @@ export class SocialCodexEventPipelineService {
       await writer(
         'approval.required',
         'approval',
-        schema?.title || '执行这一步前需要你确认',
+        schema?.title || '执行这个动作前需要你确认',
         {
           state: 'waiting',
           detail: schema?.detail || item.summary,
@@ -639,6 +662,20 @@ export class SocialCodexEventPipelineService {
         },
       );
     }
+  }
+
+  private shouldEmitSafetyProcess(result: UserFacingAgentResponse): boolean {
+    if (result.safeStatus.blocked) return true;
+    if (result.safeStatus.level !== 'low') return true;
+    if (result.safeStatus.requiredConfirmations.length > 0) return true;
+    if (result.pendingConfirmations.length > 0) return true;
+    return result.cards.some(
+      (card) =>
+        this.isCandidateCard(card) ||
+        this.isActivityCard(card) ||
+        this.cardSchemaType(card) === 'safety.approval' ||
+        this.cardSchemaType(card) === 'meet_loop.timeline',
+    );
   }
 
   stageFromStep(label: string): SocialAgentEventV2Stage {
@@ -698,6 +735,28 @@ export class SocialCodexEventPipelineService {
         normalized,
       );
     return hasActivity && hasTime && hasPlace;
+  }
+
+  private mergeCurrentMessageSlots(
+    existingSlots: unknown,
+    text: string | null | undefined,
+  ): Record<string, unknown> | null | undefined {
+    if (!this.taskSlots || typeof text !== 'string')
+      return existingSlots as Record<string, unknown> | null | undefined;
+    const extracted = this.taskSlots.extractSlotsFromUserMessage(text);
+    if (Object.keys(extracted).length === 0) {
+      return existingSlots as Record<string, unknown> | null | undefined;
+    }
+    const existing =
+      existingSlots &&
+      typeof existingSlots === 'object' &&
+      !Array.isArray(existingSlots)
+        ? (existingSlots as Record<string, unknown>)
+        : {};
+    return {
+      ...existing,
+      ...extracted,
+    };
   }
 
   private toolTypeForStatus(
@@ -803,8 +862,8 @@ export class SocialCodexEventPipelineService {
       case 'error_recovery':
         return {
           stage: 'detect_social_intent',
-          title: '已保留当前对话',
-          detail: '刚才的处理没有继续执行高风险动作，你可以直接接着说。',
+          title: '连接中断了，可以继续',
+          detail: '这段需求还在，可以直接继续；刚才没有执行任何高风险动作。',
           state: 'done',
         };
       case 'casual_chatting':

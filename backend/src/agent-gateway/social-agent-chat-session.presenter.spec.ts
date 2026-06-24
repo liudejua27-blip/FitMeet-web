@@ -114,4 +114,236 @@ describe('readSocialAgentRestorableResult', () => {
     });
     expect(JSON.stringify(result)).not.toContain('filteredByBoundary');
   });
+
+  it('restores an unpublished social request draft as an actionable OpportunityCard from latest run results', () => {
+    const task = {
+      id: 202,
+      status: AgentTaskStatus.AwaitingConfirmation,
+      result: {},
+      memory: {},
+    } as unknown as AgentTask;
+
+    const result = readSocialAgentRestorableResult({
+      task,
+      latestRun: {
+        taskId: 202,
+        runId: 'sar_publish_restore',
+        status: 'completed',
+        phase: 'completed',
+        message: '约练卡已生成',
+        visibleSteps: [],
+        queuedAt: '2026-06-05T00:00:00.000Z',
+        startedAt: '2026-06-05T00:01:00.000Z',
+        updatedAt: '2026-06-05T00:03:00.000Z',
+        completedAt: '2026-06-05T00:03:00.000Z',
+        failedAt: null,
+        pollAfterMs: 1500,
+        error: null,
+        replan: null,
+        result: {
+          taskId: 202,
+          status: AgentTaskStatus.AwaitingConfirmation,
+          visibleSteps: [],
+          assistantMessage: '约练卡已生成',
+          socialRequestDraft: {
+            agentTaskId: 202,
+            mode: 'draft',
+            type: 'city_walk',
+            title: '今晚青岛大学散步搭子',
+            description: '今晚在青岛大学附近散步，只公开模糊地点。',
+            city: '青岛',
+            activityType: '散步',
+            timePreference: '今晚',
+            locationPreference: '青岛大学附近',
+            socialRequestId: 88,
+            visibilityConsent: false,
+            autoPublished: false,
+            publicIntentId: null,
+            discoverHref: null,
+            publishPolicy: 'requires_confirmation_sensitive_content',
+          } as never,
+          candidates: [],
+          approvalRequiredActions: [],
+          events: [],
+        },
+      },
+      events: [],
+      visibleStepLabel: (_, label) => label,
+    });
+
+    expect(result?.cards?.[0]).toMatchObject({
+      type: 'activity_plan',
+      schemaType: 'social_match.activity',
+      status: 'waiting_confirmation',
+      title: '今晚青岛大学散步搭子',
+      actions: expect.arrayContaining([
+        expect.objectContaining({
+          label: '确认发布',
+          schemaAction: 'publish_to_discover',
+          requiresConfirmation: true,
+          payload: expect.objectContaining({
+            taskId: 202,
+            socialRequestId: 88,
+            approvalRequired: true,
+            socialRequestDraft: expect.objectContaining({
+              title: '今晚青岛大学散步搭子',
+            }),
+          }),
+        }),
+        expect.objectContaining({
+          label: '暂不发布',
+          schemaAction: 'activity.skip_publish',
+        }),
+      ]),
+    });
+  });
+
+  it('restores an unpublished social request draft as an actionable OpportunityCard from task memory', () => {
+    const task = {
+      id: 203,
+      status: AgentTaskStatus.AwaitingConfirmation,
+      result: {
+        chatRun: {
+          message: '约练卡已生成',
+          socialRequestDraft: {
+            type: 'fitness',
+            title: '今晚青岛大学健身约练',
+            description: '今晚在青岛大学附近健身，只公开模糊地点。',
+            city: '青岛',
+            activityType: '健身',
+            timePreference: '今晚',
+            locationPreference: '青岛大学附近',
+            socialRequestId: 99,
+            visibilityConsent: false,
+            autoPublished: false,
+            publicIntentId: null,
+            discoverHref: null,
+          },
+        },
+      },
+      memory: {},
+    } as unknown as AgentTask;
+
+    const result = readSocialAgentRestorableResult({
+      task,
+      latestRun: null,
+      events: [],
+      visibleStepLabel: (_, label) => label,
+    });
+
+    expect(result?.cards?.[0]).toMatchObject({
+      id: 'activity_plan:203:99',
+      schemaType: 'social_match.activity',
+      data: expect.objectContaining({
+        opportunityCard: true,
+        socialRequestId: 99,
+        publishStatus: 'draft_requires_confirmation',
+        opportunity: expect.objectContaining({
+          title: '今晚青岛大学健身约练',
+          time: '今晚',
+          location: '青岛大学附近',
+        }),
+      }),
+      actions: expect.arrayContaining([
+        expect.objectContaining({
+          schemaAction: 'publish_to_discover',
+          payload: expect.objectContaining({
+            taskId: 203,
+            socialRequestId: 99,
+          }),
+        }),
+      ]),
+    });
+  });
+
+  it('does not restore an opportunity card after the draft was cancelled', () => {
+    const task = {
+      id: 204,
+      status: AgentTaskStatus.AwaitingConfirmation,
+      result: {
+        chatRun: {
+          message: '约练卡已生成',
+          publishStatus: 'cancelled',
+          socialRequestDraft: null,
+        },
+        activityDraft: {
+          title: '今晚青岛大学散步搭子',
+          visibility: 'hidden',
+          dismissed: true,
+          publishStatus: 'cancelled',
+          status: 'draft_cancelled',
+        },
+      },
+      memory: {
+        socialAgentChat: {
+          publishStatus: 'cancelled',
+          socialRequestDraft: null,
+        },
+        shortTerm: {
+          publishStatus: 'cancelled',
+          socialRequestDraft: null,
+        },
+      },
+    } as unknown as AgentTask;
+
+    const result = readSocialAgentRestorableResult({
+      task,
+      latestRun: {
+        taskId: 204,
+        runId: 'sar_publish_restore_stale',
+        status: 'completed',
+        phase: 'completed',
+        message: '约练卡已生成',
+        visibleSteps: [],
+        queuedAt: '2026-06-05T00:00:00.000Z',
+        startedAt: '2026-06-05T00:01:00.000Z',
+        updatedAt: '2026-06-05T00:03:00.000Z',
+        completedAt: '2026-06-05T00:03:00.000Z',
+        failedAt: null,
+        pollAfterMs: 1500,
+        error: null,
+        replan: null,
+        result: {
+          taskId: 204,
+          status: AgentTaskStatus.AwaitingConfirmation,
+          visibleSteps: [],
+          assistantMessage: '约练卡已生成',
+          socialRequestDraft: {
+            agentTaskId: 204,
+            mode: 'draft',
+            type: 'city_walk',
+            title: '今晚青岛大学散步搭子',
+            description: '今晚在青岛大学附近散步，只公开模糊地点。',
+            city: '青岛',
+            activityType: '散步',
+            timePreference: '今晚',
+            locationPreference: '青岛大学附近',
+            autoPublished: false,
+            publicIntentId: null,
+            discoverHref: null,
+          } as never,
+          cards: [
+            {
+              id: 'activity_plan:204:draft',
+              type: 'activity_plan',
+              title: '今晚青岛大学散步搭子',
+              schemaType: 'social_match.activity',
+              status: 'waiting_confirmation',
+              data: { schemaType: 'social_match.activity' },
+              actions: [],
+            },
+          ],
+          candidates: [],
+          approvalRequiredActions: [],
+          events: [],
+        },
+      },
+      events: [],
+      visibleStepLabel: (_, label) => label,
+    });
+
+    expect(result?.assistantMessage).toContain('已取消发布');
+    expect(result?.socialRequestDraft).toBeNull();
+    expect(result?.cards ?? []).toEqual([]);
+  });
 });

@@ -123,6 +123,13 @@ function requiredFieldsForRoute(
     'time',
     'activity',
   ];
+  if (
+    route.intent === 'action_request' ||
+    route.shouldExecuteAction === true ||
+    route.replyStrategy === 'execute_action'
+  ) {
+    return [...base, 'location', 'boundary'];
+  }
   if (route.intent === 'social_search') {
     return base;
   }
@@ -135,9 +142,22 @@ export function isAwaitingSocialOpportunityClarification(
   const currentTask = isRecord(taskContext?.currentTask)
     ? taskContext?.currentTask
     : {};
+  const taskMemory = isRecord(taskContext?.taskMemory)
+    ? taskContext?.taskMemory
+    : {};
+  const memoryCurrentTask = isRecord(taskMemory.currentTask)
+    ? taskMemory.currentTask
+    : {};
+  const waitingFor = cleanDisplayText(
+    currentTask.waitingFor ?? memoryCurrentTask.waitingFor,
+    '',
+  );
+  const awaitingSearchConfirmation =
+    currentTask.awaitingSearchConfirmation ??
+    memoryCurrentTask.awaitingSearchConfirmation;
   return (
-    currentTask.awaitingSearchConfirmation === true &&
-    cleanDisplayText(currentTask.waitingFor, '') === 'opportunity_clarification'
+    awaitingSearchConfirmation === true &&
+    waitingFor === 'opportunity_clarification'
   );
 }
 
@@ -161,17 +181,21 @@ function resolveFields(input: {
     .join(' ');
   const combined = `${historyText} ${text}`.trim();
   const boundaries = memory.boundaries;
-  const relationshipGoal = relationshipGoalSummary(combined, memory.preferences);
+  const relationshipGoal = relationshipGoalSummary(
+    combined,
+    memory.preferences,
+  );
   return {
     city:
       cleanDisplayText(entities.city, '') ||
       cleanDisplayText(memory.activeEntities.city, '') ||
+      taskSlots.city ||
       taskSlots.geo_area ||
       extractCity(
-        `${combined} ${taskSlots.location_text ?? ''} ${taskSlots.geo_area ?? ''}`,
+        `${combined} ${taskSlots.city ?? ''} ${taskSlots.location_text ?? ''} ${taskSlots.geo_area ?? ''}`,
       ) ||
       inferCityFromKnownArea(
-        `${taskSlots.location_text ?? ''} ${taskSlots.geo_area ?? ''}`,
+        `${taskSlots.city ?? ''} ${taskSlots.location_text ?? ''} ${taskSlots.geo_area ?? ''}`,
       ),
     time:
       cleanDisplayText(entities.timePreference, '') ||
@@ -190,13 +214,16 @@ function resolveFields(input: {
       extractActivity(combined),
     intensity: taskSlots.intensity || extractIntensity(combined),
     relationshipGoal,
-    candidatePreference: candidatePreferenceSummary(
-      combined,
-      memory.preferences,
-      relationshipGoal,
-    ) || taskSlots.candidate_preference,
+    candidatePreference:
+      candidatePreferenceSummary(
+        combined,
+        memory.preferences,
+        relationshipGoal,
+      ) || taskSlots.candidate_preference,
     boundary:
-      hasCommunicationBoundary(boundaries, combined) || boundaries.noAutoMessage
+      useSafeDefaultBoundary(combined) ||
+      hasCommunicationBoundary(boundaries, combined) ||
+      boundaries.noAutoMessage
         ? boundarySummary(boundaries, combined)
         : taskSlots.safety_boundary
           ? taskSlots.safety_boundary
@@ -222,12 +249,18 @@ function readTaskSlotValues(
   appendTaskSlotValues(out, contextTaskMemory.taskSlots);
   appendTaskSlotValues(out, context.taskSlots);
   appendKnownConstraintSlotValues(out, memory.knownTaskSlotConstraints);
-  appendKnownConstraintSlotValues(out, contextTaskMemory.knownTaskSlotConstraints);
+  appendKnownConstraintSlotValues(
+    out,
+    contextTaskMemory.knownTaskSlotConstraints,
+  );
   appendKnownConstraintSlotValues(out, context.knownTaskSlotConstraints);
   return out;
 }
 
-function appendTaskSlotValues(out: Record<string, string>, value: unknown): void {
+function appendTaskSlotValues(
+  out: Record<string, string>,
+  value: unknown,
+): void {
   const taskSlots = isRecord(value) ? value : {};
   for (const [key, slotValue] of Object.entries(taskSlots)) {
     if (!isRecord(slotValue)) continue;
@@ -276,11 +309,7 @@ function isTaskSlotUsableForClarification(
   const source = cleanDisplayText(slot.source, '');
   if (state === 'missing') return false;
   if (key === 'geo_area') return Boolean(slot.value);
-  if (
-    key === 'activity' ||
-    key === 'time_window' ||
-    key === 'location_text'
-  ) {
+  if (key === 'activity' || key === 'time_window' || key === 'location_text') {
     if (source === 'inferred' || state === 'inferred') return false;
   }
   return Boolean(slot.value);
@@ -307,11 +336,13 @@ function buildSearchGoal(input: {
   const currentGoal = cleanDisplayText(input.currentGoal, '');
   const boundary = input.fields.boundary;
   const strangerPolicy =
-    input.fields.strangerPolicy && !boundary.includes(input.fields.strangerPolicy)
+    input.fields.strangerPolicy &&
+    !boundary.includes(input.fields.strangerPolicy)
       ? input.fields.strangerPolicy
       : '';
   const publicActivity =
-    input.fields.publicActivity && !boundary.includes(input.fields.publicActivity)
+    input.fields.publicActivity &&
+    !boundary.includes(input.fields.publicActivity)
       ? input.fields.publicActivity
       : '';
   const parts = Array.from(
@@ -373,14 +404,14 @@ function buildClarifyingQuestion(input: {
       focusMissing.length === missing.length
         ? `现在只差 ${allMissingText}`
         : `新增信息已记下，现在只差 ${allMissingText}`;
-    return `${knownText}${prefix}。直接补这几项就可以；如果不确定，也可以说“由你按安全默认值处理”。`;
+    return `${knownText}${prefix}。直接补这几项就可以；如果不确定，也可以说“由你按安全默认值处理”。确认前不会公开，也不会替你联系别人。`;
   }
-  return `${knownText}还差 ${missingText}。你可以直接一句话补齐；安全边界和是否发布到发现，会在真正发送邀请或公开前再让你确认。`;
+  return `${knownText}我先一次性确认这些信息：还差 ${missingText}。你可以直接一句话补齐；所有问题都可以跳过，不确定也可以说“由你按安全默认值处理”。补齐后我会先整理约练卡片，等你确认后再发布或匹配。确认前不会公开，也不会替你联系别人。`;
 }
 
 function extractActivity(text: string): string {
   const match = text.match(
-    /(跑步|慢跑|夜跑|羽毛球|瑜伽|健身|撸铁|普拉提|徒步|户外|骑行|篮球|足球|网球|游泳|飞盘|咖啡|散步|拍照|city\s*walk|citywalk|约练|训练|低压力社交|认识新朋友|新朋友)/i,
+    /(跑步|慢跑|夜跑|羽毛球|瑜伽|健身|撸铁|普拉提|徒步|户外|骑行|篮球|足球|网球|游泳|飞盘|咖啡|散步|拍照|city\s*walk|citywalk)/i,
   );
   return cleanDisplayText(match?.[1], '');
 }
@@ -500,6 +531,8 @@ function candidatePreferenceSummary(
   ) {
     return '女生、舞蹈相关';
   }
+  const publicPreference = publicCandidatePreferenceSummary(text);
+  if (publicPreference) return publicPreference;
   const explicitPreference = text.match(
     /(理想型是|偏好是|希望认识|想认识|更想认识|最好是|希望是)([^，。；.!?]{2,56})(的人|朋友|搭子|伙伴|对象)?/i,
   );
@@ -512,10 +545,7 @@ function candidatePreferenceSummary(
   if (descriptivePerson?.[1]) {
     return cleanRelationshipGoal(descriptivePerson[1]);
   }
-  if (
-    relationshipGoal &&
-    !isGenericRelationshipGoal(relationshipGoal)
-  ) {
+  if (relationshipGoal && !isGenericRelationshipGoal(relationshipGoal)) {
     return relationshipGoal;
   }
   const activityCompanion = text.match(
@@ -525,9 +555,7 @@ function candidatePreferenceSummary(
     return `${cleanDisplayText(activityCompanion[1] ?? activityCompanion[3] ?? '运动', '')}搭子`;
   }
   if (/(认识新朋友|新朋友|交朋友|扩圈)/i.test(text)) {
-    const style = /(轻松|低压力|慢热|公共场所|站内聊|周末有空|同城)/i.test(
-      text,
-    )
+    const style = /(轻松|低压力|慢热|公共场所|站内聊|周末有空|同城)/i.test(text)
       ? '低压力新朋友'
       : '新朋友';
     return style;
@@ -541,6 +569,42 @@ function candidatePreferenceSummary(
       : '更外向、愿意互动';
   }
   return '';
+}
+
+function publicCandidatePreferenceSummary(text: string): string {
+  const hasPreferenceContext =
+    /(喜欢|兴趣|爱好|公开资料|标签|理想型|偏好|希望认识|想认识|更想认识|最好是|希望是|会|学|专业|从事|找个|找一个|找些)/i.test(
+      text,
+    );
+  if (!hasPreferenceContext) return '';
+  const parts: string[] = [];
+  const add = (label: string) => {
+    if (!parts.includes(label)) parts.push(label);
+  };
+
+  if (/(女生|女孩|女孩子|女性|女同学|女大学生)/.test(text)) add('女生');
+  if (/(男生|男孩|男孩子|男性|男同学|男大学生)/.test(text)) add('男生');
+  if (hasProgrammingPublicPreference(text)) {
+    add('编程/科技相关');
+  }
+  if (/(摄影|拍照|相机|影像)/.test(text)) add('摄影相关');
+  if (/(音乐|唱歌|乐队|吉他|钢琴|民谣)/.test(text)) add('音乐相关');
+  if (/(读书|阅读|文学|写作)/.test(text)) add('阅读写作相关');
+  if (/(动漫|二次元|游戏|电竞)/.test(text)) add('动漫/游戏相关');
+  if (/(咖啡|探店|电影|展览|city ?walk|城市漫步)/i.test(text)) {
+    add('生活方式相近');
+  }
+  return parts.slice(0, 3).join('、');
+}
+
+function hasProgrammingPublicPreference(text: string): boolean {
+  if (/(编程|代码|程序员|程序猿|软件|计算机|人工智能|科技)/i.test(text)) {
+    return true;
+  }
+  if (/\bAI\b/i.test(text)) return true;
+  return /(?:喜欢|爱好|兴趣|会|懂|学|学习|专业|从事|做|搞|想认识|希望认识).{0,12}开发|开发.{0,10}(工程师|程序员|开发者|专业|同学|从业者)/i.test(
+    text,
+  );
 }
 
 function isGenericRelationshipGoal(value: string): boolean {
@@ -567,22 +631,33 @@ function hasCommunicationBoundary(
   );
 }
 
+function useSafeDefaultBoundary(text: string): boolean {
+  return /(安全默认|默认安全|按默认|你来处理|由你处理|你看着办|不确定)/i.test(
+    text,
+  );
+}
+
 function boundarySummary(
   boundaries: ReturnType<typeof readSocialAgentTaskMemory>['boundaries'],
   text: string,
 ): string {
   const parts = [
-    boundaries.publicPlaceOnly || /(公共场所|公开场所)/i.test(text)
+    boundaries.publicPlaceOnly ||
+    useSafeDefaultBoundary(text) ||
+    /(公共场所|公开场所)/i.test(text)
       ? '公共场所'
       : '',
     boundaries.noContactExchange ||
+    useSafeDefaultBoundary(text) ||
     /(不交换|不加微信|不留电话|站内聊)/i.test(text)
       ? '先站内沟通'
       : '',
     boundaries.noNightMeet || /(不要夜间|不要晚上|不晚上)/i.test(text)
       ? '避开夜间'
       : '',
-    boundaries.noAutoMessage || /(不要自动|先确认|发送前确认)/i.test(text)
+    boundaries.noAutoMessage ||
+    useSafeDefaultBoundary(text) ||
+    /(不要自动|先确认|发送前确认)/i.test(text)
       ? '发送前确认'
       : '',
     boundaries.acceptsStrangers === true ||

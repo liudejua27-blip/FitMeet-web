@@ -72,9 +72,9 @@ export const SOCIAL_CODEX_STAGE_COPY: Record<string, SocialCodexStageCopy> = {
     detail: '发送前你可以修改语气和内容。',
   },
   approval: {
-    running: '需要你确认这一步',
+    running: '需要你确认后继续',
     done: '已处理你的确认',
-    waiting: '需要你确认这一步',
+    waiting: '需要你确认后继续',
     label: '等待确认',
     detail: '确认前不会执行真实发布、邀请或联系动作。',
   },
@@ -85,7 +85,7 @@ export const SOCIAL_CODEX_STAGE_COPY: Record<string, SocialCodexStageCopy> = {
     detail: '发送前会展示对方可见内容，并等待你确认。',
   },
   life_graph_writeback: {
-    running: '正在整理画像变化建议',
+    running: '正在整理资料变化建议',
     done: '已整理画像变化建议',
     label: '更新记忆',
     detail: '只沉淀稳定偏好，敏感信息会先征得确认。',
@@ -113,8 +113,8 @@ export const SOCIAL_CODEX_INTERNAL_PROCESS_LABELS: Record<string, string> = {
   generate_opener: SOCIAL_CODEX_STAGE_COPY.generate_opener.running,
   send_invite: SOCIAL_CODEX_STAGE_COPY.send_invite.running,
   life_graph_writeback: SOCIAL_CODEX_STAGE_COPY.life_graph_writeback.running,
-  tool_call_started: '正在推进这一步',
-  tool_result_done: '已整理当前进度',
+  tool_call_started: '正在整理当前信息',
+  tool_result_done: '已整理当前信息',
 };
 
 export function socialCodexStageTitle(
@@ -123,7 +123,7 @@ export function socialCodexStageTitle(
 ): string | null {
   const copy = stageCopy(stage);
   if (!copy) return null;
-  if (state === 'failed') return copy.failed ?? '这一步没有完成';
+  if (state === 'failed') return copy.failed ?? '刚才连接不稳';
   if (state === 'waiting') return copy.waiting ?? copy.running;
   if (state === 'done' || state === 'completed') return copy.done;
   return copy.running;
@@ -132,7 +132,7 @@ export function socialCodexStageTitle(
 export function socialCodexStageDetail(stage: unknown, state: SocialCodexProcessState) {
   const copy = stageCopy(stage);
   if (!copy) return null;
-  if (state === 'failed') return '你可以重试，或者补充一句新的要求。';
+  if (state === 'failed') return '我保留了这段需求，你可以继续处理或重新发送。';
   return copy.detail ?? null;
 }
 
@@ -147,9 +147,35 @@ export function socialCodexProcessLabelForInternalName(value: unknown) {
 
 export function isGenericSocialCodexProcessTitle(value: unknown) {
   if (typeof value !== 'string') return false;
-  return /^(这一步处理完成|已完成这一步|处理完成|已处理|正在处理|正在处理这一步|这次处理没有完成|已完成|完成|处理中|已整理结果|工具|步骤|调用)$/i.test(
-    value.trim(),
-  );
+  return isGenericProcessText(value);
+}
+
+function isGenericProcessText(value: string) {
+  const normalized = value.replace(/\s+/g, '');
+  const tokenSets = [
+    ['这一步', '处理', '完成'],
+    ['已完成', '这一步'],
+    ['处理', '完成'],
+    ['已处理'],
+    ['正在', '处理'],
+    ['正在', '处理', '这一步'],
+    ['正在', '推进', '当前', '进度'],
+    ['正在', '处理', '当前', '步骤'],
+    ['正在', '思考'],
+    ['这次', '处理', '没有', '完成'],
+    ['这一步', '没有', '完成'],
+    ['这一步', '需要', '重试'],
+    ['刚才', '连接', '不稳'],
+    ['已完成'],
+    ['完成'],
+    ['处理中'],
+    ['已整理', '结果'],
+    ['已整理', '当前', '进度'],
+    ['工具'],
+    ['步骤'],
+    ['调用'],
+  ];
+  return tokenSets.some((tokens) => tokens.every((token) => normalized.includes(token)));
 }
 
 export function isKnownSocialCodexStageTitle(value: unknown) {

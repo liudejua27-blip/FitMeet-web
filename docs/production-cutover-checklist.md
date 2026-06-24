@@ -191,30 +191,18 @@ API_BASE_URL=https://www.ourfitmeet.cn/api \
 ./scripts/verify-production.sh
 ```
 
-Prepare dedicated smoke users only after migrations and object storage are
-ready:
-
-```bash
-APP_SMOKE_SEED_PASSWORD='use-a-long-random-password' \
-APP_SMOKE_SEED_ALLOW_PRODUCTION=true \
-pnpm -C backend run seed:app-smoke-users
-```
-
-Use the printed exports, then run authenticated mutation smoke:
+Run the explicit public-intent write/read-back smoke only when production writes
+are allowed:
 
 ```bash
 BASE_URL=https://www.ourfitmeet.cn \
 API_BASE_URL=https://www.ourfitmeet.cn/api \
-APP_SMOKE_EMAIL=fitmeet-smoke-owner@ourfitmeet.cn \
-APP_SMOKE_PASSWORD='***' \
-APP_SMOKE_TARGET_USER_ID=123 \
-APP_SMOKE_RUN_MUTATIONS=true \
-./scripts/verify-production.sh --run-app-smoke
+./scripts/verify-production.sh --run-public-intent-write
 ```
 
-This covers login, refresh/profile restore, feed interactions, real messaging,
-avatar upload/profile save, feed moment publish/read-back, and Social Agent
-route-message.
+Agent publish, message, invite, and account-menu QA should use dedicated real QA
+credentials with `scripts/verify-agent-goal-production.sh`; the old seed/app
+smoke scripts are no longer part of the release path.
 
 ## 6. iOS TestFlight Gate
 

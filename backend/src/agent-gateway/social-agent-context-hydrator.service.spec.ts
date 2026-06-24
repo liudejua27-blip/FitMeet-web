@@ -271,10 +271,7 @@ describe('SocialAgentContextHydratorService', () => {
     expect(context.taskSlots.activity?.value).toBe('散步');
     expect(context.knownTaskSlotConstraints).toEqual(
       expect.objectContaining({
-        doNotAskAgainFor: expect.arrayContaining([
-          'activity',
-          'location_text',
-        ]),
+        doNotAskAgainFor: expect.arrayContaining(['activity', 'location_text']),
       }),
     );
     expect(context.taskMemory?.taskSlots).toMatchObject(context.taskSlots);

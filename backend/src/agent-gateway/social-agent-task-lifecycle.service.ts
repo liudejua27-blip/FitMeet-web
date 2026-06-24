@@ -117,32 +117,17 @@ export class SocialAgentTaskLifecycleService {
     const existing = await this.taskRepo.findOne({
       where: { ownerUserId, idempotencyKey },
     });
-    if (existing) return this.refreshGenericConversationTitle(existing, message);
-    const activeThread = await this.taskRepo.findOne({
-      where: {
-        ownerUserId,
-        taskType: 'social_agent_chat',
-        status: In([
-          AgentTaskStatus.Pending,
-          AgentTaskStatus.Planning,
-          AgentTaskStatus.AwaitingConfirmation,
-          AgentTaskStatus.Executing,
-          AgentTaskStatus.WaitingResult,
-          AgentTaskStatus.WaitingReply,
-          AgentTaskStatus.AwaitingFeedback,
-        ]),
-      },
-      order: { updatedAt: 'DESC' },
-    });
-    if (activeThread) {
-      return this.refreshGenericConversationTitle(activeThread, message);
-    }
+    if (existing)
+      return this.refreshGenericConversationTitle(existing, message);
     const task = await this.taskRepo.save(
       this.taskRepo.create({
         ownerUserId,
         agentConnectionId: agent?.id ?? null,
         taskType: 'social_agent_chat',
-        title: inferSocialAgentThreadTitle({ firstMessage: message, goal: message }),
+        title: inferSocialAgentThreadTitle({
+          firstMessage: message,
+          goal: message,
+        }),
         goal: message,
         input: {
           source: 'social_agent_chat',

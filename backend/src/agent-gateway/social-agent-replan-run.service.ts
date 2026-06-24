@@ -165,12 +165,12 @@ export class SocialAgentReplanRunService {
             },
           },
           {
-            agent: 'Social Match Agent',
+            agent: 'Match Agent',
             toolName: 'replan_refresh_draft_candidates',
             input: { refreshedGoal },
           },
           {
-            agent: 'Social Match Agent',
+            agent: 'Match Agent',
             toolName: 'replan_rank_and_explain',
             input: {},
           },

@@ -1,6 +1,7 @@
-/* eslint-disable @typescript-eslint/require-await */
 import { SocialAgentFinalResponseService } from './social-agent-final-response.service';
+import { SocialAgentLlmOutputCacheService } from './social-agent-llm-output-cache.service';
 import { SOCIAL_AGENT_QUALITY_CHAT_TIMEOUT_MS } from './social-agent-model-router.service';
+import { SocialAgentSemanticResponseCacheService } from './social-agent-semantic-response-cache.service';
 
 function makeConfig(values: Record<string, string | undefined> = {}) {
   return {
@@ -139,6 +140,11 @@ describe('SocialAgentFinalResponseService', () => {
         userVisibleSummary: expect.stringContaining('时间：今天晚上'),
         candidatePreferencePolicy: expect.stringContaining('公开可发现资料'),
       }),
+      promptBudget: expect.objectContaining({
+        policy: 'token_budget_context_packer_v1',
+        promptPrefixHash: expect.stringMatching(/^[a-f0-9]{24}$/),
+        dynamicContextHash: expect.stringMatching(/^[a-f0-9]{24}$/),
+      }),
     });
     expect(
       (
@@ -203,6 +209,8 @@ describe('SocialAgentFinalResponseService', () => {
       expect.objectContaining({
         traceId: 'agent:trace-final',
         success: true,
+        promptPrefixHash: expect.stringMatching(/^[a-f0-9]{24}$/),
+        dynamicContextHash: expect.stringMatching(/^[a-f0-9]{24}$/),
       }),
     );
     const request = fetchMock.mock.calls[0]?.[1] as { body?: string };
@@ -215,6 +223,227 @@ describe('SocialAgentFinalResponseService', () => {
     >;
     expect(userPayload).not.toHaveProperty('traceId');
     expect(body.messages[0].content).not.toContain('agent:trace-final');
+  });
+
+  it('reuses exact cached final responses for identical prompt fingerprints', async () => {
+    const fetchMock = jest.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        choices: [
+          { message: { content: '我可以帮你找搭子、安排邀请和管理偏好。' } },
+        ],
+      }),
+    });
+    global.fetch = fetchMock as never;
+    const outputCache = new SocialAgentLlmOutputCacheService();
+    const metrics = { recordLlmOutputCache: jest.fn() };
+    const service = new SocialAgentFinalResponseService(
+      makeConfig({
+        DEEPSEEK_API_KEY: 'key',
+        DEEPSEEK_BASE_URL: 'https://deepseek.test',
+        DEEPSEEK_CHAT_MODEL: 'deepseek-v4-pro',
+      }) as never,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      outputCache,
+      metrics as never,
+    );
+    const input = {
+      userMessage: '你都可以干什么',
+      intent: 'product_help',
+      fallbackReply: '我可以介绍功能。',
+    };
+
+    await expect(service.generate(input)).resolves.toBe(
+      '我可以帮你找搭子、安排邀请和管理偏好。',
+    );
+    const deltas: string[] = [];
+    await expect(
+      service.generate(input, {
+        onDelta: (delta) => {
+          deltas.push(delta);
+        },
+      }),
+    ).resolves.toBe('我可以帮你找搭子、安排邀请和管理偏好。');
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(deltas).toEqual(['我可以帮你找搭子、安排邀请和管理偏好。']);
+    expect(outputCache.stats()).toMatchObject({
+      hits: 1,
+      misses: 1,
+      writes: 1,
+      size: 1,
+    });
+    expect(outputCache.stats().savedApproxPromptChars).toBeGreaterThan(
+      '我可以帮你找搭子、安排邀请和管理偏好。'.length,
+    );
+    expect(metrics.recordLlmOutputCache).toHaveBeenCalledWith(
+      expect.objectContaining({
+        cacheName: 'final_response_exact',
+        hit: false,
+      }),
+    );
+    const exactHitMetric = metrics.recordLlmOutputCache.mock.calls.find(
+      ([input]) => input.cacheName === 'final_response_exact' && input.hit,
+    );
+    expect(exactHitMetric?.[0]).toEqual(
+      expect.objectContaining({
+        cacheName: 'final_response_exact',
+        hit: true,
+        approxChars: expect.any(Number),
+      }),
+    );
+    expect(exactHitMetric?.[0].approxChars).toBeGreaterThan(
+      '我可以帮你找搭子、安排邀请和管理偏好。'.length,
+    );
+  });
+
+  it('reuses semantic cached final responses for equivalent low-risk product help questions', async () => {
+    const fetchMock = jest.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        choices: [
+          {
+            message: {
+              content: '我可以帮你找搭子、生成约练卡、管理确认和记住偏好。',
+            },
+          },
+        ],
+      }),
+    });
+    global.fetch = fetchMock as never;
+    const outputCache = new SocialAgentLlmOutputCacheService();
+    const semanticCache = new SocialAgentSemanticResponseCacheService();
+    const metrics = { recordLlmOutputCache: jest.fn() };
+    const service = new SocialAgentFinalResponseService(
+      makeConfig({
+        DEEPSEEK_API_KEY: 'key',
+        DEEPSEEK_BASE_URL: 'https://deepseek.test',
+        DEEPSEEK_CHAT_MODEL: 'deepseek-v4-pro',
+        SOCIAL_AGENT_FINAL_RESPONSE_EXACT_CACHE_TTL_MS: '0',
+      }) as never,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      outputCache,
+      metrics as never,
+      semanticCache,
+    );
+
+    await expect(
+      service.generate({
+        userMessage: '你都可以干什么',
+        intent: 'product_help',
+        fallbackReply: '我可以介绍功能。',
+      }),
+    ).resolves.toBe('我可以帮你找搭子、生成约练卡、管理确认和记住偏好。');
+    const deltas: string[] = [];
+    await expect(
+      service.generate(
+        {
+          userMessage: '你有什么功能',
+          intent: 'product_help',
+          fallbackReply: '我可以介绍功能。',
+        },
+        {
+          onDelta: (delta) => {
+            deltas.push(delta);
+          },
+        },
+      ),
+    ).resolves.toBe('我可以帮你找搭子、生成约练卡、管理确认和记住偏好。');
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(deltas).toEqual([
+      '我可以帮你找搭子、生成约练卡、管理确认和记住偏好。',
+    ]);
+    expect(semanticCache.stats()).toMatchObject({
+      hits: 1,
+      misses: 1,
+      writes: 1,
+      size: 1,
+    });
+    expect(semanticCache.stats().savedApproxPromptChars).toBeGreaterThan(
+      '我可以帮你找搭子、生成约练卡、管理确认和记住偏好。'.length,
+    );
+    expect(metrics.recordLlmOutputCache).toHaveBeenCalledWith(
+      expect.objectContaining({
+        cacheName: 'final_response_semantic',
+        hit: false,
+      }),
+    );
+    expect(metrics.recordLlmOutputCache).toHaveBeenCalledWith(
+      expect.objectContaining({
+        cacheName: 'final_response_semantic',
+        hit: true,
+        approxChars: expect.any(Number),
+      }),
+    );
+  });
+
+  it('does not semantically cache social execution answers', async () => {
+    const fetchMock = jest
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          choices: [{ message: { content: '我先帮你筛选公开候选。' } }],
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          choices: [{ message: { content: '我继续按你的条件找人。' } }],
+        }),
+      });
+    global.fetch = fetchMock as never;
+    const semanticCache = new SocialAgentSemanticResponseCacheService();
+    const service = new SocialAgentFinalResponseService(
+      makeConfig({
+        DEEPSEEK_API_KEY: 'key',
+        DEEPSEEK_BASE_URL: 'https://deepseek.test',
+        DEEPSEEK_CHAT_MODEL: 'deepseek-v4-pro',
+        SOCIAL_AGENT_FINAL_RESPONSE_EXACT_CACHE_TTL_MS: '0',
+      }) as never,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      semanticCache,
+    );
+    const input = {
+      userMessage: '帮我找个搭子',
+      intent: 'social_search',
+      taskContext: {
+        taskId: 42,
+        taskSlots: {
+          activity: { value: '散步', state: 'answered' },
+        },
+      },
+      fallbackReply: '我会继续处理。',
+    };
+
+    await expect(service.generate(input)).resolves.toBe(
+      '我先帮你筛选公开候选。',
+    );
+    await expect(
+      service.generate({ ...input, userMessage: '帮我继续找人' }),
+    ).resolves.toBe('我继续按你的条件找人。');
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(semanticCache.stats()).toMatchObject({
+      hits: 0,
+      writes: 0,
+      size: 0,
+    });
   });
 
   it('uses the shared streaming DeepSeek client when injected without weakening final responses', async () => {
@@ -433,6 +662,69 @@ describe('SocialAgentFinalResponseService', () => {
     expect(global.fetch).not.toHaveBeenCalled();
   });
 
+  it('does not turn ordinary chat into an old task continuation', async () => {
+    global.fetch = jest.fn() as never;
+    const service = new SocialAgentFinalResponseService(makeConfig() as never);
+
+    const fallbackReply =
+      '可以，今天训练安排可以按热身、主训练、恢复三步来梳理。';
+    const result = await service.generate({
+      userMessage: '只想普通聊天，帮我梳理今天训练安排',
+      intent: 'casual_chat',
+      route: {
+        intent: 'casual_chat',
+        replyStrategy: 'conversational_answer',
+        shouldSearch: false,
+        shouldExecuteAction: false,
+        shouldReplan: false,
+      },
+      taskContext: {
+        taskSlots: {
+          activity: { value: '聊天', state: 'completed' },
+          time_window: { value: '今天', state: 'completed' },
+        },
+      },
+      fallbackReply: '今天什么时候训练？你想做跑步、羽毛球还是力量训练？',
+    });
+
+    expect(result).toBe('今天什么时候训练？你想做跑步、羽毛球还是力量训练？');
+    expect(result).not.toContain('我记得你已经补充了');
+    expect(result).not.toContain(fallbackReply);
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  it('keeps social advice questions out of task-slot continuation fallback', async () => {
+    global.fetch = jest.fn() as never;
+    const service = new SocialAgentFinalResponseService(makeConfig() as never);
+
+    const result = await service.generate({
+      userMessage:
+        '根据我的画像，推荐一些适合我的运动搭子类型，不要给真实用户，也不要搜索候选人',
+      intent: 'social_search',
+      route: {
+        intent: 'social_search',
+        replyStrategy: 'conversational_answer',
+        shouldSearch: false,
+        shouldExecuteAction: false,
+        shouldReplan: false,
+      },
+      taskContext: {
+        taskSlots: {
+          activity: { value: '跑步', state: 'completed' },
+          time_window: { value: '今天晚上', state: 'completed' },
+          location_text: { value: '青岛大学附近', state: 'completed' },
+        },
+      },
+      fallbackReply:
+        '可以先按类型判断，不搜索具体用户。建议优先看同城、时间稳定、活动强度接近的运动搭子。',
+    });
+
+    expect(result).toContain('类型');
+    expect(result).toContain('建议');
+    expect(result).not.toContain('我记得你已经补充了');
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
   it('uses a release-quality configurable final response token budget', async () => {
     const fetchMock = jest.fn().mockResolvedValue({
       ok: true,
@@ -524,19 +816,8 @@ describe('SocialAgentFinalResponseService', () => {
     expect(global.fetch).not.toHaveBeenCalled();
   });
 
-  it('sends context-aware fallback into DeepSeek instead of stale clarification copy', async () => {
-    const fetchMock = jest.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({
-        choices: [
-          {
-            message: {
-              content: '我会按你已补齐的信息继续筛选候选人。',
-            },
-          },
-        ],
-      }),
-    });
+  it('skips DeepSeek when context-aware fallback already fixes stale clarification copy', async () => {
+    const fetchMock = jest.fn();
     global.fetch = fetchMock as never;
     const service = new SocialAgentFinalResponseService(
       makeConfig({
@@ -563,19 +844,51 @@ describe('SocialAgentFinalResponseService', () => {
         '你更想今晚就近试试，还是周末下午找个时间？告诉我这个，我就能继续筛人啦。',
     });
 
-    const request = fetchMock.mock.calls[0]?.[1] as { body?: string };
-    const body = JSON.parse(request.body ?? '{}') as {
-      messages: Array<{ role: string; content: string }>;
-    };
-    const userPayload = JSON.parse(body.messages[1].content) as Record<
-      string,
-      unknown
-    >;
-    expect(userPayload.fallbackReply).toContain('我记得你已经补充了');
-    expect(userPayload.fallbackReply).toContain('今天晚上');
-    expect(userPayload.fallbackReply).toContain('青岛大学附近');
-    expect(userPayload.fallbackReply).toContain('舞蹈相关');
-    expect(userPayload.fallbackReply).not.toContain('今晚就近试试，还是周末下午');
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('skips DeepSeek for safe empty-candidate final fallback', async () => {
+    const fetchMock = jest.fn();
+    global.fetch = fetchMock as never;
+    const service = new SocialAgentFinalResponseService(
+      makeConfig({
+        DEEPSEEK_API_KEY: 'key',
+        DEEPSEEK_BASE_URL: 'https://deepseek.test',
+      }) as never,
+    );
+
+    await expect(
+      service.generate({
+        userMessage: '继续帮我找人',
+        intent: 'social_search',
+        searchResults: { emptyReason: 'no_real_candidates' },
+        fallbackReply:
+          '当前没有找到真实候选人。可以发布到发现、扩大范围，或者换一个时间再试。',
+      }),
+    ).resolves.toBe(
+      '当前没有找到真实候选人。可以发布到发现、扩大范围，或者换一个时间再试。',
+    );
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('skips DeepSeek for low-risk card action fallback', async () => {
+    const fetchMock = jest.fn();
+    global.fetch = fetchMock as never;
+    const service = new SocialAgentFinalResponseService(
+      makeConfig({
+        DEEPSEEK_API_KEY: 'key',
+        DEEPSEEK_BASE_URL: 'https://deepseek.test',
+      }) as never,
+    );
+
+    await expect(
+      service.generate({
+        userMessage: '收藏这个候选人',
+        intent: 'action_request',
+        fallbackReply: '已记录兴趣，我会优先保留这个候选人。',
+      }),
+    ).resolves.toBe('已记录兴趣，我会优先保留这个候选人。');
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it('does not repeat stale clarification when slots only exist in taskMemory', async () => {
@@ -723,7 +1036,7 @@ describe('SocialAgentFinalResponseService', () => {
     expect(global.fetch).not.toHaveBeenCalled();
   });
 
-  it('uses context-aware fallback after DeepSeek final response fails', async () => {
+  it('uses context-aware fallback before DeepSeek when task memory is already actionable', async () => {
     const fetchMock = jest.fn().mockRejectedValue(new Error('network down'));
     global.fetch = fetchMock as never;
     const service = new SocialAgentFinalResponseService(
@@ -744,8 +1057,7 @@ describe('SocialAgentFinalResponseService', () => {
           location_text: { value: '青岛大学附近', state: 'completed' },
         },
       },
-      fallbackReply:
-        '还缺一点关键信息：你更想今晚还是周末下午？地点在哪里？',
+      fallbackReply: '还缺一点关键信息：你更想今晚还是周末下午？地点在哪里？',
     });
 
     expect(result).toContain('我记得你已经补充了');
@@ -753,7 +1065,7 @@ describe('SocialAgentFinalResponseService', () => {
     expect(result).toContain('今天晚上');
     expect(result).toContain('青岛大学附近');
     expect(result).not.toContain('还缺一点关键信息');
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it('returns fallback for empty model content', async () => {
@@ -844,9 +1156,12 @@ describe('SocialAgentFinalResponseService', () => {
     });
     await Promise.resolve();
     await Promise.resolve();
+    await Promise.resolve();
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    await jest.advanceTimersByTimeAsync(SOCIAL_AGENT_QUALITY_CHAT_TIMEOUT_MS - 1);
+    await jest.advanceTimersByTimeAsync(
+      SOCIAL_AGENT_QUALITY_CHAT_TIMEOUT_MS - 1,
+    );
     expect(aborts).toHaveLength(0);
     await jest.advanceTimersByTimeAsync(1);
     await expect(result).resolves.toBe('我先保留你的需求，稍后可以继续。');
@@ -893,7 +1208,7 @@ describe('SocialAgentFinalResponseService', () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
-  it('uses the shared production context window for final DeepSeek answers', async () => {
+  it('uses a compact final-response context window without weakening route/planner context', async () => {
     const fetchMock = jest.fn().mockResolvedValue({
       ok: true,
       json: async () => ({
@@ -932,13 +1247,83 @@ describe('SocialAgentFinalResponseService', () => {
       string,
       unknown
     >;
-    expect(userPayload.conversationHistory).toHaveLength(80);
+    expect(userPayload.conversationHistory).toHaveLength(40);
     expect(userPayload.conversationHistory).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ text: 'history-16' }),
+        expect.objectContaining({ text: 'history-56' }),
         expect.objectContaining({ text: 'history-95' }),
       ]),
     );
+    expect(userPayload.promptBudget).toMatchObject({
+      policy: 'token_budget_context_packer_v1',
+      conversationTurns: 40,
+      contextTurnLimit: 40,
+    });
+  });
+
+  it('compacts final-response prompt noise while preserving actionable context', async () => {
+    const fetchMock = jest.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        choices: [{ message: { content: '我会继续按你说的条件处理。' } }],
+      }),
+    });
+    global.fetch = fetchMock as never;
+    const service = new SocialAgentFinalResponseService(
+      makeConfig({
+        DEEPSEEK_API_KEY: 'key',
+        DEEPSEEK_BASE_URL: 'https://deepseek.test',
+        SOCIAL_AGENT_FINAL_RESPONSE_CONTEXT_TURN_LIMIT: '20',
+      }) as never,
+    );
+
+    await service.generate({
+      userMessage: '继续帮我找人',
+      intent: 'social_search',
+      conversationHistory: [
+        { role: 'assistant', text: '正在理解你的需求' },
+        { role: 'assistant', text: '正在筛选公开可发现的人' },
+        { role: 'user', text: '今天晚上青岛大学附近散步，找女生' },
+        { role: 'assistant', text: '我已经记住时间、地点和候选偏好。' },
+      ],
+      taskContext: {
+        taskSlots: {
+          time_window: { value: '今天晚上', state: 'completed' },
+          location_text: { value: '青岛大学附近', state: 'completed' },
+          activity: { value: '散步', state: 'completed' },
+          candidate_preference: { value: '女生优先', state: 'answered' },
+        },
+        traceId: 'trace-should-not-leak',
+        rawPayload: { huge: 'raw tool payload should not leak' },
+      },
+      toolResults: [
+        {
+          name: 'search_real_candidates',
+          success: true,
+          candidates: [{ id: 1, displayName: '陈砚' }],
+          traceId: 'trace-tool-should-not-leak',
+          rawResponse: { internal: true },
+        },
+      ],
+      fallbackReply: '我会继续。',
+    });
+
+    const request = fetchMock.mock.calls[0]?.[1] as { body?: string };
+    const body = JSON.parse(request.body ?? '{}') as {
+      messages: Array<{ role: string; content: string }>;
+    };
+    const serialized = body.messages[1].content;
+    const userPayload = JSON.parse(serialized) as Record<string, unknown>;
+    expect(userPayload.conversationHistory).toEqual([
+      { role: 'user', text: '今天晚上青岛大学附近散步，找女生' },
+      { role: 'assistant', text: '我已经记住时间、地点和候选偏好。' },
+    ]);
+    expect(serialized).toContain('青岛大学附近');
+    expect(serialized).toContain('女生优先');
+    expect(serialized).toContain('search_real_candidates');
+    expect(serialized).not.toContain('trace-should-not-leak');
+    expect(serialized).not.toContain('trace-tool-should-not-leak');
+    expect(serialized).not.toContain('raw tool payload should not leak');
   });
 
   it('defaults final natural replies to the quality model when no chat model env is set', async () => {

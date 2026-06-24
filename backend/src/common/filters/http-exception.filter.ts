@@ -201,7 +201,6 @@ export class HttpExceptionFilter implements ExceptionFilter {
       '/api/auth/profile',
       '/api/social-agent/chat/session',
       '/api/messages/conversations',
-      '/api/agent/skills/manifest',
     ].includes(this.safePath(request));
   }
 }

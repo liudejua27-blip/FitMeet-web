@@ -10,7 +10,7 @@ import {
 } from './social-agent-loop-state';
 import {
   buildSocialAgentConversationOptions,
-  buildSocialAgentMessageMetadata,
+  buildSocialAgentDelegateMessageOptions,
   buildSocialAgentMessageSendOptions,
 } from './social-agent-message-options';
 import { SocialAgentConfirmationPolicyService } from './social-agent-confirmation-policy.service';
@@ -21,7 +21,7 @@ import {
 import { SocialAgentToolInputParserService } from './social-agent-tool-input-parser.service';
 import { SocialAgentToolName } from './social-agent-tool.types';
 
-export type SocialAgentMessageToolInboxEvent = {
+export type SocialAgentMessageToolMessageEvent = {
   eventType: string;
   input: {
     conversationId?: string | null;
@@ -36,7 +36,7 @@ export type SocialAgentMessageToolResult = {
   output: unknown;
   loopUpdates?: Partial<SocialAgentLoopMemory>;
   sentMessage?: SocialAgentSentMessageMemoryInput;
-  inboxEvent?: SocialAgentMessageToolInboxEvent;
+  messageEvent?: SocialAgentMessageToolMessageEvent;
 };
 
 @Injectable()
@@ -98,7 +98,14 @@ export class SocialAgentMessageToolService {
       const conversation = await this.messages.startConversation(
         task.ownerUserId,
         targetUserId,
-        buildSocialAgentConversationOptions(task, stepId),
+        buildSocialAgentConversationOptions(task, stepId, {
+          targetUserId,
+          candidateRecordId: this.toolInput.number(input.candidateRecordId),
+          socialRequestId: this.toolInput.number(
+            input.socialRequestId ?? input.requestId,
+          ),
+          toolName: SocialAgentToolName.SendMessage,
+        }),
       );
       conversationId = conversation.conversationId;
     }
@@ -199,14 +206,12 @@ export class SocialAgentMessageToolService {
           conversationId,
           task.agentConnectionId,
           text,
-          {
-            ownerUserId: task.ownerUserId,
-            metadata: buildSocialAgentMessageMetadata(
-              task,
-              stepId,
-              input.metadata,
-            ),
-          },
+          buildSocialAgentDelegateMessageOptions(task, stepId, {
+            ...(this.toolInput.isRecord(input.metadata) ? input.metadata : {}),
+            targetUserId: targetForDedupe,
+            toolName: SocialAgentToolName.ReplyMessage,
+            textPreview: this.taskMemory.preview(text),
+          }),
         )
       : await this.messages.sendMessage(
           conversationId,
@@ -253,7 +258,7 @@ export class SocialAgentMessageToolService {
         toolName: SocialAgentToolName.ReplyMessage,
         stepId,
       },
-      inboxEvent: {
+      messageEvent: {
         eventType: 'social_agent.reply.sent',
         input: {
           conversationId,

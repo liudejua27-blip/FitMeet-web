@@ -417,9 +417,7 @@ describe('AgentApprovalService classify', () => {
         ]),
       );
       expect(result.reasons).not.toEqual(
-        expect.arrayContaining([
-          `open_requires_pending_${item.actionType}`,
-        ]),
+        expect.arrayContaining([`open_requires_pending_${item.actionType}`]),
       );
     }
   });
@@ -580,7 +578,7 @@ describe('AgentApprovalService Social Codex approval payload', () => {
           dryRunPreview: expect.objectContaining({
             title: '发布到发现前预览',
             actionType: 'publish_social_request',
-            dataBoundary: '会过滤联系方式、精确住址和敏感画像字段。',
+            dataBoundary: '会过滤联系方式、精确住址和私密资料字段。',
           }),
         }),
       }),

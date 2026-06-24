@@ -1,6 +1,5 @@
 import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
-import { NotificationsController } from './notifications.controller';
 import { NotificationsService } from './notifications.service';
 import { Notification, NotificationSchema } from './notification.schema';
 import { RealtimeModule } from '../realtime/realtime.module';
@@ -12,7 +11,7 @@ import { RealtimeModule } from '../realtime/realtime.module';
       { name: Notification.name, schema: NotificationSchema },
     ]),
   ],
-  controllers: [NotificationsController],
+  controllers: [],
   providers: [NotificationsService],
   exports: [NotificationsService],
 })

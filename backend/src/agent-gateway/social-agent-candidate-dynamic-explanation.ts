@@ -62,7 +62,9 @@ export function buildSocialMatchDynamicExplanation(
       : '',
     ...input.riskWarnings,
   ]).slice(0, 4);
-  const preferenceHistoryReasons = lifeGraphPreferenceHistoryReasons(input.lifeGraphSignals);
+  const preferenceHistoryReasons = lifeGraphPreferenceHistoryReasons(
+    input.lifeGraphSignals,
+  );
   const dynamicSignalReasons = uniqueStrings([
     behavior?.summary,
     ...(behavior?.insights ?? []),
@@ -136,7 +138,9 @@ function lifeGraphPreferenceHistoryReasons(
   ).slice(0, 2);
 }
 
-function lifeGraphPreferenceLabel(entry: LifeGraphPreferenceHistoryItemDto): string {
+function lifeGraphPreferenceLabel(
+  entry: LifeGraphPreferenceHistoryItemDto,
+): string {
   const key = `${entry.category}.${entry.fieldKey}`;
   const labels: Record<string, string> = {
     'lifestyle.availableTimes': '可约时间',

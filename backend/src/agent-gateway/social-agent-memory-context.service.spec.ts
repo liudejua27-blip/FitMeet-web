@@ -339,7 +339,10 @@ describe('SocialAgentMemoryContextService', () => {
     const context = service.build({
       task,
       conversationHistory: [
-        { role: 'user', text: '今天晚上，青岛大学，散步，找舞蹈相关公开标签的人' },
+        {
+          role: 'user',
+          text: '今天晚上，青岛大学，散步，找舞蹈相关公开标签的人',
+        },
         { role: 'assistant', text: '我已记录今晚、青岛大学附近、散步。' },
         { role: 'user', text: '不是周末，我刚才说的是今天晚上' },
       ],

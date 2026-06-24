@@ -260,6 +260,40 @@ describe('SocialAgentEventStore', () => {
     });
   });
 
+  it('orders same-run replay events by event timestamp before row insertion order', async () => {
+    const { service } = storeWithEvents([
+      event(1, 'run.started', {
+        runId: 'run-async',
+        eventId: 'run-async:1',
+        createdAt: '2026-06-17T00:00:00.001Z',
+      }),
+      event(2, 'visible_process.delta', {
+        runId: 'run-async',
+        eventId: 'run-async:2',
+        createdAt: '2026-06-17T00:00:00.002Z',
+      }),
+      event(5, 'tool.progress', {
+        runId: 'run-async',
+        eventId: 'run-async:5',
+        createdAt: '2026-06-17T00:00:00.005Z',
+      }),
+      event(4, 'tool.done', {
+        runId: 'run-async',
+        eventId: 'run-async:4',
+        createdAt: '2026-06-17T00:00:00.004Z',
+      }),
+      event(6, 'run.completed', {
+        runId: 'run-async',
+        eventId: 'run-async:6',
+        createdAt: '2026-06-17T00:00:00.006Z',
+      }),
+    ]);
+
+    const replay = await service.buildReplayPackage(44, 7);
+
+    expect(replay.events.map((item) => item.seq)).toEqual([1, 2, 4, 5, 6]);
+  });
+
   it('does not replay internal or debug events unless debug is requested', async () => {
     const { service } = storeWithEvents([
       event(1, 'run.started'),

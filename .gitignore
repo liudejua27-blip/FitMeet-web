@@ -35,6 +35,8 @@ scan_results*
 scan_results/
 ui-verify-out/
 **/ui-verify-out/
+.playwright-cli/
+output/
 playwright-report/
 test-results/
 qa-gsap-round2/

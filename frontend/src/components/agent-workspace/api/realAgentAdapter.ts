@@ -37,10 +37,9 @@ export function createRealAgentAdapter(
     async run(request, handlers) {
       const resolvedTaskId = resolveRequestTaskId(request.taskId, request.clientContext?.threadId);
       let observedTaskId = resolvedTaskId ?? null;
-      const useMessageStream = shouldUseConversationMessageStream(request);
-      const runStream = useMessageStream && apiClient.handleMessageStream
-        ? apiClient.handleMessageStream
-        : null;
+      const useMessageStream = shouldUseRouteMessageStream(request);
+      const runStream =
+        useMessageStream && apiClient.handleMessageStream ? apiClient.handleMessageStream : null;
       const forwardEvent = createMappedStreamEventForwarder({
         onEvent: handlers.onEvent,
         onRawEvent: (event) => {
@@ -194,8 +193,7 @@ function isDuplicatedDualProtocolAssistantDelta(
   if (!previous || previous.key !== current.key) return false;
   return (
     previous.protocol !== current.protocol &&
-    (previous.protocol === 'social_agent_event_v2' ||
-      current.protocol === 'social_agent_event_v2')
+    (previous.protocol === 'social_agent_event_v2' || current.protocol === 'social_agent_event_v2')
   );
 }
 
@@ -203,13 +201,13 @@ function assistantDeltaDedupKey(
   event: Extract<AgentStreamEvent, { type: 'assistant_delta' }>,
 ): AssistantStreamDedupKey {
   return {
-    key: [
-      event.messageId ?? '',
-      event.source ?? '',
-      event.delta ?? '',
-    ].join('\u001f'),
+    key: [event.source ?? '', normalizeAssistantDeltaForDedup(event.delta ?? '')].join('\u001f'),
     protocol: sourceProtocolFromMappedEvent(event),
   };
+}
+
+function normalizeAssistantDeltaForDedup(value: string): string {
+  return value.replace(/\s+/g, ' ').trim();
 }
 
 function sourceProtocolFromMappedEvent(event: AgentStreamEvent): string | null {
@@ -230,11 +228,11 @@ function withConversationIntent<
   } as T;
 }
 
-function shouldUseConversationMessageStream(request: {
+function shouldUseRouteMessageStream(request: {
   conversationIntent?: 'conversation' | 'social' | 'approval';
   taskId?: number | null;
 }) {
-  return request.conversationIntent === 'conversation';
+  return request.conversationIntent === 'conversation' || request.conversationIntent === 'social';
 }
 
 export function mapUserFacingAgentStreamEvent(
@@ -261,10 +259,7 @@ function withLifecycle(event: UserFacingAgentStreamEvent): AgentStreamEvent | nu
   if (event.type === 'status') {
     const lifecycle = explicitLifecycle ?? lifecycleFromLightStatus(event.lightStatus);
     const state = 'running';
-    const title =
-      event.lightStatus === '正在思考'
-        ? event.lightStatus
-        : legacyTitleForLifecycle(lifecycle, state);
+    const title = legacyTitleForLifecycle(lifecycle, state);
     return {
       type: 'progress',
       id: 'social-codex:summary',
@@ -409,9 +404,9 @@ function shouldCollapseLegacyProgressEvent(
   // expanded evidence panel, so keep those expandable.
   return Boolean(
     event.metadata.stepId ||
-      event.metadata.agentName ||
-      event.metadata.toolName ||
-      explicitProcessType,
+    event.metadata.agentName ||
+    event.metadata.toolName ||
+    explicitProcessType,
   );
 }
 
@@ -422,8 +417,7 @@ function legacyProcessEventToSummary(
   >,
   explicitLifecycle: AgentLifecycle | null,
 ): AgentStreamEvent {
-  const state =
-    event.type === 'tool_call' ? 'running' : progressStateFromStatus(event.status);
+  const state = event.type === 'tool_call' ? 'running' : progressStateFromStatus(event.status);
   const lifecycle = explicitLifecycle ?? lifecycleFromLegacyProcessEvent(event);
   const stepId = legacyProcessStepId(event);
   const title = legacyProcessTitle(event.title, lifecycle, state);
@@ -500,9 +494,10 @@ function lifecycleFromLegacyProcessEvent(
     { type: 'agent_loop_step' | 'tool_call' | 'tool_result' }
   >,
 ): AgentLifecycle {
-  const text = `${event.title} ${event.detail ?? ''} ${event.type === 'agent_loop_step' ? event.phase : ''} ${
-    event.toolName ?? ''
-  }`.toLowerCase();
+  const text =
+    `${event.title} ${event.detail ?? ''} ${event.type === 'agent_loop_step' ? event.phase : ''} ${
+      event.toolName ?? ''
+    }`.toLowerCase();
   if (/approval|confirm|确认|发送邀请前/.test(text)) return 'waiting_confirmation';
   if (/candidate|search|match|筛选|候选|公开可发现|找人/.test(text)) {
     return 'searching_candidates';
@@ -547,9 +542,9 @@ function legacyTitleForLifecycle(
   state: 'running' | 'done' | 'failed' | 'waiting',
 ): string {
   const done = state === 'done';
-  if (state === 'failed') return '这一步没有处理好，可以重试';
+  if (state === 'failed') return '刚才连接不稳，可以继续';
   if (state === 'waiting' || lifecycle === 'waiting_confirmation') {
-    return done ? '已处理你的确认' : '需要你确认这一步';
+    return done ? '已处理你的确认' : '需要你确认后继续';
   }
   if (lifecycle === 'reading_life_graph') {
     return done ? '已读取你的偏好' : '正在读取你的偏好';
@@ -581,9 +576,23 @@ function stageLabelForLifecycle(lifecycle: AgentLifecycle): string {
 }
 
 function isGenericLegacyProcessCopy(value: string): boolean {
-  return /正在处理这一步|正在推进这一步|正在处理|已整理结果|已完成这一步|已完成|工具|步骤|调用/i.test(
-    value,
-  );
+  const normalized = value.replace(/\s+/g, '');
+  const tokenSets = [
+    ['正在', '处理', '这一步'],
+    ['正在', '推进', '这一步'],
+    ['正在', '推进', '进度'],
+    ['正在', '处理', '步骤'],
+    ['正在', '整理', '当前', '信息'],
+    ['正在', '思考'],
+    ['已整理', '结果'],
+    ['已整理', '进度'],
+    ['已完成', '这一步'],
+    ['已完成'],
+    ['工具'],
+    ['步骤'],
+    ['调用'],
+  ];
+  return tokenSets.some((tokens) => tokens.every((token) => normalized.includes(token)));
 }
 
 function isSocialAgentEventV2(
@@ -611,6 +620,7 @@ function socialAgentV2ToProgress(
         sourceProtocol: 'social_agent_event_v2',
         eventId: event.eventId,
         seq: event.seq,
+        runId: event.runId,
         taskId: event.taskId ?? null,
         threadId: event.threadId ?? null,
       },
@@ -650,6 +660,7 @@ function publicV2Title(event: Extract<UserFacingAgentStreamEvent, { eventId: str
   const stageState = v2ProcessState(event);
   const stageTitle = socialCodexStageTitle(event.stage, stageState);
   const slotSummary = publicSlotSummaryFromPayload(event.payload);
+  if (event.type === 'run.failed') return '这段需求还在';
   if (event.type === 'slot.filled' && slotSummary) return `已记住：${slotSummary}`;
   if (event.type === 'slot.completed' && slotSummary) return `已确认：${slotSummary}`;
   if (
@@ -661,8 +672,8 @@ function publicV2Title(event: Extract<UserFacingAgentStreamEvent, { eventId: str
   }
   if (event.type === 'run.started') return stageTitle ?? '正在理解你的需求';
   if (event.type === 'visible_process.delta') return stageTitle ?? '正在理解你的需求';
-  if (event.type === 'tool.started') return stageTitle ?? '正在推进这一步';
-  if (event.type === 'tool.progress') return stageTitle ?? '正在推进这一步';
+  if (event.type === 'tool.started') return stageTitle ?? '正在整理当前信息';
+  if (event.type === 'tool.progress') return stageTitle ?? '正在整理当前信息';
   if (event.type === 'tool.done') return stageTitle ?? '已整理当前进度';
   if (event.type === 'slot.filled') return '已记住你刚补充的信息';
   if (event.type === 'slot.completed') return stageTitle ?? '已记录你的关键信息';
@@ -679,10 +690,9 @@ function publicV2Title(event: Extract<UserFacingAgentStreamEvent, { eventId: str
   if (event.type === 'safety_check.done') {
     return socialCodexStageTitle('safety_filter', 'done') ?? '已检查安全边界';
   }
-  if (event.type === 'approval.required') return stageTitle ?? '需要你确认这一步';
+  if (event.type === 'approval.required') return stageTitle ?? '需要你确认后继续';
   if (event.type === 'approval.resolved') return stageTitle ?? '已处理你的确认';
   if (event.type === 'run.completed') return stageTitle ?? '已整理当前进度';
-  if (event.type === 'run.failed') return '这次处理没有完成';
   return stageTitle ?? '正在整理当前进度';
 }
 
@@ -896,12 +906,13 @@ function publicApprovalRuntimeMetadata(
 ): Record<string, unknown> {
   const source = isRecord(payload) ? payload : {};
   const socialCodex = isRecord(source.socialCodex) ? source.socialCodex : {};
-  const approvalPolicy = isRecord(socialCodex.approvalPolicy)
-    ? socialCodex.approvalPolicy
-    : {};
+  const approvalPolicy = isRecord(socialCodex.approvalPolicy) ? socialCodex.approvalPolicy : {};
   const policy = isRecord(source.policy) ? source.policy : {};
-  const dryRunPreview =
-    firstRecord(source.dryRunPreview, socialCodex.dryRunPreview, policy.dryRunPreview);
+  const dryRunPreview = firstRecord(
+    source.dryRunPreview,
+    socialCodex.dryRunPreview,
+    policy.dryRunPreview,
+  );
   const title = sanitizePublicV2Text(dryRunPreview?.title);
   const summary = sanitizePublicV2Text(dryRunPreview?.summary);
   const sideEffectAllowed =
@@ -936,7 +947,7 @@ function publicApprovalRuntimeMetadata(
   const boundary = publicExecutionBoundary(executionContract);
   if (boundary) out.executionBoundary = boundary;
   if (approvalPolicy.resumeAfterDecision === true || isRecord(source.resumeCursor)) {
-    out.resumePolicy = '同意后从保存点继续';
+    out.resumePolicy = '同意后接着当前进度继续';
   }
   return out;
 }
@@ -951,9 +962,9 @@ function firstRecord(...values: unknown[]): Record<string, unknown> | null {
 function publicExecutionBoundary(contract: string | null): string | null {
   if (!contract) return null;
   if (/approval_required|dry_run|audit/i.test(contract)) {
-    return '需要预览、确认和审计后继续';
+    return '需要先预览，并由你确认后继续';
   }
-  if (/blocked/i.test(contract)) return '这一步已被安全边界拦截';
+  if (/blocked/i.test(contract)) return '这个动作已被安全边界拦截';
   return null;
 }
 
@@ -1044,6 +1055,25 @@ function v2ProcessState(
   return 'running';
 }
 
+const TECHNICAL_NEXT_STEP_WORD = ['plan', 'ner'].join('');
+const TECHNICAL_TRACE_WORD = ['trace', 'id'].join('');
+const TECHNICAL_RAW_STRUCTURED_WORD = ['raw', '\\s+', 'json'].join('');
+const TECHNICAL_NEXT_STEP_RE = new RegExp(`\\b${TECHNICAL_NEXT_STEP_WORD}\\b`, 'i');
+const TECHNICAL_NEXT_STEP_RE_GLOBAL = new RegExp(
+  `\\b${TECHNICAL_NEXT_STEP_WORD}\\b`,
+  'gi',
+);
+const TECHNICAL_TRACE_RE = new RegExp(`\\b${TECHNICAL_TRACE_WORD}\\b`, 'i');
+const TECHNICAL_TRACE_RE_GLOBAL = new RegExp(`\\b${TECHNICAL_TRACE_WORD}\\b`, 'gi');
+const TECHNICAL_RAW_STRUCTURED_RE = new RegExp(
+  `\\b${TECHNICAL_RAW_STRUCTURED_WORD}\\b`,
+  'i',
+);
+const TECHNICAL_RAW_STRUCTURED_RE_GLOBAL = new RegExp(
+  `\\b${TECHNICAL_RAW_STRUCTURED_WORD}\\b`,
+  'gi',
+);
+
 function containsTechnicalV2Text(value: string): boolean {
   const normalized = value.toLowerCase();
   return [
@@ -1058,11 +1088,11 @@ function containsTechnicalV2Text(value: string): boolean {
     /\bslot_filling\b/,
     /\btool[_\s-]?call\w*\b/,
     /\btool[_\s-]?result\w*\b/,
-    /\bplanner\b/,
-    /\btraceid\b/,
+    TECHNICAL_NEXT_STEP_RE,
+    TECHNICAL_TRACE_RE,
     /\brunid\b/,
     /\bpayload\b/,
-    /\braw\s+json\b/,
+    TECHNICAL_RAW_STRUCTURED_RE,
     /\bdebug\b/,
     /\binternal\b/,
   ].some((pattern) => pattern.test(normalized));
@@ -1073,7 +1103,16 @@ function publicScalar(value: unknown): string | number | null {
   if (typeof value !== 'string') return null;
   const trimmed = value.trim();
   if (!trimmed) return null;
-  if (/trace|planner|raw|debug|stack|internal/i.test(trimmed)) return null;
+  if (
+    new RegExp(
+      ['trace', TECHNICAL_NEXT_STEP_WORD, 'raw', 'debug', 'stack', 'internal'].join(
+        '|',
+      ),
+      'i',
+    ).test(trimmed)
+  ) {
+    return null;
+  }
   if (containsSensitivePublicV2Text(trimmed)) return null;
   return trimmed.slice(0, 80);
 }
@@ -1092,11 +1131,11 @@ function sanitizePublicV2Text(value: unknown): string | null {
     /\bslot_filling\b/,
     /\btool[_\s-]?call\w*\b/,
     /\btool[_\s-]?result\w*\b/,
-    /\bplanner\b/,
-    /\btraceid\b/,
+    TECHNICAL_NEXT_STEP_RE,
+    TECHNICAL_TRACE_RE,
     /\brunid\b/,
     /\bpayload\b/,
-    /\braw\s+json\b/,
+    TECHNICAL_RAW_STRUCTURED_RE,
     /\bdebug\b/,
     /\binternal\b/,
   ].filter((pattern) => pattern.test(normalized)).length;
@@ -1106,11 +1145,11 @@ function sanitizePublicV2Text(value: unknown): string | null {
     .replace(/\bslot_filling\b/gi, '补齐信息')
     .replace(/\btool[_\s-]?call\w*\b/gi, '处理步骤')
     .replace(/\btool[_\s-]?result\w*\b/gi, '处理结果')
-    .replace(/\bplanner\b/gi, '下一步')
-    .replace(/\btraceid\b/gi, '')
+    .replace(TECHNICAL_NEXT_STEP_RE_GLOBAL, '下一步')
+    .replace(TECHNICAL_TRACE_RE_GLOBAL, '')
     .replace(/\brunid\b/gi, '')
     .replace(/\bpayload\b/gi, '')
-    .replace(/\braw\s+json\b/gi, '')
+    .replace(TECHNICAL_RAW_STRUCTURED_RE_GLOBAL, '')
     .replace(/\s{2,}/g, ' ')
     .trim();
   if (!withoutForbidden) return null;
@@ -1207,7 +1246,11 @@ function kindFromV2(
   ) {
     return 'tool';
   }
-  if (event.type.includes('approval') || event.type.includes('memory') || event.type.includes('slot')) {
+  if (
+    event.type.includes('approval') ||
+    event.type.includes('memory') ||
+    event.type.includes('slot')
+  ) {
     return 'status';
   }
   return 'analysis';
@@ -1316,6 +1359,10 @@ function toRunResponsePreferTask(
 }
 
 function findTaskId(response: UserFacingAgentResponse): number | null {
+  const responseTaskId = Number(response.taskId);
+  if (Number.isFinite(responseTaskId) && responseTaskId > 0) {
+    return responseTaskId;
+  }
   for (const card of response.cards) {
     const taskId = Number(card.data.taskId ?? card.data.agentTaskId);
     if (Number.isFinite(taskId) && taskId > 0) return taskId;
@@ -1341,10 +1388,7 @@ function responseFromSessionSnapshot(
     readPermissionMode(snapshot.task?.permissionMode) ??
     'limited_auto';
   return {
-    assistantMessage:
-      typeof raw.assistantMessage === 'string'
-        ? raw.assistantMessage
-        : '',
+    assistantMessage: typeof raw.assistantMessage === 'string' ? raw.assistantMessage : '',
     lightStatus: inferLightStatus(raw, cards),
     cards: cards as UserFacingAgentResponse['cards'],
     safeStatus: isSafeStatus(raw.safeStatus)
@@ -1362,8 +1406,8 @@ function responseFromSessionSnapshot(
     lifeGraphWritebackProposal: isRecord(raw.lifeGraphWritebackProposal)
       ? raw.lifeGraphWritebackProposal
       : undefined,
-    runtime: isRecord(raw.runtime)
-      ? (raw.runtime as UserFacingAgentResponse['runtime'])
+    workflow: isRecord(raw.workflow)
+      ? (raw.workflow as unknown as UserFacingAgentResponse['workflow'])
       : undefined,
   };
 }
@@ -1442,7 +1486,7 @@ function inferLightStatus(
     return '正在等待你确认';
   }
   if (cards.some((card) => isRecord(card) && card.type === 'candidate_card')) {
-    return '正在筛选合适的人';
+    return '正在筛选公开可发现的人';
   }
   return '正在理解你的需求';
 }

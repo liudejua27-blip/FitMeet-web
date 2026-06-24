@@ -1,6 +1,7 @@
 import {
   DEFAULT_DEEPSEEK_MODEL,
   callDeepSeekChatCompletion,
+  callDeepSeekChatCompletionWithUsage,
   resolveDeepSeekModel,
 } from './deepseek.util';
 
@@ -81,6 +82,76 @@ describe('callDeepSeekChatCompletion', () => {
         { role: 'system', content: '输出 JSON。' },
         { role: 'user', content: '你好' },
       ],
+    });
+  });
+
+  it('returns DeepSeek usage and cache-hit token metrics for non-streaming calls', async () => {
+    global.fetch = jest.fn(() =>
+      Promise.resolve({
+        ok: true,
+        json: async () => ({
+          system_fingerprint: 'fp-cache-a',
+          usage: {
+            prompt_tokens: 120,
+            prompt_cache_hit_tokens: 80,
+            prompt_cache_miss_tokens: 40,
+            completion_tokens: 16,
+            completion_tokens_details: { reasoning_tokens: 5 },
+          },
+          choices: [{ message: { content: '带 usage 的结果' } }],
+        }),
+      } as Response),
+    ) as unknown as jest.MockedFunction<typeof fetch>;
+
+    await expect(
+      callDeepSeekChatCompletionWithUsage({
+        apiKey: 'test-key',
+        model: 'deepseek-v4-pro',
+        timeoutMs: 12_000,
+        messages: [{ role: 'user', content: '你好' }],
+      }),
+    ).resolves.toEqual({
+      content: '带 usage 的结果',
+      systemFingerprint: 'fp-cache-a',
+      usage: {
+        promptTokens: 120,
+        promptCacheHitTokens: 80,
+        promptCacheMissTokens: 40,
+        completionTokens: 16,
+        reasoningTokens: 5,
+      },
+    });
+  });
+
+  it('reads OpenAI-compatible cached token details when DeepSeek cache fields are absent', async () => {
+    global.fetch = jest.fn(() =>
+      Promise.resolve({
+        ok: true,
+        json: async () => ({
+          usage: {
+            prompt_tokens: 90,
+            prompt_tokens_details: { cached_tokens: 42 },
+            completion_tokens: 9,
+            reasoning_tokens: 3,
+          },
+          choices: [{ message: { content: '兼容 usage 的结果' } }],
+        }),
+      } as Response),
+    ) as unknown as jest.MockedFunction<typeof fetch>;
+
+    const result = await callDeepSeekChatCompletionWithUsage({
+      apiKey: 'test-key',
+      model: 'deepseek-v4-pro',
+      timeoutMs: 12_000,
+      messages: [{ role: 'user', content: '你好' }],
+    });
+
+    expect(result.usage).toEqual({
+      promptTokens: 90,
+      promptCacheHitTokens: 42,
+      promptCacheMissTokens: null,
+      completionTokens: 9,
+      reasoningTokens: 3,
     });
   });
 

@@ -158,10 +158,7 @@ export class UploadsService implements OnModuleInit {
 
       if (!shouldModerateOssObject) {
         // Check the exact image bytes that will be stored.
-        await this.moderationService.checkImage(
-          processedBuffer,
-          file.originalname,
-        );
+        this.moderationService.checkImage(processedBuffer, file.originalname);
       }
 
       // 3. Upload to configured object storage

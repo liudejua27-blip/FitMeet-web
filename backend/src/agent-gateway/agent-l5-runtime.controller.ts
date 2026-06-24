@@ -22,6 +22,7 @@ import { AgentObservabilityService } from './agent-observability.service';
 import { SubagentWorkerQueueService } from './subagent-worker-queue.service';
 import { LifeGraphComplianceService } from '../life-graph/life-graph-compliance.service';
 import { SocialAgentMessageFeedbackService } from './social-agent-message-feedback.service';
+import { SocialAgentMetricsService } from './social-agent-metrics.service';
 
 type UserSatisfactionBody = {
   score?: number;
@@ -44,6 +45,7 @@ export class AgentL5RuntimeController {
     private readonly subagentWorkerQueue: SubagentWorkerQueueService,
     private readonly lifeGraphCompliance: LifeGraphComplianceService,
     private readonly messageFeedback: SocialAgentMessageFeedbackService,
+    private readonly socialAgentMetrics: SocialAgentMetricsService,
   ) {}
 
   @Get('dashboard')
@@ -65,6 +67,7 @@ export class AgentL5RuntimeController {
       Number(limit),
     );
     const observability = this.observability.snapshot();
+    const socialAgentMetrics = this.socialAgentMetrics.snapshot();
     const messageFeedback = await this.messageFeedback.listRecent(
       Number(limit),
     );
@@ -96,6 +99,7 @@ export class AgentL5RuntimeController {
       workerHeartbeats,
       workerFailures,
       observability,
+      socialAgentMetrics,
     };
   }
 

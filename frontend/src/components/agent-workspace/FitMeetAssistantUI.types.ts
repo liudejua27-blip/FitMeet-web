@@ -15,7 +15,7 @@ export type FitMeetAssistantMessage = {
   result?: UserFacingAgentResponse | null;
   taskId?: number | null;
   runId?: string | null;
-  traceId?: string | null;
+  messageId?: string | null;
   feedback?: 'positive' | 'negative' | null;
   feedbackStatus?: 'submitting' | 'submitted' | 'failed' | null;
   feedbackErrorValue?: 'positive' | 'negative' | null;

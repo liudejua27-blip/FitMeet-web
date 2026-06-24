@@ -125,14 +125,14 @@ export class SceneRiskPolicyService {
       riskLevel = 'critical';
       blockedActions.push('auto_execute', 'precise_location');
       safetyPrompts.push(
-        '你的 Life Graph 不允许共享精确定位，Agent 不能自动发送位置。',
+        '你的安全边界不允许共享精确定位，Agent 不能自动发送位置。',
       );
     }
 
     if (safetySignals.publicPlaceOnly && actionType === 'offline_meeting') {
       riskLevel = this.maxRisk(riskLevel, 'high');
       safetyPrompts.push(
-        '你的 Life Graph 设置了公共场所优先，第一次见面必须选择公开、人多、好离开的地点。',
+        '你的安全边界设置了公共场所优先，第一次见面必须选择公开、人多、好离开的地点。',
       );
     }
 
@@ -146,7 +146,7 @@ export class SceneRiskPolicyService {
     ) {
       riskLevel = this.maxRisk(riskLevel, 'high');
       safetyPrompts.push(
-        '你的 Life Graph 显示不接受夜间活动，夜间约见需要高风险提醒并建议改到白天。',
+        '你的安全边界显示不接受夜间活动，夜间约见需要高风险提醒并建议改到白天。',
       );
     }
 
@@ -156,7 +156,7 @@ export class SceneRiskPolicyService {
     ) {
       riskLevel = this.maxRisk(riskLevel, 'medium');
       safetyPrompts.push(
-        '你的 Life Graph 要求严格确认，所有关键社交动作都需要进入待确认。',
+        '你的安全设置要求严格确认，所有关键社交动作都需要先确认。',
       );
     }
 
@@ -265,7 +265,12 @@ export class SceneRiskPolicyService {
       return 'contact_exchange';
     if (/offline|meet|见面|线下/.test(raw)) return 'offline_meeting';
     if (/add_friend|friend|connect|加好友|好友/.test(raw)) return 'add_friend';
-    if (/send_message|message|发消息|私信|聊天/.test(raw))
+    if (this.isDraftOnlyOpenerAction(raw)) return 'generate_opener';
+    if (
+      /send_message|confirm_send|send_invite|message|invite|发消息|私信|聊天|发送|邀请/.test(
+        raw,
+      )
+    )
       return 'send_message';
     if (/create_workout|workout|约练/.test(raw)) return 'create_workout';
     if (/create_activity|invite_activity|join_activity|活动|报名/.test(raw)) {
@@ -275,6 +280,18 @@ export class SceneRiskPolicyService {
     if (/search|match|候选|搜索|匹配/.test(raw)) return 'search_candidates';
     if (/profile|画像|整理/.test(raw)) return 'profile';
     return 'chat';
+  }
+
+  private isDraftOnlyOpenerAction(text: string): boolean {
+    return (
+      /draft|opener|开场白|草稿/.test(text) &&
+      /不会(?:自动)?发送|不(?:会)?发送|未发送|只(?:会)?生成|仅(?:会)?生成|仅.*草稿|只.*草稿/.test(
+        text,
+      ) &&
+      !/确认.*发送|发送邀请|发消息|私信|邀请|send_invite|confirm_send|send_message|message|invite/.test(
+        text,
+      )
+    );
   }
 
   private baseRisk(actionType: SceneActionType): SceneRiskLevel {

@@ -148,6 +148,9 @@ function makeHarness(task = makeTask()) {
       suggestions: [],
     }),
   };
+  const metrics = {
+    recordDeterministicRouteReply: jest.fn(),
+  };
   const service = new SocialAgentRecommendationResultService(
     taskRepo as never,
     eventRepo as never,
@@ -156,6 +159,8 @@ function makeHarness(task = makeTask()) {
     alphaAgent as never,
     tonePolicy as never,
     agentQuality as never,
+    undefined,
+    metrics as never,
   );
   return {
     agentQuality,
@@ -168,6 +173,7 @@ function makeHarness(task = makeTask()) {
     task,
     taskRepo,
     tonePolicy,
+    metrics,
   };
 }
 
@@ -248,23 +254,9 @@ describe('SocialAgentRecommendationResultService', () => {
       ]),
     );
     expect(lifeGraph.getUnifiedMatchSignals).toHaveBeenCalledWith(7);
-    expect(finalResponses.generate).toHaveBeenCalledWith(
-      expect.objectContaining({
-        intent: 'candidate_search',
-        memoryContext: { memory: 'context' },
-        toolResults: [
-          expect.objectContaining({
-            tool: 'search_real_candidates',
-            candidateCount: 1,
-          }),
-        ],
-      }),
-      expect.objectContaining({
-        onDelta: expect.any(Function),
-      }),
-    );
+    expect(finalResponses.generate).not.toHaveBeenCalled();
     expect(tonePolicy.safeAssistantMessage).toHaveBeenCalledWith(
-      '最终推荐回复',
+      '找到 1 位候选人',
       '找到 1 位候选人',
     );
     expect(alphaAgent.buildResultCards).toHaveBeenCalledWith(
@@ -280,16 +272,16 @@ describe('SocialAgentRecommendationResultService', () => {
     );
     expect(agentQuality.evaluate).toHaveBeenCalledWith(
       expect.objectContaining({
-        assistantMessage: '最终推荐回复',
+        assistantMessage: '找到 1 位候选人',
         candidates: [expect.objectContaining({ userId: 22 })],
       }),
     );
     expect(result).toMatchObject({
       taskId: 101,
       status: AgentTaskStatus.AwaitingConfirmation,
-      assistantMessage: '最终推荐回复',
+      assistantMessage: '找到 1 位候选人',
       candidates: [expect.objectContaining({ userId: 22 })],
-      approvalRequiredActions: expect.any(Array),
+      approvalRequiredActions: [],
       cards: [expect.objectContaining({ type: 'candidate_card' })],
       traceId: 'trace-1',
     });
@@ -299,6 +291,60 @@ describe('SocialAgentRecommendationResultService', () => {
         result: expect.objectContaining({ taskId: 101 }),
       }),
     ]);
+  });
+
+  it('streams recommendation text with a run-scoped assistant message id', async () => {
+    const { finalResponses, service, task } = makeHarness();
+    finalResponses.generate.mockImplementationOnce(
+      async (
+        _input: unknown,
+        options: { onDelta?: (delta: string) => void },
+      ) => {
+        options.onDelta?.('最终');
+        options.onDelta?.('推荐');
+        return '最终推荐回复';
+      },
+    );
+    const emitted: Array<Record<string, unknown>> = [];
+
+    const result = await service.completeRecommendationResult({
+      ownerUserId: 7,
+      task,
+      visibleSteps: [],
+      draft: makeDraft(),
+      candidates: [makeCandidate()],
+      searchResult: makeSearchResult(),
+      statusReason: 'recommendations_ready_waiting_user_confirmation',
+      runId: 'run-abc',
+      emit: (event) => {
+        emitted.push(event as unknown as Record<string, unknown>);
+      },
+      buildMemoryContext: () => ({}),
+      toEventDto: (event) => ({ id: event.id }),
+    });
+
+    expect(result.runtime).toMatchObject({
+      runId: 'run-abc',
+      messageId: 'agent-message:101:run-abc',
+    });
+    expect(emitted).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: 'result',
+          result: expect.objectContaining({
+            runtime: expect.objectContaining({
+              messageId: 'agent-message:101:run-abc',
+            }),
+          }),
+        }),
+      ]),
+    );
+    expect(emitted.some((event) => event.type === 'assistant_delta')).toBe(
+      false,
+    );
+    expect(emitted.some((event) => event.type === 'assistant_done')).toBe(
+      false,
+    );
   });
 
   it('uses hydrated taskContext for final recommendation LLM replies', async () => {
@@ -349,14 +395,7 @@ describe('SocialAgentRecommendationResultService', () => {
       toEventDto: (event) => ({ id: event.id }),
     });
 
-    expect(finalResponses.generate).toHaveBeenCalledWith(
-      expect.objectContaining({
-        conversationHistory: taskContext.conversationHistory,
-        memoryContext: { memory: 'hydrated' },
-        taskContext,
-      }),
-      expect.any(Object),
-    );
+    expect(finalResponses.generate).not.toHaveBeenCalled();
   });
 
   it('uses the recommendation fallback when final response service is absent', async () => {
@@ -428,8 +467,8 @@ describe('SocialAgentRecommendationResultService', () => {
     });
   });
 
-  it('constrains final response generation with the product empty-candidate fallback', async () => {
-    const { finalResponses, service, task } = makeHarness();
+  it('skips final response generation for empty candidate results', async () => {
+    const { finalResponses, metrics, service, task } = makeHarness();
     const draft = {
       ...makeDraft(),
       activityType: 'walking',
@@ -456,18 +495,53 @@ describe('SocialAgentRecommendationResultService', () => {
       toEventDto: (event) => ({ id: event.id }),
     });
 
-    const [request] = finalResponses.generate.mock.calls[0];
-    expect(request).toEqual(
-      expect.objectContaining({
-        fallbackReply: expect.stringContaining('真实、公开可发现'),
-        responseGoal:
-          '自然说明当前没有找到真实候选人，并给出放宽条件、补充信息或发布需求的下一步。',
-      }),
+    expect(finalResponses.generate).not.toHaveBeenCalled();
+    expect(metrics.recordDeterministicRouteReply).toHaveBeenCalledWith(
+      'candidate_search.empty_candidates',
+      { estimatedAvoidedLlmCalls: 1 },
     );
-    expect(request.fallbackReply).toContain('周末下午');
-    expect(request.fallbackReply).toContain('崂山区');
-    expect(request.fallbackReply).not.toContain('pool=0');
-    expect(request.fallbackReply).not.toContain('debug');
-    expect(request.fallbackReply).not.toContain('raw_tool_output');
+  });
+
+  it('returns a deterministic product fallback for empty candidate results', async () => {
+    const { finalResponses, service, task } = makeHarness();
+    const draft = {
+      ...makeDraft(),
+      activityType: 'walking',
+      metadata: {
+        timePreference: '周末下午',
+        locationPreference: '崂山区',
+      },
+    } as SocialAgentRequestDraft;
+
+    const result = await service.completeRecommendationResult({
+      ownerUserId: 7,
+      task,
+      visibleSteps: [],
+      draft,
+      candidates: [],
+      searchResult: makeSearchResult({
+        candidates: [],
+        emptyReason: 'no_real_candidates',
+        message: 'no_real_candidates: pool=0 debug raw_tool_output',
+        debugReasons: { accepted: 0 } as never,
+      }),
+      statusReason: 'empty_candidates_waiting_user_refinement',
+      buildMemoryContext: () => ({}),
+      toEventDto: (event) => ({ id: event.id }),
+    });
+
+    expect(finalResponses.generate).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      assistantMessageSource: 'deterministic_route',
+      emptyReason: 'no_real_candidates',
+      candidates: [],
+    });
+    expect(result.assistantMessage).toContain('真实、公开可发现');
+    expect(result.assistantMessage).toContain('周末下午');
+    expect(result.assistantMessage).toContain('崂山区');
+    expect(result.assistantMessage).toContain('发布到发现');
+    expect(result.assistantMessage).not.toContain('pool=0');
+    expect(result.assistantMessage).not.toContain('debug');
+    expect(result.assistantMessage).not.toContain('raw_tool_output');
   });
 });

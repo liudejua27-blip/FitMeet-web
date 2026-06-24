@@ -9,7 +9,7 @@ import {
   forwardRef,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, Repository, In } from 'typeorm';
+import { DataSource, Repository, In, SelectQueryBuilder } from 'typeorm';
 import * as bcrypt from 'bcrypt';
 import * as crypto from 'crypto';
 import {
@@ -104,10 +104,6 @@ import {
   scorePublicIntentSuspicion,
 } from './public-social-intent.helpers';
 import {
-  buildSocialSkillsManifest,
-  buildSocialSkillsOpenApi,
-} from './agent-social-skills.contract';
-import {
   buildLegacyAgentActionLogInput,
   numberOrNull,
 } from './agent-gateway-legacy-log.mapper';
@@ -116,7 +112,11 @@ import {
   buildExecutedSendMessageActionLog,
   buildPendingApprovalSendMessageActionLog,
 } from './agent-gateway-message-log.mapper';
-import { buildPublicSocialCandidates } from './public-social-candidate.presenter';
+import {
+  buildPublicSocialCandidates,
+  serializePublicSocialCandidates,
+  type PublicSocialCandidateCard,
+} from './public-social-candidate.presenter';
 import {
   normalizePublicSocialIntentListFilters,
   type PublicSocialIntentListFilters,
@@ -359,7 +359,7 @@ export class AgentGatewayService {
     const existing = await this.connRepo.findOne({
       where: {
         userId,
-        agentName: KnownAgent.OpenClaw,
+        agentName: KnownAgent.FitMeetAgent,
         status: ConnectionStatus.Active,
       },
       order: { createdAt: 'DESC' },
@@ -399,8 +399,8 @@ export class AgentGatewayService {
 
         const conn = connRepo.create({
           userId,
-          agentName: KnownAgent.OpenClaw,
-          agentDisplayName: 'OpenClaw Personal Token',
+          agentName: KnownAgent.FitMeetAgent,
+          agentDisplayName: 'FitMeet Agent',
           agentWebhookUrl: null,
           permissionLevel: AgentPermissionLevel.Open,
           dailyActionLimit: 500,
@@ -413,7 +413,7 @@ export class AgentGatewayService {
         const savedDelegateProfile =
           await this.ensureAiDelegateProfileForPersonalToken(
             userId,
-            user.name || 'OpenClaw',
+            user.name || 'FitMeet Agent',
             delegateProfileRepo,
           );
         await this.grantConnectionPermissions(savedConn.id, actions, permRepo);
@@ -456,7 +456,7 @@ export class AgentGatewayService {
       grantedActions: actions,
       mode: 'authorized',
       message:
-        'Store this token in OpenClaw as FITMEET_AGENT_TOKEN. It will not be shown again.',
+        'Store this token securely as FITMEET_AGENT_TOKEN. It will not be shown again.',
     };
   }
 
@@ -465,7 +465,7 @@ export class AgentGatewayService {
     if (!user) throw new NotFoundException('User not found');
 
     const connections = await this.findConnectionSummaries(userId, {
-      agentName: KnownAgent.OpenClaw,
+      agentName: KnownAgent.FitMeetAgent,
       status: ConnectionStatus.Active,
       take: 5,
     });
@@ -534,14 +534,14 @@ export class AgentGatewayService {
     };
   }
 
-  async getOpenClawSetupStatus(
+  async getFitMeetAgentSetupStatus(
     userId: number,
     subconsciousLoopStatus?: Record<string, unknown>,
   ) {
     const connections = await this.connRepo.find({
       where: {
         userId,
-        agentName: KnownAgent.OpenClaw,
+        agentName: KnownAgent.FitMeetAgent,
         status: ConnectionStatus.Active,
       },
       order: { updatedAt: 'DESC' },
@@ -720,8 +720,8 @@ export class AgentGatewayService {
 
   private providerFromKnownAgent(agentName: KnownAgent | string) {
     switch (String(agentName)) {
-      case 'openclaw':
-        return AgentProvider.OpenClaw;
+      case 'fitmeet_agent':
+        return AgentProvider.FitMeetAgent;
       case 'codex':
         return AgentProvider.Codex;
       case 'qclaw':
@@ -758,14 +758,6 @@ export class AgentGatewayService {
       lastActiveAt: connection.lastActiveAt,
       createdAt: connection.createdAt,
     };
-  }
-
-  getSocialSkillsOpenApi() {
-    return buildSocialSkillsOpenApi();
-  }
-
-  getSkillsManifest(conn: AgentConnection) {
-    return buildSocialSkillsManifest(conn);
   }
 
   // ───────────────────────────────────────────────
@@ -816,12 +808,13 @@ export class AgentGatewayService {
     };
     await this.enforcePublicSocialIntentAbuseControls(sanitizedDto, meta);
 
-    const candidates = await this.searchSocialCandidates(0, {
+    const rawCandidates = await this.searchSocialCandidates(0, {
       ...sanitizedDto,
       verifiedOnly: sanitizedDto.verifiedOnly ?? true,
       visibility: 'matched_users_only',
       limit: Math.min(sanitizedDto.limit ?? 5, 5),
     });
+    const candidates = this.publicVisibleSocialCandidates(rawCandidates, null);
     const riskLevel = classifyPublicSocialRisk(sanitizedDto);
     const matchSignal = buildPublicIntentMatchSignalFromRequest(
       sanitizedDto,
@@ -832,7 +825,7 @@ export class AgentGatewayService {
         id: `public_${crypto.randomUUID()}`,
         userId: null,
         linkedSocialRequestId: null,
-        source: 'public_social_skills',
+        source: 'public_intent',
         requestType: sanitizedDto.requestType.trim(),
         title:
           sanitizedDto.title?.trim() ||
@@ -860,7 +853,7 @@ export class AgentGatewayService {
             ? SocialRequestStatus.Matched
             : SocialRequestStatus.Searching,
         metadata: {
-          source: 'public_social_skills',
+          source: 'public_intent',
           ipBucket: hashPublicIntentBucket(normalizePublicIntentIp(meta)),
           deviceBucket: hashPublicIntentBucket(
             normalizePublicIntentHeader(meta.deviceId) ||
@@ -873,37 +866,10 @@ export class AgentGatewayService {
     );
 
     return {
-      mode: 'public',
-      request: {
-        id: intent.id,
-        requestType: intent.requestType,
-        title: intent.title,
-        description: intent.description,
-        city: intent.city,
-        loc: intent.loc,
-        radiusKm: intent.radiusKm,
-        timePreference: intent.timePreference,
-        riskLevel: intent.riskLevel,
-        requiresUserConfirmation: intent.requiresUserConfirmation,
-        matchedCount: intent.matchedCount,
-        matchSignal,
-        status: intent.status,
-        createdAt: intent.createdAt,
-      },
-      candidates,
-      matchedBy: 'fitmeet_matching_engine',
-      limitations: [
-        'no_owner_long_term_preferences',
-        'no_history_management',
-        'no_autonomous_message_send',
-        'no_contact_exchange',
-        'no_payment_or_funds_related_actions',
-      ],
-      upgrade: {
-        mode: 'authorized',
-        requirement: 'login_once_and_complete_real_name_verification',
-        tokenEndpoint: '/api/agents/personal-token',
-      },
+      publicIntentId: intent.id,
+      discoverHref: `/discover?publicIntentId=${encodeURIComponent(intent.id)}`,
+      request: serializePublicSocialIntent(intent),
+      candidates: serializePublicSocialCandidates(candidates),
     };
   }
 
@@ -916,6 +882,7 @@ export class AgentGatewayService {
       .skip(normalized.skip);
 
     query.andWhere('intent.mode = :mode', { mode: 'public' });
+    this.excludeInternalPublicIntentFixtures(query);
 
     if (normalized.city) {
       query.andWhere('LOWER(intent.city) LIKE LOWER(:city)', {
@@ -945,6 +912,8 @@ export class AgentGatewayService {
           OR LOWER(intent.city) LIKE LOWER(:q)
           OR LOWER(intent.loc) LIKE LOWER(:q)
           OR LOWER(intent.requestType) LIKE LOWER(:q)
+          OR LOWER(CAST(intent.interestTags AS TEXT)) LIKE LOWER(:q)
+          OR LOWER(CAST(intent.filters AS TEXT)) LIKE LOWER(:q)
         )`,
         { q: `%${normalized.q}%` },
       );
@@ -968,6 +937,39 @@ export class AgentGatewayService {
     };
   }
 
+  private excludeInternalPublicIntentFixtures(
+    query: SelectQueryBuilder<PublicSocialIntent>,
+  ) {
+    query.andWhere(
+      `(
+        LOWER(COALESCE(intent.id, '')) NOT LIKE :fixtureSmoke
+        AND LOWER(COALESCE(intent.id, '')) NOT LIKE :fixtureSeed
+        AND LOWER(COALESCE(intent.id, '')) NOT LIKE :fixtureTest
+        AND LOWER(COALESCE(intent.source, '')) NOT LIKE :fixtureSmoke
+        AND LOWER(COALESCE(intent.source, '')) NOT LIKE :fixtureSeed
+        AND LOWER(COALESCE(intent.source, '')) NOT LIKE :fixtureTest
+        AND LOWER(COALESCE(intent.title, '')) NOT LIKE :fixtureSmoke
+        AND LOWER(COALESCE(intent.title, '')) NOT LIKE :fixtureTest
+        AND LOWER(COALESCE(intent.description, '')) NOT LIKE :fixtureSmoke
+        AND LOWER(COALESCE(intent.description, '')) NOT LIKE :fixtureSeed
+        AND LOWER(COALESCE(intent.description, '')) NOT LIKE :fixtureTest
+        AND LOWER(COALESCE(intent.socialGoal, '')) NOT LIKE :fixtureSmoke
+        AND LOWER(COALESCE(intent.socialGoal, '')) NOT LIKE :fixtureTest
+        AND LOWER(COALESCE(CAST(intent.filters AS TEXT), '')) NOT LIKE :fixtureSmoke
+        AND LOWER(COALESCE(CAST(intent.filters AS TEXT), '')) NOT LIKE :fixtureSeed
+        AND LOWER(COALESCE(CAST(intent.filters AS TEXT), '')) NOT LIKE :fixtureTest
+        AND LOWER(COALESCE(CAST(intent.metadata AS TEXT), '')) NOT LIKE :fixtureSmoke
+        AND LOWER(COALESCE(CAST(intent.metadata AS TEXT), '')) NOT LIKE :fixtureSeed
+        AND LOWER(COALESCE(CAST(intent.metadata AS TEXT), '')) NOT LIKE :fixtureTest
+      )`,
+      {
+        fixtureSmoke: '%smoke%',
+        fixtureSeed: '%seed%',
+        fixtureTest: '%test%',
+      },
+    );
+  }
+
   async getPublicSocialIntent(id: string) {
     const intent = await this.publicIntentRepo.findOne({ where: { id } });
     if (!intent) throw new NotFoundException('Public social intent not found');
@@ -977,22 +979,32 @@ export class AgentGatewayService {
   async getPublicSocialIntentMatches(id: string) {
     const intent = await this.publicIntentRepo.findOne({ where: { id } });
     if (!intent) throw new NotFoundException('Public social intent not found');
-    const candidates = await this.searchSocialCandidates(0, {
-      requestType: intent.requestType,
-      title: intent.title,
-      description: intent.description,
-      city: intent.city,
-      loc: intent.loc,
-      lat: intent.lat ?? undefined,
-      lng: intent.lng ?? undefined,
-      radiusKm: intent.radiusKm,
-      timePreference: intent.timePreference,
-      verifiedOnly: Boolean(intent.filters?.verifiedOnly ?? true),
-      interests: Array.isArray(intent.filters?.interests)
-        ? (intent.filters.interests as string[])
-        : [],
-      limit: 5,
-    });
+    const rawCandidates = await this.searchSocialCandidates(
+      0,
+      {
+        requestType: intent.requestType,
+        title: intent.title,
+        description: intent.description,
+        city: intent.city,
+        loc: intent.loc,
+        lat: intent.lat ?? undefined,
+        lng: intent.lng ?? undefined,
+        radiusKm: intent.radiusKm,
+        timePreference: intent.timePreference,
+        verifiedOnly: Boolean(intent.filters?.verifiedOnly ?? true),
+        interests: Array.isArray(intent.filters?.interests)
+          ? (intent.filters.interests as string[])
+          : [],
+        limit: 5,
+      },
+      {
+        excludedUserIds: intent.userId ? [intent.userId] : [],
+      },
+    );
+    const candidates = this.publicVisibleSocialCandidates(
+      rawCandidates,
+      intent.userId,
+    );
     intent.candidateUserIds = candidates.map(
       (candidate) => candidate.profile.id,
     );
@@ -1008,9 +1020,33 @@ export class AgentGatewayService {
     await this.publicIntentRepo.save(intent);
     return {
       request: serializePublicSocialIntent(intent),
-      candidates,
-      matchedBy: 'fitmeet_matching_engine',
+      candidates: serializePublicSocialCandidates(candidates),
     };
+  }
+
+  private publicVisibleSocialCandidates(
+    candidates: PublicSocialCandidateCard[],
+    ownerUserId?: number | null,
+  ) {
+    const ownerId = Number(ownerUserId);
+    return candidates.filter((candidate) => {
+      const candidateId = Number(candidate.profile?.id);
+      if (!Number.isFinite(candidateId) || candidateId <= 0) return false;
+      if (Number.isFinite(ownerId) && candidateId === ownerId) return false;
+      return ![
+        candidate.profile?.name,
+        candidate.profile?.bio,
+        ...(candidate.profile?.interestTags ?? []),
+        candidate.reasonText,
+      ].some((value) => this.isInternalPublicText(value));
+    });
+  }
+
+  private isInternalPublicText(value: string | null | undefined) {
+    const normalized = `${value ?? ''}`.trim().replace(/[_-]+/g, ' ');
+    return /\b(agent\s*smoke|api\s*smoke|smoke\s*account|smoke|fixture|seed|test\s*account|mock)\b/i.test(
+      normalized,
+    );
   }
 
   async createAgentSocialRequest(
@@ -1106,7 +1142,7 @@ export class AgentGatewayService {
         status: 'candidate_rejected',
         requestId,
         candidateUserId: dto.candidateUserId,
-        nextStep: 'openclaw_may_present_another_fitmeet_candidate',
+        nextStep: 'fitmeet_agent_may_present_another_fitmeet_candidate',
       };
     }
 
@@ -1162,7 +1198,10 @@ export class AgentGatewayService {
         ownerUserId: conn.userId,
         actorUserId: conn.userId,
         metadata: {
-          source: String(conn.agentName) === 'openclaw' ? 'openclaw' : 'agent',
+          source:
+            String(conn.agentName) === 'fitmeet_agent'
+              ? 'fitmeet_agent'
+              : 'agent',
           requestId: request.id,
         },
       },
@@ -1179,7 +1218,10 @@ export class AgentGatewayService {
         ownerUserId: conn.userId,
         actorUserId: conn.userId,
         metadata: {
-          source: String(conn.agentName) === 'openclaw' ? 'openclaw' : 'agent',
+          source:
+            String(conn.agentName) === 'fitmeet_agent'
+              ? 'fitmeet_agent'
+              : 'agent',
           actorType: 'agent',
           actorUserId: conn.userId,
           agentConnectionId: conn.id,
@@ -1369,6 +1411,16 @@ export class AgentGatewayService {
     const content = (dto.content ?? dto.text ?? '').trim();
     const agentTaskId =
       dto.agentTaskId ?? numberOrNull(dto.metadata?.agentTaskId) ?? null;
+    const idempotencyKey =
+      typeof dto.metadata?.idempotencyKey === 'string' &&
+      dto.metadata.idempotencyKey.trim()
+        ? dto.metadata.idempotencyKey.trim().slice(0, 180)
+        : dto.approvalRequestId
+          ? `approval:${dto.approvalRequestId}:send_message:${targetUserId ?? 'target'}`
+          : `agent_message:${conn.id}:${agentTaskId ?? 'task'}:${targetUserId ?? 'target'}:${content.slice(0, 48).replace(/\s+/g, '_')}`.slice(
+              0,
+              180,
+            );
     if (!targetUserId) {
       throw new BadRequestException(
         'toUserId (or recipientUserId) is required',
@@ -1637,9 +1689,12 @@ export class AgentGatewayService {
         agentConnectionId: conn.id,
         ownerUserId: conn.userId,
         actorUserId: conn.userId,
+        agentTaskId,
+        idempotencyKey: `${idempotencyKey}:conversation`,
         metadata: {
           source: dto.metadata?.source ?? conn.agentName,
           agentTaskId,
+          idempotencyKey: `${idempotencyKey}:conversation`,
           socialRequestId: dto.socialRequestId ?? null,
           activityId: dto.activityId ?? null,
         },
@@ -1656,6 +1711,8 @@ export class AgentGatewayService {
         agentConnectionId: conn.id,
         ownerUserId: conn.userId,
         actorUserId: conn.userId,
+        agentTaskId,
+        idempotencyKey,
         metadata: {
           source: dto.metadata?.source ?? conn.agentName,
           actorType: 'agent',
@@ -1667,6 +1724,7 @@ export class AgentGatewayService {
           candidateRecordId: dto.metadata?.candidateRecordId ?? null,
           socialRequestId: dto.socialRequestId ?? null,
           activityId: dto.activityId ?? null,
+          idempotencyKey,
           ...(dto.metadata ?? {}),
         },
       },
@@ -1861,7 +1919,7 @@ export class AgentGatewayService {
     };
 
     for (const targetConn of targetConnections) {
-      await this.messagesService.createAgentInboxEvent({
+      await this.messagesService.createAgentMessageEvent({
         agentConnectionId: targetConn.id,
         ownerUserId: input.targetUserId,
         eventType: 'contact.request.received',
@@ -1965,6 +2023,7 @@ export class AgentGatewayService {
   private async searchSocialCandidates(
     userId: number,
     dto: SearchNearbyPeopleDto,
+    options: { excludedUserIds?: number[] } = {},
   ) {
     const owner = await this.userRepo.findOne({ where: { id: userId } });
 
@@ -1982,10 +2041,19 @@ export class AgentGatewayService {
     // blocked the caller.
     const blockedSet = await this.safetyService.getMutualBlockUserIds(userId);
 
+    const excludedUserIds = [userId, ...(options.excludedUserIds ?? [])].filter(
+      (id) => Number.isFinite(id) && id > 0,
+    );
+
     const qb = this.userRepo
       .createQueryBuilder('u')
-      .where('u.id != :uid', { uid: userId })
-      .andWhere('u."acceptNearbyMatch" = true');
+      .where('u."acceptNearbyMatch" = true');
+
+    if (excludedUserIds.length > 0) {
+      qb.andWhere('u.id NOT IN (:...excludedUserIds)', {
+        excludedUserIds: Array.from(new Set(excludedUserIds)),
+      });
+    }
 
     if (blockedSet.size > 0) {
       qb.andWhere('u.id NOT IN (:...blocked)', {

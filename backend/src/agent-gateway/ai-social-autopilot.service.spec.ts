@@ -13,7 +13,10 @@ import {
   AgentActionStatus,
   AgentActionType,
 } from './entities/agent-action-log.entity';
-import { ApprovalRiskLevel, ApprovalType } from './entities/agent-approval-request.entity';
+import {
+  ApprovalRiskLevel,
+  ApprovalType,
+} from './entities/agent-approval-request.entity';
 import { AiSocialAutopilotService } from './ai-social-autopilot.service';
 
 function repo() {

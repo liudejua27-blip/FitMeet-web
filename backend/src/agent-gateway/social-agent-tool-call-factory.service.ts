@@ -44,8 +44,8 @@ export class SocialAgentToolCallFactoryService {
         return SocialAgentToolName.InviteActivity;
       case SocialAgentAction.FavoriteCandidate:
         return SocialAgentToolName.SaveCandidate;
-      case SocialAgentAction.WriteInbox:
-        return SocialAgentToolName.WriteInbox;
+      case SocialAgentAction.WriteMessageEvent:
+        return SocialAgentToolName.WriteMessageEvent;
       case SocialAgentAction.OfflineMeet:
         return SocialAgentToolName.OfflineMeeting;
       case SocialAgentAction.Payment:

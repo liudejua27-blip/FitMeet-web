@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, MoreThan, Repository } from 'typeorm';
@@ -8,6 +8,7 @@ import {
   RecentAgentConversationSignal,
 } from '../messages/messages.service';
 import { shouldRunBackgroundJobs } from '../common/process-role.util';
+import { LifeGraphService } from '../life-graph/life-graph.service';
 import {
   UserSocialRequest,
   UserSocialRequestStatus,
@@ -29,6 +30,7 @@ import {
   AgentTaskStatus,
 } from './entities/agent-task.entity';
 import { SocialAgentPlannerService } from './social-agent-planner.service';
+import { rememberSocialAgentCurrentTask } from './social-agent-memory.util';
 import {
   SocialAgentRunNextResult,
   SocialAgentToolExecutorService,
@@ -53,6 +55,8 @@ export interface SocialAgentAutopilotSummary {
   };
   queuedTasks: number;
   createdTasks: number;
+  profileEnrichmentTasks: number;
+  profileEnrichmentProposals: number;
   processedTasks: number;
   handledReplies: number;
   actionsExecuted: number;
@@ -100,6 +104,8 @@ export class SocialAgentAutopilotService {
     private readonly planner: SocialAgentPlannerService,
     private readonly executor: SocialAgentToolExecutorService,
     private readonly actionLogs: AgentActionLogService,
+    @Optional()
+    private readonly lifeGraph?: LifeGraphService,
   ) {}
 
   @Cron('*/10 * * * * *')
@@ -231,6 +237,10 @@ export class SocialAgentAutopilotService {
           process.env.SOCIAL_AGENT_AUTOPILOT_INTERVAL_SECONDS ?? null,
         SOCIAL_AGENT_AUTOPILOT_MAX_TASKS_PER_RUN:
           process.env.SOCIAL_AGENT_AUTOPILOT_MAX_TASKS_PER_RUN ?? null,
+        SOCIAL_AGENT_PROFILE_ENRICHMENT_ENABLED:
+          process.env.SOCIAL_AGENT_PROFILE_ENRICHMENT_ENABLED ?? null,
+        SOCIAL_AGENT_PROFILE_ENRICHMENT_INTERVAL_HOURS:
+          process.env.SOCIAL_AGENT_PROFILE_ENRICHMENT_INTERVAL_HOURS ?? null,
       },
     };
   }
@@ -264,11 +274,127 @@ export class SocialAgentAutopilotService {
     });
     summary.scanned.conversations = signals.length;
 
+    const profileEnrichmentOwners = new Set<number>();
     for (const signal of signals) {
       if (tasks.size >= maxTasks) return;
       const task = await this.taskForConversationSignal(signal, summary);
       if (task) tasks.set(task.id, task);
+      if (!profileEnrichmentOwners.has(signal.ownerUserId)) {
+        profileEnrichmentOwners.add(signal.ownerUserId);
+        await this.createPeriodicProfileEnrichmentTask(signal, summary);
+      }
     }
+  }
+
+  private async createPeriodicProfileEnrichmentTask(
+    signal: RecentAgentConversationSignal,
+    summary: SocialAgentAutopilotSummary,
+  ): Promise<AgentTask | null> {
+    if (!this.lifeGraph || !isProfileEnrichmentEnabled()) return null;
+    const sourceMessage = profileEnrichmentSourceText(signal.text);
+    if (!sourceMessage) return null;
+
+    const since = profileEnrichmentSince();
+    const existing = await this.taskRepo.findOne({
+      where: {
+        ownerUserId: signal.ownerUserId,
+        taskType: 'profile_enrichment',
+        createdAt: MoreThan(since),
+      },
+      order: { createdAt: 'DESC' },
+    });
+    if (existing) {
+      summary.skippedDuplicates += 1;
+      return null;
+    }
+
+    const task = await this.taskRepo.save(
+      this.taskRepo.create({
+        ownerUserId: signal.ownerUserId,
+        agentConnectionId: signal.agentConnectionId,
+        taskType: 'profile_enrichment',
+        title: '定期整理画像',
+        goal: '根据最近聊天整理可确认的画像偏好，等待用户确认后再保存。',
+        input: {
+          source: 'periodic_profile_enrichment',
+          conversationId: signal.conversationId,
+          messageId: signal.messageId,
+          fromUserId: signal.fromUserId,
+          sourceMessage,
+          intervalHours: profileEnrichmentIntervalHours(),
+        },
+        plan: [],
+        toolCalls: [],
+        result: {},
+        memory: {},
+        status: AgentTaskStatus.Pending,
+        permissionMode: AgentTaskPermissionMode.Confirm,
+        riskLevel: AgentTaskRiskLevel.Low,
+        idempotencyKey: `profile_enrichment:${signal.ownerUserId}:periodic:${profileEnrichmentBucket()}`,
+        statusReason: 'periodic_profile_enrichment',
+      }),
+    );
+    summary.createdTasks += 1;
+    summary.profileEnrichmentTasks += 1;
+
+    const proposal = await this.lifeGraph.extractFromChat(signal.ownerUserId, {
+      message: sourceMessage,
+      taskId: task.id,
+      messageId: signal.messageId,
+      context: {
+        intent: 'periodic_profile_enrichment',
+        source: 'social_agent_autopilot',
+        conversationId: signal.conversationId,
+        fromUserId: signal.fromUserId,
+      },
+    });
+    const proposedFieldCount = proposal.proposedFields.length;
+    summary.profileEnrichmentProposals += proposedFieldCount > 0 ? 1 : 0;
+
+    task.result = {
+      ...(task.result ?? {}),
+      profileUpdateProposal: {
+        proposalId: proposal.proposalId,
+        proposedFieldCount,
+        confirmationRequired: proposal.confirmationRequired,
+        missingFields: proposal.missingFields,
+      },
+    };
+
+    if (proposedFieldCount > 0) {
+      task.status = AgentTaskStatus.AwaitingFeedback;
+      task.statusReason = 'life_graph_profile_confirmation';
+      rememberSocialAgentCurrentTask(task, {
+        objective: 'profile_enrichment',
+        nextStep: '等待用户确认是否保存画像更新建议',
+        shouldSearchNow: false,
+        profileSaved: false,
+        waitingFor: 'life_graph_profile_confirmation',
+        lastCompletedStep: 'life_graph_profile_proposed',
+      });
+    } else {
+      task.status = AgentTaskStatus.Succeeded;
+      task.statusReason = 'profile_enrichment_no_fields';
+    }
+
+    await this.taskRepo.save(task);
+    await this.writeAutopilotLog('social_agent_autopilot.profile_enrichment', {
+      ownerUserId: signal.ownerUserId,
+      agentId: signal.agentConnectionId,
+      agentTaskId: task.id,
+      actionStatus:
+        proposedFieldCount > 0
+          ? AgentActionStatus.Planned
+          : AgentActionStatus.Executed,
+      status: proposedFieldCount > 0 ? 'proposal_created' : 'no_fields',
+      payload: {
+        taskId: task.id,
+        conversationId: signal.conversationId,
+        messageId: signal.messageId,
+        proposedFieldCount,
+      },
+    });
+    return task;
   }
 
   private async collectSocialRequestTasks(
@@ -570,7 +696,7 @@ export class SocialAgentAutopilotService {
       SocialAgentToolName.ReadTaskConversationMessages,
       SocialAgentToolName.SummarizeReply,
       SocialAgentToolName.DecideNextSocialAction,
-      SocialAgentToolName.ReadInbox,
+      SocialAgentToolName.ReadMessageEvents,
     ]);
     return result.toolCalls.filter(
       (call) =>
@@ -622,6 +748,8 @@ export class SocialAgentAutopilotService {
       scanned: { tasks: 0, conversations: 0, socialRequests: 0 },
       queuedTasks: 0,
       createdTasks: 0,
+      profileEnrichmentTasks: 0,
+      profileEnrichmentProposals: 0,
       processedTasks: 0,
       handledReplies: 0,
       actionsExecuted: 0,
@@ -673,4 +801,54 @@ function recentMessageSince(): Date {
 
 function recentSocialRequestSince(): Date {
   return new Date(Date.now() - 24 * 60 * 60 * 1000);
+}
+
+function isProfileEnrichmentEnabled(): boolean {
+  return (
+    String(process.env.SOCIAL_AGENT_PROFILE_ENRICHMENT_ENABLED ?? 'true')
+      .trim()
+      .toLowerCase() !== 'false'
+  );
+}
+
+function profileEnrichmentIntervalHours(): number {
+  const raw = Number(
+    process.env.SOCIAL_AGENT_PROFILE_ENRICHMENT_INTERVAL_HOURS,
+  );
+  const hours = Number.isFinite(raw) && raw > 0 ? raw : 72;
+  return Math.max(1, Math.min(Math.floor(hours), 24 * 30));
+}
+
+function profileEnrichmentIntervalMs(): number {
+  return profileEnrichmentIntervalHours() * 60 * 60 * 1000;
+}
+
+function profileEnrichmentSince(): Date {
+  return new Date(Date.now() - profileEnrichmentIntervalMs());
+}
+
+function profileEnrichmentBucket(): number {
+  return Math.floor(Date.now() / profileEnrichmentIntervalMs());
+}
+
+function profileEnrichmentSourceText(text: string): string {
+  const sanitized = sanitizeProfileEnrichmentText(text);
+  if (sanitized.length < 4) return '';
+  if (!hasProfileEnrichmentSignal(sanitized)) return '';
+  return sanitized.slice(0, 240);
+}
+
+function sanitizeProfileEnrichmentText(text: string): string {
+  return (text ?? '')
+    .replace(/\b1[3-9]\d{9}\b/g, '[联系方式已隐藏]')
+    .replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, '[联系方式已隐藏]')
+    .replace(/(?:微信|wechat|wx)[:：\s]*[A-Za-z0-9_-]{4,}/gi, '微信已隐藏')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function hasProfileEnrichmentSignal(text: string): boolean {
+  return /喜欢|偏好|爱好|常去|方便|不方便|周末|工作日|早上|上午|中午|下午|晚上|青岛|附近|区域|公共场所|安全|边界|不接受|不想|希望|想认识|跑步|散步|健身|羽毛球|篮球|游泳|瑜伽|骑行|咖啡|聊天|citywalk|run|gym|coffee|weekend|weekday/i.test(
+    text,
+  );
 }

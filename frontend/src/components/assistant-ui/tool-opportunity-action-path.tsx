@@ -57,15 +57,23 @@ function actionPathSteps(actions: VisibleCardAction[], schemaType: ToolUISchemaT
   const order: ToolUISchemaAction[] =
     schemaType === 'social_match.activity'
       ? [
-          'activity.view_detail',
-          'activity.modify_time',
-          'activity.modify_location',
+          'publish_to_discover',
           'activity.confirm_create',
+          'activity.modify_time',
+          'activity.skip_publish',
+          'activity.view_detail',
+          'activity.modify_location',
           'activity.check_in',
           'activity.complete',
           'review.submit',
         ]
-      : ['candidate.view_detail', 'candidate.generate_opener', 'candidate.connect'];
+      : [
+          'candidate.view_detail',
+          'candidate.like',
+          'candidate.generate_opener',
+          'opener.confirm_send',
+          'candidate.connect',
+        ];
 
   const defaultSteps = new Map(
     defaultOpportunityActionsForSchema(schemaType).map((step) => [step.schemaAction, step]),
@@ -81,7 +89,7 @@ function actionPathSteps(actions: VisibleCardAction[], schemaType: ToolUISchemaT
         schemaAction,
         requiresConfirmation,
         source: action?.source ?? defaultStep?.source ?? 'default',
-        label: actionPathLabel(schemaAction, requiresConfirmation),
+        label: actionPathLabel(schemaAction),
       };
     })
     .filter(Boolean) as Array<{
@@ -92,24 +100,20 @@ function actionPathSteps(actions: VisibleCardAction[], schemaType: ToolUISchemaT
   }>;
 }
 
-function actionPathLabel(schemaAction: ToolUISchemaAction, requiresConfirmation: boolean) {
-  const confirmationRequired =
-    requiresConfirmation ||
-    schemaAction === 'candidate.connect' ||
-    schemaAction === 'opener.confirm_send' ||
-    schemaAction === 'activity.confirm_create' ||
-    schemaAction === 'life_graph.accept_update';
+function actionPathLabel(schemaAction: ToolUISchemaAction) {
   if (schemaAction === 'candidate.view_detail') return '先看详情';
+  if (schemaAction === 'candidate.like') return '收藏';
   if (schemaAction === 'candidate.generate_opener') return '生成开场白';
+  if (schemaAction === 'opener.confirm_send') return '发送邀请';
   if (schemaAction === 'candidate.connect') {
-    return confirmationRequired ? '确认后发邀请' : '发邀请';
+    return '加好友并聊天';
   }
   if (schemaAction === 'activity.view_detail') return '查看活动';
-  if (schemaAction === 'activity.modify_time') return '调整时间';
-  if (schemaAction === 'activity.modify_location') return '调整地点';
-  if (schemaAction === 'activity.confirm_create') {
-    return confirmationRequired ? '确认后发起' : '发起活动';
-  }
+  if (schemaAction === 'activity.modify_time') return '修改卡片';
+  if (schemaAction === 'activity.modify_location') return '修改卡片';
+  if (schemaAction === 'activity.skip_publish') return '暂不发布';
+  if (schemaAction === 'publish_to_discover') return '确认发布';
+  if (schemaAction === 'activity.confirm_create') return '确认发布';
   if (schemaAction === 'activity.check_in') return '到达签到';
   if (schemaAction === 'activity.complete') return '记录完成';
   if (schemaAction === 'review.submit') return '提交评价';

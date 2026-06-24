@@ -65,8 +65,8 @@ export class User {
   @Column({ type: 'text', default: '' })
   bio: string;
 
-  @Column({ nullable: true })
-  coverUrl: string;
+  @Column({ type: 'text', nullable: true })
+  coverUrl: string | null;
 
   @Column({ default: false })
   singleCert: boolean;
@@ -88,9 +88,6 @@ export class User {
 
   @Column({ type: 'jsonb', default: () => "'[]'" })
   bestRecords: { name: string; value: string }[];
-
-  @Column({ default: false })
-  isCoach: boolean;
 
   /** Cumulative trust score: +1 per accepted proof, +2 per completed
    *  mutually-confirmed activity. Used by AgentGateway risk scoring. */

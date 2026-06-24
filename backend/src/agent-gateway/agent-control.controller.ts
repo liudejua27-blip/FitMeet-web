@@ -449,7 +449,7 @@ export class AgentControlController {
         if (!step || typeof step !== 'object' || Array.isArray(step)) {
           return null;
         }
-        const record = step as Record<string, unknown>;
+        const record = step;
         const stepId = this.text(record.id) ?? `step-${index + 1}`;
         const label = this.text(record.label) ?? 'Agent 步骤';
         return {
@@ -458,7 +458,9 @@ export class AgentControlController {
           status: this.text(record.status) ?? null,
           toolName:
             this.text(record.toolName) ??
-            (stepId === checkpoint.stepId ? this.text(checkpoint.toolName) : null),
+            (stepId === checkpoint.stepId
+              ? this.text(checkpoint.toolName)
+              : null),
           retryable: true,
           replayable: true,
           forkable: true,
@@ -471,11 +473,12 @@ export class AgentControlController {
   private stepLabel(checkpoint: AgentRunCheckpoint, stepId: string) {
     const steps = Array.isArray(checkpoint.steps) ? checkpoint.steps : [];
     const step = steps.find((item) => {
-      if (!item || typeof item !== 'object' || Array.isArray(item)) return false;
-      return this.text((item as Record<string, unknown>).id) === stepId;
+      if (!item || typeof item !== 'object' || Array.isArray(item))
+        return false;
+      return this.text(item.id) === stepId;
     });
     if (!step || typeof step !== 'object' || Array.isArray(step)) return null;
-    return this.text((step as Record<string, unknown>).label);
+    return this.text(step.label);
   }
 
   private resolveActor(req: JwtReq) {

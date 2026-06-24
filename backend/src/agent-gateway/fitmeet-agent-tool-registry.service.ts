@@ -102,7 +102,7 @@ export const FIRST_STAGE_AGENT_TOOL_NAMES = [
   'connect_candidate',
   'get_conversation_messages',
   'get_conversations',
-  'get_agent_inbox',
+  'get_agent_message_events',
   'get_candidate_detail',
   'create_activity',
   'join_activity',
@@ -576,7 +576,7 @@ const TOOL_DEFINITIONS: FitMeetAgentToolDefinition[] = [
     name: 'save_candidate',
     description: '把候选人加入当前任务的收藏/稍后处理列表。',
     category: FitMeetAgentToolCategory.Candidate,
-    riskLevel: AgentActionRiskLevel.Medium,
+    riskLevel: AgentActionRiskLevel.Low,
     requiresApproval: false,
     inputSchema: objectSchema(
       {
@@ -844,8 +844,8 @@ const TOOL_DEFINITIONS: FitMeetAgentToolDefinition[] = [
     sideEffects: ['message_send', 'audit_log_required'],
   },
   {
-    name: 'get_agent_inbox',
-    description: '查看当前用户自己的 Agent Inbox 或任务相关站内消息。',
+    name: 'get_agent_message_events',
+    description: '查看当前用户自己的站内消息或任务相关消息。',
     category: FitMeetAgentToolCategory.Message,
     riskLevel: AgentActionRiskLevel.Low,
     requiresApproval: false,
@@ -866,7 +866,7 @@ const TOOL_DEFINITIONS: FitMeetAgentToolDefinition[] = [
       true,
     ),
     permissionMode: [...ALL_PERMISSION_MODES],
-    executorToolName: 'get_agent_inbox',
+    executorToolName: 'get_agent_message_events',
     runtimeStatus: 'implemented',
     plannerEnabled: true,
     dataScope: 'owner_messages_only',
@@ -897,7 +897,7 @@ const TOOL_DEFINITIONS: FitMeetAgentToolDefinition[] = [
   {
     name: 'get_conversation_messages',
     description:
-      'Read recent messages from the current task conversation or a selected agent inbox conversation.',
+      'Read recent messages from the current task conversation or a selected agent message event conversation.',
     category: FitMeetAgentToolCategory.Message,
     permission: 'read_only',
     riskLevel: AgentActionRiskLevel.Low,
@@ -929,7 +929,7 @@ const TOOL_DEFINITIONS: FitMeetAgentToolDefinition[] = [
     sideEffects: [],
     failureFallback:
       'Use the recent conversation history already present in task memory and ask the user for clarification if needed.',
-    aliases: ['read_task_conversation_messages', 'get_agent_inbox'],
+    aliases: ['read_task_conversation_messages', 'get_agent_message_events'],
   },
   {
     name: 'reply_message',
@@ -972,7 +972,7 @@ const TOOL_DEFINITIONS: FitMeetAgentToolDefinition[] = [
     name: 'connect_candidate',
     description: '发起好友/关注关系，不能绕过对方或用户确认。',
     category: FitMeetAgentToolCategory.Friend,
-    riskLevel: AgentActionRiskLevel.Medium,
+    riskLevel: AgentActionRiskLevel.High,
     requiresApproval: true,
     inputSchema: objectSchema(
       {

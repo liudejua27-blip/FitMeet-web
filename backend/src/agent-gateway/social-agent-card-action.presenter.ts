@@ -49,104 +49,6 @@ export function buildSocialAgentCardActionRouteResult(input: {
   };
 }
 
-export function buildSocialAgentOpenerApprovalCard(input: {
-  taskId: number;
-  targetUserId: number | null;
-  approvalId: number;
-  candidate: Record<string, unknown>;
-  displayName: string;
-  draft: string;
-  regeneratePayload: Record<string, unknown>;
-}): FitMeetAlphaCard {
-  return {
-    id: `opener_approval:${input.taskId}:${input.targetUserId ?? input.approvalId}`,
-    type: 'opener_approval',
-    schemaVersion: 'fitmeet.tool-ui.v1',
-    schemaType: 'safety.approval',
-    title: '这条消息会发送给对方。我先帮你写好了，你确认后我再发。',
-    body: input.draft,
-    status: 'waiting_confirmation',
-    data: {
-      taskId: input.taskId,
-      schemaName: 'SafetyApprovalCard',
-      schemaVersion: 'fitmeet.tool-ui.v1',
-      schemaType: 'safety.approval',
-      targetUserId: input.targetUserId,
-      displayName: input.displayName,
-      message: input.draft,
-      loopStage: 'opener_draft_created',
-      riskLevel: 'medium',
-      reasons: ['这一步会向真实用户发送消息', '发送前需要你确认语气和内容'],
-      auditNote: '确认、拒绝和执行结果都会进入审批审计日志。',
-      confirmationLabel: '确认后发送',
-      checkpointLabel: '开场白已保存，可重新生成或取消',
-      safetyBoundary: '确认前不会发送。建议先站内沟通，不急着交换联系方式。',
-      approval: {
-        title: '这条消息会发送给对方。我先帮你写好了，你确认后我再发。',
-        boundary: '确认前不会发送。建议先站内沟通，不急着交换联系方式。',
-        riskLevel: 'medium',
-        reasons: ['这一步会向真实用户发送消息', '发送前需要你确认语气和内容'],
-        auditNote: '确认、拒绝和执行结果都会进入审批审计日志。',
-        confirmationLabel: '确认后发送',
-        checkpointLabel: '开场白已保存，可重新生成或取消',
-      },
-    },
-    actions: [
-      {
-        id: 'opener_confirm_send',
-        label: '确认发送',
-        action: 'send_message',
-        schemaAction: 'opener.confirm_send',
-        loopStage: 'opener_draft_created',
-        requiresConfirmation: true,
-        payload: {
-          taskId: input.taskId,
-          targetUserId: input.targetUserId,
-          candidate: input.candidate,
-          message: input.draft,
-          approvalId: input.approvalId,
-          safetyBoundary: '确认前不会发送。建议先站内沟通，不急着交换联系方式。',
-          approvalRequired: true,
-          checkpointRequired: true,
-          resumeMode: 'resume_after_approval',
-          idempotencyKey: `opener-send:${input.taskId}:${input.targetUserId ?? input.approvalId}`,
-        },
-      },
-      {
-        id: 'opener_regenerate',
-        label: '重新生成',
-        action: 'generate_opener',
-        schemaAction: 'opener.regenerate',
-        loopStage: 'opener_draft_created',
-        requiresConfirmation: false,
-        payload: {
-          ...input.regeneratePayload,
-          taskId: input.taskId,
-          targetUserId: input.targetUserId,
-          candidate: input.candidate,
-          message: input.draft,
-          approvalId: input.approvalId,
-        },
-      },
-      {
-        id: 'opener_reject_send',
-        label: '取消发送',
-        action: 'reject_opener',
-        schemaAction: 'opener.reject',
-        loopStage: 'opener_draft_created',
-        requiresConfirmation: false,
-        payload: {
-          taskId: input.taskId,
-          targetUserId: input.targetUserId,
-          candidate: input.candidate,
-          message: input.draft,
-          approvalId: input.approvalId,
-        },
-      },
-    ],
-  };
-}
-
 export function buildSocialAgentCandidateDetailCard(input: {
   taskId: number;
   candidate: Record<string, unknown>;
@@ -161,10 +63,13 @@ export function buildSocialAgentCandidateDetailCard(input: {
     cleanDisplayText(
       candidate.displayName ?? candidate.nickname ?? candidate.name,
       '',
-    ) || (targetUserId ? `候选人 #${targetUserId}` : '候选人');
+    ) || (targetUserId ? '这位用户' : '对方');
   const area =
     cleanDisplayText(
-      candidate.area ?? candidate.city ?? candidate.location ?? candidate.region,
+      candidate.area ??
+        candidate.city ??
+        candidate.location ??
+        candidate.region,
       '',
     ) || null;
   const time =
@@ -191,11 +96,11 @@ export function buildSocialAgentCandidateDetailCard(input: {
         candidate.message,
       '',
     ) || '你好，我看到我们有一些共同兴趣，想先轻松聊聊，看是否适合一起活动。';
-  const interests = stringArray(
-    candidate.interests ??
-      candidate.tags ??
-      candidate.sharedInterests ??
-      candidate.commonInterests,
+  const interests = firstStringArray(
+    candidate.sharedInterests,
+    candidate.commonInterests,
+    candidate.interests,
+    candidate.tags,
   );
   const reasons = stringArray(
     candidate.fitReasons ??
@@ -219,12 +124,15 @@ export function buildSocialAgentCandidateDetailCard(input: {
     subtitle:
       cleanDisplayText(candidate.subtitle ?? candidate.contextLine, '') ||
       '候选详情已展开',
-    avatarUrl: cleanDisplayText(candidate.avatarUrl ?? candidate.imageUrl, '') || null,
+    avatarUrl:
+      cleanDisplayText(candidate.avatarUrl ?? candidate.imageUrl, '') || null,
     score: number(candidate.score ?? candidate.matchScore) ?? null,
     summary,
     relationshipGoal:
-      cleanDisplayText(candidate.relationshipGoal ?? candidate.relationGoal, '') ||
-      null,
+      cleanDisplayText(
+        candidate.relationshipGoal ?? candidate.relationGoal,
+        '',
+      ) || null,
     idealType:
       cleanDisplayText(candidate.idealType ?? candidate.targetPreference, '') ||
       null,
@@ -234,7 +142,8 @@ export function buildSocialAgentCandidateDetailCard(input: {
     area,
     time,
     distanceLabel:
-      cleanDisplayText(candidate.distanceLabel ?? candidate.distance, '') || null,
+      cleanDisplayText(candidate.distanceLabel ?? candidate.distance, '') ||
+      null,
     interests,
     safetyBadges,
     reasons:
@@ -242,11 +151,15 @@ export function buildSocialAgentCandidateDetailCard(input: {
         ? reasons
         : [
             area ? `地点/区域接近：${area}` : null,
-            interests[0] ? `共同兴趣：${interests.slice(0, 2).join('、')}` : null,
+            interests[0]
+              ? `共同兴趣：${interests.slice(0, 2).join('、')}`
+              : null,
             '发送前会保留确认边界',
           ].filter(Boolean),
     explanationSteps: stringArray(candidate.explanationSteps).slice(0, 3),
-    trustSignals: stringArray(candidate.trustSignals ?? candidate.consentSignals),
+    trustSignals: stringArray(
+      candidate.trustSignals ?? candidate.consentSignals,
+    ),
     coldStartSignals: stringArray(candidate.coldStartSignals),
     reasonerSource: reasoningQuality.reasonerSource,
     reasoningConfidence: reasoningQuality.reasoningConfidence,
@@ -260,6 +173,7 @@ export function buildSocialAgentCandidateDetailCard(input: {
     confirmedContext: ['公开可发现资料', '低风险站内沟通', '发送前确认'],
   };
   const safeCandidate = candidateActionSnapshot(candidate);
+  const candidateIdentity = targetUserId ?? candidateRecordId ?? 'unknown';
   const basePayload = {
     taskId: input.taskId,
     targetUserId,
@@ -295,7 +209,23 @@ export function buildSocialAgentCandidateDetailCard(input: {
     },
     actions: [
       {
-        id: 'candidate_generate_opener',
+        id: `candidate_view_detail:${input.taskId}:${candidateIdentity}`,
+        label: '查看详情',
+        action: 'candidate.view_detail',
+        schemaAction: 'candidate.view_detail',
+        requiresConfirmation: false,
+        payload: basePayload,
+      },
+      {
+        id: `candidate_like:${input.taskId}:${candidateIdentity}`,
+        label: '收藏',
+        action: 'candidate.like',
+        schemaAction: 'candidate.like',
+        requiresConfirmation: false,
+        payload: basePayload,
+      },
+      {
+        id: `candidate_generate_opener:${input.taskId}:${candidateIdentity}`,
         label: '生成开场白',
         action: 'generate_opener',
         schemaAction: 'candidate.generate_opener',
@@ -303,8 +233,23 @@ export function buildSocialAgentCandidateDetailCard(input: {
         payload: basePayload,
       },
       {
-        id: 'candidate_connect',
+        id: `candidate_send_invite:${input.taskId}:${candidateIdentity}`,
         label: '发送邀请',
+        action: 'send_message',
+        schemaAction: 'opener.confirm_send',
+        requiresConfirmation: true,
+        payload: {
+          ...basePayload,
+          actionType: 'send_invite',
+          approvalRequired: true,
+          checkpointRequired: true,
+          resumeMode: 'resume_after_approval',
+          idempotencyKey: `opener-send:${input.taskId}:${candidateIdentity}`,
+        },
+      },
+      {
+        id: `candidate_connect:${input.taskId}:${candidateIdentity}`,
+        label: '确认后邀请Ta',
         action: 'connect_candidate',
         schemaAction: 'candidate.connect',
         requiresConfirmation: true,
@@ -313,11 +258,11 @@ export function buildSocialAgentCandidateDetailCard(input: {
           approvalRequired: true,
           checkpointRequired: true,
           resumeMode: 'resume_after_approval',
-          idempotencyKey: `candidate-connect:${input.taskId}:${targetUserId ?? candidateRecordId ?? 'unknown'}`,
+          idempotencyKey: `candidate-connect:${input.taskId}:${candidateIdentity}`,
         },
       },
       {
-        id: 'candidate_more_like_this',
+        id: `candidate_more_like_this:${input.taskId}:${candidateIdentity}`,
         label: '找相似的人',
         action: 'candidate.more_like_this',
         schemaAction: 'candidate.more_like_this',
@@ -343,6 +288,7 @@ export function buildSocialAgentActivityPlanCard(input: {
     status: 'waiting_confirmation',
     data: {
       taskId: input.taskId,
+      approvalId: input.approvalId,
       schemaName: 'OpportunityCard',
       schemaVersion: 'fitmeet.tool-ui.v1',
       schemaType: 'social_match.activity',
@@ -352,12 +298,14 @@ export function buildSocialAgentActivityPlanCard(input: {
       noPreciseLocation: true,
       safetyBoundary: '公共场所见面，不共享精确位置。',
       checkinReminder: '活动开始前我会提醒你确认是否到达。',
-      reviewPrompt: '活动结束后我会请你做一次简短评价，再决定是否写入画像。',
-      lifeGraphUpdatePreview: '完成后会把这次活动结果用于更新你的 Life Graph。',
+      reviewPrompt:
+        '活动结束后我会请你做一次简短评价，再决定是否更新个人信息。',
+      lifeGraphUpdatePreview: '完成后会把这次活动结果用于更新你的长期偏好。',
       trustScoreUpdatePreview:
-        '完成与评价会写入 trust score，用来提升后续推荐可信度。',
+        '完成与评价会更新可信度，用来提升后续推荐可信度。',
       opportunity: {
         id: `opportunity:${input.taskId}:activity:${input.approvalId}`,
+        approvalId: input.approvalId,
         type: 'activity',
         title: '约练计划',
         subtitle: '确认后创建',
@@ -367,7 +315,8 @@ export function buildSocialAgentActivityPlanCard(input: {
         recommendedNextAction: '确认后我再创建约练，不会自动公开发布。',
         safetyBoundary: '公共场所见面，不共享精确位置。',
         checkinReminder: '活动开始前我会提醒你确认是否到达。',
-        reviewPrompt: '活动结束后我会请你做一次简短评价，再决定是否写入画像。',
+        reviewPrompt:
+          '活动结束后我会请你做一次简短评价，再决定是否更新个人信息。',
         confirmedContext: ['公共场所', '不共享精确位置', '确认后创建'],
       },
       opportunityType: 'activity',
@@ -390,13 +339,14 @@ export function buildSocialAgentActivityPlanCard(input: {
           noPreciseLocation: true,
           safetyBoundary: '公共场所见面，不共享精确位置。',
           checkinReminder: '活动开始前我会提醒你确认是否到达。',
-          reviewPrompt: '活动结束后我会请你做一次简短评价，再决定是否写入画像。',
+          reviewPrompt:
+            '活动结束后我会请你做一次简短评价，再决定是否更新个人信息。',
           ...input.payload,
         },
       },
       {
         id: 'activity_modify_time',
-        label: '调整时间',
+        label: '修改卡片',
         action: 'reschedule_meet_loop',
         schemaAction: 'activity.modify_time',
         loopStage: 'activity_draft_created',
@@ -412,7 +362,7 @@ export function buildSocialAgentActivityPlanCard(input: {
       },
       {
         id: 'activity_modify_location',
-        label: '调整地点',
+        label: '修改卡片',
         action: 'reschedule_meet_loop',
         schemaAction: 'activity.modify_location',
         loopStage: 'activity_draft_created',
@@ -423,6 +373,22 @@ export function buildSocialAgentActivityPlanCard(input: {
           publicPlaceOnly: true,
           noPreciseLocation: true,
           safetyBoundary: '公共场所见面，不共享精确位置。',
+          ...input.payload,
+        },
+      },
+      {
+        id: 'activity_skip_publish',
+        label: '暂不发布',
+        action: 'activity.skip_publish',
+        schemaAction: 'activity.skip_publish',
+        loopStage: 'activity_draft_created',
+        requiresConfirmation: false,
+        payload: {
+          taskId: input.taskId,
+          approvalId: input.approvalId,
+          publicPlaceOnly: true,
+          noPreciseLocation: true,
+          safetyBoundary: '这张约练卡暂不发布；你可以继续修改或直接聊天。',
           ...input.payload,
         },
       },
@@ -457,7 +423,10 @@ export function buildSocialAgentCheckinCard(input: {
         title: '约练进展',
         description: '活动计划已创建，开始前先确认到达和安全边界。',
         nextAction: '开始前确认是否到达；不会共享精确位置。',
-        steps: socialAgentMeetLoopTimelineSteps('activity_confirmed', '确认到达后继续'),
+        steps: socialAgentMeetLoopTimelineSteps(
+          'activity_confirmed',
+          '确认到达后继续',
+        ),
       },
       publicPlaceOnly: true,
       noPreciseLocation: true,
@@ -509,7 +478,10 @@ export function buildSocialAgentActivityCompletionCard(input: {
         title: '约练进展',
         description: '已记录到达，活动结束后可确认完成并留下评价。',
         nextAction: '活动结束后确认是否完成。',
-        steps: socialAgentMeetLoopTimelineSteps('activity_checked_in', '活动结束后确认完成'),
+        steps: socialAgentMeetLoopTimelineSteps(
+          'activity_checked_in',
+          '活动结束后确认完成',
+        ),
       },
       checkedInAt: input.checkedInAt,
     },
@@ -538,12 +510,12 @@ export function buildSocialAgentReviewCard(input: {
   realActivityPersisted: boolean;
 }): FitMeetAlphaCard {
   return {
-    id: `review_card:${input.taskId}:${input.activityId ?? 'draft'}`,
-    type: 'review_card',
+    id: `meet_loop_timeline:${input.taskId}:${input.activityId ?? 'draft'}:review`,
+    type: 'meet_loop_timeline',
     schemaVersion: 'fitmeet.tool-ui.v1',
     schemaType: 'meet_loop.timeline',
     title: '这次约练完成了吗？我可以帮你记录一个简短评价。',
-    body: '评价会帮助我调整后续推荐，也会用于更新你的 Life Graph 和履约可信度。',
+    body: '评价会帮助我调整后续推荐，也会用于更新你的长期偏好和履约可信度。',
     status: 'ready',
     data: {
       taskId: input.taskId,
@@ -556,9 +528,12 @@ export function buildSocialAgentReviewCard(input: {
       loopStage: 'activity_completed',
       timeline: {
         title: '约练进展',
-        description: '活动已进入评价阶段，确认后才会写入长期画像。',
-        nextAction: '提交评价后，我会给出画像更新建议。',
-        steps: socialAgentMeetLoopTimelineSteps('activity_completed', '提交评价后进入画像确认'),
+        description: '活动已进入评价阶段，确认后才会更新长期偏好。',
+        nextAction: '提交评价后，我会给出资料更新建议。',
+        steps: socialAgentMeetLoopTimelineSteps(
+          'activity_completed',
+          '提交评价后进入资料确认',
+        ),
       },
       defaultRating: 5,
       lifeGraphUpdatePreview:
@@ -601,7 +576,7 @@ export function buildSocialAgentMeetLoopTimelineCard(input: {
   const recoveryProtocol = meetLoopRecoveryProtocol(stage, payload);
   return {
     id: `meet_loop_timeline:${input.taskId}:${input.activityId ?? 'draft'}`,
-    type: 'review_card',
+    type: 'meet_loop_timeline',
     schemaVersion: 'fitmeet.tool-ui.v1',
     schemaType: 'meet_loop.timeline',
     title: '邀约进展',
@@ -637,6 +612,7 @@ export function buildSocialAgentMeetLoopTimelineCard(input: {
       taskId: input.taskId,
       activityId: input.activityId ?? null,
       candidateUserId: input.candidateUserId ?? null,
+      stage,
       payload,
     }),
   };
@@ -655,8 +631,8 @@ function meetLoopRecoveryProtocol(
   return [
     {
       key: 'checkpoint',
-      label: '进度保存',
-      detail: '当前邀约状态已保存，刷新或断线后可以回到这一步。',
+      label: '可继续',
+      detail: '刷新或断线后，也可以回到当前邀约进度继续处理。',
     },
     {
       key: 'waiting_for',
@@ -680,9 +656,14 @@ function meetLoopTimelineActions(input: {
   taskId: number;
   activityId: number | null;
   candidateUserId: number | null;
+  stage: string;
   payload: Record<string, unknown>;
 }): FitMeetAlphaCardAction[] {
-  const counterpartIntent = cleanDisplayText(input.payload.counterpartIntent, '');
+  const counterpartIntent = cleanDisplayText(
+    input.payload.counterpartIntent,
+    '',
+  );
+  const stage = cleanDisplayText(input.stage, '');
   const nextStepText = cleanDisplayText(
     input.payload.nextSafeStep ??
       input.payload.nextAction ??
@@ -695,6 +676,43 @@ function meetLoopTimelineActions(input: {
     candidateUserId: input.candidateUserId,
     ...input.payload,
   };
+  if (
+    stage === 'activity_draft_private' ||
+    cleanDisplayText(input.payload.visibility, '') === 'private'
+  ) {
+    return [
+      {
+        id: 'meet_loop_private_match',
+        label: '继续私密匹配',
+        action: 'candidate.more_like_this',
+        schemaAction: 'candidate.more_like_this',
+        requiresConfirmation: false,
+        payload: {
+          ...basePayload,
+          privateMatchMode: true,
+          candidateSearchMode: 'private_match_without_discover_publish',
+          sourceAction: 'activity.skip_publish',
+          publicDiscoverPublishSkipped: true,
+        },
+      },
+      {
+        id: 'meet_loop_publish_later',
+        label: '重新发布到发现',
+        action: 'publish_to_discover',
+        schemaAction: 'publish_to_discover',
+        requiresConfirmation: true,
+        payload: {
+          ...basePayload,
+          confirmedPublish: false,
+          approvalRequired: true,
+          checkpointRequired: true,
+          resumeMode: 'resume_after_approval',
+          sourceAction: 'activity.skip_publish.republish',
+        },
+      },
+      meetLoopRescheduleAction(basePayload),
+    ];
+  }
   if (counterpartIntent === 'declined') {
     return [
       {
@@ -722,7 +740,9 @@ function meetLoopTimelineActions(input: {
   }
   if (
     counterpartIntent === 'accepted' &&
-    /activity|invite_activity|create_activity|offline|约练|活动|创建/.test(nextStepText)
+    /activity|invite_activity|create_activity|offline|约练|活动|创建/.test(
+      nextStepText,
+    )
   ) {
     return [
       {
@@ -742,10 +762,15 @@ function meetLoopTimelineActions(input: {
       meetLoopRescheduleAction(basePayload),
     ];
   }
-  return [meetLoopResumeAction(basePayload), meetLoopRescheduleAction(basePayload)];
+  return [
+    meetLoopResumeAction(basePayload),
+    meetLoopRescheduleAction(basePayload),
+  ];
 }
 
-function meetLoopResumeAction(payload: Record<string, unknown>): FitMeetAlphaCardAction {
+function meetLoopResumeAction(
+  payload: Record<string, unknown>,
+): FitMeetAlphaCardAction {
   return {
     id: 'meet_loop_resume',
     label: '继续推进',
@@ -757,10 +782,12 @@ function meetLoopResumeAction(payload: Record<string, unknown>): FitMeetAlphaCar
   };
 }
 
-function meetLoopRescheduleAction(payload: Record<string, unknown>): FitMeetAlphaCardAction {
+function meetLoopRescheduleAction(
+  payload: Record<string, unknown>,
+): FitMeetAlphaCardAction {
   return {
     id: 'meet_loop_reschedule',
-    label: '调整时间',
+    label: '修改卡片',
     action: 'reschedule_meet_loop',
     schemaAction: 'meet_loop.reschedule',
     loopStage: 'activity_draft_created',
@@ -790,8 +817,8 @@ export function buildSocialAgentLifeGraphUpdateCard(input: {
     schemaVersion: 'fitmeet.tool-ui.v1',
     schemaType: 'life_graph.diff',
     title: isCounterpartReply
-      ? '这次回应可以作为一条弱画像信号。'
-      : '这次约练已经记录到你的 Life Graph。',
+      ? '这次回应可以作为一条弱互动信号。'
+      : '这次约练已经记录到你的长期偏好。',
     body: isCounterpartReply
       ? '如果你愿意，我会把这次低压力开场的回应记录为脱敏互动信号，用来优化后续推荐。'
       : '我会用这次真实完成和评价，优化之后推荐给你的运动搭子和活动时间。',
@@ -808,16 +835,14 @@ export function buildSocialAgentLifeGraphUpdateCard(input: {
       loopStage,
       review: { rating: input.rating, comment: input.comment },
       diff: {
-        title: isCounterpartReply
-          ? '低压力开场互动信号'
-          : '约练偏好更新建议',
+        title: isCounterpartReply ? '低压力开场互动信号' : '约练偏好更新建议',
         description: isCounterpartReply
           ? '对方已经回复，说明这类低压力、先站内聊的开场方式对你当前目标有效。'
           : input.positive
             ? '这次完成记录会提高类似运动社交机会的推荐权重。'
             : '这次反馈会降低类似安排的推荐权重。',
         currentValue: isCounterpartReply
-          ? '不把这次回复写入长期画像'
+          ? '不把这次回复写入长期偏好'
           : '沿用当前运动社交偏好',
         proposedValue: isCounterpartReply
           ? '提高低压力开场、公共场所和先站内聊候选的解释权重'
@@ -829,9 +854,10 @@ export function buildSocialAgentLifeGraphUpdateCard(input: {
           : ['运动社交偏好', '约练节奏', '履约可信度'],
         conflicts: [],
         sensitivityLevel: 'medium',
-        confirmationBoundary: '这只是画像更新建议；你可以保留、撤回或选择不用于推荐。',
+        confirmationBoundary:
+          '这只是资料更新建议；你可以保留、撤回或选择不用于推荐。',
         privacyBoundary: '不会写入精确位置或私聊内容。',
-        revokeHint: '确认后仍可在 Life Graph 中撤回或纠正。',
+        revokeHint: '确认后仍可在个人信息里撤回或纠正。',
         sourceSignals: isCounterpartReply
           ? ['对方已回复', '低压力开场有效', '先站内聊边界']
           : ['本次约练完成状态', '你的评价反馈'],
@@ -919,7 +945,7 @@ export function buildSocialAgentProofUploadPromptCard(input: {
         summary: '证明只用于活动履约确认，不要求露脸。',
         safetyBadges: ['不公开精确位置', '不强制露脸', '仅用于履约确认'],
         safetyBoundary: '证明仅用于活动履约确认，不公开精确位置，不强制露脸。',
-        meetLoopNextStep: '证明确认后继续推进评价和画像更新。',
+        meetLoopNextStep: '证明确认后继续推进评价和长期偏好更新。',
         confirmedContext: ['活动履约确认', '隐私保护', '可补充证明'],
       },
     },
@@ -952,7 +978,7 @@ export function buildSocialAgentProofSubmittedCard(input: {
     schemaVersion: 'fitmeet.tool-ui.v1',
     schemaType: 'social_match.activity',
     title: '活动证明已提交',
-    body: '证明已进入待确认状态。对方确认后，我会继续更新活动履约状态和 Life Graph 信号。',
+    body: '证明已进入待确认状态。对方确认后，我会继续更新活动履约状态和长期偏好信号。',
     status: 'ready',
     data: {
       taskId: input.taskId,
@@ -973,8 +999,8 @@ export function buildSocialAgentProofSubmittedCard(input: {
         summary: '证明已进入待确认状态，确认后继续更新履约状态。',
         safetyBadges: ['待确认', '隐私保护', '履约状态更新'],
         safetyBoundary: '证明只用于履约确认，不公开精确位置。',
-        meetLoopNextStep: '对方确认后继续评价与画像更新。',
-        confirmedContext: ['证明待确认', '活动履约', '后续回写画像'],
+        meetLoopNextStep: '对方确认后继续评价与长期偏好更新。',
+        confirmedContext: ['证明待确认', '活动履约', '后续更新资料'],
       },
     },
     actions: [
@@ -1052,12 +1078,12 @@ export function buildSocialAgentActivityDetailCard(input: {
         location: cleanDisplayText(activity.locationName, ''),
         time: cleanDisplayText(activity.startTime, ''),
         safetyBadges: [
-          Boolean(activity.proofRequired) ? '需要履约证明' : '无需额外证明',
+          activity.proofRequired ? '需要履约证明' : '无需额外证明',
           proofStatus,
         ],
         safetyBoundary:
           '活动详情只展示当前任务关联活动；精确位置由客户端隐私开关控制。',
-        meetLoopNextStep: '根据证明状态继续推进评价和画像更新。',
+        meetLoopNextStep: '根据证明状态继续推进评价和长期偏好更新。',
         confirmedContext: ['活动详情', '履约证明', '隐私边界'],
       },
     },
@@ -1126,8 +1152,8 @@ function socialAgentMeetLoopTimelineSteps(
     },
     {
       key: 'life_graph',
-      label: '回写画像',
-      description: '只把你确认的信息写回 Life Graph。',
+      label: '更新资料',
+      description: '只把你确认的信息写回个人信息。',
     },
   ];
   const activeIndex = socialAgentMeetLoopStageIndex(stage);
@@ -1154,7 +1180,11 @@ function socialAgentMeetLoopStageIndex(stage: string) {
   const text = stage.toLowerCase();
   if (/life|trust/.test(text)) return 6;
   if (/review|complete|completed/.test(text)) return 5;
-  if (/met|meet|offline|checkin|check_in|checked_in|arrived|到达|签到|见面/.test(text))
+  if (
+    /met|meet|offline|checkin|check_in|checked_in|arrived|到达|签到|见面/.test(
+      text,
+    )
+  )
     return 4;
   if (/confirm/.test(text)) return 3;
   if (/reschedule|modify/.test(text)) return 2;
@@ -1163,7 +1193,7 @@ function socialAgentMeetLoopStageIndex(stage: string) {
 }
 
 function socialAgentMeetLoopActionLabel(key: string) {
-  if (key === 'draft') return '确认后发起';
+  if (key === 'draft') return '确认后推进';
   if (key === 'sent') return '等待回复';
   if (key === 'reschedule') return '可改期';
   if (key === 'confirmed') return '确认细节';
@@ -1189,6 +1219,14 @@ function stringArray(value: unknown): string[] {
     .slice(0, 6);
 }
 
+function firstStringArray(...values: unknown[]): string[] {
+  for (const value of values) {
+    const items = stringArray(value);
+    if (items.length > 0) return items;
+  }
+  return [];
+}
+
 function number(value: unknown): number | null {
   const next =
     typeof value === 'number'
@@ -1212,7 +1250,9 @@ function candidateReasoningQuality(candidate: Record<string, unknown>): {
     degradationReason?: 'empty_response' | 'model_unavailable';
   };
 } {
-  const nested = record(candidate.matchReasoner ?? candidate.candidateExplanation);
+  const nested = record(
+    candidate.matchReasoner ?? candidate.candidateExplanation,
+  );
   const reasonerSource = reasonerSourceValue(
     candidate.reasonerSource ??
       candidate.explanationSource ??
@@ -1259,7 +1299,8 @@ function candidateReasoningQuality(candidate: Record<string, unknown>): {
 function candidateActionSnapshot(candidate: Record<string, unknown>) {
   const reasoningQuality = candidateReasoningQuality(candidate);
   return {
-    targetUserId: candidate.targetUserId ?? candidate.candidateUserId ?? candidate.userId,
+    targetUserId:
+      candidate.targetUserId ?? candidate.candidateUserId ?? candidate.userId,
     candidateUserId: candidate.candidateUserId ?? candidate.userId,
     userId: candidate.userId,
     candidateRecordId: candidate.candidateRecordId ?? null,
@@ -1271,12 +1312,15 @@ function candidateActionSnapshot(candidate: Record<string, unknown>) {
       cleanDisplayText(candidate.nickname, '') ||
       cleanDisplayText(candidate.name, '') ||
       '候选人',
-    avatarUrl: cleanDisplayText(candidate.avatarUrl ?? candidate.imageUrl, '') || null,
+    avatarUrl:
+      cleanDisplayText(candidate.avatarUrl ?? candidate.imageUrl, '') || null,
     city: cleanDisplayText(candidate.city, '') || null,
     score: candidate.score ?? candidate.matchScore ?? null,
     matchScore: candidate.matchScore ?? candidate.score ?? null,
     commonTags: stringArray(candidate.commonTags).slice(0, 6),
-    matchReasons: stringArray(candidate.matchReasons ?? candidate.reasons).slice(0, 6),
+    matchReasons: stringArray(
+      candidate.matchReasons ?? candidate.reasons,
+    ).slice(0, 6),
     suggestedOpener:
       cleanDisplayText(
         candidate.suggestedOpener ??
@@ -1303,7 +1347,9 @@ function record(value: unknown): Record<string, unknown> {
     : {};
 }
 
-function reasonerSourceValue(value: unknown): 'deepseek' | 'fallback' | undefined {
+function reasonerSourceValue(
+  value: unknown,
+): 'deepseek' | 'fallback' | undefined {
   return value === 'deepseek' || value === 'fallback' ? value : undefined;
 }
 
@@ -1448,6 +1494,10 @@ export function messageForSocialAgentSchemaAction(
       return '重新生成开场白';
     case 'opener.reject':
       return '取消发送开场白';
+    case 'publish_to_discover':
+      return '发布这张约练卡到发现';
+    case 'activity.skip_publish':
+      return '暂不发布这张约练卡';
     case 'activity.modify_time':
       return '修改约练时间';
     case 'activity.modify_location':
@@ -1462,12 +1512,14 @@ export function messageForSocialAgentSchemaAction(
       return '查看活动详情';
     case 'candidate.view_detail':
       return '详细解释这个候选人的匹配理由、安全边界和推荐下一步';
+    case 'candidate.like':
+      return '收藏这个候选人';
     case 'review.submit':
       return '提交活动评价';
     case 'life_graph.accept_update':
-      return '确认更新 Life Graph';
+      return '确认更新画像';
     case 'life_graph.reject_update':
-      return '不要更新 Life Graph';
+      return '不要更新画像';
     case 'meet_loop.resume':
       return '继续推进邀约';
     case 'meet_loop.reschedule':

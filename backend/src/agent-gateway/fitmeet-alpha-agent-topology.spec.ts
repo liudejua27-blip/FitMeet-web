@@ -1,11 +1,14 @@
 import {
   FITMEET_ALPHA_AGENT_HANDOFFS,
   FITMEET_ALPHA_AGENT_PATH,
+  FITMEET_ALPHA_AGENT_RUNTIME_BOUNDARIES,
   FITMEET_ALPHA_AGENT_TOOL_OWNERS,
+  FITMEET_ALPHA_LEGACY_NEXT_AGENT_VALUES,
   FITMEET_ALPHA_NEXT_AGENT_MAP,
   FITMEET_ALPHA_NEXT_AGENT_VALUES,
   fitMeetAlphaAgentForNextAgent,
   fitMeetAlphaAgentOwnersForTool,
+  fitMeetAlphaAgentRuntimeBoundary,
 } from './fitmeet-alpha-agent-topology';
 import {
   FitMeetAgentToolRegistryService,
@@ -18,16 +21,14 @@ describe('FitMeet Alpha Agent topology', () => {
       'FitMeet Main Agent',
       'Agent Brain',
       'Life Graph Agent',
-      'Social Match Agent',
-      'Meet Loop Agent',
-      'Math Agent',
+      'Match Agent',
     ]);
   });
 
   it('only allows Main Agent handoffs to registered subagents', () => {
     const supportedAgents = new Set(FITMEET_ALPHA_AGENT_PATH);
 
-    expect(FITMEET_ALPHA_AGENT_HANDOFFS).toHaveLength(4);
+    expect(FITMEET_ALPHA_AGENT_HANDOFFS).toHaveLength(3);
     for (const handoff of FITMEET_ALPHA_AGENT_HANDOFFS) {
       expect(handoff.from).toBe('FitMeet Main Agent');
       expect(supportedAgents.has(handoff.to)).toBe(true);
@@ -36,8 +37,47 @@ describe('FitMeet Alpha Agent topology', () => {
     }
   });
 
+  it('keeps runtime role budgets centralized and low-cost', () => {
+    expect(Object.keys(FITMEET_ALPHA_AGENT_RUNTIME_BOUNDARIES).sort()).toEqual(
+      [...FITMEET_ALPHA_AGENT_PATH].sort(),
+    );
+    expect(fitMeetAlphaAgentRuntimeBoundary('Agent Brain')).toMatchObject({
+      role: 'agent_brain',
+      memoryScope: 'agent_brain.turn_memory',
+      maxToolCalls: 1,
+      maxRetries: 0,
+      evalHints: expect.objectContaining({
+        forbidsPrivacyReadWrite: true,
+      }),
+    });
+    expect(fitMeetAlphaAgentRuntimeBoundary('Life Graph Agent')).toMatchObject({
+      role: 'life_graph_agent',
+      memoryScope: 'life_graph.profile_memory',
+      maxToolCalls: 2,
+      maxRetries: 1,
+      evalHints: expect.objectContaining({
+        needsUserConfirmedMerge: true,
+      }),
+    });
+    expect(fitMeetAlphaAgentRuntimeBoundary('Match Agent')).toMatchObject({
+      role: 'match_agent',
+      memoryScope: 'matching.candidate_memory',
+      maxToolCalls: 3,
+      maxRetries: 1,
+      evalHints: expect.objectContaining({
+        needsIdempotency: true,
+      }),
+    });
+  });
+
   it('maps every structured nextAgent value to an implemented user-facing agent', () => {
     expect(FITMEET_ALPHA_NEXT_AGENT_VALUES).toEqual([
+      'agent_brain',
+      'life_graph_agent',
+      'match_agent',
+      'main_agent',
+    ]);
+    expect(FITMEET_ALPHA_LEGACY_NEXT_AGENT_VALUES).toEqual([
       'life_graph',
       'social_match',
       'meet_loop',
@@ -45,7 +85,10 @@ describe('FitMeet Alpha Agent topology', () => {
       'answer',
     ]);
     expect(Object.keys(FITMEET_ALPHA_NEXT_AGENT_MAP).sort()).toEqual(
-      [...FITMEET_ALPHA_NEXT_AGENT_VALUES].sort(),
+      [
+        ...FITMEET_ALPHA_NEXT_AGENT_VALUES,
+        ...FITMEET_ALPHA_LEGACY_NEXT_AGENT_VALUES,
+      ].sort(),
     );
 
     for (const nextAgent of FITMEET_ALPHA_NEXT_AGENT_VALUES) {
@@ -56,11 +99,21 @@ describe('FitMeet Alpha Agent topology', () => {
     }
   });
 
-  it('routes math requests only through the implemented no-side-effect Math Agent', () => {
-    expect(fitMeetAlphaAgentForNextAgent('math')).toBe('Math Agent');
+  it('routes math requests only through the implemented no-side-effect Agent Brain', () => {
+    expect(fitMeetAlphaAgentForNextAgent('agent_brain')).toBe('Agent Brain');
+    expect(fitMeetAlphaAgentForNextAgent('math')).toBe('Agent Brain');
     expect(fitMeetAlphaAgentForNextAgent('math_agent')).toBeNull();
     expect(fitMeetAlphaAgentForNextAgent('calendar_agent')).toBeNull();
-    expect(FITMEET_ALPHA_AGENT_TOOL_OWNERS['Math Agent']).toEqual([]);
+    expect(FITMEET_ALPHA_AGENT_TOOL_OWNERS['Agent Brain']).toEqual([]);
+  });
+
+  it('keeps legacy nextAgent values as compatibility aliases only', () => {
+    expect(fitMeetAlphaAgentForNextAgent('life_graph')).toBe(
+      'Life Graph Agent',
+    );
+    expect(fitMeetAlphaAgentForNextAgent('social_match')).toBe('Match Agent');
+    expect(fitMeetAlphaAgentForNextAgent('meet_loop')).toBe('Match Agent');
+    expect(fitMeetAlphaAgentForNextAgent('answer')).toBe('FitMeet Main Agent');
   });
 
   it('assigns every model-facing tool to at least one implemented subagent', () => {
@@ -101,7 +154,7 @@ describe('FitMeet Alpha Agent topology', () => {
 
   it('does not assign external tools to future math capabilities before they exist', () => {
     expect(Object.keys(FITMEET_ALPHA_AGENT_TOOL_OWNERS)).toContain(
-      'Math Agent',
+      'Agent Brain',
     );
     expect(fitMeetAlphaAgentOwnersForTool('calculate_training_pace')).toEqual(
       [],

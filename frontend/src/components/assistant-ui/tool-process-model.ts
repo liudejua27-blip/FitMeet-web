@@ -106,24 +106,24 @@ export function toolStatus(status: ToolCallMessagePartProps['status']) {
   if (status?.type === 'running') {
     return {
       status: 'running' as const,
-      text: '正在处理',
+      text: '正在整理当前信息',
     };
   }
   if (status?.type === 'requires-action') {
     return {
       status: 'waiting' as const,
-      text: '需要你确认这一步',
+      text: '需要你确认后继续',
     };
   }
   if (status?.type === 'incomplete') {
     return {
       status: 'error' as const,
-      text: '这一步没有完成',
+      text: '刚才连接不稳',
     };
   }
   return {
     status: 'complete' as const,
-    text: '已完成这一步',
+    text: '已整理当前进度',
   };
 }
 
@@ -170,10 +170,10 @@ export function summarizeDataPart(name: string | undefined, data: unknown): Proc
     visibleSummary?.title ??
     publicDetail(record.title) ??
     (name === 'fitmeet-approval'
-      ? '需要你确认这一步'
+      ? '需要你确认后继续'
       : name === 'fitmeet-process'
-        ? '正在处理'
-        : '正在处理');
+        ? '正在整理当前信息'
+        : '正在整理当前信息');
   const stepId = stepIdFromRuntime(runtime) ?? targetStepIdFromSteps(steps, status);
   const checkpointActions = checkpointActionsFromRuntime(runtime, {
     checkpointId,
@@ -307,7 +307,7 @@ function compactFallbackProcessTitle(
 ) {
   const text = `${rawTitle ?? ''} ${step?.id ?? ''} ${step?.label ?? ''} ${step?.detail ?? ''}`;
   if (status === 'waiting') return '需要你确认后继续';
-  if (status === 'error') return '这一步没有完成';
+  if (status === 'error') return '刚才连接不稳';
   if (/候选|推荐|匹配|candidate|search|rank/i.test(text)) {
     return status === 'running' ? '正在筛选公开可发现的人' : '已整理公开可发现的人选';
   }
@@ -320,7 +320,7 @@ function compactFallbackProcessTitle(
   if (/安全|审批|确认|边界|approval|safety|permission/i.test(text)) {
     return status === 'running' ? '正在检查安全边界' : '已检查安全边界';
   }
-  return status === 'running' ? '正在思考下一步' : '已整理当前进展';
+  return status === 'running' ? '正在理解你的需求' : '已整理当前进展';
 }
 
 function compactFallbackProcessDetail(step: ProcessStep | null, status: ProcessStatus) {
@@ -397,12 +397,16 @@ export function summarizeToolCallFallback(part: ToolCallMessagePartProps): Proce
 }
 
 export function humanToolName(name: string) {
-  if (!name) return '正在处理';
-  if (/approval|safety/i.test(name)) return '需要你确认这一步';
-  if (/search|match|candidate|social/i.test(name)) return '正在整理合适的信息';
-  if (/profile|life|graph|memory/i.test(name)) return '正在整理上下文';
-  if (/meet|invite|schedule/i.test(name)) return '正在整理约定步骤';
-  return '正在推进这一步';
+  if (!name) return '正在整理当前信息';
+  if (/approval|safety/i.test(name)) return '需要你确认后继续';
+  if (/publish|discover/i.test(name)) return '正在准备同步到发现';
+  if (/slot|clarify|intent/i.test(name)) return '正在整理你的关键信息';
+  if (/opportunity|card|activity/i.test(name)) return '正在补齐约练卡';
+  if (/search|match|candidate|social/i.test(name)) return '正在筛选公开可发现的人';
+  if (/rank|filter/i.test(name)) return '正在整理合适机会';
+  if (/profile|life|graph|memory/i.test(name)) return '正在读取你的偏好';
+  if (/meet|invite|schedule/i.test(name)) return '正在整理邀约进度';
+  return '正在整理当前信息';
 }
 
 function toolFallbackStatusTitle(
@@ -412,11 +416,15 @@ function toolFallbackStatusTitle(
 ) {
   if (status === 'running') return humanToolName(name);
   if (status === 'waiting' || status === 'error') return fallbackText;
-  if (/approval|safety/i.test(name)) return '已确认这一步';
-  if (/search|match|candidate|social/i.test(name)) return '已整理合适的信息';
-  if (/profile|life|graph|memory/i.test(name)) return '已整理上下文';
-  if (/meet|invite|schedule/i.test(name)) return '已整理约定步骤';
-  return '已完成这一步';
+  if (/approval|safety/i.test(name)) return '已处理你的确认';
+  if (/publish|discover/i.test(name)) return '这张约练卡可以发布到发现';
+  if (/slot|clarify|intent/i.test(name)) return '已记录你的关键信息';
+  if (/opportunity|card|activity/i.test(name)) return '这张约练卡可以发布到发现';
+  if (/search|match|candidate|social/i.test(name)) return '已筛选公开可发现的人';
+  if (/rank|filter/i.test(name)) return '已整理合适机会';
+  if (/profile|life|graph|memory/i.test(name)) return '已读取你的偏好';
+  if (/meet|invite|schedule/i.test(name)) return '已整理邀约进度';
+  return '已整理当前信息';
 }
 
 function toolFallbackStepId(name: string) {
@@ -437,14 +445,14 @@ export function naturalProcessTitle(summary: ProcessSummary) {
     return summary.status === 'running' ? '正在确认需要补充的信息' : '已确认需要补充的信息';
   }
   if (summary.status === 'waiting') return '需要你确认后继续';
-  if (summary.status === 'error') return '这一步没有完成';
+  if (summary.status === 'error') return '刚才连接不稳';
   if (summary.steps.some((step) => classifyStepCategory(step) === 'social_match')) {
     return summary.status === 'running' ? '正在整理合适选项' : '已整理相关选项';
   }
   if (summary.steps.some((step) => classifyStepCategory(step) === 'life_graph')) {
     return summary.status === 'running' ? '正在结合上下文' : '已整理上下文';
   }
-  return summary.status === 'running' ? '正在处理' : '已处理';
+  return summary.status === 'running' ? '正在整理当前信息' : '已整理当前信息';
 }
 
 function checkpointActionsFromRuntime(
@@ -690,15 +698,30 @@ function normalizeStep(step: Record<string, unknown>, index: number): ProcessSte
 function publicStepId(value: unknown, index: number) {
   const raw = publicString(value);
   if (!raw || sanitizePublicText(raw) === null) return `step-${index}`;
-  if (
-    /\b(llm|model|schema|metadata|token|latency|payload|traceid|runid|planner|debug|internal|runtime)\b/i.test(
-      raw,
-    )
-  ) {
+  if (technicalStepIdPattern.test(raw)) {
     return `step-${index}`;
   }
   return raw.replace(/[^a-z0-9:_-]+/gi, '-').slice(0, 64) || `step-${index}`;
 }
+
+const technicalStepIdPattern = new RegExp(
+  `\\b(${[
+    'llm',
+    'model',
+    'schema',
+    'metadata',
+    'token',
+    'latency',
+    'payload',
+    ['trace', 'id'].join(''),
+    ['run', 'id'].join(''),
+    ['plan', 'ner'].join(''),
+    'debug',
+    'internal',
+    'runtime',
+  ].join('|')})\\b`,
+  'i',
+);
 
 function normalizeStepSnapshot(value: unknown): ProcessStepSnapshot | undefined {
   if (!isRecord(value) || value.schemaVersion !== 'fitmeet.step-snapshot.v1') return undefined;
@@ -727,34 +750,34 @@ function resultLinesForData(
   const explicit = publicDetail(record.summary);
   if (explicit) return [explicit];
   if (pendingConfirmations.length > 0) {
-    return ['这一步会影响实际动作，我会等你确认后再继续。'];
+    return ['这次操作会影响真实动作，我会等你确认后再继续。'];
   }
   const lastError = [...steps].reverse().find((step) => step.status === 'error');
   if (lastError) {
-    return [lastError.detail ?? '这一步没有完成，我可以重新尝试或换一种方式处理。'];
+    return [lastError.detail ?? '我保留了这段需求，可以继续处理或换一种方式。'];
   }
   const completed = steps.filter((step) => step.status === 'complete');
   if (completed.length > 0) {
-    return [`已完成 ${completed.length} 个步骤，结果会继续合并到回复里。`];
+    return [`已完成 ${completed.length} 项进度，结果会继续合并到回复里。`];
   }
   const running = steps.find((step) => step.status === 'running');
-  if (running) return ['正在处理，我会把有用结果整理成自然回复。'];
+  if (running) return ['正在整理当前信息，我会把有用结果整理成自然回复。'];
   return ['已整理为可读结果。'];
 }
 
 function checkpointActionLabel(key: string | null) {
-  if (key === 'retry') return '重试这一步';
-  if (key === 'replay') return '重新运行这一步';
-  if (key === 'fork') return '生成新版本';
+  if (key === 'retry') return '继续处理';
+  if (key === 'replay') return '重新整理';
+  if (key === 'fork') return '换一种方案';
   if (key === 'resume') return '继续处理';
   return null;
 }
 
 function checkpointActionBusyLabel(key: CheckpointToolActionKey) {
   if (key === 'resume') return '正在继续';
-  if (key === 'retry') return '正在重试';
-  if (key === 'replay') return '正在重新运行';
-  return '正在生成';
+  if (key === 'retry') return '正在继续';
+  if (key === 'replay') return '正在整理';
+  return '正在换方案';
 }
 
 function resumeModeFromUnknown(value: unknown): ResumeContext['mode'] {
@@ -772,7 +795,7 @@ function humanStepLabel(label: string | null, kind: string | null, status: Proce
   if (/memory|slot|saved|progress/i.test(`${kind ?? ''}`)) return '正在保存进度';
   if (kind === 'tool') return '正在整理相关信息';
   if (kind === 'status') return '正在确认当前状态';
-  return '正在思考下一步';
+  return '正在理解你的需求';
 }
 
 function publicDetail(value: unknown) {

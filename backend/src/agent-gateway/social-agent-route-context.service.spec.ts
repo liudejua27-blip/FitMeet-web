@@ -439,11 +439,7 @@ describe('SocialAgentRouteContextService', () => {
         },
         taskSlotSummary: {
           text: '今天晚上 · 青岛大学附近 · 散步 · 舞蹈相关标签优先',
-          completedRequiredSlots: [
-            'time_window',
-            'location_text',
-            'activity',
-          ],
+          completedRequiredSlots: ['time_window', 'location_text', 'activity'],
         },
         taskMemory: {
           pendingActions: [

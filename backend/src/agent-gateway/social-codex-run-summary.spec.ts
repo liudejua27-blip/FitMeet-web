@@ -193,8 +193,8 @@ describe('summarizeSocialCodexRun', () => {
 
     expect(summary).toMatchObject({
       state: 'failed',
-      title: '这次处理没有完成',
-      detail: '你可以重试，或者补充一句新的要求。',
+      title: '连接中断了，可以继续',
+      detail: '我保留了这段需求，可以继续处理或补充一句新的要求。',
       currentStage: 'search_candidates',
     });
   });

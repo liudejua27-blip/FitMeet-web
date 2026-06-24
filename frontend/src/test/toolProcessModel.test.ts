@@ -35,7 +35,7 @@ describe('assistant-ui tool process model', () => {
       detail: '正在读取你的偏好',
     });
     expect(summary.steps[0]).toMatchObject({
-      label: '需要你确认这一步',
+      label: '需要你确认后继续',
       detail: '正在确认候选动作',
     });
 
@@ -64,9 +64,9 @@ describe('assistant-ui tool process model', () => {
       ],
     });
 
-    expect(summary.title).toBe('正在思考下一步');
+    expect(summary.title).toBe('正在理解你的需求');
     expect(summary.visibleSummary).toMatchObject({
-      title: '正在思考下一步',
+      title: '正在理解你的需求',
       source: 'client.covering_status',
       displayMode: 'covering_status',
       updateModel: 'latest_state',
@@ -156,7 +156,7 @@ describe('assistant-ui tool process model', () => {
     });
 
     expect(summary.visibleSummary).toMatchObject({
-      title: '正在思考下一步',
+      title: '正在理解你的需求',
       source: 'client.covering_status',
       displayMode: 'covering_status',
       updateModel: 'latest_state',
@@ -389,7 +389,7 @@ describe('assistant-ui tool process model', () => {
     } as never);
 
     expect(summary.visibleSummary).toMatchObject({
-      title: '正在整理合适的信息',
+      title: '正在筛选公开可发现的人',
       status: 'running',
       source: 'tool.status',
       displayMode: 'covering_status',
@@ -411,7 +411,7 @@ describe('assistant-ui tool process model', () => {
     } as never);
 
     expect(summary.visibleSummary).toMatchObject({
-      title: '已整理合适的信息',
+      title: '已筛选公开可发现的人',
       detail: '找到 3 个公开可发现的人',
       status: 'complete',
       source: 'tool.status',
@@ -427,7 +427,7 @@ describe('assistant-ui tool process model', () => {
     } as never);
 
     expect(summary.visibleSummary).toMatchObject({
-      title: '需要你确认这一步',
+      title: '需要你确认后继续',
       status: 'waiting',
       source: 'tool.status',
       displayMode: 'covering_status',

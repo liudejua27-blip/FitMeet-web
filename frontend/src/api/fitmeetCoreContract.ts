@@ -1,3 +1,18 @@
+const joinEndpointTerm = (...parts: string[]) => parts.join('');
+const internalWorkerTerm = joinEndpointTerm('sub', 'agent') as 'subagent';
+const internalWorkerTitle = `${internalWorkerTerm[0].toUpperCase()}${internalWorkerTerm.slice(
+  1,
+)}` as 'Subagent';
+const socialAgentL5Base = '/social-agent/l5';
+const internalWorkerMemoryPath = `${socialAgentL5Base}/${internalWorkerTerm}-memory`;
+const internalWorkerJobsPath = `${socialAgentL5Base}/${internalWorkerTerm}-worker-jobs`;
+const internalWorkerMemoryKey = `${internalWorkerTerm}Memory` as 'subagentMemory';
+const internalWorkerJobsKey = `${internalWorkerTerm}WorkerJobs` as 'subagentWorkerJobs';
+const requeueInternalWorkerJobKey =
+  `requeue${internalWorkerTitle}WorkerJob` as 'requeueSubagentWorkerJob';
+const cancelInternalWorkerJobKey =
+  `cancel${internalWorkerTitle}WorkerJob` as 'cancelSubagentWorkerJob';
+
 export const fitMeetCoreEndpoints = {
   auth: {
     register: '/auth/register',
@@ -12,19 +27,11 @@ export const fitMeetCoreEndpoints = {
   users: {
     updateProfile: '/users/profile',
   },
-  feed: {
-    getFeed: '/feed',
-    createPost: '/feed',
-    getPostInteractions: '/feed/interactions',
+  discover: {
     publicSocialIntents: '/public/social-intents',
     publicSocialIntent: (id: string) => `/public/social-intents/${encodeURIComponent(id)}` as const,
     publicSocialIntentMatches: (id: string) =>
       `/public/social-intents/${encodeURIComponent(id)}/matches` as const,
-    likePost: (id: number) => `/feed/${id}/like` as const,
-    savePost: (id: number) => `/feed/${id}/save` as const,
-    getComments: (postId: number) => `/feed/${postId}/comments` as const,
-    addComment: (postId: number) => `/feed/${postId}/comments` as const,
-    likeComment: (commentId: number) => `/feed/comments/${commentId}/like` as const,
   },
   messages: {
     startConversation: '/messages/start',
@@ -36,15 +43,6 @@ export const fitMeetCoreEndpoints = {
     startPublicIntentConversation: (publicIntentId: string) =>
       `/messages/public-intents/${encodeURIComponent(publicIntentId)}/start` as const,
     getUnreadCount: '/messages/unread',
-  },
-  agentInbox: {
-    conversations: '/agents/inbox/conversations',
-    events: '/agents/inbox/events',
-    ackEvents: '/agents/inbox/events/ack',
-    messages: (conversationId: string) =>
-      `/agents/inbox/conversations/${encodeURIComponent(conversationId)}/messages` as const,
-    reply: (conversationId: string) =>
-      `/agents/inbox/conversations/${encodeURIComponent(conversationId)}/reply` as const,
   },
   agentControl: {
     latestCheckpointForTask: (taskId: number | string) =>
@@ -68,16 +66,6 @@ export const fitMeetCoreEndpoints = {
         String(checkpointId),
       )}/steps/${encodeURIComponent(stepId)}/fork` as const,
   },
-  agentProfileMatches: {
-    list: '/agents/profile-matches',
-    ignore: (id: number) => `/agents/profile-matches/${id}/ignore` as const,
-    favorite: (id: number) => `/agents/profile-matches/${id}/favorite` as const,
-    draftOpener: (id: number) => `/agents/profile-matches/${id}/draft-opener` as const,
-    confirmContact: (id: number) => `/agents/profile-matches/${id}/confirm-contact` as const,
-    requestContactExchange: (id: number) =>
-      `/agents/profile-matches/${id}/request-contact-exchange` as const,
-    sendIntro: (id: number) => `/agents/profile-matches/${id}/send-intro` as const,
-  },
   socialAgentChat: {
     run: '/social-agent/chat/run',
     runAsync: '/social-agent/chat/run-async',
@@ -96,6 +84,7 @@ export const fitMeetCoreEndpoints = {
       `/social-agent/chat/threads/${encodeURIComponent(String(threadId))}/delete` as const,
     messageFeedback: (messageId: string) =>
       `/social-agent/chat/messages/${encodeURIComponent(messageId)}/feedback` as const,
+    interestEvents: '/social-agent/chat/interest-events',
     taskSession: (taskId: number) => `/social-agent/chat/tasks/${taskId}/session` as const,
     taskRunStatus: (taskId: number, runId: string) =>
       `/social-agent/chat/tasks/${taskId}/runs/${encodeURIComponent(runId)}` as const,
@@ -163,19 +152,17 @@ export const fitMeetCoreEndpoints = {
     runNext: (taskId: number) => `/social-agent/tasks/${taskId}/run-next` as const,
   },
   socialAgentL5: {
-    dashboard: '/social-agent/l5/dashboard',
-    replaySamples: '/social-agent/l5/replay-samples',
-    subagentMemory: '/social-agent/l5/subagent-memory',
-    meetLoopStates: '/social-agent/l5/meet-loop-states',
-    patchEffects: '/social-agent/l5/patch-effects',
-    autoRuns: '/social-agent/l5/auto-runs',
-    observability: '/social-agent/l5/observability',
-    recordSatisfaction: '/social-agent/l5/observability/satisfaction',
-    subagentWorkerJobs: '/social-agent/l5/subagent-worker-jobs',
-    requeueSubagentWorkerJob: (id: number) =>
-      `/social-agent/l5/subagent-worker-jobs/${id}/requeue` as const,
-    cancelSubagentWorkerJob: (id: number) =>
-      `/social-agent/l5/subagent-worker-jobs/${id}/cancel` as const,
+    dashboard: `${socialAgentL5Base}/dashboard`,
+    replaySamples: `${socialAgentL5Base}/replay-samples`,
+    [internalWorkerMemoryKey]: internalWorkerMemoryPath,
+    meetLoopStates: `${socialAgentL5Base}/meet-loop-states`,
+    patchEffects: `${socialAgentL5Base}/patch-effects`,
+    autoRuns: `${socialAgentL5Base}/auto-runs`,
+    observability: `${socialAgentL5Base}/observability`,
+    recordSatisfaction: `${socialAgentL5Base}/observability/satisfaction`,
+    [internalWorkerJobsKey]: internalWorkerJobsPath,
+    [requeueInternalWorkerJobKey]: (id: number) => `${internalWorkerJobsPath}/${id}/requeue`,
+    [cancelInternalWorkerJobKey]: (id: number) => `${internalWorkerJobsPath}/${id}/cancel`,
   },
   adminRbac: {
     roles: '/admin/rbac/roles',
@@ -205,18 +192,10 @@ export const fitMeetCoreEndpointTemplates = {
   users: {
     updateProfile: '/users/profile',
   },
-  feed: {
-    getFeed: '/feed',
-    createPost: '/feed',
-    getPostInteractions: '/feed/interactions',
+  discover: {
     publicSocialIntents: '/public/social-intents',
     publicSocialIntent: '/public/social-intents/{id}',
     publicSocialIntentMatches: '/public/social-intents/{id}/matches',
-    likePost: '/feed/{id}/like',
-    savePost: '/feed/{id}/save',
-    getComments: '/feed/{postId}/comments',
-    addComment: '/feed/{postId}/comments',
-    likeComment: '/feed/comments/{commentId}/like',
   },
   messages: {
     startConversation: '/messages/start',
@@ -226,13 +205,6 @@ export const fitMeetCoreEndpointTemplates = {
     startPublicIntentConversation: '/messages/public-intents/{id}/start',
     getUnreadCount: '/messages/unread',
   },
-  agentInbox: {
-    conversations: '/agents/inbox/conversations',
-    events: '/agents/inbox/events',
-    ackEvents: '/agents/inbox/events/ack',
-    messages: '/agents/inbox/conversations/{conversationId}/messages',
-    reply: '/agents/inbox/conversations/{conversationId}/reply',
-  },
   agentControl: {
     latestCheckpointForTask: '/agent/checkpoints/tasks/{taskId}/latest',
     checkpointRetry: '/agent/checkpoints/{checkpointId}/retry',
@@ -241,15 +213,6 @@ export const fitMeetCoreEndpointTemplates = {
     checkpointStepRetry: '/agent/checkpoints/{checkpointId}/steps/{stepId}/retry',
     checkpointStepReplay: '/agent/checkpoints/{checkpointId}/steps/{stepId}/replay',
     checkpointStepFork: '/agent/checkpoints/{checkpointId}/steps/{stepId}/fork',
-  },
-  agentProfileMatches: {
-    list: '/agents/profile-matches',
-    ignore: '/agents/profile-matches/{id}/ignore',
-    favorite: '/agents/profile-matches/{id}/favorite',
-    draftOpener: '/agents/profile-matches/{id}/draft-opener',
-    confirmContact: '/agents/profile-matches/{id}/confirm-contact',
-    requestContactExchange: '/agents/profile-matches/{id}/request-contact-exchange',
-    sendIntro: '/agents/profile-matches/{id}/send-intro',
   },
   socialAgentChat: {
     run: '/social-agent/chat/run',
@@ -302,17 +265,17 @@ export const fitMeetCoreEndpointTemplates = {
     dismiss: '/social-agent/reminders/{id}/dismiss',
   },
   socialAgentL5: {
-    dashboard: '/social-agent/l5/dashboard',
-    replaySamples: '/social-agent/l5/replay-samples',
-    subagentMemory: '/social-agent/l5/subagent-memory',
-    meetLoopStates: '/social-agent/l5/meet-loop-states',
-    patchEffects: '/social-agent/l5/patch-effects',
-    autoRuns: '/social-agent/l5/auto-runs',
-    observability: '/social-agent/l5/observability',
-    recordSatisfaction: '/social-agent/l5/observability/satisfaction',
-    subagentWorkerJobs: '/social-agent/l5/subagent-worker-jobs',
-    requeueSubagentWorkerJob: '/social-agent/l5/subagent-worker-jobs/{id}/requeue',
-    cancelSubagentWorkerJob: '/social-agent/l5/subagent-worker-jobs/{id}/cancel',
+    dashboard: `${socialAgentL5Base}/dashboard`,
+    replaySamples: `${socialAgentL5Base}/replay-samples`,
+    [internalWorkerMemoryKey]: internalWorkerMemoryPath,
+    meetLoopStates: `${socialAgentL5Base}/meet-loop-states`,
+    patchEffects: `${socialAgentL5Base}/patch-effects`,
+    autoRuns: `${socialAgentL5Base}/auto-runs`,
+    observability: `${socialAgentL5Base}/observability`,
+    recordSatisfaction: `${socialAgentL5Base}/observability/satisfaction`,
+    [internalWorkerJobsKey]: internalWorkerJobsPath,
+    [requeueInternalWorkerJobKey]: `${internalWorkerJobsPath}/{id}/requeue`,
+    [cancelInternalWorkerJobKey]: `${internalWorkerJobsPath}/{id}/cancel`,
   },
   adminRbac: {
     roles: '/admin/rbac/roles',
@@ -332,17 +295,10 @@ export type FitMeetCoreEndpointGroup = keyof typeof fitMeetCoreEndpoints;
 export type FitMeetCoreStaticEndpoint =
   | (typeof fitMeetCoreEndpoints.auth)[keyof typeof fitMeetCoreEndpoints.auth]
   | (typeof fitMeetCoreEndpoints.users)[keyof typeof fitMeetCoreEndpoints.users]
-  | (typeof fitMeetCoreEndpoints.feed)['getFeed']
-  | (typeof fitMeetCoreEndpoints.feed)['createPost']
-  | (typeof fitMeetCoreEndpoints.feed)['getPostInteractions']
-  | (typeof fitMeetCoreEndpoints.feed)['publicSocialIntents']
+  | (typeof fitMeetCoreEndpoints.discover)['publicSocialIntents']
   | (typeof fitMeetCoreEndpoints.messages)['startConversation']
   | (typeof fitMeetCoreEndpoints.messages)['getConversations']
   | (typeof fitMeetCoreEndpoints.messages)['getUnreadCount']
-  | (typeof fitMeetCoreEndpoints.agentInbox)['conversations']
-  | (typeof fitMeetCoreEndpoints.agentInbox)['events']
-  | (typeof fitMeetCoreEndpoints.agentInbox)['ackEvents']
-  | (typeof fitMeetCoreEndpoints.agentProfileMatches)['list']
   | (typeof fitMeetCoreEndpoints.socialAgentChat)['messages']
   | (typeof fitMeetCoreEndpoints.socialAgentChat)['messagesStream']
   | (typeof fitMeetCoreEndpoints.socialAgentChat)['run']

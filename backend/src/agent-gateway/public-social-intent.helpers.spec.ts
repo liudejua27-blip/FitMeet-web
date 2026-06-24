@@ -72,9 +72,9 @@ describe('public social intent helpers', () => {
     expect(
       hasPublicIntentSensitiveContent('集合点坐标 36.123456,120.123456'),
     ).toBe(true);
-    expect(
-      hasPublicIntentSensitiveContent('青岛某小区3号楼2单元门口见'),
-    ).toBe(true);
+    expect(hasPublicIntentSensitiveContent('青岛某小区3号楼2单元门口见')).toBe(
+      true,
+    );
     expect(
       scorePublicIntentSuspicion(
         request({ description: '短', city: undefined, limit: 20 }),

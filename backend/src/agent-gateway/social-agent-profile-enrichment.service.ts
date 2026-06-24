@@ -25,6 +25,7 @@ import { readSocialAgentConversationHistory } from './social-agent-chat-memory.p
 import { socialAgentContextTurnLimit } from './social-agent-context-window';
 import type { SocialAgentBrainTurnDecision } from './social-agent-brain.service';
 import { SocialAgentChatLlmService } from './social-agent-chat-llm.service';
+import type { FitMeetAlphaCard } from './fitmeet-alpha-agent.types';
 import type {
   ExtractedProfileFields,
   SocialAgentAssistantMessageSource,
@@ -40,6 +41,7 @@ import type {
   SocialAgentIntentType,
 } from './social-agent-intent-router.service';
 import { SocialAgentMetricsService } from './social-agent-metrics.service';
+import { buildRunScopedAssistantMessageId } from './social-agent-stream-message-id.util';
 
 type MemoryContextBuilder = (
   task: AgentTask,
@@ -70,6 +72,7 @@ export class SocialAgentProfileEnrichmentService {
     intent: SocialAgentIntentType;
     buildMemoryContext: MemoryContextBuilder;
     buildTaskContext?: TaskContextBuilder;
+    traceId?: string | null;
     emit?: StreamEmit;
     signal?: AbortSignal | null;
   }): Promise<{
@@ -77,11 +80,39 @@ export class SocialAgentProfileEnrichmentService {
     savedContext: boolean;
     profileUpdated: boolean;
     profileUpdateProposal?: LifeGraphProposalDto | null;
+    cards?: FitMeetAlphaCard[];
     task: AgentTask;
     assistantStreamed?: boolean;
     assistantMessageSource?: SocialAgentAssistantMessageSource;
   }> {
     const { ownerUserId, task, message, intent, buildMemoryContext } = input;
+    const assistantMessageId = buildRunScopedAssistantMessageId({
+      taskId: task.id,
+      traceId: input.traceId,
+    });
+
+    if (this.shouldStartProfileCompletionMode(message, intent)) {
+      transitionSocialAgentState(task, 'profile_detected', {
+        objective: 'profile_completion',
+        nextStep: '等待用户回答个人信息补全问题',
+        shouldSearchNow: false,
+        profileSaved: false,
+        awaitingSearchConfirmation: false,
+        waitingFor: 'profile_completion_answers',
+        lastCompletedStep: 'profile_completion_questions_asked',
+      });
+      await this.taskRepo.save(task);
+      return {
+        assistantMessage: this.profileCompletionQuestionReply(task),
+        assistantMessageSource: 'deterministic_route',
+        savedContext: true,
+        profileUpdated: false,
+        profileUpdateProposal: null,
+        cards: [this.profileCompletionCard(task)],
+        task,
+        assistantStreamed: false,
+      };
+    }
 
     if (this.isProfileMissingFieldsQuestion(message)) {
       return {
@@ -100,17 +131,20 @@ export class SocialAgentProfileEnrichmentService {
     const extractedProfile = this.extractProfileFieldsFromConversation([
       sourceMessage,
     ]);
-    const llmExtractedProfile = await this.chatLlm.extractProfileFieldsWithLlm(
-      task,
-      sourceMessage,
-    );
+    const llmExtractedProfile = this.hasSufficientDeterministicProfileSignal(
+      extractedProfile,
+    )
+      ? (this.recordDeterministicProfileExtraction(), {})
+      : await this.chatLlm.extractProfileFieldsWithLlm(task, sourceMessage);
     const plannedProfile = this.chatLlm.profileFieldsFromRecord(
       readSocialAgentConversationBrainToolArguments(
         task,
         SocialAgentToolName.UpdateProfileFromAgentContext,
       ),
     );
+    const pendingProfile = this.pendingExtractedProfile(task);
     const mergedProfile: ExtractedProfileFields = {
+      ...pendingProfile,
       ...plannedProfile,
       ...extractedProfile,
       ...llmExtractedProfile,
@@ -122,6 +156,32 @@ export class SocialAgentProfileEnrichmentService {
     );
     await this.taskRepo.save(task);
 
+    if (
+      this.shouldUseProfileForCurrentTaskWithoutSaving(message) &&
+      Object.keys(mergedProfile).length > 0
+    ) {
+      mergeSocialAgentStableProfileFacts(task, mergedProfile);
+      transitionSocialAgentState(task, 'profile_detected', {
+        objective: 'profile_enrichment',
+        nextStep: '等待用户确认是否开始匹配',
+        shouldSearchNow: false,
+        profileSaved: false,
+        awaitingSearchConfirmation: true,
+        waitingFor: 'profile_match_confirmation',
+        lastCompletedStep: 'profile_used_without_saving',
+      });
+      await this.taskRepo.save(task);
+      return {
+        assistantMessage: this.profileUsedWithoutSavingReply(mergedProfile),
+        assistantMessageSource: 'deterministic_route',
+        savedContext: true,
+        profileUpdated: false,
+        profileUpdateProposal: null,
+        task,
+        assistantStreamed: false,
+      };
+    }
+
     if (this.lifeGraph && Object.keys(mergedProfile).length > 0) {
       const proposal = await this.lifeGraph.extractFromChat(ownerUserId, {
         message: sourceMessage,
@@ -131,7 +191,7 @@ export class SocialAgentProfileEnrichmentService {
       if (proposal.proposedFields.length > 0) {
         rememberSocialAgentCurrentTask(task, {
           objective: 'profile_enrichment',
-          nextStep: '等待用户确认是否保存 Life Graph 画像提案',
+          nextStep: '等待用户确认是否保存个人信息更新建议',
           shouldSearchNow: false,
           profileSaved: false,
           waitingFor: 'life_graph_profile_confirmation',
@@ -194,8 +254,7 @@ export class SocialAgentProfileEnrichmentService {
       await this.taskRepo.save(task);
       const fallbackReply = this.profileUpdatedReply(mergedProfile, output);
       const memoryContext = buildMemoryContext(task);
-      const taskContext =
-        input.buildTaskContext?.(task, memoryContext) ?? null;
+      const taskContext = input.buildTaskContext?.(task, memoryContext) ?? null;
       let assistantStreamed = false;
       const answer = await this.chatLlm.generateAgentBrainReplyWithSource({
         message,
@@ -215,7 +274,7 @@ export class SocialAgentProfileEnrichmentService {
               assistantStreamed = true;
               await input.emit?.({
                 type: 'assistant_delta',
-                messageId: `agent-message:${task.id}`,
+                messageId: assistantMessageId,
                 delta,
                 source: 'llm',
               });
@@ -240,7 +299,7 @@ export class SocialAgentProfileEnrichmentService {
     );
     rememberSocialAgentCurrentTask(task, {
       objective: 'profile_enrichment',
-      nextStep: '询问是否保存画像，或继续补齐可约时间和边界',
+      nextStep: '询问是否保存个人信息，或继续补齐可约时间和边界',
       shouldSearchNow: false,
       profileSaved: false,
       awaitingSearchConfirmation: true,
@@ -249,6 +308,18 @@ export class SocialAgentProfileEnrichmentService {
     });
     transitionSocialAgentState(task, 'profile_detected');
     await this.taskRepo.save(task);
+    if (this.hasSufficientDeterministicProfileSignal(mergedProfile)) {
+      this.recordDeterministicProfileReply();
+      return {
+        assistantMessage: fallbackReply,
+        assistantMessageSource: 'deterministic_route',
+        savedContext: true,
+        profileUpdated: false,
+        profileUpdateProposal: null,
+        task,
+        assistantStreamed: false,
+      };
+    }
     const memoryContext = buildMemoryContext(task);
     const taskContext = input.buildTaskContext?.(task, memoryContext) ?? null;
     let assistantStreamed = false;
@@ -272,7 +343,7 @@ export class SocialAgentProfileEnrichmentService {
             assistantStreamed = true;
             await input.emit?.({
               type: 'assistant_delta',
-              messageId: `agent-message:${task.id}`,
+              messageId: assistantMessageId,
               delta,
               source: 'llm',
             });
@@ -299,9 +370,9 @@ export class SocialAgentProfileEnrichmentService {
       return `- ${this.lifeGraphFieldLabel(field.fieldKey)}：${value}`;
     });
     return [
-      '我识别到以下画像信息：',
+      '我识别到以下个人信息：',
       ...lines,
-      '是否保存到你的 Life Graph？保存后我会用它提升匹配准确度；不保存也不会影响当前聊天。',
+      '是否保存到你的个人信息？保存后我会用它提升匹配准确度；不保存也不会影响当前聊天。',
     ].join('\n');
   }
 
@@ -423,8 +494,8 @@ export class SocialAgentProfileEnrichmentService {
         objective: 'profile_enrichment',
         nextStep:
           brainMode === 'profile_update_tool'
-            ? '保存画像后询问可约时间和边界要求'
-            : '提取画像信息，询问是否保存或继续补齐',
+            ? '保存个人信息后询问可约时间和边界要求'
+            : '提取个人信息，询问是否保存或继续补齐',
         shouldSearchNow: false,
         awaitingSearchConfirmation: true,
         waitingFor:
@@ -443,7 +514,7 @@ export class SocialAgentProfileEnrichmentService {
     if (route.intent === 'workflow_help') {
       rememberSocialAgentCurrentTask(task, {
         objective: 'workflow_help',
-        nextStep: '解释直接发布需求和先完善画像两种路径',
+        nextStep: '解释直接发布需求和先完善个人信息两种路径',
         shouldSearchNow: false,
         awaitingSearchConfirmation: false,
         waitingFor: 'user_choice',
@@ -470,7 +541,7 @@ export class SocialAgentProfileEnrichmentService {
     recordSocialAgentMisunderstanding(task, reason || 'user_correction');
     transitionSocialAgentState(task, 'user_correction', {
       objective: 'profile_enrichment',
-      nextStep: '重新理解上一段画像信息并继续补齐',
+      nextStep: '重新理解上一段个人信息并继续补齐',
       shouldSearchNow: false,
       waitingFor: 'profile_repair',
     });
@@ -479,7 +550,7 @@ export class SocialAgentProfileEnrichmentService {
   rememberLifeGraphProfileProposal(task: AgentTask): void {
     rememberSocialAgentCurrentTask(task, {
       objective: 'profile_enrichment',
-      nextStep: '等待用户确认是否保存 Life Graph 画像提案',
+      nextStep: '等待用户确认是否保存个人信息更新建议',
       shouldSearchNow: false,
       profileSaved: false,
       waitingFor: 'life_graph_profile_confirmation',
@@ -488,28 +559,56 @@ export class SocialAgentProfileEnrichmentService {
   }
 
   private lifeGraphFieldLabel(fieldKey: string): string {
-    const labels: Record<string, string> = {
-      city: '城市',
-      nearbyArea: '常活动区域',
-      availableTimes: '可约时间',
-      weekendAvailability: '周末可用时间',
-      sportsPreferences: '运动偏好',
-      currentSocialGoal: '当前目标',
-      preferredSocialStyle: '社交方式',
-      acceptsNightMeet: '是否接受晚上见面',
-      publicPlaceOnly: '公开地点偏好',
-    };
-    return labels[fieldKey] ?? fieldKey;
+    return this.profileFieldLabel(fieldKey);
   }
 
   private shouldSaveProfileFromMessage(message: string): boolean {
-    return /(调用工具|保存|写入|存到|完善ai画像|完善AI画像|对，|对,|确认|可以保存)/i.test(
-      message,
+    return /(调用工具|保存|写入|存到|对，|对,|确认|可以保存)/i.test(message);
+  }
+
+  private shouldUseProfileForCurrentTaskWithoutSaving(
+    message: string,
+  ): boolean {
+    const text = cleanDisplayText(message, '');
+    if (!text) return false;
+    return /(本次|这次|当前|先|暂时|暂不).{0,8}(使用|用)?.{0,8}(不保存|不用保存|不要保存|别保存)|不保存.{0,8}(本次|这次|当前|先用|使用)|本次使用，不保存|本次使用不保存|先不保存|暂不保存|不用保存/i.test(
+      text,
+    );
+  }
+
+  private shouldStartProfileCompletionMode(
+    message: string,
+    intent: SocialAgentIntentType,
+  ): boolean {
+    const text = cleanDisplayText(message, '');
+    if (!text) return false;
+    if (this.shouldSaveProfileFromMessage(text)) return false;
+    if (
+      intent !== 'profile_enrichment_request' &&
+      !this.isProfileMissingFieldsQuestion(text)
+    ) {
+      return false;
+    }
+    if (
+      !this.isProfileMissingFieldsQuestion(text) &&
+      Object.keys(this.extractProfileFieldsFromConversation([text])).length > 0
+    ) {
+      return false;
+    }
+    return (
+      this.isProfileMissingFieldsQuestion(text) ||
+      /(帮我|可以|想|需要|继续|请你).{0,16}(完善|补充|补全|整理|更新).{0,16}(画像|资料|个人信息|偏好|信息)/i.test(
+        text,
+      ) ||
+      /(完善|补充|补全|整理|更新).{0,16}(画像|资料|个人信息|偏好|信息)/i.test(
+        text,
+      ) ||
+      /问我.{0,8}(几个问题|问题)/i.test(text)
     );
   }
 
   private isProfileMissingFieldsQuestion(message: string): boolean {
-    return /(\u8fd8\u7f3a\u4ec0\u4e48|\u8fd8\u5dee\u4ec0\u4e48|\u7f3a\u54ea\u4e9b|\u7f3a\u5c11\u54ea\u4e9b|\u753b\u50cf.*\u7f3a|\u8d44\u6599.*\u7f3a|\u8fd8\u9700\u8981\u8865\u5145\u4ec0\u4e48)/i.test(
+    return /(\u8fd8\u7f3a\u4ec0\u4e48|\u8fd8\u5dee\u4ec0\u4e48|\u7f3a\u54ea\u4e9b|\u7f3a\u5c11\u54ea\u4e9b|\u753b\u50cf.*\u7f3a|\u8d44\u6599.*\u7f3a|\u4e2a\u4eba\u4fe1\u606f.*\u7f3a|\u8fd8\u9700\u8981\u8865\u5145\u4ec0\u4e48)/i.test(
       message,
     );
   }
@@ -536,6 +635,17 @@ export class SocialAgentProfileEnrichmentService {
       userTurns[0] ??
       null
     );
+  }
+
+  private pendingExtractedProfile(task: AgentTask): ExtractedProfileFields {
+    const memory = this.isRecord(task.memory) ? task.memory : {};
+    const pending = this.isRecord(memory.pendingProfileEnrichment)
+      ? memory.pendingProfileEnrichment
+      : {};
+    const extracted = this.isRecord(pending.extractedProfile)
+      ? pending.extractedProfile
+      : {};
+    return this.chatLlm.profileFieldsFromRecord(extracted);
   }
 
   private extractProfileFieldsFromConversation(
@@ -589,11 +699,17 @@ export class SocialAgentProfileEnrichmentService {
     }
     const interestMatches = Array.from(
       text.matchAll(
-        /(跑步|咖啡|健身|羽毛球|瑜伽|徒步|骑行|游泳|拍照|篮球|足球|网球)/g,
+        /(跑步|咖啡|健身|羽毛球|瑜伽|徒步|骑行|游泳|拍照|篮球|足球|网球|散步|编程|舞蹈|跳舞|Citywalk|citywalk|书店|电影|桌游|爬山|露营|飞盘)/g,
       ),
     ).map((match) => match[1]);
     if (interestMatches.length > 0)
-      fields.interestTags = Array.from(new Set(interestMatches));
+      fields.interestTags = Array.from(
+        new Set(
+          interestMatches.map((item) =>
+            item.toLowerCase() === 'citywalk' ? 'Citywalk' : item,
+          ),
+        ),
+      );
     const timeMatch = text.match(
       /(周末[^，。,.]{0,12}|下午|晚上|工作日[^，。,.]{0,12})/,
     );
@@ -606,13 +722,119 @@ export class SocialAgentProfileEnrichmentService {
       fields.wantToMeet = [target];
       fields.preferredTraits = [target];
     }
+    const publicTagPreference = this.extractPublicTagPreference(text);
+    if (publicTagPreference) {
+      const existing = Array.isArray(fields.preferredTraits)
+        ? fields.preferredTraits
+        : [];
+      const targetPreferenceParts = Array.from(
+        new Set(
+          [fields.targetPreference, publicTagPreference]
+            .map((item) => cleanDisplayText(item, ''))
+            .filter(Boolean),
+        ),
+      );
+      fields.targetPreference = targetPreferenceParts.join('，');
+      fields.preferredTraits = Array.from(
+        new Set([...existing, ...targetPreferenceParts]),
+      );
+    }
     const rejectMatch = text.match(
       /(?:不喜欢|不接受|不想|拒绝|避免)([^，。,.]{1,40})/,
     );
     if (rejectMatch) fields.rejectRules = rejectMatch[0];
     const privacyMatch = text.match(/(?:隐私|不公开|不透露)([^，。,.]{1,60})/);
     if (privacyMatch) fields.privacyBoundary = privacyMatch[0];
+    const socialBoundary = this.extractSocialSafetyBoundary(text);
+    if (socialBoundary) {
+      fields.socialBoundary = socialBoundary;
+      const existingPrivacyBoundary = cleanDisplayText(
+        fields.privacyBoundary,
+        '',
+      );
+      fields.privacyBoundary = existingPrivacyBoundary
+        ? `${existingPrivacyBoundary}；${socialBoundary}`
+        : socialBoundary;
+    }
     return fields;
+  }
+
+  private recordDeterministicProfileExtraction(): void {
+    this.metrics.recordDeterministicRouteReply(
+      'profile_extraction.rule_based',
+      { estimatedAvoidedLlmCalls: 1 },
+    );
+  }
+
+  private recordDeterministicProfileReply(): void {
+    this.metrics.recordDeterministicRouteReply(
+      'profile_extraction.deterministic_reply',
+      { estimatedAvoidedLlmCalls: 1 },
+    );
+  }
+
+  private extractPublicTagPreference(text: string): string {
+    const preferences = [
+      /(?:公开资料|资料|标签|最好|优先)(?:里|中)?[^，。,.]{0,16}(舞蹈|跳舞|编程|程序员|摄影|瑜伽|羽毛球|跑步|健身)[^，。,.]{0,12}/,
+      /(?:找|认识|希望|优先|最好)[^，。,.]{0,16}(女生|男生|同校|同城|校友|舞蹈生|程序员|编程相关|舞蹈相关)[^，。,.]{0,12}/,
+    ]
+      .map((pattern) => text.match(pattern)?.[0])
+      .filter((item): item is string => Boolean(item))
+      .map((item) =>
+        cleanDisplayText(item, '')
+          .replace(/^(想)?(?:找|认识|希望|优先|最好)/, '')
+          .trim(),
+      )
+      .filter(Boolean);
+    return Array.from(new Set(preferences)).slice(0, 3).join('，');
+  }
+
+  private extractSocialSafetyBoundary(text: string): string {
+    const boundaries: string[] = [];
+    if (/公共场所|公开场所|人多|校园内|校内|白天/.test(text)) {
+      boundaries.push('第一次见面优先公共场所');
+    }
+    if (
+      /站内聊|站内沟通|先聊天|先聊|不交换联系方式|不加微信|不留电话/.test(text)
+    ) {
+      boundaries.push('先站内沟通，不自动交换联系方式');
+    }
+    if (/不公开精确位置|不透露具体位置|模糊位置|位置保护/.test(text)) {
+      boundaries.push('保护精确位置，只使用模糊区域');
+    }
+    return Array.from(new Set(boundaries)).join('；');
+  }
+
+  private hasSufficientDeterministicProfileSignal(
+    fields: ExtractedProfileFields,
+  ): boolean {
+    const strongKeys = [
+      'city',
+      'school',
+      'nearbyArea',
+      'mbti',
+      'zodiac',
+      'ageRange',
+      'height',
+      'weight',
+      'personality',
+      'interestTags',
+      'availableTimes',
+      'targetPreference',
+      'socialGoal',
+      'privacyBoundary',
+      'rejectRules',
+      'socialBoundary',
+      'preferredTraits',
+    ];
+    const strongSignals = strongKeys.filter((key) =>
+      this.hasUsefulValue(fields[key]),
+    );
+    if (strongSignals.length >= 2) return true;
+    return Boolean(
+      fields.targetPreference &&
+      (fields.city || fields.school || fields.nearbyArea),
+    );
   }
 
   private rememberExtractedProfileInTaskMemory(
@@ -670,7 +892,7 @@ export class SocialAgentProfileEnrichmentService {
     const knownMissing =
       missingFields.length > 0
         ? `工具返回还缺：${missingFields.join('、')}。`
-        : '目前画像主干已经有了，但关键约练条件还不够完整。';
+        : '目前个人信息主干已经有了，但关键约练条件还不够完整。';
 
     return [
       knownMissing,
@@ -679,20 +901,127 @@ export class SocialAgentProfileEnrichmentService {
     ].join('\n');
   }
 
+  private profileCompletionQuestionReply(task: AgentTask): string {
+    const missingFields = this.profileCompletionMissingFields(task);
+    const questionCount = 5;
+    const missingLine =
+      missingFields.length > 0
+        ? `当前个人信息建议先补：${missingFields.join('、')}。`
+        : '当前个人信息建议先补：当前目标、互动形式、时间地点、活动偏好和安全边界。';
+
+    return [
+      `我会先帮你补充 ${questionCount} 项关键个人信息，所有问题都可以跳过，或选“暂不确定”。`,
+      missingLine,
+      '本次不会推荐具体人物，不会生成联系文案，也不会替你执行外部动作；也不会直接搜索候选人。',
+      '',
+      '1. 你这次最想达成什么？',
+      '   可选：找运动搭子 / 找轻松聊天的人 / 参加附近活动 / 暂不确定',
+      '2. 你偏好的互动形式是什么？',
+      '   可选：先站内沟通 / 低压力轻松聊 / 先运动后熟悉 / 暂不确定',
+      '3. 你方便的时间和地点范围？',
+      '   可选：今天晚上 / 周末下午 / 学校或公司附近 / 3 公里内 / 暂不确定',
+      '4. 你更想参加哪类活动？',
+      '   可选：跑步 / 羽毛球 / 散步 / 健身 / 暂不确定',
+      '5. 有哪些必要的安全边界？',
+      '   可选：只接受公共场所 / 不交换联系方式 / 不接受太晚见面 / 暂不确定',
+      '',
+      '你回答后，我会先生成结构化更新预览，由你选择“确认保存”“修改后保存”或“本次使用，不保存”。保存完成后，我再单独问你是否开始匹配。',
+    ].join('\n');
+  }
+
+  private profileCompletionCard(task: AgentTask): FitMeetAlphaCard {
+    const missingFields = this.profileCompletionMissingFields(task);
+    const questions = [
+      {
+        key: 'currentGoal',
+        label: '当前目标',
+        question: '你这次最想达成什么？',
+        placeholder: '例如：找一个周末下午能一起慢跑的搭子',
+        options: ['找运动搭子', '找轻松聊天的人', '参加附近活动', '暂不确定'],
+      },
+      {
+        key: 'interactionStyle',
+        label: '互动形式',
+        question: '你更偏好怎样开始互动？',
+        placeholder: '例如：先站内聊，再约公共路线',
+        options: ['先站内沟通', '低压力轻松聊', '先运动后熟悉', '暂不确定'],
+      },
+      {
+        key: 'timeLocation',
+        label: '时间和地点',
+        question: '你方便的时间和地点范围？',
+        placeholder: '例如：青岛大学附近，周末下午，3 公里内',
+        options: [
+          '今天晚上',
+          '周末下午',
+          '学校或公司附近',
+          '3 公里内',
+          '暂不确定',
+        ],
+      },
+      {
+        key: 'activityPreference',
+        label: '活动偏好',
+        question: '你更想参加哪类活动？',
+        placeholder: '例如：3-5km 慢跑，节奏轻松',
+        options: ['跑步', '羽毛球', '散步', '健身', '暂不确定'],
+      },
+      {
+        key: 'safetyBoundary',
+        label: '安全边界',
+        question: '有哪些必要的安全边界？',
+        placeholder: '例如：只接受公共场所，不交换联系方式',
+        options: [
+          '只接受公共场所',
+          '不交换联系方式',
+          '不接受太晚见面',
+          '暂不确定',
+        ],
+      },
+    ];
+
+    return {
+      id: `profile_completion:${task.id}`,
+      type: 'profile_completion',
+      schemaVersion: 'fitmeet.tool-ui.v1',
+      schemaType: 'profile.completion',
+      title: '让 Agent 帮你补充个人信息',
+      body: '回答 3-5 个问题后，我会先生成更新预览；确认后才保存到个人信息。',
+      status: 'waiting_confirmation',
+      data: {
+        taskId: task.id,
+        schemaName: 'ProfileCompletionCard',
+        schemaVersion: 'fitmeet.tool-ui.v1',
+        schemaType: 'profile.completion',
+        questionCount: questions.length,
+        missingFields,
+        questions,
+        savePolicy: 'preview_before_write',
+        boundaries: [
+          '不会推荐具体人物',
+          '不会生成邀约文案',
+          '不会自动开始匹配',
+          '所有问题都可以跳过',
+        ],
+      },
+      actions: [],
+    };
+  }
+
   private profileExtractionReply(
     extractedProfile: ExtractedProfileFields,
     corrected: boolean,
   ): string {
     const lines = this.profileFieldLines(extractedProfile);
     const intro = corrected
-      ? '我理解了，刚才那段是你的画像信息，不是立即搜索需求。我先不搜索。'
-      : '我已提取到这些画像信息，先不直接搜索候选人。';
+      ? '我理解了，刚才那段是你的个人信息，不是立即搜索需求。我先不搜索。'
+      : '我已提取到这些个人信息，先不直接搜索候选人。';
     return [
       intro,
       lines.length > 0
         ? `已提取：${lines.join('；')}`
-        : '我还没有提取到足够明确的画像字段。',
-      '你要我把这些信息保存到 AI 画像里吗？保存后，我也可以继续问你可约时间、边界要求，再基于画像开始搜索。',
+        : '我还没有提取到足够明确的个人信息字段。',
+      '你要我把这些信息保存到个人信息里吗？保存后，我也可以继续问你可约时间、边界要求，再基于这些资料开始搜索。',
       '你也可以直接补充：城市/区域、兴趣、可约时间、想认识的人和边界。',
     ].join('\n');
   }
@@ -705,23 +1034,39 @@ export class SocialAgentProfileEnrichmentService {
       ? output.updatedFields
           .map((item) => cleanDisplayText(item, ''))
           .filter(Boolean)
+          .map((item) => this.profileFieldLabel(item))
       : [];
     const memoryFields = Array.isArray(output.memoryFields)
       ? output.memoryFields
           .map((item) => cleanDisplayText(item, ''))
           .filter(Boolean)
+          .map((item) => this.profileFieldLabel(item))
       : [];
     const lines = this.profileFieldLines(extractedProfile);
     return [
-      '已帮你把刚才的信息写入 AI 画像。',
+      '已帮你把刚才的信息保存到个人信息。',
       updatedFields.length > 0
-        ? `已保存到画像字段：${updatedFields.join('、')}`
+        ? `已保存到个人信息字段：${updatedFields.join('、')}`
         : '',
       memoryFields.length > 0
         ? `作为补充偏好记录：${memoryFields.join('、')}`
         : '',
       lines.length > 0 ? `本次识别：${lines.join('；')}` : '',
-      '还缺少可约时间、明确边界和具体约练偏好。你可以继续补充，或者告诉我“现在开始搜索”。',
+      '我已允许 Agent 在匹配池中基于这些公开安全字段推荐你，但不会公开精确位置、联系方式或替你发消息。',
+      '还缺少可约时间、明确边界和具体约练偏好时，你可以继续补充。准备好后我会单独问你是否开始匹配；未确认前不会自动推荐候选。',
+    ]
+      .filter(Boolean)
+      .join('\n');
+  }
+
+  private profileUsedWithoutSavingReply(
+    extractedProfile: ExtractedProfileFields,
+  ): string {
+    const lines = this.profileFieldLines(extractedProfile);
+    return [
+      '好的，这些信息本次只用于当前对话，不保存到个人信息。',
+      lines.length > 0 ? `本次使用的资料预览：${lines.join('；')}` : '',
+      '接下来要基于这些信息开始匹配吗？你可以回复“开始匹配”，我再进入候选推荐；未确认前不会推荐具体人物、发送邀请或发布约练卡。',
     ]
       .filter(Boolean)
       .join('\n');
@@ -730,8 +1075,74 @@ export class SocialAgentProfileEnrichmentService {
   private profileFieldLines(fields: ExtractedProfileFields): string[] {
     return Object.entries(fields).map(([key, value]) => {
       const rendered = Array.isArray(value) ? value.join('、') : value;
-      return `${key}: ${rendered}`;
+      return `${this.profileFieldLabel(key)}：${rendered}`;
     });
+  }
+
+  private profileCompletionMissingFields(task: AgentTask): string[] {
+    const lastToolResult =
+      readSocialAgentConversationBrainLastToolResult(task) ?? {};
+    const output = this.isRecord(lastToolResult.output)
+      ? lastToolResult.output
+      : {};
+    const missingFields = Array.isArray(output.missingFields)
+      ? output.missingFields
+          .map((item) => cleanDisplayText(item, ''))
+          .filter(Boolean)
+      : [];
+    return Array.from(
+      new Set(
+        missingFields
+          .map((field) => this.profileFieldLabel(field))
+          .filter(Boolean),
+      ),
+    ).slice(0, 5);
+  }
+
+  private profileFieldLabel(fieldKey: string): string {
+    const labels: Record<string, string> = {
+      gender: '性别',
+      ageRange: '年龄',
+      height: '身高',
+      weight: '体重',
+      zodiac: '星座',
+      mbti: 'MBTI',
+      city: '城市',
+      school: '学校',
+      nearbyArea: '常活动区域',
+      personality: '性格',
+      traits: '性格特点',
+      interestTags: '兴趣和活动偏好',
+      availableTimes: '可约时间',
+      weekendAvailability: '周末可用时间',
+      targetPreference: '想认识的人',
+      socialGoal: '当前目标',
+      currentSocialGoal: '当前目标',
+      wantToMeet: '想认识的人',
+      preferredTraits: '偏好特质',
+      rejectRules: '不接受的情况',
+      privacyBoundary: '隐私边界',
+      socialBoundary: '安全边界',
+      sportsPreferences: '运动偏好',
+      preferredSocialStyle: '社交方式',
+      acceptsNightMeet: '是否接受晚上见面',
+      publicPlaceOnly: '公开地点偏好',
+      activityPreference: '活动偏好',
+      interactionStyle: '互动形式',
+      locationRange: '地点范围',
+      safetyBoundary: '安全边界',
+      boundary: '安全边界',
+      boundaries: '安全边界',
+      可约时间: '可约时间',
+      边界要求: '安全边界',
+      活动偏好: '活动偏好',
+      城市: '城市',
+      常活动区域: '常活动区域',
+      当前目标: '当前目标',
+      互动形式: '互动形式',
+      时间地点: '时间地点',
+    };
+    return labels[fieldKey] ?? '补充信息';
   }
 
   private isRecord(value: unknown): value is Record<string, unknown> {

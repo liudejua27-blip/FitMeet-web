@@ -28,6 +28,7 @@ import type {
   FitMeetAlphaCard,
 } from './fitmeet-alpha-agent.types';
 import type { AgentLoopRun, SubagentHandoffResult } from './agent-loop.types';
+import type { UserFacingAgentPublicLoop } from './user-facing-agent-response';
 
 export interface SocialAgentVisibleStep {
   id: string;
@@ -133,6 +134,7 @@ export interface SocialAgentChatRunResult {
   cards?: FitMeetAlphaCard[];
   lifeGraphWritebackProposal?: Record<string, unknown> | null;
   safety?: FitMeetAgentSafety;
+  publicLoop?: UserFacingAgentPublicLoop;
   traceId?: string;
   agentTrace?: FitMeetAgentTrace;
   structuredIntent?: Record<string, unknown>;
@@ -140,6 +142,8 @@ export interface SocialAgentChatRunResult {
   agentLoop?: AgentLoopRun;
   subagentHandoffs?: SubagentHandoffResult[];
   runtime?: {
+    runId?: string | null;
+    messageId?: string | null;
     checkpointId?: number | null;
     checkpointType?: string | null;
     canResume?: boolean;
@@ -199,7 +203,11 @@ export type SocialAgentChatStreamEvent =
     }
   | { type: 'error'; message: string };
 
-export type SocialAgentAssistantMessageSource = 'llm' | 'fallback';
+export type SocialAgentAssistantMessageSource =
+  | 'llm'
+  | 'fallback'
+  | 'deterministic_route'
+  | 'deterministic_action';
 
 export type SocialAgentRequestDraft = NonNullable<
   SocialAgentChatRunResult['socialRequestDraft']
@@ -361,6 +369,7 @@ export interface SocialAgentIntentRouteResult {
   lifeGraphWritebackProposal?: Record<string, unknown> | null;
   cards?: FitMeetAlphaCard[];
   safety?: FitMeetAgentSafety;
+  publicLoop?: UserFacingAgentPublicLoop;
   permissionMode?: AgentTaskPermissionMode;
   traceId?: string;
   agentTrace?: FitMeetAgentTrace;

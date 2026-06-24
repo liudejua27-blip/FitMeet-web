@@ -428,8 +428,8 @@ export class ActivitiesService implements OnModuleInit {
 
     // ── Moderation ──────────────────────────────────────────────
     // 1. Always run text moderation on free-text fields.
-    if (dto.note) await this.moderation.checkText(dto.note);
-    if (locationApprox) await this.moderation.checkText(locationApprox);
+    if (dto.note) this.moderation.checkText(dto.note);
+    if (locationApprox) this.moderation.checkText(locationApprox);
 
     // 2. If a photoUrl is supplied, route through Aliyun image moderation
     //    when configured. This is fail-closed — if the moderation API

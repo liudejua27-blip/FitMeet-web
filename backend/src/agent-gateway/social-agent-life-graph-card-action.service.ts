@@ -51,7 +51,7 @@ export class SocialAgentLifeGraphCardActionService {
     body: SocialAgentCardActionBody,
   ): Promise<SocialAgentIntentRouteResult> {
     if (!this.isLifeGraphAction(body.action)) {
-      throw new BadRequestException('Unsupported Life Graph action');
+      throw new BadRequestException('Unsupported profile update action');
     }
 
     const task = await this.assertTaskOwner(taskId, ownerUserId);
@@ -65,10 +65,10 @@ export class SocialAgentLifeGraphCardActionService {
       );
     }
     if (!this.lifeGraph) {
-      throw new BadRequestException('Life Graph service is not available');
+      throw new BadRequestException('Profile update service is not available');
     }
     if (!proposalId) {
-      throw new BadRequestException('Missing Life Graph proposalId');
+      throw new BadRequestException('Missing profile proposalId');
     }
 
     const fieldIds = this.readFieldIds(payload);
@@ -85,7 +85,7 @@ export class SocialAgentLifeGraphCardActionService {
             ...(fieldIds.length ? { fieldIds } : {}),
             reason:
               cleanDisplayText(payload.reason, '') ||
-              '用户从 Agent 卡片拒绝 Life Graph 提案',
+              '用户从 Agent 卡片拒绝画像更新建议',
           });
 
     const accepted = body.action === 'life_graph.accept_update';
@@ -96,7 +96,7 @@ export class SocialAgentLifeGraphCardActionService {
         objective: 'profile_enrichment',
         nextStep: accepted
           ? '继续补齐可约时间、边界要求，或确认现在开始搜索'
-          : '继续补充画像信息，或重新告诉我哪些内容可以保存',
+          : '继续补充个人信息，或重新告诉我哪些内容可以保存',
         shouldSearchNow: false,
         profileSaved: accepted,
         awaitingSearchConfirmation: accepted,
@@ -142,8 +142,8 @@ export class SocialAgentLifeGraphCardActionService {
       task,
       AgentTaskEventType.ConfirmationReceived,
       accepted
-        ? 'User accepted Life Graph proposal'
-        : 'User rejected Life Graph proposal',
+        ? 'User accepted profile proposal'
+        : 'User rejected profile proposal',
       {
         action: body.action,
         proposalId: proposal.proposalId,
@@ -238,8 +238,8 @@ export class SocialAgentLifeGraphCardActionService {
       task,
       AgentTaskEventType.ConfirmationReceived,
       accepted
-        ? 'User kept Meet Loop Life Graph influence'
-        : 'User revoked Meet Loop Life Graph influence',
+        ? 'User kept meet loop profile influence'
+        : 'User revoked meet loop profile influence',
       {
         action,
         activityId,
@@ -262,16 +262,16 @@ export class SocialAgentLifeGraphCardActionService {
     payload: Record<string, unknown>,
   ): string {
     if (this.lifeGraphInfluenceSource(payload) === 'counterpart_reply') {
-      return '已保留这次回复的脱敏互动信号，后续推荐会参考它。你之后仍然可以在 Life Graph 里查看、纠正或撤回。';
+      return '已保留这次回复的脱敏互动信号，后续推荐会参考它。你之后仍然可以在个人信息里查看、纠正或撤回。';
     }
-    return '已保留这次约练对后续推荐的影响。你之后仍然可以在 Life Graph 里查看、纠正或撤回。';
+    return '已保留这次约练对后续推荐的影响。你之后仍然可以在个人信息里查看、纠正或撤回。';
   }
 
   private lifeGraphInfluenceRejectedReply(
     payload: Record<string, unknown>,
   ): string {
     if (this.lifeGraphInfluenceSource(payload) === 'counterpart_reply') {
-      return '好的，这次回复不会作为长期画像偏好信号。我会保留会话上下文，但后续推荐不会继续参考这条互动信号。';
+      return '好的，这次回复不会作为长期偏好信号。我会保留会话上下文，但后续推荐不会继续参考这条互动信号。';
     }
     return '好的，这次约练评价不会继续用于后续推荐。我已经保留聊天记录本身，但不会把它作为画像偏好信号。';
   }
@@ -281,13 +281,13 @@ export class SocialAgentLifeGraphCardActionService {
     accepted: boolean,
   ): string {
     if (!accepted) {
-      return '好的，这次 Life Graph 提案我不会保存。你可以继续补充画像、时间或安全边界；如果想现在开始找人，也直接告诉我。';
+      return '好的，这次个人信息更新建议我不会保存。你可以继续补充资料、时间或安全边界；如果想现在开始找人，也直接告诉我。';
     }
     const count = proposal.proposedFields.filter(
       (field) => field.status === 'confirmed',
     ).length;
     const countText = count > 0 ? `${count} 条` : '这些';
-    return `已保存 ${countText} Life Graph 信息。接下来你可以继续补充可约时间和边界，或告诉我“现在开始找搭子”。`;
+    return `已保存 ${countText} 个人信息。接下来你可以继续补充可约时间和边界，或告诉我“现在开始找搭子”。`;
   }
 
   private lifeGraphFieldSnapshots(proposal: LifeGraphProposalDto) {
@@ -299,7 +299,8 @@ export class SocialAgentLifeGraphCardActionService {
       oldValue: sanitizeForDisplay(field.oldValue),
       source: cleanDisplayText(field.source, '') || null,
       confidence:
-        typeof field.confidence === 'number' && Number.isFinite(field.confidence)
+        typeof field.confidence === 'number' &&
+        Number.isFinite(field.confidence)
           ? field.confidence
           : null,
       status: cleanDisplayText(field.status, '') || null,

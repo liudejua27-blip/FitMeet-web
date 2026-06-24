@@ -9,26 +9,13 @@ import { AgentObservabilityAlertSinkService } from './agent-observability-alert-
 import { AgentApprovalDispatcherService } from './agent-approval-dispatcher.service';
 import { AgentSelfImproveService } from './agent-self-improve.service';
 import { ActivitiesModule } from '../activities/activities.module';
-import { SocialAgentAutopilotController } from './social-agent-autopilot.controller';
 import { SocialAgentReminderController } from './social-agent-reminder.controller';
 import { AgentSelfImproveController } from './agent-self-improve.controller';
 import { AgentL5RuntimeController } from './agent-l5-runtime.controller';
 import { SocialAgentChatController } from './social-agent-chat.controller';
-import { SocialAgentDebugController } from './social-agent-debug.controller';
 import { SocialAgentTasksController } from './social-agent-tasks.controller';
-import {
-  FitMeetAgentToolRegistryAgentController,
-  FitMeetAgentToolRegistryUserController,
-} from './fitmeet-agent-tool-registry.controller';
-import {
-  AgentUserController,
-  AgentApiController,
-  AgentProfileQAController,
-  PublicSocialIntentController,
-  PublicSocialSkillsController,
-} from './agent-gateway.controller';
-import { AgentSkillsController } from './agent-skills.controller';
-import { MiniProgramController } from './mini-program.controller';
+import { AgentProfileQAController } from './agent-profile-qa.controller';
+import { PublicSocialIntentController } from './public-social-intent.controller';
 import { AgentTokenGuard } from './guards/agent-token.guard';
 import { AgentPermissionGuard } from './guards/agent-permission.guard';
 import { AgentOwnerOrTokenGuard } from './guards/agent-owner-or-token.guard';
@@ -67,6 +54,7 @@ import { AgentActionLogService } from './agent-action-log.service';
 import { AgentPermissionService } from './agent-permission.service';
 import { SocialAgentPlannerService } from './social-agent-planner.service';
 import { SocialAgentIntentRouterService } from './social-agent-intent-router.service';
+import { SocialAgentWorkflowRouterService } from './social-agent-workflow-router.service';
 import { SocialAgentBrainService } from './social-agent-brain.service';
 import { FitMeetAlphaAgentSdkService } from './fitmeet-alpha-agent-sdk.service';
 import { FitMeetSubagentRuntimeService } from './fitmeet-subagent-runtime.service';
@@ -87,7 +75,7 @@ import { SocialAgentToolInputParserService } from './social-agent-tool-input-par
 import { SocialAgentPaymentIntentToolService } from './social-agent-payment-intent-tool.service';
 import { SocialAgentMessageToolService } from './social-agent-message-tool.service';
 import { SocialAgentActivityToolService } from './social-agent-activity-tool.service';
-import { SocialAgentInboxToolService } from './social-agent-inbox-tool.service';
+import { SocialAgentMessageEventToolService } from './social-agent-message-event-tool.service';
 import { SocialAgentConversationToolService } from './social-agent-conversation-tool.service';
 import { SocialAgentDecisionToolService } from './social-agent-decision-tool.service';
 import { SocialAgentTaskMemoryService } from './social-agent-task-memory.service';
@@ -143,8 +131,12 @@ import { SocialCodexTraceEvalService } from './social-codex-trace-eval.service';
 import { AgentRunCheckpointService } from './agent-run-checkpoint.service';
 import { FitMeetAgentRuntimeService } from './fitmeet-agent-runtime.service';
 import { SocialAgentCandidatePoolService } from './social-agent-candidate-pool.service';
+import { SocialAgentLlmOutputCacheService } from './social-agent-llm-output-cache.service';
+import { SocialAgentSemanticResponseCacheService } from './social-agent-semantic-response-cache.service';
+import { SocialAgentToolResultCacheService } from './social-agent-tool-result-cache.service';
+import { SocialAgentEmbeddingCacheService } from './social-agent-embedding-cache.service';
+import { SocialAgentTokenBudgetContextPackerService } from './social-agent-token-budget-context-packer.service';
 import { SocialAgentMetricsService } from './social-agent-metrics.service';
-import { SocialAgentMetricsController } from './social-agent-metrics.controller';
 import { SocialAgentLongTermMemoryService } from './social-agent-long-term-memory.service';
 import { SocialAgentLongTermMemory } from './entities/social-agent-long-term-memory.entity';
 import { SocialAgentMessageFeedback } from './entities/social-agent-message-feedback.entity';
@@ -152,6 +144,8 @@ import {
   SocialAgentReminder,
   SocialAgentReminderPreference,
 } from './entities/social-agent-reminder.entity';
+import { SocialAgentUserInterestEvent } from './entities/social-agent-user-interest-event.entity';
+import { SocialAgentUserInterestEventService } from './social-agent-user-interest-event.service';
 import { SocialAgentRagService } from './social-agent-rag.service';
 import { SocialAgentRouteContextService } from './social-agent-route-context.service';
 import { SocialAgentRouteCandidateConfirmationService } from './social-agent-route-candidate-confirmation.service';
@@ -189,8 +183,12 @@ import { LightStatusMapperService } from './response-quality/light-status-mapper
 import { UserFacingResponseSanitizerService } from './response-quality/user-facing-response-sanitizer.service';
 import { MatchModule } from '../match/match.module';
 import { AgentApprovalRequest } from './entities/agent-approval-request.entity';
+import { AgentSideEffectLedger } from './entities/agent-side-effect-ledger.entity';
 import { AgentSettings } from './entities/agent-settings.entity';
 import { AgentApprovalService } from './agent-approval.service';
+import { AgentSideEffectLedgerService } from './agent-side-effect-ledger.service';
+import { SocialAgentPublishReconcilerService } from './social-agent-publish-reconciler.service';
+import { SocialAgentPublishReconcilerCronService } from './social-agent-publish-reconciler-cron.service';
 import { AgentSettingsService } from './agent-settings.service';
 import { AgentControlController } from './agent-control.controller';
 import { SafetyEvent } from './entities/safety-event.entity';
@@ -258,6 +256,7 @@ import { AdminRbacModule } from '../admin-rbac/admin-rbac.module';
       FitMeetAgentMessage,
       FitMeetAgentMemoryUpdate,
       AgentApprovalRequest,
+      AgentSideEffectLedger,
       AgentSettings,
       SafetyEvent,
       ContactRequest,
@@ -271,6 +270,7 @@ import { AdminRbacModule } from '../admin-rbac/admin-rbac.module';
       UserSocialProfile,
       SocialAgentLongTermMemory,
       SocialAgentMessageFeedback,
+      SocialAgentUserInterestEvent,
       SocialAgentReminderPreference,
       SocialAgentReminder,
       User,
@@ -286,6 +286,9 @@ import { AdminRbacModule } from '../admin-rbac/admin-rbac.module';
     AgentObservabilityAlertSinkService,
     AgentSelfImproveService,
     AgentApprovalService,
+    AgentSideEffectLedgerService,
+    SocialAgentPublishReconcilerService,
+    SocialAgentPublishReconcilerCronService,
     AgentApprovalDispatcherService,
     AgentSettingsService,
     AgentActionLogService,
@@ -307,6 +310,7 @@ import { AdminRbacModule } from '../admin-rbac/admin-rbac.module';
     FitMeetAgentToolRegistryService,
     SocialAgentPlannerService,
     SocialAgentIntentRouterService,
+    SocialAgentWorkflowRouterService,
     SocialAgentBrainService,
     FitMeetAlphaAgentSdkService,
     FitMeetSubagentRuntimeService,
@@ -373,9 +377,15 @@ import { AdminRbacModule } from '../admin-rbac/admin-rbac.module';
     AgentRunCheckpointService,
     SocialAgentChatService,
     FitMeetAgentRuntimeService,
+    SocialAgentLlmOutputCacheService,
+    SocialAgentSemanticResponseCacheService,
+    SocialAgentToolResultCacheService,
+    SocialAgentEmbeddingCacheService,
+    SocialAgentTokenBudgetContextPackerService,
     SocialAgentCandidatePoolService,
     SocialAgentMetricsService,
     SocialAgentLongTermMemoryService,
+    SocialAgentUserInterestEventService,
     SocialAgentRagService,
     SocialAgentRouteContextService,
     SocialAgentRouteCandidateConfirmationService,
@@ -394,7 +404,7 @@ import { AdminRbacModule } from '../admin-rbac/admin-rbac.module';
     SocialAgentPaymentIntentToolService,
     SocialAgentMessageToolService,
     SocialAgentActivityToolService,
-    SocialAgentInboxToolService,
+    SocialAgentMessageEventToolService,
     SocialAgentConversationToolService,
     SocialAgentDecisionToolService,
     SocialAgentTaskMemoryService,
@@ -410,23 +420,13 @@ import { AdminRbacModule } from '../admin-rbac/admin-rbac.module';
     AgentOwnerOrTokenGuard,
   ],
   controllers: [
-    AgentUserController,
     AgentControlController,
-    AgentApiController,
     AgentProfileQAController,
-    AgentSkillsController,
-    MiniProgramController,
     PublicSocialIntentController,
-    PublicSocialSkillsController,
-    SocialAgentAutopilotController,
     SocialAgentReminderController,
     AgentSelfImproveController,
     AgentL5RuntimeController,
     SocialAgentChatController,
-    SocialAgentDebugController,
-    FitMeetAgentToolRegistryAgentController,
-    FitMeetAgentToolRegistryUserController,
-    SocialAgentMetricsController,
     SocialAgentTasksController,
   ],
   exports: [
@@ -438,6 +438,7 @@ import { AdminRbacModule } from '../admin-rbac/admin-rbac.module';
     AgentObservabilityAlertSinkService,
     AgentSelfImproveService,
     AgentApprovalService,
+    AgentSideEffectLedgerService,
     AgentApprovalDispatcherService,
     AgentSettingsService,
     AgentActionLogService,
@@ -454,6 +455,7 @@ import { AdminRbacModule } from '../admin-rbac/admin-rbac.module';
     FitMeetAgentToolRegistryService,
     SocialAgentPlannerService,
     SocialAgentIntentRouterService,
+    SocialAgentWorkflowRouterService,
     SocialAgentBrainService,
     FitMeetAlphaAgentSdkService,
     FitMeetSubagentRuntimeService,
@@ -499,8 +501,14 @@ import { AdminRbacModule } from '../admin-rbac/admin-rbac.module';
     SocialAgentFollowUpContextService,
     SocialAgentReplanProgressService,
     FitMeetAgentRuntimeService,
+    SocialAgentLlmOutputCacheService,
+    SocialAgentSemanticResponseCacheService,
+    SocialAgentToolResultCacheService,
+    SocialAgentEmbeddingCacheService,
+    SocialAgentTokenBudgetContextPackerService,
     SocialAgentCandidatePoolService,
     SocialAgentLongTermMemoryService,
+    SocialAgentUserInterestEventService,
     SocialAgentRagService,
     SocialAgentRouteContextService,
     SocialAgentToolExecutorService,

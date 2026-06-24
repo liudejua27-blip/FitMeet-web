@@ -6,9 +6,9 @@ function repo<T extends { id?: number }>() {
   const rows: T[] = [];
   return {
     rows,
-    findOne: jest.fn(async ({ where }: { where?: Record<string, unknown> }) => {
+    findOne: jest.fn(({ where }: { where?: Record<string, unknown> }) => {
       if (!where) return rows[0] ?? null;
-      return (
+      return Promise.resolve(
         rows.find((row) =>
           Object.entries(where).every(([key, value]) => {
             if (value && typeof value === 'object' && 'value' in value) {
@@ -17,29 +17,45 @@ function repo<T extends { id?: number }>() {
             if (value && typeof value === 'object') return true;
             return (row as Record<string, unknown>)[key] === value;
           }),
-        ) ?? null
+        ) ?? null,
       );
     }),
-    find: jest.fn(async ({ where, take }: { where?: Record<string, unknown>; take?: number } = {}) => {
-      const filtered = where
-        ? rows.filter((row) => matchesWhere(row as Record<string, unknown>, where))
-        : rows;
-      return typeof take === 'number' ? filtered.slice(0, take) : filtered;
-    }),
+    find: jest.fn(
+      ({
+        where,
+        take,
+      }: { where?: Record<string, unknown>; take?: number } = {}) => {
+        const filtered = where
+          ? rows.filter((row) =>
+              matchesWhere(row as Record<string, unknown>, where),
+            )
+          : rows;
+        return Promise.resolve(
+          typeof take === 'number' ? filtered.slice(0, take) : filtered,
+        );
+      },
+    ),
     create: jest.fn((input: Partial<T>) => input as T),
-    merge: jest.fn((target: T, input: Partial<T>) => Object.assign(target, input)),
-    save: jest.fn(async (input: T) => {
+    merge: jest.fn((target: T, input: Partial<T>) =>
+      Object.assign(target, input),
+    ),
+    save: jest.fn((input: T) => {
       if (!input.id) input.id = rows.length + 1;
       const index = rows.findIndex((row) => row.id === input.id);
       if (index >= 0) rows[index] = input;
       else rows.push(input);
-      return input;
+      return Promise.resolve(input);
     }),
   };
 }
 
-function matchesWhere(row: Record<string, unknown>, where: Record<string, unknown>) {
-  return Object.entries(where).every(([key, value]) => matchesValue(row[key], value));
+function matchesWhere(
+  row: Record<string, unknown>,
+  where: Record<string, unknown>,
+) {
+  return Object.entries(where).every(([key, value]) =>
+    matchesValue(row[key], value),
+  );
 }
 
 function matchesValue(actual: unknown, expected: unknown) {
@@ -59,7 +75,7 @@ describe('SocialAgentReminderService', () => {
     const reminderRepo = repo<Record<string, unknown>>();
     const taskRepo = repo<Record<string, unknown>>();
     const profileRepo = repo<Record<string, unknown>>();
-    const notifications = { create: jest.fn(async () => ({})) };
+    const notifications = { create: jest.fn(() => Promise.resolve({})) };
     const defaultLongTermSnapshot: LongTermMemorySnapshot = {
       userId: 7,
       profileFacts: {},
@@ -90,7 +106,10 @@ describe('SocialAgentReminderService', () => {
       updatedAt: null,
     };
     const longTermMemory = {
-      readSnapshot: jest.fn(async (): Promise<LongTermMemorySnapshot> => defaultLongTermSnapshot),
+      readSnapshot: jest.fn(
+        (): Promise<LongTermMemorySnapshot> =>
+          Promise.resolve(defaultLongTermSnapshot),
+      ),
     };
     const service = new SocialAgentReminderService(
       preferenceRepo as never,
@@ -224,7 +243,9 @@ describe('SocialAgentReminderService', () => {
             detail: expect.stringContaining('关闭或调整提醒场景'),
           }),
         ]),
-        safeBoundary: expect.stringContaining('发送邀请、加好友、创建活动或公开发布前都会再次确认'),
+        safeBoundary: expect.stringContaining(
+          '发送邀请、加好友、创建活动或公开发布前都会再次确认',
+        ),
       }),
     });
     expect(result.reminder?.message).toContain('要不要我帮你看看');
@@ -375,8 +396,12 @@ describe('SocialAgentReminderService', () => {
     });
     expect(result.reminder?.message).toContain('手机号已隐藏');
     expect(result.reminder?.message.length).toBeLessThanOrEqual(90);
-    expect(serialized).not.toMatch(/13800001111|fitmeet123|me@example\.com|3号楼2单元/);
-    expect(serialized).toMatch(/手机号已隐藏|联系方式已隐藏|邮箱已隐藏|住址已隐藏/);
+    expect(serialized).not.toMatch(
+      /13800001111|fitmeet123|me@example\.com|3号楼2单元/,
+    );
+    expect(serialized).toMatch(
+      /手机号已隐藏|联系方式已隐藏|邮箱已隐藏|住址已隐藏/,
+    );
     expect(notificationPayload).toMatchObject({
       pushPayload: expect.objectContaining({
         deliveryPolicy: expect.objectContaining({
@@ -640,6 +665,58 @@ describe('SocialAgentReminderService', () => {
     });
   });
 
+  it('supports realtime new-match reminders without enabling external actions', async () => {
+    const { service, profileRepo, notifications } = build();
+    profileRepo.rows.push({
+      userId: 7,
+      wantToMeet: ['轻松跑步搭子'],
+      profileDiscoverable: true,
+      agentCanRecommendMe: true,
+    });
+
+    const preference = await service.updatePreference(7, {
+      enabled: true,
+      quietStart: '00:00',
+      quietEnd: '00:00',
+      frequency: 'realtime',
+      scenes: ['new_match'],
+    });
+    const result = await service.runOnce(7);
+
+    expect(preference).toMatchObject({
+      enabled: true,
+      frequency: 'realtime',
+      metadata: {
+        reminderScenes: ['new_match'],
+        reminderPreferenceUpdatedFields: expect.arrayContaining([
+          'enabled',
+          'frequency',
+          'scenes',
+        ]),
+      },
+    });
+    expect(result.reminder).toMatchObject({
+      message: expect.stringContaining('新的匹配机会'),
+      context: expect.objectContaining({
+        scene: 'new_match',
+        scenes: ['new_match'],
+        suggestionOnly: true,
+        externalDeliveryDisabled: true,
+      }),
+    });
+    expect(notifications.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'social_agent.reminder',
+        pushPayload: expect.objectContaining({
+          reminderContext: expect.objectContaining({
+            allowedActions: ['open_agent_chat', 'view_safe_opportunities'],
+            prohibitedActions: expect.arrayContaining(['send_message']),
+          }),
+        }),
+      }),
+    );
+  });
+
   it('disables proactive reminders through the explicit opt-out action', async () => {
     const { service } = build();
 
@@ -718,8 +795,12 @@ describe('SocialAgentReminderService', () => {
         ]),
       }),
     });
-    expect(reminder?.message).not.toMatch(/自动发送|不用确认|直接连接|加好友|创建活动/);
-    expect(reminder?.dedupeKey).not.toMatch(/自动发送|不用确认|直接连接|加好友|创建活动/);
+    expect(reminder?.message).not.toMatch(
+      /自动发送|不用确认|直接连接|加好友|创建活动/,
+    );
+    expect(reminder?.dedupeKey).not.toMatch(
+      /自动发送|不用确认|直接连接|加好友|创建活动/,
+    );
     expect(reminder?.context?.intent).not.toMatch(
       /自动发送|不用确认|直接连接|加好友|创建活动/,
     );
@@ -826,9 +907,9 @@ describe('SocialAgentReminderService', () => {
         },
       },
     });
-    expect('preference' in firstDismiss ? firstDismiss.preference.mutedUntil : null).toBeInstanceOf(
-      Date,
-    );
+    expect(
+      'preference' in firstDismiss ? firstDismiss.preference.mutedUntil : null,
+    ).toBeInstanceOf(Date);
     expect(muted).toMatchObject({
       skipped: true,
       reason: 'muted',
@@ -884,8 +965,14 @@ describe('SocialAgentReminderService', () => {
           },
         },
       });
-      expect('preference' in duplicateDismiss ? duplicateDismiss.preference.mutedUntil : null).toEqual(
-        'preference' in firstDismiss ? firstDismiss.preference.mutedUntil : null,
+      expect(
+        'preference' in duplicateDismiss
+          ? duplicateDismiss.preference.mutedUntil
+          : null,
+      ).toEqual(
+        'preference' in firstDismiss
+          ? firstDismiss.preference.mutedUntil
+          : null,
       );
       expect(notifications.create).toHaveBeenCalledTimes(1);
     } finally {

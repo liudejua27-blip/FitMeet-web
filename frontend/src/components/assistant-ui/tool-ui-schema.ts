@@ -1,6 +1,10 @@
+import { isLowRiskApprovalActionType, isLowRiskApprovalText } from './tool-risk-policy';
+
 export type ToolUISchemaType =
   | 'social_match.candidate'
   | 'social_match.activity'
+  | 'social_match.empty'
+  | 'profile.completion'
   | 'life_graph.diff'
   | 'meet_loop.timeline'
   | 'safety.approval'
@@ -9,6 +13,8 @@ export type ToolUISchemaType =
 export type ToolUIProductComponent =
   | 'CandidateCards'
   | 'OpportunityCard'
+  | 'CandidateEmptyStateCard'
+  | 'ProfileCompletionCard'
   | 'LifeGraphDiffCard'
   | 'MeetLoopTimeline'
   | 'ApprovalPanel'
@@ -24,10 +30,15 @@ export type ToolUISchemaAction =
   | 'opener.confirm_send'
   | 'opener.regenerate'
   | 'opener.reject'
+  | 'publish_to_discover'
+  | 'social_intent.decline_publish'
+  | 'social_intent.dismiss'
+  | 'social_intent.retry_publish'
   | 'activity.view_detail'
   | 'activity.confirm_create'
   | 'activity.modify_time'
   | 'activity.modify_location'
+  | 'activity.skip_publish'
   | 'activity.check_in'
   | 'activity.complete'
   | 'activity.upload_proof'
@@ -64,9 +75,11 @@ export type ToolUICardCollectionSummary = {
   title: string;
   detail: string;
   candidateCount: number;
+  emptyCount: number;
   opportunityCount: number;
   approvalCount: number;
   lifeGraphDiffCount: number;
+  profileCompletionCount: number;
   meetLoopCount: number;
   genericCount: number;
   components: ToolUIProductComponent[];
@@ -157,12 +170,30 @@ export type ActivityOpportunityView = {
   autoPublished: boolean;
   publicIntentId: string | null;
   discoverHref: string | null;
+  publicIntentHref: string | null;
+  messagesHref: string | null;
 };
 
 export type ActivityProtocolItemView = {
   key: string;
   label: string;
   detail: string;
+};
+
+export type CandidateEmptyStateRecoveryOptionView = {
+  key: string;
+  label: string;
+  detail: string;
+  requiresConfirmation: boolean;
+};
+
+export type CandidateEmptyStateView = {
+  title: string;
+  summary: string;
+  criteria: string[];
+  recoveryOptions: CandidateEmptyStateRecoveryOptionView[];
+  safetyBoundary: string | null;
+  nextBestStep: string | null;
 };
 
 export type DefaultOpportunityActionStep = {
@@ -249,10 +280,499 @@ export function extractAssistantCards(data: unknown): SchemaDrivenAssistantCard[
 
 export function extractCanonicalAssistantCards(data: unknown): SchemaDrivenAssistantCard[] {
   if (!isRecord(data) || !Array.isArray(data.cards)) return [];
-  return data.cards
-    .filter(isRecord)
-    .map((card, index) => normalizeAssistantCard(card, index))
-    .filter((card) => isCanonicalAssistantCard(card));
+  return dedupeAssistantCards(
+    data.cards
+      .filter(isRecord)
+      .map((card, index) => normalizeAssistantCard(card, index))
+      .filter((card) => isCanonicalAssistantCard(card)),
+  );
+}
+
+export function dedupeAssistantCards(
+  cards: SchemaDrivenAssistantCard[],
+): SchemaDrivenAssistantCard[] {
+  const hostCards = collectApprovalHostCards(cards);
+  for (const card of cards) {
+    if (card.schemaType !== 'safety.approval') continue;
+    if (isLowRiskApprovalCard(card)) continue;
+    const host = findApprovalHostCard(card, hostCards);
+    const inlineApproval = inlineApprovalConfirmationFromApprovalCard(card, host?.card);
+    if (!host || !inlineApproval) continue;
+    const actionKey = publicString(inlineApproval.confirmation.actionKey) ?? 'approval';
+    host.inlineApprovalCandidates.set(
+      actionKey,
+      choosePreferredInlineApproval(
+        host.inlineApprovalCandidates.get(actionKey) ?? null,
+        inlineApproval,
+      ),
+    );
+  }
+
+  const cardsWithInlineApproval = new Map<string, SchemaDrivenAssistantCard>();
+  for (const host of hostCards) {
+    if (host.inlineApprovalCandidates.size === 0) continue;
+    const inlineApprovalConfirmations = Object.fromEntries(
+      Array.from(host.inlineApprovalCandidates.entries()).map(([actionKey, candidate]) => [
+        actionKey,
+        candidate.confirmation,
+      ]),
+    );
+    const firstInlineApproval = Array.from(host.inlineApprovalCandidates.values()).sort(
+      (left, right) => right.priority - left.priority,
+    )[0]?.confirmation;
+    cardsWithInlineApproval.set(host.card.id, {
+      ...host.card,
+      data: {
+        ...host.card.data,
+        inlineApprovalConfirmation: firstInlineApproval,
+        inlineApprovalConfirmations,
+      },
+    });
+  }
+
+  const seen = new Set<string>();
+  const result: SchemaDrivenAssistantCard[] = [];
+  for (const originalCard of cards) {
+    const card = cardsWithInlineApproval.get(originalCard.id) ?? originalCard;
+    const keys = cardIdentityKeys(card);
+    if (
+      card.schemaType === 'safety.approval' &&
+      approvalCardShouldCollapseIntoActionCard(card, hostCards)
+    ) {
+      continue;
+    }
+    if (keys.some((key) => seen.has(key))) continue;
+    for (const key of keys) seen.add(key);
+    result.push(card);
+  }
+  return result;
+}
+
+type ApprovalHostCard = {
+  card: SchemaDrivenAssistantCard;
+  keys: Set<string>;
+  hostType: 'candidate' | 'activity';
+  inlineApprovalCandidates: Map<string, InlineApprovalCandidate>;
+};
+
+type InlineApprovalCandidate = {
+  priority: number;
+  confirmation: Record<string, unknown>;
+};
+
+function collectApprovalHostCards(cards: SchemaDrivenAssistantCard[]): ApprovalHostCard[] {
+  return cards
+    .filter(
+      (card) =>
+        card.schemaType === 'social_match.candidate' || card.schemaType === 'social_match.activity',
+    )
+    .map((card) => ({
+      card,
+      keys: new Set(hostCardIdentityKeys(card)),
+      hostType: card.schemaType === 'social_match.candidate' ? 'candidate' : 'activity',
+      inlineApprovalCandidates: new Map<string, InlineApprovalCandidate>(),
+    }));
+}
+
+function approvalCardShouldCollapseIntoActionCard(
+  card: SchemaDrivenAssistantCard,
+  hostCards: ApprovalHostCard[],
+) {
+  if (card.schemaType !== 'safety.approval') return false;
+  if (isLowRiskApprovalCard(card)) return true;
+  if (hostCards.length === 0) return false;
+  return Boolean(findApprovalHostCard(card, hostCards));
+}
+
+function findApprovalHostCard(
+  approvalCard: SchemaDrivenAssistantCard,
+  hostCards: ApprovalHostCard[],
+): ApprovalHostCard | null {
+  if (hostCards.length === 0) return null;
+  const approvalKeys = new Set(hostCardIdentityKeys(approvalCard));
+  const keyedMatch = hostCards.find((host) => [...approvalKeys].some((key) => host.keys.has(key)));
+  if (keyedMatch) return keyedMatch;
+
+  const text = approvalCardSearchText(approvalCard);
+  const wantsCandidate =
+    /candidate|connect|friend|send|message|invite|contact|候选|加好友|好友|连接|发送|私信|邀请|联系/.test(
+      text,
+    );
+  const wantsActivity =
+    /publish|social_request|activity|meet|location|precise|发布|发现|活动|约练|位置|精确/.test(
+      text,
+    );
+  const candidateHosts = hostCards.filter((host) => host.hostType === 'candidate');
+  const activityHosts = hostCards.filter((host) => host.hostType === 'activity');
+  const candidateNameMatch = uniqueHostByTextHint(candidateHosts, text);
+  if (wantsCandidate && candidateNameMatch) return candidateNameMatch;
+  const activityNameMatch = uniqueHostByTextHint(activityHosts, text);
+  if (wantsActivity && activityNameMatch) return activityNameMatch;
+  if (wantsCandidate && candidateHosts.length === 1) return candidateHosts[0];
+  if (wantsActivity && activityHosts.length === 1) return activityHosts[0];
+  if (hostCards.length === 1 && (wantsCandidate || wantsActivity)) return hostCards[0];
+  return null;
+}
+
+function uniqueHostByTextHint(
+  hostCards: ApprovalHostCard[],
+  text: string,
+): ApprovalHostCard | null {
+  const matches = hostCards.filter((host) =>
+    hostCardTextHints(host.card).some((hint) => text.includes(hint)),
+  );
+  return matches.length === 1 ? matches[0] : null;
+}
+
+function hostCardTextHints(card: SchemaDrivenAssistantCard): string[] {
+  const opportunity = isRecord(card.data.opportunity) ? card.data.opportunity : {};
+  const candidate = isRecord(card.data.candidate) ? card.data.candidate : {};
+  const values = [
+    card.title,
+    card.data.displayName,
+    card.data.name,
+    card.data.nickname,
+    opportunity.title,
+    opportunity.name,
+    opportunity.displayName,
+    opportunity.nickname,
+    candidate.title,
+    candidate.name,
+    candidate.displayName,
+    candidate.nickname,
+  ];
+  return Array.from(
+    new Set(
+      values
+        .map((value) => publicDetail(value)?.toLowerCase())
+        .filter((value): value is string => Boolean(value && value.length >= 2)),
+    ),
+  );
+}
+
+function inlineApprovalConfirmationFromApprovalCard(
+  card: SchemaDrivenAssistantCard,
+  hostCard: SchemaDrivenAssistantCard | undefined,
+): InlineApprovalCandidate | null {
+  const sources = approvalIdentitySources(card);
+  const id = approvalIdFromCardData(card) ?? approvalIdFromCardActions(card) ?? card.id;
+  if (!id) return null;
+  const actionType =
+    firstPrimitiveFromSources(sources, ['schemaAction', 'actionType', 'action']) ??
+    actionTypeFromApprovalText(card);
+  const summary =
+    firstPublicDetailFromSources(sources, ['summary', 'boundary']) ??
+    card.body ??
+    '确认前不会触达对方或公开敏感信息。';
+  const riskLevel = firstPrimitiveFromSources(sources, ['riskLevel', 'risk_level']) ?? 'medium';
+  return {
+    priority: approvalCardPriority(card),
+    confirmation: {
+      id,
+      type: firstPrimitiveFromSources(sources, ['type']) ?? 'action',
+      actionType,
+      summary,
+      riskLevel,
+      expiresAt: firstPrimitiveFromSources(sources, ['expiresAt', 'expires_at']),
+      actionKey: inlineApprovalActionKeyForApprovalCard(card, hostCard),
+    },
+  };
+}
+
+function approvalIdFromCardActions(card: SchemaDrivenAssistantCard) {
+  for (const action of card.actions) {
+    const payload = isRecord(action.payload) ? action.payload : {};
+    const value =
+      primitiveIdentityString(payload.approvalId) ??
+      primitiveIdentityString(payload.approval_id) ??
+      primitiveIdentityString(action.id);
+    if (value) return value;
+  }
+  return null;
+}
+
+function approvalIdFromCardData(card: SchemaDrivenAssistantCard) {
+  const approval = isRecord(card.data.approval) ? card.data.approval : {};
+  return (
+    firstPrimitiveFromSources(approvalIdentitySources(card), ['approvalId', 'approval_id']) ??
+    primitiveIdentityString(approval.id)
+  );
+}
+
+function choosePreferredInlineApproval(
+  existing: InlineApprovalCandidate | null,
+  next: InlineApprovalCandidate,
+) {
+  if (!existing) return next;
+  return next.priority >= existing.priority ? next : existing;
+}
+
+function approvalCardPriority(card: SchemaDrivenAssistantCard) {
+  const text = approvalCardSearchText(card);
+  if (/send|message|invite|opener|发送|私信|邀请|开场白/.test(text)) return 50;
+  if (/connect|friend|candidate|加好友|好友|连接|候选/.test(text)) return 40;
+  if (/publish|social_request|activity|meet|location|发现|发布|活动|约练|位置/.test(text)) {
+    return 30;
+  }
+  return 10;
+}
+
+function actionTypeFromApprovalText(card: SchemaDrivenAssistantCard) {
+  const text = approvalCardSearchText(card);
+  if (/send|message|invite|发送|私信|邀请/.test(text)) return 'send_invite';
+  if (/connect|friend|candidate|加好友|好友|连接|候选/.test(text)) return 'connect_candidate';
+  if (/publish|social_request|activity|meet|发现|发布|活动|约练/.test(text)) {
+    return 'publish_social_request';
+  }
+  return 'approval_required';
+}
+
+function inlineApprovalActionKeyForApprovalCard(
+  card: SchemaDrivenAssistantCard,
+  hostCard: SchemaDrivenAssistantCard | undefined,
+) {
+  const text = approvalCardSearchText(card);
+  if (hostCard?.schemaType === 'social_match.activity') {
+    return /publish|social_request|发现|发布/.test(text)
+      ? 'publish_to_discover'
+      : 'activity.confirm_create';
+  }
+  if (/send|message|invite|opener|发送|私信|邀请|开场白/.test(text)) return 'opener.confirm_send';
+  if (/connect|friend|candidate|加好友|好友|连接|候选/.test(text)) return 'candidate.connect';
+  if (/publish|social_request|activity|meet|发现|发布|活动|约练/.test(text)) {
+    return /publish|social_request|发现|发布/.test(text)
+      ? 'publish_to_discover'
+      : 'activity.confirm_create';
+  }
+  return 'candidate.connect';
+}
+
+function isLowRiskApprovalCard(card: SchemaDrivenAssistantCard) {
+  const actionType = approvalCardActionType(card);
+  if (isLowRiskApprovalActionType(actionType)) return true;
+  return isLowRiskApprovalText(approvalCardSearchText(card));
+}
+
+function approvalCardActionType(card: SchemaDrivenAssistantCard) {
+  return firstPrimitiveFromSources(approvalIdentitySources(card), [
+    'schemaAction',
+    'actionType',
+    'action',
+  ]);
+}
+
+function approvalCardSearchText(card: SchemaDrivenAssistantCard) {
+  const approval = isRecord(card.data.approval) ? card.data.approval : {};
+  const sources = approvalIdentitySources(card);
+  const sourceValues = sources.flatMap((source) => [
+    source.actionType,
+    source.action,
+    source.schemaAction,
+    source.riskLevel,
+    source.risk_level,
+    source.summary,
+    source.boundary,
+    source.confirmationLabel,
+    source.candidateRecordId,
+    source.socialRequestCandidateId,
+    source.targetUserId,
+    source.candidateUserId,
+    source.userId,
+    source.opportunityId,
+    source.activityId,
+    source.publicIntentId,
+    source.socialRequestId,
+    source.taskId,
+  ]);
+  return [
+    card.id,
+    card.title,
+    card.body,
+    card.type,
+    card.status,
+    card.data.actionType,
+    card.data.action,
+    card.data.riskLevel,
+    card.data.summary,
+    card.data.boundary,
+    card.data.confirmationLabel,
+    card.data.candidateRecordId,
+    card.data.targetUserId,
+    card.data.opportunityId,
+    approval.id,
+    approval.title,
+    approval.actionType,
+    approval.action,
+    approval.riskLevel,
+    approval.boundary,
+    approval.summary,
+    approval.confirmationLabel,
+    ...sourceValues,
+  ]
+    .map((value) => publicString(value))
+    .filter((value): value is string => Boolean(value))
+    .join(' ')
+    .toLowerCase();
+}
+
+function cardIdentityKeys(card: SchemaDrivenAssistantCard): string[] {
+  const keys = new Set<string>();
+  const add = (prefix: string, value: unknown) => {
+    const text = primitiveIdentityString(value);
+    if (text) keys.add(`${prefix}:${text}`);
+  };
+  add('id', card.id);
+  const approval = isRecord(card.data.approval) ? card.data.approval : {};
+  for (const source of approvalIdentitySources(card)) {
+    add('approval', source.approvalId);
+    add('approval', source.approval_id);
+    add('checkpoint', source.checkpointId);
+    add('checkpoint', source.checkpoint_id);
+  }
+  add('approval', approval.id);
+  const actionType = approvalCardActionType(card);
+  const candidateKeys = candidateCardIdentityKeys(card);
+  const useCandidateOnlyKey = shouldUseCandidateOnlyCardKey(card, actionType);
+  for (const key of candidateKeys) {
+    if (useCandidateOnlyKey) keys.add(key);
+    if (actionType) keys.add(`${key}:action:${actionType}`);
+  }
+  const taskId = firstPrimitiveFromSources(cardIdentitySources(card), ['taskId', 'agentTaskId']);
+  const opportunityId =
+    firstPrimitiveFromSources(cardIdentitySources(card), [
+      'opportunityId',
+      'activityId',
+      'publicIntentId',
+      'socialRequestId',
+    ]) ??
+    (isRecord(card.data.opportunity) ? primitiveIdentityString(card.data.opportunity.id) : null);
+  if (taskId && opportunityId) keys.add(`opportunity:${taskId}:${opportunityId}`);
+  if (keys.size === 0) keys.add(`id:${card.id}`);
+  return [...keys];
+}
+
+function shouldUseCandidateOnlyCardKey(card: SchemaDrivenAssistantCard, actionType: string | null) {
+  if (card.schemaType === 'safety.approval') return false;
+  if (actionType && isCandidateActionResultCard(card, actionType)) return false;
+  return true;
+}
+
+function isCandidateActionResultCard(card: SchemaDrivenAssistantCard, actionType: string) {
+  if (
+    /^(send_invite|connect_candidate|candidate\.connect|opener\.confirm_send|send_message|add_friend)$/i.test(
+      actionType,
+    )
+  ) {
+    return true;
+  }
+  const schemaName = primitiveIdentityString(card.data.schemaName) ?? '';
+  return schemaName === 'ApprovalPanel';
+}
+
+function hostCardIdentityKeys(card: SchemaDrivenAssistantCard): string[] {
+  const keys = new Set(candidateCardIdentityKeys(card));
+  const add = (prefix: string, value: unknown) => {
+    const text = primitiveIdentityString(value);
+    if (text) keys.add(`${prefix}:${text}`);
+  };
+  const opportunity = isRecord(card.data.opportunity) ? card.data.opportunity : {};
+  const sources = cardIdentitySources(card);
+  const taskId =
+    firstPrimitiveFromSources(sources, ['taskId', 'agentTaskId']) ??
+    primitiveIdentityString(opportunity.taskId);
+  const opportunityId =
+    firstPrimitiveFromSources(sources, [
+      'opportunityId',
+      'activityId',
+      'publicIntentId',
+      'socialRequestId',
+    ]) ??
+    primitiveIdentityString(opportunity.id) ??
+    primitiveIdentityString(opportunity.opportunityId) ??
+    primitiveIdentityString(opportunity.activityId) ??
+    primitiveIdentityString(opportunity.publicIntentId) ??
+    primitiveIdentityString(opportunity.socialRequestId);
+  if (taskId && opportunityId) keys.add(`opportunity:${taskId}:${opportunityId}`);
+  add('opportunity', opportunityId);
+  add('activity', card.data.activityId);
+  add('activity', opportunity.activityId);
+  add('public-intent', card.data.publicIntentId);
+  add('public-intent', opportunity.publicIntentId);
+  add('social-request', card.data.socialRequestId);
+  add('social-request', opportunity.socialRequestId);
+  return [...keys];
+}
+
+function candidateCardIdentityKeys(card: SchemaDrivenAssistantCard): string[] {
+  const values = cardIdentitySources(card).flatMap((source) => [
+    source.candidateRecordId,
+    source.socialRequestCandidateId,
+    source.targetUserId,
+    source.candidateUserId,
+    source.userId,
+  ]);
+  const opportunity = isRecord(card.data.opportunity) ? card.data.opportunity : {};
+  values.push(
+    opportunity.candidateRecordId,
+    opportunity.socialRequestCandidateId,
+    opportunity.targetUserId,
+    opportunity.candidateUserId,
+    opportunity.userId,
+  );
+  const candidate = isRecord(card.data.candidate) ? card.data.candidate : {};
+  values.push(
+    candidate.candidateRecordId,
+    candidate.socialRequestCandidateId,
+    candidate.targetUserId,
+    candidate.candidateUserId,
+    candidate.userId,
+  );
+  const uniqueValues = new Set(
+    values
+      .map((value) => primitiveIdentityString(value))
+      .filter((value): value is string => Boolean(value)),
+  );
+  return Array.from(uniqueValues).map((value) => `candidate:${value}`);
+}
+
+function cardIdentitySources(card: SchemaDrivenAssistantCard): Record<string, unknown>[] {
+  const approval = isRecord(card.data.approval) ? card.data.approval : {};
+  const payload = isRecord(card.data.payload) ? card.data.payload : {};
+  const approvalPayload = isRecord(approval.payload) ? approval.payload : {};
+  const actionPayloads = card.actions
+    .map((action) => (isRecord(action.payload) ? action.payload : null))
+    .filter((value): value is Record<string, unknown> => Boolean(value));
+  return [card.data, payload, approval, approvalPayload, ...actionPayloads];
+}
+
+function approvalIdentitySources(card: SchemaDrivenAssistantCard): Record<string, unknown>[] {
+  return cardIdentitySources(card);
+}
+
+function firstPrimitiveFromSources(
+  sources: Record<string, unknown>[],
+  keys: string[],
+): string | null {
+  for (const source of sources) {
+    for (const key of keys) {
+      const value = primitiveIdentityString(source[key]);
+      if (value) return value;
+    }
+  }
+  return null;
+}
+
+function firstPublicDetailFromSources(
+  sources: Record<string, unknown>[],
+  keys: string[],
+): string | null {
+  for (const source of sources) {
+    for (const key of keys) {
+      const value = publicDetail(source[key]);
+      if (value) return value;
+    }
+  }
+  return null;
 }
 
 export function isCanonicalAssistantCard(card: SchemaDrivenAssistantCard): boolean {
@@ -295,6 +815,8 @@ export function productComponentForSchemaType(
 ): ToolUIProductComponent {
   if (schemaType === 'social_match.candidate') return 'CandidateCards';
   if (schemaType === 'social_match.activity') return 'OpportunityCard';
+  if (schemaType === 'social_match.empty') return 'CandidateEmptyStateCard';
+  if (schemaType === 'profile.completion') return 'ProfileCompletionCard';
   if (schemaType === 'life_graph.diff') return 'LifeGraphDiffCard';
   if (schemaType === 'meet_loop.timeline') return 'MeetLoopTimeline';
   if (schemaType === 'safety.approval') return 'ApprovalPanel';
@@ -307,12 +829,12 @@ export function summarizeToolUICardCollection(
   const candidateCount = cards.filter(
     (card) => card.schemaType === 'social_match.candidate',
   ).length;
-  const activityCount = cards.filter(
-    (card) => card.schemaType === 'social_match.activity',
-  ).length;
+  const emptyCount = cards.filter((card) => card.schemaType === 'social_match.empty').length;
+  const activityCount = cards.filter((card) => card.schemaType === 'social_match.activity').length;
   const approvalCount = cards.filter((card) => card.schemaType === 'safety.approval').length;
-  const lifeGraphDiffCount = cards.filter(
-    (card) => card.schemaType === 'life_graph.diff',
+  const lifeGraphDiffCount = cards.filter((card) => card.schemaType === 'life_graph.diff').length;
+  const profileCompletionCount = cards.filter(
+    (card) => card.schemaType === 'profile.completion',
   ).length;
   const meetLoopCount = cards.filter((card) => card.schemaType === 'meet_loop.timeline').length;
   const genericCount = cards.filter((card) => card.schemaType === 'generic.card').length;
@@ -322,30 +844,38 @@ export function summarizeToolUICardCollection(
   );
   const titleParts = [
     candidateCount > 0 ? `${candidateCount} 个候选` : null,
+    emptyCount > 0 ? `${emptyCount} 个下一步建议` : null,
     activityCount > 0 ? `${activityCount} 张约练卡` : null,
     meetLoopCount > 0 ? `${meetLoopCount} 个约练进展` : null,
     lifeGraphDiffCount > 0 ? `${lifeGraphDiffCount} 条画像建议` : null,
-    approvalCount > 0 ? `${approvalCount} 个确认` : null,
+    profileCompletionCount > 0 ? `${profileCompletionCount} 张资料补全卡` : null,
+    approvalCount > 0 ? `${approvalCount} 个待确认动作` : null,
   ].filter(Boolean);
   const title = titleParts.length > 0 ? titleParts.join(' · ') : '整理结果';
-  const detail =
-    opportunityCount > 0
-      ? '候选、约练和真实动作都按结构化卡片展示；涉及连接、发送或公开时会先确认。'
-      : approvalCount > 0
-        ? '这一步涉及真实动作或隐私边界，确认前不会自动执行。'
-        : lifeGraphDiffCount > 0
-          ? '画像变化会展示依据、冲突和撤回边界，确认后才写入长期记忆。'
-          : meetLoopCount > 0
-            ? '约练进展按发起、等待、改期、确认、评价和画像回写展示。'
-            : '结果已按安全的消息卡片展示。';
+  let detail = '结果已按安全的消息卡片展示。';
+  if (opportunityCount > 0) {
+    detail = '候选、约练和真实动作都按结构化卡片展示；涉及连接、发送或公开时会先确认。';
+  } else if (emptyCount > 0) {
+    detail = '没有真实候选时，不会编造结果；你可以选择发布到发现、扩大范围或调整时间。';
+  } else if (approvalCount > 0) {
+    detail = '这次操作涉及真实动作或隐私边界，确认前不会自动执行。';
+  } else if (lifeGraphDiffCount > 0) {
+    detail = '画像变化会展示依据、冲突和撤回边界，确认后才写入长期记忆。';
+  } else if (profileCompletionCount > 0) {
+    detail = '先补齐当前匹配最需要的信息，生成预览并确认后才保存。';
+  } else if (meetLoopCount > 0) {
+    detail = '约练进展按发起、等待、改期、确认、评价和画像回写展示。';
+  }
 
   return {
     title,
     detail,
     candidateCount,
+    emptyCount,
     opportunityCount,
     approvalCount,
     lifeGraphDiffCount,
+    profileCompletionCount,
     meetLoopCount,
     genericCount,
     components,
@@ -378,7 +908,9 @@ export function normalizeCardActions(value: unknown): AssistantCardAction[] {
 export function schemaDefaultTitle(schemaType: ToolUISchemaType) {
   if (schemaType === 'social_match.candidate') return '候选机会';
   if (schemaType === 'social_match.activity') return '活动机会';
-  if (schemaType === 'life_graph.diff') return '画像更新建议';
+  if (schemaType === 'social_match.empty') return '暂时没有找到合适的人';
+  if (schemaType === 'profile.completion') return '个人信息补全';
+  if (schemaType === 'life_graph.diff') return '资料更新建议';
   if (schemaType === 'meet_loop.timeline') return '约练进展';
   if (schemaType === 'safety.approval') return '安全确认';
   return '整理结果';
@@ -389,6 +921,8 @@ export function toolUISchemaTypeFromUnknown(value: unknown): ToolUISchemaType | 
   if (
     text === 'social_match.candidate' ||
     text === 'social_match.activity' ||
+    text === 'social_match.empty' ||
+    text === 'profile.completion' ||
     text === 'life_graph.diff' ||
     text === 'meet_loop.timeline' ||
     text === 'safety.approval' ||
@@ -411,10 +945,15 @@ export function toolUISchemaActionFromUnknown(value: unknown): ToolUISchemaActio
     text === 'opener.confirm_send' ||
     text === 'opener.regenerate' ||
     text === 'opener.reject' ||
+    text === 'publish_to_discover' ||
+    text === 'social_intent.decline_publish' ||
+    text === 'social_intent.dismiss' ||
+    text === 'social_intent.retry_publish' ||
     text === 'activity.view_detail' ||
     text === 'activity.confirm_create' ||
     text === 'activity.modify_time' ||
     text === 'activity.modify_location' ||
+    text === 'activity.skip_publish' ||
     text === 'activity.check_in' ||
     text === 'activity.complete' ||
     text === 'activity.upload_proof' ||
@@ -439,9 +978,23 @@ function toolUISchemaActionFromLegacyAction(value: string | null): ToolUISchemaA
   if (value === 'generate_opener') return 'candidate.generate_opener';
   if (value === 'reject_opener') return 'opener.reject';
   if (value === 'see_more') return 'candidate.more_like_this';
+  if (value === 'expand_radius') return 'candidate.more_like_this';
+  if (value === 'relax_preference') return 'candidate.more_like_this';
   if (value === 'send_message') return 'opener.confirm_send';
   if (value === 'view_activity') return 'activity.view_detail';
+  if (value === 'publish_social_request') return 'publish_to_discover';
+  if (value === 'publish_to_discover') return 'publish_to_discover';
   if (value === 'create_activity') return 'activity.confirm_create';
+  if (value === 'modify_activity') return 'activity.modify_time';
+  if (value === 'change_time') return 'activity.modify_time';
+  if (
+    value === 'skip_publish' ||
+    value === 'activity.skip_publish' ||
+    value === 'decline_publish' ||
+    value === 'dismiss_draft'
+  ) {
+    return 'social_intent.decline_publish';
+  }
   if (value === 'check_in') return 'activity.check_in';
   if (value === 'submit_review') return 'review.submit';
   if (value === 'upload_proof') return 'activity.upload_proof';
@@ -456,10 +1009,13 @@ function legacyActionRequiresConfirmation(
   return (
     rawAction === 'connect_candidate' ||
     rawAction === 'send_message' ||
+    rawAction === 'publish_social_request' ||
+    rawAction === 'publish_to_discover' ||
     rawAction === 'create_activity' ||
     rawAction === 'confirm_profile_update' ||
     schemaAction === 'candidate.connect' ||
     schemaAction === 'opener.confirm_send' ||
+    schemaAction === 'publish_to_discover' ||
     schemaAction === 'activity.confirm_create' ||
     schemaAction === 'life_graph.accept_update'
   );
@@ -467,9 +1023,12 @@ function legacyActionRequiresConfirmation(
 
 export function schemaTypeFromLegacyCardType(type: string): ToolUISchemaType {
   if (type === 'candidate_card') return 'social_match.candidate';
+  if (type === 'candidate_empty_state') return 'social_match.empty';
   if (type === 'activity_plan' || type === 'activity_status') return 'social_match.activity';
   if (type === 'profile_proposal' || type === 'audit_update') return 'life_graph.diff';
-  if (type === 'checkin_card' || type === 'review_card') return 'meet_loop.timeline';
+  if (type === 'checkin_card' || type === 'meet_loop_timeline' || type === 'review_card') {
+    return 'meet_loop.timeline';
+  }
   if (type === 'opener_approval' || type === 'safety_boundary') return 'safety.approval';
   return 'generic.card';
 }
@@ -480,19 +1039,47 @@ export function defaultOpportunityActionsForSchema(
   if (schemaType === 'social_match.candidate') {
     return [
       { schemaAction: 'candidate.view_detail', requiresConfirmation: false, source: 'default' },
+      { schemaAction: 'candidate.like', requiresConfirmation: false, source: 'default' },
       { schemaAction: 'candidate.generate_opener', requiresConfirmation: false, source: 'default' },
+      { schemaAction: 'opener.confirm_send', requiresConfirmation: true, source: 'default' },
       { schemaAction: 'candidate.connect', requiresConfirmation: true, source: 'default' },
     ];
   }
   if (schemaType === 'social_match.activity') {
     return [
-      { schemaAction: 'activity.view_detail', requiresConfirmation: false, source: 'default' },
+      { schemaAction: 'publish_to_discover', requiresConfirmation: true, source: 'default' },
       { schemaAction: 'activity.modify_time', requiresConfirmation: false, source: 'default' },
-      { schemaAction: 'activity.modify_location', requiresConfirmation: false, source: 'default' },
-      { schemaAction: 'activity.confirm_create', requiresConfirmation: true, source: 'default' },
+      { schemaAction: 'social_intent.decline_publish', requiresConfirmation: false, source: 'default' },
+    ];
+  }
+  if (schemaType === 'social_match.empty') {
+    return [
+      { schemaAction: 'publish_to_discover', requiresConfirmation: true, source: 'default' },
+      { schemaAction: 'candidate.more_like_this', requiresConfirmation: false, source: 'default' },
+      { schemaAction: 'activity.modify_time', requiresConfirmation: false, source: 'default' },
     ];
   }
   return [];
+}
+
+export function normalizeCandidateEmptyStateView(
+  card: SchemaDrivenAssistantCard,
+): CandidateEmptyStateView {
+  const recoveryOptions = normalizeCandidateEmptyRecoveryOptions(card.data.recoveryOptions);
+  return {
+    title: card.title || '暂时没有找到合适的人',
+    summary:
+      card.body ??
+      publicDetail(card.data.summary) ??
+      '这次没有找到真实、公开可发现且符合安全边界的人；我不会用假候选凑数。',
+    criteria: publicStringArray(card.data.criteria).slice(0, 5),
+    recoveryOptions,
+    safetyBoundary:
+      publicDetail(card.data.safetyBoundary) ??
+      '不会编造候选；发送邀请、公开位置或交换联系方式前必须确认。',
+    nextBestStep:
+      publicDetail(card.data.nextBestStep) ?? '建议先发布到发现，或放宽范围后重新搜索。',
+  };
 }
 
 export function normalizeCandidateOpportunityView(
@@ -683,9 +1270,7 @@ function candidateReasoningQuality(
     source,
     confidence,
     label: degraded ? '我先用公开资料保守推荐' : null,
-    detail: degraded
-      ? '更细的个性化解释稍后可重试；发送邀请前仍会等你确认。'
-      : null,
+    detail: degraded ? '更细的个性化解释稍后可重试；发送邀请前仍会等你确认。' : null,
     actionLabel: degraded && retryable ? '可稍后重新生成推荐解释' : null,
   };
 }
@@ -699,8 +1284,7 @@ function candidateTrustSignals(
     primary.trustSignals ??
       primary.consentSignals ??
       fallback.trustSignals ??
-      fallback.consentSignals ??
-      [
+      fallback.consentSignals ?? [
         isRecord(primary.recommendationConsent)
           ? primary.recommendationConsent.sourceLabel
           : undefined,
@@ -760,6 +1344,57 @@ function normalizeCandidateRecommendationProtocol(
     .slice(0, 5);
 }
 
+function normalizeCandidateEmptyRecoveryOptions(
+  value: unknown,
+): CandidateEmptyStateRecoveryOptionView[] {
+  if (!Array.isArray(value)) return defaultCandidateEmptyRecoveryOptions();
+  const options = value
+    .filter(isRecord)
+    .map((item, index) => {
+      const label = publicDetail(item.label);
+      const detail = publicDetail(item.detail ?? item.value ?? item.description);
+      if (!label || !detail) return null;
+      return {
+        key: publicString(item.key) ?? `recovery-${index}`,
+        label,
+        detail,
+        requiresConfirmation: item.requiresConfirmation === true,
+      };
+    })
+    .filter((item): item is CandidateEmptyStateRecoveryOptionView => Boolean(item))
+    .slice(0, 4);
+  return options.length > 0 ? options : defaultCandidateEmptyRecoveryOptions();
+}
+
+function defaultCandidateEmptyRecoveryOptions(): CandidateEmptyStateRecoveryOptionView[] {
+  return [
+    {
+      key: 'publish_to_discover',
+      label: '确认发布',
+      detail: '让公开可发现的人看到你的约练卡；发布前仍需要确认。',
+      requiresConfirmation: true,
+    },
+    {
+      key: 'expand_radius',
+      label: '扩大范围',
+      detail: '扩大同城范围后继续搜索真实公开资料。',
+      requiresConfirmation: false,
+    },
+    {
+      key: 'change_time',
+      label: '换个时间',
+      detail: '保留活动和地点，把时间换成更容易匹配的窗口。',
+      requiresConfirmation: false,
+    },
+    {
+      key: 'relax_preference',
+      label: '放宽偏好',
+      detail: '保留安全边界，先放宽非必要偏好再搜索。',
+      requiresConfirmation: false,
+    },
+  ];
+}
+
 function candidateRecommendationProtocol(
   primary: Record<string, unknown>,
   fallback: Record<string, unknown>,
@@ -790,7 +1425,7 @@ function candidateRecommendationProtocol(
     },
     {
       key: 'recovery',
-      label: '可恢复',
+      label: '可以继续',
       detail: '你可以跳过、重试生成开场白，或从确认点继续。',
     },
   ];
@@ -809,9 +1444,7 @@ function candidateDiscoverySafetySignals(
   const signals = [
     '仅整理公开可发现或已授权匹配的信息',
     '资料默认脱敏，不展示精确位置或私密联系方式',
-    hasConfirmRequiredAction(actions)
-      ? '发送邀请前必须确认'
-      : '涉及真实触达时必须确认',
+    hasConfirmRequiredAction(actions) ? '发送邀请前必须确认' : '涉及真实触达时必须确认',
     '可跳过、重试或从确认点恢复',
   ];
   return Array.from(new Set(signals)).slice(0, 5);
@@ -1057,19 +1690,18 @@ export function normalizeActivityOpportunityView(
     lifeGraphUpdatePreview:
       publicDetail(opportunity.lifeGraphUpdatePreview) ??
       publicDetail(card.data.lifeGraphUpdatePreview) ??
-      '只有你确认后，活动结果才会作为 Life Graph 的长期记忆候选。',
+      '只有你确认后，活动结果才会作为长期偏好的更新建议。',
     trustScoreUpdatePreview:
       publicDetail(opportunity.trustScoreUpdatePreview) ??
       publicDetail(card.data.trustScoreUpdatePreview) ??
       '完成、评价和守约情况会作为后续推荐可信度的弱信号。',
-    autoPublished:
-      opportunity.autoPublished === true || card.data.autoPublished === true,
+    autoPublished: opportunity.autoPublished === true || card.data.autoPublished === true,
     publicIntentId:
-      publicString(opportunity.publicIntentId) ??
-      publicString(card.data.publicIntentId),
-    discoverHref:
-      publicString(opportunity.discoverHref) ??
-      publicString(card.data.discoverHref),
+      publicString(opportunity.publicIntentId) ?? publicString(card.data.publicIntentId),
+    discoverHref: publicString(opportunity.discoverHref) ?? publicString(card.data.discoverHref),
+    publicIntentHref:
+      publicString(opportunity.publicIntentHref) ?? publicString(card.data.publicIntentHref),
+    messagesHref: publicString(opportunity.messagesHref) ?? publicString(card.data.messagesHref),
   };
 }
 
@@ -1097,7 +1729,7 @@ function activityProtocolWithFallback(
     },
     {
       key: 'recovery',
-      label: '可恢复闭环',
+      label: '连续推进',
       detail: '确认后进入等待回复、改期、确认到达、评价和画像回写流程。',
     },
   ];
@@ -1153,7 +1785,7 @@ export function normalizeLifeGraphDiffView(card: SchemaDrivenAssistantCard): Lif
     '等待你确认后更新';
 
   return {
-    title: (publicDetail(diff.title) ?? card.title) || '画像更新建议',
+    title: (publicDetail(diff.title) ?? card.title) || '资料更新建议',
     description:
       publicDetail(diff.description) ?? '只在你确认后写入长期记忆；冲突或敏感内容会保留边界提示。',
     source,
@@ -1216,7 +1848,7 @@ export function normalizeMeetLoopTimelineView(
   return {
     title: (publicDetail(timeline.title) ?? card.title) || '约练进展',
     description:
-      publicDetail(timeline.description) ?? card.body ?? '我会把邀约拆成可确认、可恢复的步骤。',
+      publicDetail(timeline.description) ?? card.body ?? '我会把邀约拆成可确认、可继续的进度。',
     nextAction:
       publicDetail(timeline.nextAction) ??
       publicDetail(card.data.recommendedNextAction) ??
@@ -1232,23 +1864,17 @@ export function normalizeMeetLoopTimelineView(
       publicDetail(card.data.replyIntent) ??
       publicDetail(timeline.counterpartIntent),
     replyIntentLabel:
-      publicDetail(card.data.replyIntentLabel) ??
-      publicDetail(timeline.replyIntentLabel),
+      publicDetail(card.data.replyIntentLabel) ?? publicDetail(timeline.replyIntentLabel),
     replyIntentDescription:
       publicDetail(card.data.replyIntentDescription) ??
       publicDetail(timeline.replyIntentDescription),
-    nextSafeStep:
-      publicDetail(card.data.nextSafeStep) ??
-      publicDetail(timeline.nextSafeStep),
-    waitingFor:
-      publicDetail(card.data.waitingFor) ??
-      publicDetail(timeline.waitingFor),
+    nextSafeStep: publicDetail(card.data.nextSafeStep) ?? publicDetail(timeline.nextSafeStep),
+    waitingFor: publicDetail(card.data.waitingFor) ?? publicDetail(timeline.waitingFor),
     nextRecoverableActions: publicStringArray(
       card.data.nextRecoverableActions ?? timeline.nextRecoverableActions,
     ).slice(0, 4),
     sideEffectPolicy:
-      publicDetail(card.data.sideEffectPolicy) ??
-      publicDetail(timeline.sideEffectPolicy),
+      publicDetail(card.data.sideEffectPolicy) ?? publicDetail(timeline.sideEffectPolicy),
     recoveryProtocol: normalizeMeetLoopRecoveryProtocol(
       card.data.recoveryProtocol ?? timeline.recoveryProtocol,
     ),
@@ -1260,9 +1886,7 @@ export function normalizeMeetLoopTimelineView(
   };
 }
 
-function normalizeMeetLoopRecoveryProtocol(
-  value: unknown,
-): MeetLoopRecoveryProtocolItemView[] {
+function normalizeMeetLoopRecoveryProtocol(value: unknown): MeetLoopRecoveryProtocolItemView[] {
   if (!Array.isArray(value)) return [];
   return value
     .filter(isRecord)
@@ -1290,7 +1914,7 @@ export function normalizeSafetyApprovalView(card: SchemaDrivenAssistantCard): Sa
       publicDetail(card.data.safetyBoundary) ??
       publicDetail(card.data.boundary) ??
       card.body ??
-      '这一步涉及真实动作，我会等你确认后再继续。',
+      '这次操作涉及真实动作，我会等你确认后再继续。',
     riskLevel:
       publicDetail(approval.riskLevel) ??
       publicDetail(approval.level) ??
@@ -1300,18 +1924,18 @@ export function normalizeSafetyApprovalView(card: SchemaDrivenAssistantCard): Sa
       approval.reasons ?? card.data.riskReasons ?? card.data.reasons,
     ).slice(0, 4),
     auditNote:
-      publicDetail(approval.auditNote) ??
-      publicDetail(card.data.auditNote) ??
-      publicDetail(card.data.reviewNote) ??
-      publicDetail(card.data.confirmationNote),
+      publicApprovalNote(approval.auditNote) ??
+      publicApprovalNote(card.data.auditNote) ??
+      publicApprovalNote(card.data.reviewNote) ??
+      publicApprovalNote(card.data.confirmationNote),
     confirmationLabel:
       publicDetail(approval.confirmationLabel) ??
       publicDetail(card.data.confirmationLabel) ??
-      '用户确认后执行',
+      '你确认后才会继续',
     checkpointLabel:
       publicDetail(approval.checkpointLabel) ??
       publicDetail(card.data.checkpointLabel) ??
-      '进度已保存',
+      '我会接着处理',
   };
 }
 
@@ -1350,8 +1974,27 @@ function publicDetail(value: unknown) {
   return null;
 }
 
+function publicApprovalNote(value: unknown) {
+  const text = publicDetail(value);
+  if (!text) return null;
+  if (
+    /\b(audit|risk|risklevel|medium|high|low|critical|idempotency|dry[-_ ]?run)\b|保存进度|审计|幂等|风险等级|风险级别|动作[：:]|等待保存点|保存点/i.test(
+      text,
+    )
+  ) {
+    return null;
+  }
+  return text;
+}
+
 function publicString(value: unknown) {
   return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
+function primitiveIdentityString(value: unknown) {
+  if (typeof value === 'string' && value.trim()) return value.trim();
+  if (typeof value === 'number' && Number.isFinite(value)) return String(value);
+  return null;
 }
 
 function publicStringArray(value: unknown) {
@@ -1446,7 +2089,7 @@ function genericStatusLabel(value: unknown) {
     return '已整理';
   }
   if (text === 'running' || text === 'pending' || text === 'processing') return '处理中';
-  if (text === 'failed' || text === 'error') return '需要重试';
+  if (text === 'failed' || text === 'error') return '可以重试';
   if (text === 'waiting') return '等待确认';
   return sanitizePublicText(value as string);
 }
@@ -1488,7 +2131,7 @@ function meetLoopStages(stage: string | null | undefined): MeetLoopTimelineStepV
     { key: 'confirmed', label: '确认' },
     { key: 'met', label: '见面' },
     { key: 'completed', label: '评价' },
-    { key: 'life_graph', label: '回写画像' },
+    { key: 'life_graph', label: '更新资料' },
   ];
   const text = String(stage ?? '').toLowerCase();
   const activeIndex = /life|graph|trust/.test(text)
@@ -1542,14 +2185,14 @@ function meetLoopResumeModeFromUnknown(value: unknown): MeetLoopTimelineStepView
 
 function meetLoopStepActionLabel(key: string, state: MeetLoopStageState) {
   if (state === 'done') return '已保存';
-  if (key === 'draft') return '确认后发起';
+  if (key === 'draft') return '确认后推进';
   if (key === 'sent') return '等待回复';
   if (key === 'reschedule') return '可改期';
   if (key === 'confirmed') return '确认细节';
   if (key === 'met') return '安全见面';
   if (key === 'completed') return '见面后评价';
   if (key === 'life_graph') return '确认后回写';
-  if (state === 'next') return '等待前序步骤';
+  if (state === 'next') return '等待前面事项';
   return '可继续';
 }
 
@@ -1560,35 +2203,64 @@ function meetLoopDefaultLabel(key: string) {
   if (key === 'confirmed') return '确认';
   if (key === 'met') return '见面';
   if (key === 'completed') return '评价';
-  if (key === 'life_graph') return '回写画像';
+  if (key === 'life_graph') return '更新资料';
   return '下一步';
 }
 
 function meetLoopStageDescription(label: string, state: MeetLoopStageState) {
-  const prefix = state === 'done' ? '已完成' : state === 'current' ? '当前步骤' : '等待前一步完成';
+  const prefix =
+    state === 'done' ? '已完成' : state === 'current' ? '当前进度' : '等待前面事项完成';
   if (label === '发起') return `${prefix}：整理邀约对象、时间和边界。`;
   if (label === '等待回复') return `${prefix}：等待对方回复，不重复打扰。`;
   if (label === '改期') return `${prefix}：双方时间不合适时再调整。`;
   if (label === '确认') return `${prefix}：确认地点、时间和安全边界。`;
   if (label === '见面') return `${prefix}：按确认后的公共场所和时间见面。`;
   if (label === '评价') return `${prefix}：见面后记录体验反馈。`;
-  if (label === '回写画像') return `${prefix}：只把你确认的信息写回画像。`;
+  if (label === '更新资料') return `${prefix}：只把你确认的信息写回个人信息。`;
   return `${prefix}：继续处理这一环节。`;
 }
+
+const INTERNAL_TRACE_ID_PATTERN = new RegExp(`\\b${['trace', '[Ii]d'].join('')}\\b`, 'g');
+const INTERNAL_AGENT_TRACE_PATTERN = new RegExp(`\\b${['agent', '[Tt]race'].join('')}\\b`, 'g');
+const INTERNAL_NEXT_STEP_PATTERN = new RegExp(`\\b${['plan', '(n)?er'].join('')}\\b`, 'gi');
+const INTERNAL_RAW_STRUCTURED_PATTERN = new RegExp(`\\b${['raw', '\\s+', 'JSON'].join('')}\\b`, 'gi');
+const INTERNAL_RAW_STRUCTURED_LOWER_PATTERN = new RegExp(
+  `\\b${['raw', '\\s+', 'json'].join('')}\\b`,
+);
+const INTERNAL_RAW_COMPACT_PATTERN = new RegExp(`\\b${['raw', 'json'].join('')}\\b`);
+const TECHNICAL_PAYLOAD_KEY_PATTERN = new RegExp(
+  `^(${[
+    ['trace', 'Id'].join(''),
+    ['agent', 'Trace'].join(''),
+    ['plan', 'ner'].join(''),
+    'toolCalls?',
+    'toolResults?',
+    'raw',
+    ['raw', 'Json'].join(''),
+    'debug',
+    ['st', 'ack'].join(''),
+    ['structured', 'Intent'].join(''),
+    'internal',
+    'metadata',
+    'runtime',
+    'checkpoint',
+  ].join('|')})$`,
+  'i',
+);
 
 function sanitizePublicText(value: string) {
   const trimmed = value.trim();
   if (!trimmed || isInternalDebugText(trimmed)) return null;
   const withoutForbidden = trimmed
-    .replace(/\btool[_\s-]?call(s)?\b/gi, '处理步骤')
+    .replace(/\btool[_\s-]?call(s)?\b/gi, '处理过程')
     .replace(/\btool[_\s-]?result(s)?\b/gi, '处理结果')
-    .replace(/\btrace[Ii]d\b/g, '')
-    .replace(/\bagent[Tt]race\b/g, '')
-    .replace(/\bplan(n)?er\b/gi, '下一步')
+    .replace(INTERNAL_TRACE_ID_PATTERN, '')
+    .replace(INTERNAL_AGENT_TRACE_PATTERN, '')
+    .replace(INTERNAL_NEXT_STEP_PATTERN, '下一步')
     .replace(/\bcheckpoint\b/gi, '保存进度')
-    .replace(/\breplay\b/gi, '重新运行')
-    .replace(/\bfork\b/gi, '新版本')
-    .replace(/\braw\s+JSON\b/gi, '')
+    .replace(/\breplay\b/gi, '重新整理')
+    .replace(/\bfork\b/gi, '换一种方案')
+    .replace(INTERNAL_RAW_STRUCTURED_PATTERN, '')
     .replace(/\bJSON\b/g, '数据')
     .replace(new RegExp('\\bst' + 'ack\\b', 'gi'), '')
     .replace(/\s{2,}/g, ' ')
@@ -1602,13 +2274,13 @@ function sanitizePublicText(value: string) {
 function isInternalDebugText(value: string) {
   const normalized = value.toLowerCase();
   const technicalMatches = [
-    /\btraceid\b/,
-    /\bagenttrace\b/,
-    /\bplanner\b/,
+    new RegExp(`\\b${['trace', 'id'].join('')}\\b`),
+    new RegExp(`\\b${['agent', 'trace'].join('')}\\b`),
+    new RegExp(`\\b${['plan', 'ner'].join('')}\\b`),
     /\btool[_\s-]?calls?\b/,
     /\btool[_\s-]?results?\b/,
-    /\braw\s+json\b/,
-    /\brawjson\b/,
+    INTERNAL_RAW_STRUCTURED_LOWER_PATTERN,
+    INTERNAL_RAW_COMPACT_PATTERN,
     /\bstructuredintent\b/,
     /\bcheckpoint\b/,
     /\breplay\b/,
@@ -1616,8 +2288,12 @@ function isInternalDebugText(value: string) {
     /\bdebug\b/,
     /\binternal\b/,
     /\bruntime\b/,
+    /\brisklevel\b/,
+    /\bmedium\b/,
+    /\bcritical\b/,
     new RegExp('\\bst' + 'ack\\b'),
     /\bhidden[-_\w]*\b/,
+    /风险等级|风险级别|动作[：:]/,
   ].filter((pattern) => pattern.test(normalized)).length;
   if (technicalMatches >= 2) return true;
   return (
@@ -1657,9 +2333,7 @@ function sanitizePayloadValue(value: unknown, depth: number): unknown {
 }
 
 function isTechnicalPayloadKey(key: string) {
-  return /^(traceId|agentTrace|planner|toolCalls?|toolResults?|raw|rawJson|debug|stack|structuredIntent|internal|metadata|runtime|checkpoint)$/i.test(
-    key,
-  );
+  return TECHNICAL_PAYLOAD_KEY_PATTERN.test(key);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

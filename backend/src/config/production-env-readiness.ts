@@ -130,11 +130,11 @@ export function buildProductionEnvReport(env: EnvMap): ProductionEnvReport {
   checkPostgres(env, error);
   checkMongoUri(env, error);
   checkRedis(env, error);
+  checkSocialAgentCache(env, error);
   checkObjectStorage(env, error);
   checkUploadTempDir(env, error);
   checkAgentModel(env, error);
   checkAgentIntelligencePolicy(env, error);
-  checkKafka(env, error);
   checkSubagentWorker(env, error, warning);
   checkObservabilityAlerts(env, error, warning);
 
@@ -286,6 +286,30 @@ function checkRedis(
     requireConfigured(env, key, error);
   }
   checkNonLocalServiceHost(env.REDIS_HOST, 'REDIS_HOST', error);
+}
+
+function checkSocialAgentCache(
+  env: EnvMap,
+  error: (key: string, message: string) => void,
+): void {
+  const backend = `${env.SOCIAL_AGENT_CACHE_BACKEND ?? ''}`
+    .trim()
+    .toLowerCase();
+  const toolBackend = `${env.SOCIAL_AGENT_TOOL_RESULT_CACHE_BACKEND ?? ''}`
+    .trim()
+    .toLowerCase();
+  if (backend !== 'redis' && backend !== 'hybrid') {
+    error(
+      'SOCIAL_AGENT_CACHE_BACKEND',
+      'must be redis or hybrid in production so Agent cache hits are stable across backend and worker processes.',
+    );
+  }
+  if (toolBackend !== 'redis') {
+    error(
+      'SOCIAL_AGENT_TOOL_RESULT_CACHE_BACKEND',
+      'must be redis in production so repeated candidate/tool results are shared across instances.',
+    );
+  }
 }
 
 function validateServiceUrl(
@@ -498,15 +522,6 @@ function isFastDeepSeekModel(value: string): boolean {
   return /(^|[-_])(flash|fast|lite)([-_]|$)/i.test(value.trim());
 }
 
-function checkKafka(
-  env: EnvMap,
-  error: (key: string, message: string) => void,
-): void {
-  if (env.ENABLE_KAFKA === 'true' && !hasConfiguredValue(env.KAFKA_BROKERS)) {
-    error('KAFKA_BROKERS', 'must be set when ENABLE_KAFKA=true.');
-  }
-}
-
 function checkSubagentWorker(
   env: EnvMap,
   error: (key: string, message: string) => void,
@@ -535,10 +550,10 @@ function checkSubagentWorker(
     .split(',')
     .map((item) => item.trim())
     .filter(Boolean);
-  if (queues.length > 0 && queues.length < 4) {
+  if (queues.length > 0 && queues.length < 3) {
     warning(
       'FITMEET_SUBAGENT_WORKER_QUEUE',
-      'custom queue list should include Life Graph, Social Match, Meet Loop, and Math worker queues unless this is an intentional partial rollout.',
+      'custom queue list should include Agent Brain, Life Graph, and Match worker queues unless this is an intentional partial rollout.',
     );
   }
 }

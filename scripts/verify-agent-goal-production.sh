@@ -21,6 +21,8 @@ Verifies the production fixes for the FitMeet Agent/Discover regression set:
   - public social intents contain at least one real discoverable item
   - production Agent browser QA catches ordinary-chat social leakage, stale
     checkpoint recovery, account menu blocking, and ordinary thread title drift
+  - Agent token/cost evidence is checked through admin-only L5 observability;
+    when REQUIRE_AGENT_COST_DATA=true, live LLM cost buckets must be present
 
 Environment:
   BASE_URL / API_BASE_URL              Production Web/API origins.
@@ -28,8 +30,12 @@ Environment:
   EXPECTED_RELEASE_BUILT_AT            Optional exact release builtAt. If unset
                                        and release.json exists, read from it.
   RUN_AGENT_BROWSER_QA=auto|true|false Auto runs when QA credentials exist.
-  FITMEET_AGENT_BROWSER_QA_EMAIL       Dedicated QA/smoke account email.
+  FITMEET_AGENT_BROWSER_QA_EMAIL       Dedicated QA account email.
   FITMEET_AGENT_BROWSER_QA_PASSWORD    Dedicated QA/smoke account password.
+  FITMEET_ADMIN_JWT or ADMIN_JWT       Optional admin token for L5 cost data.
+  REQUIRE_AGENT_COST_DATA=true         Fail when live cost evidence is missing.
+  AGENT_TOKEN_COST_EVIDENCE_FILE=path  Optional JSON evidence file for token/cost verification.
+  MIN_STAGE_PROMPT_PREFIX_REUSE_RATE   Optional per-stage prompt prefix reuse threshold.
 EOF
 }
 
@@ -129,9 +135,8 @@ fi
 ok "Discover page reachable and static HTML does not include fake 128-person copy"
 
 public_intents_file="$(curl_json "Public social intents" "${API_BASE_URL}/public/social-intents?page=1&limit=8")"
-feed_file="$(curl_json "Public feed" "${API_BASE_URL}/feed?page=1&limit=8")"
 counts="$(
-  node - "${public_intents_file}" "${feed_file}" <<'NODE'
+  node - "${public_intents_file}" <<'NODE'
 const fs = require('fs');
 const read = (file) => JSON.parse(fs.readFileSync(file, 'utf8'));
 const listFrom = (doc) => {
@@ -141,31 +146,227 @@ const listFrom = (doc) => {
   if (Array.isArray(doc.results)) return doc.results;
   if (doc.data && Array.isArray(doc.data.items)) return doc.data.items;
   if (doc.data && Array.isArray(doc.data.data)) return doc.data.data;
-  if (doc.feed && Array.isArray(doc.feed)) return doc.feed;
   return [];
 };
 const intents = listFrom(read(process.argv[2]));
-const feed = listFrom(read(process.argv[3]));
-console.log(`${intents.length} ${feed.length}`);
+console.log(`${intents.length}`);
 NODE
 )"
-read -r public_intent_count feed_count <<<"${counts}"
+read -r public_intent_count <<<"${counts}"
 
 if [[ "${public_intent_count}" -lt 1 ]]; then
   cat >&2 <<EOF
 [FAIL] /public/social-intents returned 0 discoverable items.
-[hint] If this is a fresh/empty production DB, seed a safe public Agent smoke intent:
-[hint]   cd /opt/FitMeet-web
-[hint]   AGENT_SMOKE_SEED_ALLOW_PRODUCTION=true ./scripts/ecs-backend-pnpm.sh -- seed:agent-smoke:prod -- --allow-production
+[hint] If this is a fresh/empty production DB, publish a safe Agent约练卡 through /agent and confirm it appears in Discover.
 EOF
   exit 1
 fi
 ok "Public social intents expose ${public_intent_count} discoverable item(s)"
 
-if [[ "${feed_count}" -lt 1 ]]; then
-  warn "Public feed has 0 items. Discover can still be proven by public social intents, but public dynamics remain empty."
+public_probe_file="${TMP_DIR}/public-intent-probe.json"
+node - "${public_intents_file}" >"${public_probe_file}" <<'NODE'
+const fs = require('fs');
+const file = process.argv[2];
+const doc = JSON.parse(fs.readFileSync(file, 'utf8'));
+const listFrom = (value) => {
+  if (Array.isArray(value)) return value;
+  if (Array.isArray(value?.data)) return value.data;
+  if (Array.isArray(value?.items)) return value.items;
+  if (Array.isArray(value?.results)) return value.results;
+  if (Array.isArray(value?.data?.items)) return value.data.items;
+  if (Array.isArray(value?.data?.data)) return value.data.data;
+  return [];
+};
+const intents = listFrom(doc);
+const forbiddenKeys = new Set([
+  'source',
+  'filters',
+  'candidateUserIds',
+  'linkedSocialRequestId',
+  'mode',
+  'lat',
+  'lng',
+  'riskLevel',
+  'requiresUserConfirmation',
+  'matchSignal',
+]);
+const forbiddenText =
+  /(agent[\s_-]*smoke|api[\s_-]*smoke|agent-api-smoke|agent_api_smoke|smoke[\s_-]*(account|owner)?|fixture|mock|seed)/i;
+const failures = [];
+const scan = (value, path = '$') => {
+  if (value == null) return;
+  if (typeof value === 'string') {
+    const isRouteIdentifier = /\.id$/.test(path);
+    if (!isRouteIdentifier && forbiddenText.test(value)) {
+      failures.push(`${path} contains internal fixture/smoke text`);
+    }
+    return;
+  }
+  if (Array.isArray(value)) {
+    value.forEach((item, index) => scan(item, `${path}[${index}]`));
+    return;
+  }
+  if (typeof value !== 'object') return;
+  for (const [key, child] of Object.entries(value)) {
+    if (forbiddenKeys.has(key)) {
+      failures.push(`${path}.${key} exposes internal public-intent field`);
+    }
+    scan(child, `${path}.${key}`);
+  }
+};
+intents.forEach((intent, index) => scan(intent, `intents[${index}]`));
+if (failures.length > 0) {
+  console.error(failures.slice(0, 20).join('\n'));
+  process.exit(1);
+}
+const first = intents.find((intent) => intent && intent.id);
+if (!first) {
+  console.error('No public intent id found for detail verification');
+  process.exit(1);
+}
+process.stdout.write(
+  JSON.stringify({
+    id: String(first.id),
+    ownerUserId:
+      Number.isFinite(Number(first.userId)) && Number(first.userId) > 0
+        ? Number(first.userId)
+        : null,
+  }),
+);
+NODE
+ok "Public social intent list hides smoke fixtures and internal fields"
+
+first_public_intent_id="$(
+  node -e "const fs=require('fs');const p=JSON.parse(fs.readFileSync(process.argv[1],'utf8'));process.stdout.write(p.id);" "${public_probe_file}"
+)"
+first_public_intent_owner_id="$(
+  node -e "const fs=require('fs');const p=JSON.parse(fs.readFileSync(process.argv[1],'utf8'));process.stdout.write(p.ownerUserId ? String(p.ownerUserId) : '');" "${public_probe_file}"
+)"
+
+public_intent_detail_file="$(curl_json "Public social intent detail" "${API_BASE_URL}/public/social-intents/${first_public_intent_id}")"
+public_intent_matches_file="$(curl_json "Public social intent matches" "${API_BASE_URL}/public/social-intents/${first_public_intent_id}/matches")"
+
+node - "${public_intent_detail_file}" "${public_intent_matches_file}" "${first_public_intent_owner_id}" <<'NODE'
+const fs = require('fs');
+const detail = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+const matches = JSON.parse(fs.readFileSync(process.argv[3], 'utf8'));
+const ownerUserId = Number(process.argv[4] || 0);
+const forbiddenIntentKeys = new Set([
+  'source',
+  'filters',
+  'candidateUserIds',
+  'linkedSocialRequestId',
+  'mode',
+  'lat',
+  'lng',
+  'riskLevel',
+  'requiresUserConfirmation',
+  'matchSignal',
+  'matchedBy',
+]);
+const forbiddenCandidateKeys = new Set(['score', 'reasonTags', 'nextAction']);
+const forbiddenText =
+  /(agent[\s_-]*smoke|api[\s_-]*smoke|agent-api-smoke|agent_api_smoke|smoke[\s_-]*(account|owner)?|fixture|mock|seed)/i;
+const failures = [];
+const scan = (value, path = '$', forbiddenKeys = forbiddenIntentKeys) => {
+  if (value == null) return;
+  if (typeof value === 'string') {
+    const isRouteIdentifier = /\.id$/.test(path);
+    if (!isRouteIdentifier && forbiddenText.test(value)) {
+      failures.push(`${path} contains internal fixture/smoke text`);
+    }
+    return;
+  }
+  if (Array.isArray(value)) {
+    value.forEach((item, index) => scan(item, `${path}[${index}]`, forbiddenKeys));
+    return;
+  }
+  if (typeof value !== 'object') return;
+  for (const [key, child] of Object.entries(value)) {
+    if (forbiddenKeys.has(key)) {
+      failures.push(`${path}.${key} exposes internal field`);
+    }
+    scan(child, `${path}.${key}`, forbiddenKeys);
+  }
+};
+const candidatesFrom = (doc) => {
+  if (Array.isArray(doc)) return doc;
+  if (Array.isArray(doc?.candidates)) return doc.candidates;
+  if (Array.isArray(doc?.data)) return doc.data;
+  if (Array.isArray(doc?.items)) return doc.items;
+  if (Array.isArray(doc?.results)) return doc.results;
+  if (Array.isArray(doc?.data?.items)) return doc.data.items;
+  return [];
+};
+scan(detail, 'detail');
+const candidates = candidatesFrom(matches);
+candidates.forEach((candidate, index) => {
+  scan(candidate, `matches.candidates[${index}]`, forbiddenCandidateKeys);
+  const candidateId = Number(candidate?.profile?.id ?? candidate?.userId ?? candidate?.id);
+  if (
+    Number.isFinite(ownerUserId) &&
+    ownerUserId > 0 &&
+    Number.isFinite(candidateId) &&
+    candidateId === ownerUserId
+  ) {
+    failures.push(`matches.candidates[${index}] includes the public-intent owner`);
+  }
+});
+if (failures.length > 0) {
+  console.error(failures.slice(0, 30).join('\n'));
+  process.exit(1);
+}
+NODE
+ok "Public social intent detail/matches hide smoke data and exclude self-match"
+
+if [[ -n "${first_public_intent_owner_id}" ]]; then
+  public_user_file="$(curl_json "Public user profile" "${API_BASE_URL}/users/${first_public_intent_owner_id}")"
+  node - "${public_user_file}" <<'NODE'
+const fs = require('fs');
+const user = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+const forbiddenKeys = new Set([
+  'email',
+  'password',
+  'phone',
+  'wechatOpenId',
+  'bestRecords',
+  'lat',
+  'lng',
+  'locationUpdatedAt',
+  'acceptNearbyMatch',
+]);
+const forbiddenText =
+  /(agent[\s_-]*smoke|api[\s_-]*smoke|agent-api-smoke|agent_api_smoke|smoke[\s_-]*(account|owner)?|fixture|mock|seed)/i;
+const failures = [];
+const scan = (value, path = '$') => {
+  if (value == null) return;
+  if (typeof value === 'string') {
+    if (forbiddenText.test(value)) {
+      failures.push(`${path} contains internal fixture/smoke text`);
+    }
+    return;
+  }
+  if (Array.isArray(value)) {
+    value.forEach((item, index) => scan(item, `${path}[${index}]`));
+    return;
+  }
+  if (typeof value !== 'object') return;
+  for (const [key, child] of Object.entries(value)) {
+    if (forbiddenKeys.has(key)) {
+      failures.push(`${path}.${key} exposes private profile field`);
+    }
+    scan(child, `${path}.${key}`);
+  }
+};
+scan(user, 'user');
+if (failures.length > 0) {
+  console.error(failures.slice(0, 30).join('\n'));
+  process.exit(1);
+}
+NODE
+  ok "Public user profile hides private fields and internal smoke copy"
 else
-  ok "Public feed exposes ${feed_count} item(s)"
+  skip "Public user profile privacy check. Public intent has no owner user id."
 fi
 
 should_run_browser_qa=false
@@ -177,7 +378,7 @@ case "${RUN_AGENT_BROWSER_QA}" in
     should_run_browser_qa=false
     ;;
   auto)
-    if [[ -n "${FITMEET_AGENT_BROWSER_QA_EMAIL:-${AGENT_SMOKE_EMAIL:-}}" && -n "${FITMEET_AGENT_BROWSER_QA_PASSWORD:-${AGENT_SMOKE_PASSWORD:-}}" ]]; then
+    if [[ -n "${FITMEET_AGENT_BROWSER_QA_EMAIL:-}" && -n "${FITMEET_AGENT_BROWSER_QA_PASSWORD:-}" ]]; then
       should_run_browser_qa=true
     fi
     ;;
@@ -199,5 +400,12 @@ if [[ "${should_run_browser_qa}" == "true" ]]; then
 else
   skip "Production Agent browser QA. Set FITMEET_AGENT_BROWSER_QA_EMAIL/PASSWORD or RUN_AGENT_BROWSER_QA=true."
 fi
+
+API_BASE_URL="${API_BASE_URL}" \
+  REQUIRE_AGENT_COST_DATA="${REQUIRE_AGENT_COST_DATA:-false}" \
+  REQUIRE_STAGE_COSTS="${REQUIRE_STAGE_COSTS:-final_response,planner,brain}" \
+  FITMEET_ADMIN_JWT="${FITMEET_ADMIN_JWT:-${ADMIN_JWT:-}}" \
+  "${ROOT_DIR}/scripts/verify-agent-token-cost.sh"
+ok "Agent token/cost verification completed"
 
 printf '\nFitMeet Agent goal production verification completed successfully for %s\n' "${BASE_URL}"

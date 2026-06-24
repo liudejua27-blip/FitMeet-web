@@ -22,7 +22,9 @@ export type NormalizedPublicSocialIntentListFilters = {
 };
 
 const DEFAULT_PUBLIC_INTENT_STATUSES = [
-  SocialRequestStatus.Active, SocialRequestStatus.Matched, SocialRequestStatus.Searching,
+  SocialRequestStatus.Active,
+  SocialRequestStatus.Matched,
+  SocialRequestStatus.Searching,
 ];
 
 export function normalizePublicSocialIntentListFilters(
@@ -30,11 +32,14 @@ export function normalizePublicSocialIntentListFilters(
 ): NormalizedPublicSocialIntentListFilters {
   const page = Math.max(Number(filters.page) || 1, 1);
   const take = Math.min(Math.max(Number(filters.limit) || 30, 1), 50);
-  const status = Object.values(SocialRequestStatus).includes(filters.status as SocialRequestStatus)
+  const status = Object.values(SocialRequestStatus).includes(
+    filters.status as SocialRequestStatus,
+  )
     ? (filters.status as SocialRequestStatus)
     : undefined;
   return {
-    page, take,
+    page,
+    take,
     skip: (page - 1) * take,
     q: filters.q?.trim() || undefined,
     city: sanitizeCity(filters.city) || undefined,

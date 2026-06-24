@@ -22,14 +22,38 @@ import {
   socialCodexThreadIdForTask,
   socialCodexThreadIdOrExisting,
 } from './socialCodexThreadId';
+import { agentCardDedupKeys } from './agentCardIdentity';
+import { reduceSingleRunAssistantMessages } from './agentAssistantMessageReducer';
 
 type StepState = Step['status'];
 
 const AGENT_THREAD_STORAGE_KEY = 'fitmeet-agent-thread';
 const AGENT_THREAD_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+const DEFAULT_RECOVERY_TITLE = '这段需求还在';
+const DEFAULT_RECOVERY_MESSAGE = '可以继续处理，我会从这里接着处理；也可以补充新的要求。';
 
-export const technicalPublicTextPattern =
-  /\b(traceId|agentTrace|structuredIntent|planner|tool\s*call|toolCall|toolCalls|DeepSeek|OpenAI|raw JSON|stack)\b|Life Graph Agent|Social Match Agent|Meet Loop Agent|工具调用|数据库字段|错误堆栈|原始目标|从已保存的步骤继续|从已保存的工具步骤|从已保存的 Agent 状态|继续刚才保存的 Agent 步骤/i;
+export const technicalPublicTextPattern = new RegExp(
+  [
+    `\\b(${[
+      ['trace', 'Id'].join(''),
+      ['agent', 'Trace'].join(''),
+      ['structured', 'Intent'].join(''),
+      ['plan', 'ner'].join(''),
+      'tool\\s*call',
+      ['tool', 'Call'].join(''),
+      ['tool', 'Calls'].join(''),
+      ['Deep', 'Seek'].join(''),
+      ['Open', 'AI'].join(''),
+      ['raw', '\\s+', 'JSON'].join(''),
+      'stack',
+    ].join('|')})\\b`,
+    ['Life', 'Graph', 'Agent'].join('\\s+'),
+    ['Social', 'Match', 'Agent'].join('\\s+'),
+    ['Meet', 'Loop', 'Agent'].join('\\s+'),
+    '工具调用|数据库字段|错误堆栈|原始目标|从已保存的步骤继续|从已保存的工具步骤|从已保存的 Agent 状态|继续刚才保存的 Agent 步骤',
+  ].join('|'),
+  'i',
+);
 
 export const conversationSteps: Step[] = [
   { id: 'understand', label: '正在理解你的问题', status: 'pending' },
@@ -43,7 +67,7 @@ export const socialSteps: Step[] = [
   { id: 'search', label: '正在查找合适的信息', status: 'pending' },
   { id: 'rank', label: '正在整理可行选项', status: 'pending' },
   { id: 'safety_filter', label: '正在检查必要边界', status: 'pending' },
-  { id: 'approval', label: '需要你确认这一步', status: 'pending' },
+  { id: 'approval', label: '需要你确认后继续', status: 'pending' },
 ];
 
 export function agentThreadStorageKey(userId?: number | string | null) {
@@ -134,7 +158,9 @@ export function sanitizeStoredThreadMessage(message: AgentThreadMessage): AgentT
   const result = message.result ? sanitizeRestoredResponse(message.result) : null;
   const content = publicText(message.content, result?.assistantMessage ?? '');
   const hasUsefulResult = Boolean(result && restoredResponseHasUsefulSurface(result));
-  const fallbackSourced = isFallbackAssistantMessage(message) || isFallbackAssistantResponse(result);
+  const nonBranchableSourced =
+    isNonBranchableAssistantSource(message.assistantMessageSource) ||
+    isNonBranchableAssistantSource(result?.assistantMessageSource);
   const isGenericRecovery =
     isGenericRecoveryAssistantText(message.content) ||
     isGenericRecoveryAssistantText(content) ||
@@ -143,7 +169,7 @@ export function sanitizeStoredThreadMessage(message: AgentThreadMessage): AgentT
   if (!content && !hasUsefulResult) return null;
   return {
     ...message,
-    content: content || '我可以继续上次的话题，也可以重新开始。',
+    content: isGenericRecovery ? '' : content || '我可以继续上次的话题，也可以重新开始。',
     result: hasUsefulResult ? result : null,
     conversationIntent: hasUsefulResult
       ? intentForRestoredResponse(result as UserFacingAgentResponse, 'conversation')
@@ -154,7 +180,7 @@ export function sanitizeStoredThreadMessage(message: AgentThreadMessage): AgentT
       : false,
     surfaceKind: isGenericRecovery ? 'recovery' : 'answer',
     assistantMessageSource: message.assistantMessageSource ?? result?.assistantMessageSource,
-    branchable: !isGenericRecovery && !fallbackSourced,
+    branchable: !isGenericRecovery && !nonBranchableSourced,
   };
 }
 
@@ -218,9 +244,33 @@ export function isSocialActionIntent(text: string) {
   ) {
     return false;
   }
-  return /(帮我找|给我找|想找|我要找|我想认识|想认识|低压力社交|找一个|找个|找人|找.{0,48}(人|搭子|伙伴|朋友|用户|候选|活动|局|约练)|约练|约跑|约球|认识.{0,16}(朋友|人|搭子)|推荐.{0,16}(用户|朋友|人|搭子|候选|活动|局|约练)|搜索.{0,16}(用户|朋友|人|搭子|候选|活动|局|约练)|匹配.{0,16}(用户|朋友|人|搭子|候选)|附近.{0,16}(用户|朋友|人|搭子|活动)|同城.{0,16}(用户|朋友|人|搭子|活动)|真实用户|约练用户|户外搭子|篮球搭子|约练搭子|一起.{0,16}(咖啡|拍照|跑步|健身|羽毛球|网球|篮球|徒步|户外|骑行|运动|训练)|周末.{0,16}(咖啡|拍照|跑步|健身|羽毛球|网球|篮球|徒步|户外|骑行|运动|训练)|参加.{0,8}(活动|约练)|发起.{0,8}(活动|约练)|加好友|发邀请|线下见面|线下活动)/.test(
-    normalized,
-  );
+  if (
+    /(帮我找|给我找|想找|我要找|我想认识|想认识|低压力社交|找一个|找个|找人|找.{0,48}(女生|男生|女性|男性|人|搭子|伙伴|朋友|用户|候选|活动|局|约练)|约练|约跑|约球|认识.{0,16}(朋友|人|搭子)|推荐.{0,16}(用户|朋友|人|搭子|候选|活动|局|约练)|搜索.{0,16}(用户|朋友|人|搭子|候选|活动|局|约练)|匹配.{0,16}(用户|朋友|人|搭子|候选)|附近.{0,16}(用户|朋友|人|搭子|活动)|同城.{0,16}(用户|朋友|人|搭子|活动)|真实用户|约练用户|户外搭子|篮球搭子|约练搭子|一起.{0,16}(咖啡|拍照|跑步|健身|羽毛球|网球|篮球|徒步|户外|骑行|运动|训练)|周末.{0,16}(咖啡|拍照|跑步|健身|羽毛球|网球|篮球|徒步|户外|骑行|运动|训练)|参加.{0,8}(活动|约练)|发起.{0,8}(活动|约练)|加好友|发邀请|线下见面|线下活动)/.test(
+      normalized,
+    )
+  ) {
+    return true;
+  }
+  if (
+    /((有没有|有无|筛一下|筛选|优先|最好|只要|更想|换成|找找).{0,18}(女生|男生|女性|男性|女的|男的|舞蹈|舞蹈生|编程|程序员|科技|摄影|音乐|读书|学生|同校|附近|同城))|^(女生|男生|女性|男性|女的|男的|舞蹈生|喜欢编程|会编程|附近的|同城的)[。.!！\s]*$/.test(
+      normalized,
+    )
+  ) {
+    return true;
+  }
+  const hasActivity =
+    /(散步|跑步|羽毛球|篮球|健身|徒步|爬山|骑行|游泳|瑜伽|飞盘|网球|乒乓|咖啡|吃饭|电影|city\s*walk|citywalk)/i.test(
+      normalized,
+    );
+  const hasTime =
+    /(周末|今天|明天|后天|今晚|上午|下午|晚上|中午|早上|[0-9一二三四五六七八九十]+点)/i.test(
+      normalized,
+    );
+  const hasPlace =
+    /(附近|大学|公园|商场|体育馆|健身房|校区|区|市|青岛|上海|北京|深圳|广州|杭州|成都|武汉|南京)/i.test(
+      normalized,
+    );
+  return hasActivity && hasTime && hasPlace;
 }
 
 export function stepsForPrompt(prompt: string) {
@@ -386,6 +436,20 @@ export function intentForRestoredResponse(
 }
 
 export function sanitizeRestoredResponse(response: UserFacingAgentResponse): UserFacingAgentResponse {
+  if (
+    isFallbackAssistantResponse(response) &&
+    isGenericRecoveryAssistantText(response.assistantMessage) &&
+    (response.cards.some(isSocialSurfaceCard) ||
+      response.pendingConfirmations.length > 0 ||
+      response.safeStatus.blocked)
+  ) {
+    return {
+      ...response,
+      assistantMessage: '',
+      assistantMessageSource: response.assistantMessageSource ?? 'fallback',
+      lightStatus: '已整理回复',
+    };
+  }
   if (!isGenericCheckpointResponse(response)) return response;
   return {
     ...response,
@@ -415,9 +479,7 @@ export function restoredResponseHasUsefulSurface(response: UserFacingAgentRespon
 export function isGenericRecoveryAssistantText(value: unknown) {
   const text = String(value ?? '').trim();
   if (!text) return false;
-  return /保留当前(?:对话|方向|上下文|需求)|稍后再试|可以稍后再试|我已经恢复了(?:上一次|这段|当前)|我已经恢复了这段(?:对话|约练任务|任务)|我可以继续上次的话题，也可以重新开始|暂时没有顺利完成|连接中断|连接恢复|处理时间有点久|从已保存的(?:步骤|工具步骤|Agent 状态)|继续刚才保存的 Agent 步骤|原始目标/.test(
-    text,
-  );
+  return genericRecoveryAssistantPattern().test(text);
 }
 
 export function isNonAnswerFallbackResponse(response: UserFacingAgentResponse) {
@@ -426,6 +488,7 @@ export function isNonAnswerFallbackResponse(response: UserFacingAgentResponse) {
     (Boolean(response.recoveryNotice) ||
       isGenericRecoveryAssistantText(response.assistantMessage) ||
       (assistantMessage.length === 0 && isFallbackAssistantResponse(response))) &&
+    !responseHasCheckpointRuntime(response) &&
     !response.cards.some(isSocialSurfaceCard) &&
     response.pendingConfirmations.length === 0 &&
     !response.safeStatus.blocked
@@ -437,6 +500,12 @@ export function assistantMessageForUserFacingResult(
   fallback: string,
 ) {
   const text = publicText(response.assistantMessage, '').trim();
+  if (
+    response.workflow?.state === 'RECOVERY' &&
+    (isFallbackAssistantResponse(response) || isGenericRecoveryAssistantText(text))
+  ) {
+    return response.workflow.recoveryMessage || '我保留了这段需求，可以从这里继续。';
+  }
   if (isFallbackAssistantResponse(response) && isGenericRecoveryAssistantText(text)) {
     if (responseRequiresApproval(response)) {
       return '我把需要你确认的内容放在下面，确认前不会执行真实动作。';
@@ -448,20 +517,103 @@ export function assistantMessageForUserFacingResult(
   return text || fallback;
 }
 
+export function responseHasCheckpointRuntime(response: UserFacingAgentResponse) {
+  return response.workflow?.state === 'RECOVERY';
+}
+
 export function recoveryFromUserFacingResponse(
   response: UserFacingAgentResponse,
   prompt: string,
 ): FitMeetAssistantRecovery {
   const notice = response.recoveryNotice;
+  const title = publicText(notice?.title, '').trim();
+  const safeTitle =
+    title && !isGenericRecoveryTitle(title) ? title : DEFAULT_RECOVERY_TITLE;
+  const message = publicText(notice?.message, '').trim();
+  const safeMessage =
+    message && !isGenericRecoveryNoticeMessage(message)
+      ? message
+      : DEFAULT_RECOVERY_MESSAGE;
   return {
     kind: notice?.kind === 'checkpoint' ? 'checkpoint_available' : 'failed',
-    title: notice?.title ?? '这次没有顺利完成',
-    message:
-      notice?.message ??
-      '我已经保留当前对话。你可以重试，或者继续告诉我下一步。',
+    title: safeTitle,
+    message: safeMessage,
     prompt,
     retryable: notice?.retryable ?? true,
   };
+}
+
+function isGenericRecoveryTitle(value: unknown) {
+  const text = String(value ?? '').trim();
+  if (!text) return false;
+  return genericRecoveryTitlePattern().test(text);
+}
+
+function isGenericRecoveryNoticeMessage(value: unknown) {
+  const text = String(value ?? '').trim();
+  if (!text) return false;
+  return genericRecoveryNoticeMessagePattern().test(text);
+}
+
+function phrasePattern(parts: string[][], flags = '') {
+  return new RegExp(parts.map((item) => item.join('')).join('|'), flags);
+}
+
+function genericRecoveryAssistantPattern() {
+  return phrasePattern([
+    ['这次', '处理', '没有', '完成'],
+    ['这一步', '没有', '完成'],
+    ['保留', '当前', '(?:对话|方向|上下文|需求)'],
+    ['这段', '需求', '还在'],
+    ['刚才', '的位置'],
+    ['稍后', '继续'],
+    ['稍后', '再试'],
+    ['可以', '稍后', '再试'],
+    ['我已经', '恢复了', '(?:上一次|这段|当前)'],
+    ['我已经', '恢复了这段', '(?:对话|约练任务|任务)'],
+    ['我可以', '继续上次的话题', '，也可以', '重新开始'],
+    ['暂时', '没有', '顺利', '完成'],
+    ['连接', '中断'],
+    ['连接', '恢复'],
+    ['处理', '时间', '有点久'],
+    ['从已保存的', '(?:步骤|工具步骤|Agent 状态)'],
+    ['继续', '刚才', '保存的 Agent ', '步骤'],
+    ['原始', '目标'],
+  ]);
+}
+
+function genericRecoveryTitlePattern() {
+  return phrasePattern(
+    [
+      ['^(', '这次', '处理', '没有', '完成', ')$'],
+      ['^(', '这一步', '没有', '完成', ')$'],
+      ['^(', '这次', '没有', '顺利', '完成', ')$'],
+      ['^(', '暂时', '没有', '顺利', '完成', ')$'],
+      ['^(', '这次', '处理', '时间', '有点久', ')$'],
+      ['^(', '处理', '时间', '有点久', ')$'],
+      ['^(', '处理', '失败', ')$'],
+      ['^(run failed)$'],
+    ],
+    'i',
+  );
+}
+
+function genericRecoveryNoticeMessagePattern() {
+  return phrasePattern(
+    [
+      ['这次', '处理', '没有', '完成'],
+      ['这一步', '没有', '完成'],
+      ['暂时', '没有', '顺利', '完成'],
+      ['这次', '处理', '时间', '有点久'],
+      ['处理', '时间', '有点久'],
+      ['保留', '当前', '对话'],
+      ['稍后', '再试'],
+      ['可以', '稍后', '再试'],
+      ['服务', '暂时', '不可用'],
+      ['FitMeet Agent'],
+    ],
+    'i',
+  );
 }
 
 export function isFallbackAssistantResponse(
@@ -477,11 +629,27 @@ export function isFallbackAssistantMessage(message: AgentThreadMessage) {
   );
 }
 
+export function isNonBranchableAssistantSource(value: unknown) {
+  return (
+    value === 'fallback' ||
+    value === 'deterministic_route' ||
+    value === 'deterministic_action'
+  );
+}
+
+export function isDeterministicAssistantMessage(message: AgentThreadMessage) {
+  return (
+    message.assistantMessageSource === 'deterministic_route' ||
+    message.assistantMessageSource === 'deterministic_action'
+  );
+}
+
 export function isBranchableAssistantMessage(message: AgentThreadMessage) {
   return (
     message.role === 'assistant' &&
     message.branchable !== false &&
     !isFallbackAssistantMessage(message) &&
+    !isDeterministicAssistantMessage(message) &&
     (message.surfaceKind === undefined || message.surfaceKind === 'answer')
   );
 }
@@ -498,19 +666,35 @@ export function isGenericCheckpointResponse(response: UserFacingAgentResponse) {
   return technical || genericGoal;
 }
 
-export function isApprovalCard(card: { type?: string }) {
-  return card.type === 'opener_approval' || card.type === 'safety_boundary';
+export function isApprovalCard(card: { type?: string; schemaType?: string; data?: unknown }) {
+  const schemaType = socialSurfaceSchemaType(card);
+  return (
+    card.type === 'opener_approval' ||
+    card.type === 'safety_boundary' ||
+    schemaType === 'safety.approval'
+  );
 }
 
-export function isSocialSurfaceCard(card: { type?: string }) {
+export function isSocialSurfaceCard(card: { type?: string; schemaType?: string; data?: unknown }) {
+  const schemaType = socialSurfaceSchemaType(card);
   return (
     card.type === 'candidate_card' ||
     card.type === 'activity_plan' ||
     card.type === 'activity_status' ||
     card.type === 'checkin_card' ||
     card.type === 'review_card' ||
+    schemaType === 'social_match.candidate' ||
+    schemaType === 'social_match.activity' ||
+    schemaType === 'social_match.empty' ||
+    schemaType === 'meet_loop.timeline' ||
+    schemaType === 'life_graph.diff' ||
     isApprovalCard(card)
   );
+}
+
+function socialSurfaceSchemaType(card: { schemaType?: string; data?: unknown }) {
+  const data = isRecord(card.data) ? card.data : {};
+  return stringFromUnknown(card.schemaType) || stringFromUnknown(data.schemaType);
 }
 
 export function resolveIntentFromStreamEvent(event: AgentStreamEvent) {
@@ -547,6 +731,8 @@ export function isApprovalProgressEvent(event: AgentStreamEvent) {
 
 export function findTaskId(result: UserFacingAgentResponse | null): number | null {
   if (!result) return null;
+  const fromResponse = numberFromUnknown(result.taskId);
+  if (fromResponse) return fromResponse;
   for (const card of result.cards) {
     const fromData = numberFromUnknown(card.data.taskId);
     if (fromData) return fromData;
@@ -561,11 +747,6 @@ export function findTaskId(result: UserFacingAgentResponse | null): number | nul
 export function threadIdFromResponse(response: UserFacingAgentResponse | null): string | null {
   if (!response) return null;
   const taskId = findTaskId(response);
-  const fromRuntime = socialCodexThreadIdOrExisting(
-    stringFromUnknown(response.runtime?.threadId),
-    taskId,
-  );
-  if (fromRuntime) return fromRuntime;
   for (const card of response.cards) {
     const cardTaskId = numberFromUnknown(card.data.taskId) ?? taskId;
     const fromData = socialCodexThreadIdOrExisting(
@@ -583,15 +764,6 @@ export function threadIdFromResponse(response: UserFacingAgentResponse | null): 
     }
   }
   return socialCodexThreadIdForTask(taskId);
-}
-
-export function traceIdFromResult(result: UserFacingAgentResponse | null): string | null {
-  if (!result) return null;
-  for (const card of result.cards) {
-    const traceId = stringFromUnknown(card.data.traceId);
-    if (traceId) return traceId;
-  }
-  return null;
 }
 
 export function responseFromSessionSnapshot(
@@ -619,58 +791,61 @@ export function messagesFromSessionSnapshot(
   const restoredMessages = snapshot.messages
     .map((item, index) => sessionMessageToThreadMessage(item, index, taskId))
     .filter((message): message is AgentThreadMessage => Boolean(message));
-  if (!sanitizedRestored) return restoredMessages;
+  if (!sanitizedRestored) return reduceSingleRunAssistantMessages(restoredMessages);
   const hasUsefulRestored = restoredResponseHasUsefulSurface(sanitizedRestored);
-  if (!hasUsefulRestored) return restoredMessages;
+  if (!hasUsefulRestored) return reduceSingleRunAssistantMessages(restoredMessages);
   const lastIntent =
     [...restoredMessages].reverse().find((message) => message.conversationIntent)
       ?.conversationIntent ?? 'conversation';
-  const hasResultMessage = restoredMessages.some(
-    (message) =>
-      message.role === 'assistant' &&
-      message.content.trim() === sanitizedRestored.assistantMessage.trim(),
+  const resultMessageIndex = findRestoredResultMessageIndex(
+    restoredMessages,
+    sanitizedRestored,
   );
   const resultIntent = intentForRestoredResponse(sanitizedRestored, lastIntent);
   const showSocialResult = resultIntent === 'social' || resultIntent === 'approval';
-  if (hasResultMessage) {
-    return restoredMessages.map((message, index) =>
-      index === restoredMessages.length - 1 && message.role === 'assistant'
-        ? {
-            ...message,
-            result: restoredResponseHasUsefulSurface(sanitizedRestored) ? sanitizedRestored : null,
-            taskId,
-            traceId: traceIdFromResult(sanitizedRestored),
-            conversationIntent: resultIntent,
-            showSocialResult,
-            surfaceKind: isGenericRecoveryAssistantText(message.content) ? 'recovery' : 'answer',
-            assistantMessageSource: sanitizedRestored.assistantMessageSource,
-            branchable:
-              !isGenericRecoveryAssistantText(message.content) &&
-              !isFallbackAssistantResponse(sanitizedRestored),
-          }
-        : message,
+  if (resultMessageIndex >= 0) {
+    return reduceSingleRunAssistantMessages(
+      restoredMessages.map((message, index) =>
+        index === resultMessageIndex && message.role === 'assistant'
+          ? {
+              ...message,
+              result: restoredResponseHasUsefulSurface(sanitizedRestored) ? sanitizedRestored : null,
+              taskId,
+              conversationIntent: resultIntent,
+              showSocialResult,
+              surfaceKind: isGenericRecoveryAssistantText(message.content) ? 'recovery' : 'answer',
+              assistantMessageSource: sanitizedRestored.assistantMessageSource,
+              branchable:
+                !isGenericRecoveryAssistantText(message.content) &&
+                !isNonBranchableAssistantSource(sanitizedRestored.assistantMessageSource),
+            }
+          : message,
+      ),
     );
   }
-  const restoredIsGeneric = isGenericRecoveryAssistantText(sanitizedRestored.assistantMessage);
-  return [
+  const restoredIsGeneric =
+    isGenericRecoveryAssistantText(restored?.assistantMessage) ||
+    isGenericRecoveryAssistantText(sanitizedRestored.assistantMessage);
+  return reduceSingleRunAssistantMessages([
     ...restoredMessages,
     {
       id: `task-${taskId ?? 'latest'}-result`,
       role: 'assistant',
       content: restoredIsGeneric
-        ? '我可以继续上次的话题，也可以重新开始。'
+        ? ''
         : publicText(sanitizedRestored.assistantMessage, '我已经恢复了这段对话。'),
       status: 'done',
       result: sanitizedRestored,
       taskId,
-      traceId: traceIdFromResult(sanitizedRestored),
       conversationIntent: resultIntent,
       showSocialResult,
       surfaceKind: restoredIsGeneric ? 'recovery' : 'answer',
       assistantMessageSource: sanitizedRestored.assistantMessageSource,
-      branchable: !restoredIsGeneric && !isFallbackAssistantResponse(sanitizedRestored),
+      branchable:
+        !restoredIsGeneric &&
+        !isNonBranchableAssistantSource(sanitizedRestored.assistantMessageSource),
     },
-  ];
+  ]);
 }
 
 export function sessionMessageToThreadMessage(
@@ -682,34 +857,130 @@ export function sessionMessageToThreadMessage(
   const role =
     roleCandidate === 'assistant' ? 'assistant' : roleCandidate === 'user' ? 'user' : null;
   if (!role) return null;
+  const embeddedResult = isUserFacingAgentResponse(item.result)
+    ? sanitizeRestoredResponse(item.result)
+    : null;
   const content = publicText(item.content ?? item.message ?? item.text ?? item.body, '');
-  if (!content) return null;
+  const hasUsefulEmbeddedResult = Boolean(
+    embeddedResult && restoredResponseHasUsefulSurface(embeddedResult),
+  );
+  if (!content && !hasUsefulEmbeddedResult) return null;
   if (role === 'assistant' && isGenericRecoveryAssistantText(content)) return null;
+  const runtime = isRecord(item.runtime) ? item.runtime : null;
+  const assistantSource =
+    role === 'assistant'
+      ? assistantMessageSourceFromUnknown(
+          item.assistantMessageSource ?? item.messageSource ?? item.source,
+        ) ?? embeddedResult?.assistantMessageSource
+      : undefined;
+  const conversationIntent =
+    role === 'user'
+      ? intentForPrompt(content)
+      : embeddedResult
+        ? intentForRestoredResponse(embeddedResult, 'conversation')
+        : 'conversation';
   return {
     id: stringFromUnknown(item.id) || `task-${taskId ?? 'latest'}-${index}`,
     role,
-    content,
+    content:
+      content ||
+      publicText(embeddedResult?.assistantMessage, '我可以继续上次的话题，也可以重新开始。'),
     status: 'done',
     taskId,
-    conversationIntent: role === 'user' ? intentForPrompt(content) : 'conversation',
+    runId: stringFromUnknown(item.runId) || stringFromUnknown(runtime?.runId) || null,
+    messageId:
+      stringFromUnknown(item.messageId) || stringFromUnknown(runtime?.messageId) || null,
+    result: hasUsefulEmbeddedResult ? embeddedResult : null,
+    conversationIntent,
+    showSocialResult:
+      role === 'assistant' &&
+      hasUsefulEmbeddedResult &&
+      conversationIntent !== 'conversation',
     surfaceKind: role === 'assistant' ? 'answer' : undefined,
-    assistantMessageSource:
-      role === 'assistant'
-        ? assistantMessageSourceFromUnknown(
-            item.assistantMessageSource ?? item.messageSource ?? item.source,
-          )
-        : undefined,
+    assistantMessageSource: assistantSource,
     branchable:
       role === 'assistant'
-        ? assistantMessageSourceFromUnknown(
-            item.assistantMessageSource ?? item.messageSource ?? item.source,
-          ) !== 'fallback'
+        ? !isNonBranchableAssistantSource(assistantSource) &&
+          !isNonBranchableAssistantSource(embeddedResult?.assistantMessageSource)
         : undefined,
   };
 }
 
+function findRestoredResultMessageIndex(
+  messages: AgentThreadMessage[],
+  result: UserFacingAgentResponse,
+) {
+  const resultKeys = restoredResultKeys(result);
+  const resultText = normalizeComparableAssistantText(result.assistantMessage);
+  return messages.findIndex((message) => {
+    if (message.role !== 'assistant') return false;
+    const messageKeys = restoredMessageKeys(message);
+    if (sharesAnyKey(resultKeys, messageKeys)) return true;
+    const messageText = normalizeComparableAssistantText(message.content);
+    if (!resultText || !messageText) return false;
+    if (messageText === resultText) return true;
+    const minComparableLength = 24;
+    return (
+      messageText.length >= minComparableLength &&
+      resultText.length >= minComparableLength &&
+      (messageText.includes(resultText) || resultText.includes(messageText))
+    );
+  });
+}
+
+function restoredMessageKeys(message: AgentThreadMessage) {
+  const keys = new Set<string>();
+  addKey(keys, 'run', message.runId);
+  addKey(keys, 'message', message.messageId);
+  if (message.result) {
+    for (const key of restoredResultKeys(message.result)) keys.add(key);
+  }
+  return keys;
+}
+
+function restoredResultKeys(result: UserFacingAgentResponse) {
+  const keys = new Set<string>();
+  addKey(keys, 'workflow', result.workflow?.workflowId);
+  addKey(keys, 'workflow-state', result.workflow?.state);
+  for (const confirmation of result.pendingConfirmations) {
+    addKey(keys, 'approval', confirmation.id);
+    addKey(keys, 'approval-action', confirmation.actionType);
+  }
+  for (const card of result.cards) {
+    for (const key of agentCardDedupKeys(card)) keys.add(key);
+  }
+  return keys;
+}
+
+function addKey(keys: Set<string>, prefix: string, value: unknown) {
+  const text =
+    typeof value === 'number' && Number.isFinite(value)
+      ? String(value)
+      : stringFromUnknown(value);
+  if (text) keys.add(`${prefix}:${text}`);
+}
+
+function sharesAnyKey(left: Set<string>, right: Set<string>) {
+  if (left.size === 0 || right.size === 0) return false;
+  for (const key of left) {
+    if (right.has(key)) return true;
+  }
+  return false;
+}
+
+function normalizeComparableAssistantText(value: unknown) {
+  return publicText(value, '')
+    .replace(/\s+/g, '')
+    .trim();
+}
+
 function assistantMessageSourceFromUnknown(value: unknown) {
-  return value === 'llm' || value === 'fallback' ? value : undefined;
+  return value === 'llm' ||
+    value === 'fallback' ||
+    value === 'deterministic_route' ||
+    value === 'deterministic_action'
+    ? value
+    : undefined;
 }
 
 export function branchForAssistant(
@@ -826,7 +1097,7 @@ export function buildThreadMetadata(
     latestStatus: latest?.status ?? null,
     latestPreview: latest?.content ? latest.content.slice(0, 140) : null,
     lastSyncedAt: new Date().toISOString(),
-    resultStatus: result?.runtime?.checkpointType ?? null,
+    resultStatus: result?.workflow?.state ?? null,
   };
 }
 
@@ -852,7 +1123,7 @@ export function numberFromUnknown(value: unknown): number | null {
 
 export function stepIdFromLightStatus(status: string): string {
   if (/确认关键信息|补充信息|补齐/i.test(status)) return 'clarify';
-  if (status.includes('Life Graph')) return 'profile';
+  if (status.includes('Life Graph') || status.includes('长期偏好') || status.includes('画像')) return 'profile';
   if (status.includes('筛选')) return 'search';
   if (status.includes('排除')) return 'rank';
   if (status.includes('安全')) return 'safety_filter';
@@ -880,7 +1151,7 @@ export function mergeProgressStep(
         : event.state === 'waiting'
           ? 'waiting'
           : 'running';
-  const rawLabel = publicText(event.title, event.kind === 'tool' ? '正在推进这一步' : '分析中');
+  const rawLabel = publicText(event.title, event.kind === 'tool' ? '正在整理当前信息' : '正在理解你的需求');
   const processType =
     typeof event.metadata?.processType === 'string' && event.metadata.processType.trim()
       ? event.metadata.processType.trim()
@@ -932,7 +1203,7 @@ export function mergeProgressStep(
             detail:
               waitingApprovalStep.detail ??
               nextStep.detail ??
-              '确认后我会从同一步继续。',
+              '确认后我会接着处理。',
             metadata: {
               ...nextStep.metadata,
               pendingApproval: true,
@@ -973,7 +1244,7 @@ export function mergeApprovalRequiredStep(
   event: Extract<AgentStreamEvent, { type: 'approval_required' }>,
 ): Step[] {
   const baseSteps = steps.filter((step) => !isLocalCoveringStatusStep(step));
-  const label = publicStepLabel('approval', event.summary || '需要你确认这一步', 'approval');
+  const label = publicStepLabel('approval', event.summary || '需要你确认后继续', 'approval');
   const approvalIndex = baseSteps.findIndex(
     (step) => step.processType === 'approval' || isApprovalProgressStepId(step.id),
   );
@@ -1071,10 +1342,10 @@ export function publicStepLabel(
   if (/clarify|补充|关键信息/.test(key)) return '正在确认需要补充的信息';
   if (intent === 'conversation') {
     if (/safe|guard|risk|boundary|安全|边界/.test(key)) return '正在检查必要边界';
-    if (/approval|confirm|human|确认/.test(key)) return '需要你确认这一步';
+    if (/approval|confirm|human|确认/.test(key)) return '需要你确认后继续';
     return '正在组织自然回复';
   }
-  if (/approval|confirm|human|确认/.test(key)) return '需要你确认这一步';
+  if (/approval|confirm|human|确认/.test(key)) return '需要你确认后继续';
   if (/safe|guard|risk|boundary|安全/.test(key)) return '正在检查必要边界';
   if (/rank|time|schedule|排除/.test(key)) return '正在整理可行选项';
   if (/match|search|candidate|social|筛选/.test(key)) return '正在查找合适的信息';
@@ -1096,10 +1367,15 @@ export function createAgentRecoveryFromError(
   fallbackKind: FitMeetAssistantRecovery['kind'] = 'failed',
 ): FitMeetAssistantRecovery {
   if (error.recoveryNotice) {
+    const title = publicText(error.recoveryNotice.title, '').trim();
+    const message = publicText(error.recoveryNotice.message, '').trim();
     return {
       kind: error.recoveryNotice.kind === 'checkpoint' ? 'checkpoint_available' : fallbackKind,
-      title: error.recoveryNotice.title,
-      message: error.recoveryNotice.message,
+      title: title && !isGenericRecoveryTitle(title) ? title : DEFAULT_RECOVERY_TITLE,
+      message:
+        message && !isGenericRecoveryNoticeMessage(message)
+          ? message
+          : DEFAULT_RECOVERY_MESSAGE,
       prompt,
       retryable: error.recoveryNotice.retryable,
     };
@@ -1110,10 +1386,18 @@ export function createAgentRecoveryFromError(
     UNAUTHORIZED: 'unauthorized',
     SAFETY_BLOCKED: 'safety',
   };
+  const title = publicText(error.title, '').trim();
+  const message = publicText(error.message, '').trim();
   return {
     kind: kindByCode[error.code] ?? fallbackKind,
-    title: error.title,
-    message: error.message,
+    title:
+      title && !isGenericRecoveryTitle(title) && !isGenericRecoveryNoticeMessage(title)
+        ? title
+        : DEFAULT_RECOVERY_TITLE,
+    message:
+      message && !isGenericRecoveryNoticeMessage(message)
+        ? message
+        : DEFAULT_RECOVERY_MESSAGE,
     prompt,
     retryable: error.retryable,
   };
@@ -1177,7 +1461,7 @@ export function createCheckpointAvailableRecovery(
     }));
   return {
     kind: 'checkpoint_available',
-    title: hasUserActionRequired ? '有一步需要你确认' : '这一步可以重试',
+    title: hasUserActionRequired ? '有个动作需要你确认' : '可以继续处理',
     message: `我可以继续「${sourceLabel}」，也可以忽略它，直接开始新的对话。`,
     prompt: hasUserActionRequired ? '继续处理刚才需要确认的步骤。' : '重试刚才失败的步骤。',
     retryable: true,
@@ -1223,6 +1507,10 @@ export function isAbortError(error: unknown): boolean {
 
 export function stringFromUnknown(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
 
 export function nextId(prefix: string) {

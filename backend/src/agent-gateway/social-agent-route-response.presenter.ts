@@ -47,7 +47,7 @@ export function socialAgentAssistantMessageForRoute(input: {
     route.intent === 'profile_enrichment_request' ||
     route.intent === 'correction_or_clarification'
   ) {
-    return '我先按你的画像信息来理解，不会直接搜索候选人。';
+    return '我先按你的个人信息来理解，不会直接搜索候选人。';
   }
   if (route.intent === 'profile_update') {
     return '已记住你的偏好，并写入当前上下文。等你明确说要找人、找活动或找搭子时，我再开始匹配。';
@@ -64,7 +64,7 @@ export function socialAgentAssistantMessageForRoute(input: {
     if (!clarification.complete) return clarification.assistantMessage;
     const confirmed = confirmedSocialSearchContext(task);
     if (confirmed.length > 0) {
-      return `明白，我会按已确认的：${confirmed.join('、')} 继续筛选公开可发现的人。不会自动发送消息、加好友或发布约练。`;
+      return `明白，我会按已确认的：${confirmed.join('、')} 先整理本次约练条件。需要发布时会生成约练卡片并显示“确认发布”，确认后再同步到发现并继续匹配公开可发现的人；不会自动发送消息、加好友或发布约练。`;
     }
     const city = route.entities.city ? `${route.entities.city} ` : '';
     const activity = route.entities.activityType
@@ -131,6 +131,12 @@ export function socialAgentAlphaClarifyingMessage(
 }
 
 function casualChatReply(message: string): string {
+  if (/^(谢谢|感谢|多谢|辛苦了)[!！。,.，\s]*$/i.test(message.trim())) {
+    return '不客气。你可以继续正常聊天；等你明确说要找人、找活动或发邀请时，我再进入约练流程。';
+  }
+  if (/^(好的|好|行|可以|明白|知道了)[!！。,.，\s]*$/i.test(message.trim())) {
+    return '收到。当前我不会自动搜索或发送消息；你要继续聊、补充偏好，或者开始找搭子都可以直接说。';
+  }
   if (/(你能做什么|你可以做什么)/i.test(message)) {
     return '我可以先和你正常聊天，也可以记住你的偏好和安全边界。只有当你明确说要找人、找活动或找搭子时，我才会开始匹配；发送消息、加好友、发布约练都需要你确认。';
   }
@@ -163,9 +169,7 @@ function confirmedSocialSearchContext(task: AgentTask): string[] {
     const raw = slots[key];
     if (!isRecord(raw)) continue;
     const state = cleanDisplayText(raw.state, '');
-    if (
-      !['answered', 'confirmed', 'completed', 'modified'].includes(state)
-    ) {
+    if (!['answered', 'confirmed', 'completed', 'modified'].includes(state)) {
       continue;
     }
     push(key, label, cleanDisplayText(raw.value, ''));
@@ -219,9 +223,8 @@ function shouldSuppressAlphaClarification(
     /(哪里|地点|位置|附近|区域|城市|校|大学|商圈)/.test(cleanQuestion) &&
     (knownKeys.has('location_text') || knownKeys.has('geo_area'));
   const asksKnownActivity =
-    /(活动|做什么|运动|散步|跑步|羽毛球|篮球|健身|项目)/.test(
-      cleanQuestion,
-    ) && knownKeys.has('activity');
+    /(活动|做什么|运动|散步|跑步|羽毛球|篮球|健身|项目)/.test(cleanQuestion) &&
+    knownKeys.has('activity');
   const asksOnlyKnownCoreSlots =
     asksKnownTime || asksKnownLocation || asksKnownActivity;
   const asksUnknownCandidatePreference =
@@ -234,7 +237,7 @@ function alphaClarificationFallbackFromTask(task: AgentTask): string {
   const confirmed = confirmedSocialSearchContext(task);
   const missing = missingCoreSocialSlotLabels(task);
   if (confirmed.length > 0 && missing.length === 0) {
-    return `明白，我已记住：${confirmed.join('、')}。如果这些条件不变，我会按公开可发现资料继续筛选；发送消息、加好友或发布约练前都会先让你确认。`;
+    return `明白，我已记住：${confirmed.join('、')}。如果这些条件不变，我会先整理约练卡片；需要发布时会显示“确认发布”，确认后同步到发现，再继续匹配公开可发现的人。发送消息、加好友或发布约练前都会先让你确认。`;
   }
   if (confirmed.length > 0) {
     return `我已记住：${confirmed.join('、')}。还差 ${missing.join('、')}，补齐后我就能继续筛选公开可发现的人。`;

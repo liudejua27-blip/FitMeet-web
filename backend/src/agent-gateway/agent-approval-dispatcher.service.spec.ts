@@ -9,13 +9,16 @@ import { SocialRequestCandidateStatus } from '../match/social-request-candidate.
 import { UserSocialRequestStatus } from '../social-requests/social-request.entity';
 
 describe('AgentApprovalDispatcherService', () => {
-  function makeService(options: {
-    activities?: Record<string, jest.Mock>;
-    approvalRepo?: Record<string, jest.Mock>;
-    actionLogs?: Record<string, jest.Mock>;
-    l5Runtime?: Record<string, jest.Mock>;
-    socialRequests?: Record<string, jest.Mock>;
-  } = {}) {
+  function makeService(
+    options: {
+      activities?: Record<string, jest.Mock>;
+      approvalRepo?: Record<string, jest.Mock>;
+      actionLogs?: Record<string, jest.Mock>;
+      l5Runtime?: Record<string, jest.Mock>;
+      socialRequests?: Record<string, jest.Mock>;
+      taskRepo?: Record<string, jest.Mock>;
+    } = {},
+  ) {
     const activities = options.activities ?? {};
     const approvalRepo =
       options.approvalRepo ??
@@ -44,6 +47,12 @@ describe('AgentApprovalDispatcherService', () => {
       create: jest.fn((input) => input),
       save: jest.fn((input) => Promise.resolve(input)),
     };
+    const taskRepo =
+      options.taskRepo ??
+      ({
+        findOne: jest.fn().mockResolvedValue(null),
+        save: jest.fn((input) => Promise.resolve(input)),
+      } as Record<string, jest.Mock>);
     const service = new AgentApprovalDispatcherService(
       {} as never,
       activities as never,
@@ -60,8 +69,17 @@ describe('AgentApprovalDispatcherService', () => {
       actionLogs as never,
       socialRequests as never,
       l5Runtime as never,
+      taskRepo as never,
     );
-    return { actionLogs, approvalRepo, l5Runtime, logRepo, service, socialRequests };
+    return {
+      actionLogs,
+      approvalRepo,
+      l5Runtime,
+      logRepo,
+      service,
+      socialRequests,
+      taskRepo,
+    };
   }
 
   it('dispatches approved public social request publish through SocialRequestsService', async () => {
@@ -70,7 +88,29 @@ describe('AgentApprovalDispatcherService', () => {
         .fn()
         .mockResolvedValue({ id: 'public_301', status: 'active' }),
     };
-    const { actionLogs, logRepo, service } = makeService({ socialRequests });
+    const task = {
+      id: 101,
+      ownerUserId: 7,
+      status: 'awaiting_confirmation',
+      statusReason: 'publish_social_request_requires_approval',
+      result: {
+        publishSocialRequest: {
+          status: 'pending_approval',
+          socialRequestId: 301,
+          approvalId: 9910,
+        },
+      },
+      memory: { shortTerm: { publishStatus: 'pending_approval' } },
+      completedAt: null,
+    };
+    const taskRepo = {
+      findOne: jest.fn().mockResolvedValue(task),
+      save: jest.fn((input) => Promise.resolve(input)),
+    };
+    const { actionLogs, logRepo, service } = makeService({
+      socialRequests,
+      taskRepo,
+    });
 
     const result = await service.dispatch({
       id: 9910,
@@ -127,8 +167,51 @@ describe('AgentApprovalDispatcherService', () => {
     );
     expect(result).toEqual({
       ok: true,
-      result: { id: 'public_301', status: 'active' },
+      result: expect.objectContaining({
+        id: 'public_301',
+        status: 'published',
+        socialRequestId: 301,
+        publicIntentId: 'public_301',
+        discoverHref: '/discover?publicIntentId=public_301',
+        publicIntentHref: '/public-intent/public_301',
+        synced: true,
+        publicLoop: expect.objectContaining({
+          stage: 'discover_visible',
+          publicIntentId: 'public_301',
+          discoverHref: '/discover?publicIntentId=public_301',
+          publicIntentHref: '/public-intent/public_301',
+        }),
+      }),
     });
+    expect(taskRepo.findOne).toHaveBeenCalledWith({
+      where: { id: 101, ownerUserId: 7 },
+    });
+    expect(taskRepo.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'succeeded',
+        statusReason: 'social_request_published_and_synced',
+        result: expect.objectContaining({
+          publishSocialRequest: expect.objectContaining({
+            approvalId: 9910,
+            socialRequestId: 301,
+            publicIntentId: 'public_301',
+            discoverHref: '/discover?publicIntentId=public_301',
+            publicIntentHref: '/public-intent/public_301',
+            status: 'published',
+            synced: true,
+          }),
+        }),
+        memory: expect.objectContaining({
+          shortTerm: expect.objectContaining({
+            publishedSocialRequestId: 301,
+            publicIntentId: 'public_301',
+            discoverHref: '/discover?publicIntentId=public_301',
+            publicIntentHref: '/public-intent/public_301',
+            publishStatus: 'published',
+          }),
+        }),
+      }),
+    );
   });
 
   it('dispatches approved mark-candidate-messaged approvals into candidate state updates', async () => {
@@ -232,9 +315,11 @@ describe('AgentApprovalDispatcherService', () => {
 
   it('dispatches approved activity creation with safety and idempotency context', async () => {
     const activities = {
-      create: jest
-        .fn()
-        .mockResolvedValue({ id: 700, invitedUserId: 22, status: 'pending_confirm' }),
+      create: jest.fn().mockResolvedValue({
+        id: 700,
+        invitedUserId: 22,
+        status: 'pending_confirm',
+      }),
     };
     const { actionLogs, l5Runtime, service } = makeService({ activities });
 
@@ -327,7 +412,9 @@ describe('AgentApprovalDispatcherService', () => {
 
   it('rolls failed activity creation back to pending so the approval can be retried', async () => {
     const activities = {
-      create: jest.fn().mockRejectedValue(new Error('activity service offline')),
+      create: jest
+        .fn()
+        .mockRejectedValue(new Error('activity service offline')),
     };
     const approvalRepo = {
       update: jest.fn().mockResolvedValue({ affected: 1 }),
@@ -441,7 +528,7 @@ describe('AgentApprovalDispatcherService', () => {
       skillName: 'add_friend',
       status: ApprovalStatus.Approved,
       riskLevel: ApprovalRiskLevel.Medium,
-      summary: '发送邀请给候选人 #22',
+      summary: '加好友并聊天：这位用户',
       reason: '',
       createdBy: 'agent',
       payload: {

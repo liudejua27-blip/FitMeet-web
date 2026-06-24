@@ -47,7 +47,8 @@ export function buildSocialAgentDirectReplyMessages(input: {
   conversationHistory?: Array<Record<string, unknown>> | null;
   contextTurnLimit?: number;
 }): ChatMessage[] {
-  const taskMemory = input.taskContext ?? summarizeSocialAgentTaskMemoryForLlm(input.task);
+  const taskMemory =
+    input.taskContext ?? summarizeSocialAgentTaskMemoryForLlm(input.task);
   return [
     {
       role: 'system',
@@ -97,7 +98,8 @@ export function buildSocialAgentAgentBrainMessages(input: {
   conversationHistory?: Array<Record<string, unknown>> | null;
   contextTurnLimit?: number;
 }): ChatMessage[] {
-  const taskMemory = input.taskContext ?? summarizeSocialAgentTaskMemoryForLlm(input.task);
+  const taskMemory =
+    input.taskContext ?? summarizeSocialAgentTaskMemoryForLlm(input.task);
   return [
     {
       role: 'system',
@@ -146,7 +148,8 @@ export function buildSocialAgentAgentBrainMessages(input: {
         conversationHistory: conversationHistoryForLlm(
           input.task,
           input.contextTurnLimit ?? SOCIAL_AGENT_DEFAULT_CONTEXT_TURNS,
-          input.conversationHistory ?? input.memoryContext?.shortTerm?.recentTurns,
+          input.conversationHistory ??
+            input.memoryContext?.shortTerm?.recentTurns,
         ),
       }),
     },

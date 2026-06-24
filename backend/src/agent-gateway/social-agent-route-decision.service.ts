@@ -33,10 +33,14 @@ import { SocialAgentTaskLifecycleService } from './social-agent-task-lifecycle.s
 import { SocialAgentTaskMemoryStateMachineService } from './social-agent-task-memory-state-machine.service';
 import { buildSocialAgentKnownTaskSlotConstraints } from './social-agent-task-slot-constraints.presenter';
 import {
-  enforceSocialIntentGate,
+  enforceExplicitSocialExecutionRoute,
   hasExplicitSocialExecutionIntent,
   isSocialExecutionIntent,
 } from './social-agent-social-intent-gate';
+import {
+  SocialAgentWorkflowRouterService,
+  type SocialAgentWorkflowRouterDecision,
+} from './social-agent-workflow-router.service';
 
 type PrepareRouteDecisionInput = {
   ownerUserId: number;
@@ -75,6 +79,8 @@ export class SocialAgentRouteDecisionService {
     private readonly contextHydrator?: SocialAgentContextHydratorService,
     @Optional()
     private readonly taskSlots?: SocialAgentTaskMemoryStateMachineService,
+    @Optional()
+    private readonly workflowRouter?: SocialAgentWorkflowRouterService,
   ) {}
 
   async prepare(
@@ -113,14 +119,19 @@ export class SocialAgentRouteDecisionService {
       memoryContext,
       hydratedContext,
     });
-    let route = await this.intentRouter.route({
+    const routeInput = {
       message,
       taskContext,
       profile: profile ?? {},
       conversationHistory,
       signal: input.signal,
-    });
-    route = enforceSocialIntentGate(
+      conversationIntent: this.conversationIntent(body),
+    };
+    const workflowDecision = this.workflowRouter?.route(routeInput) ?? null;
+    let route = workflowDecision
+      ? workflowDecision.route
+      : await this.intentRouter.route(routeInput);
+    route = this.enforceRouteBoundary(
       {
         message,
         taskContext,
@@ -130,20 +141,22 @@ export class SocialAgentRouteDecisionService {
       },
       route,
     );
-    const brainDecision = await this.planBrainTurn({
-      message,
-      route,
-      profile,
-      task,
-      body,
-      longTermSnapshot,
-      memoryContext,
-      taskContext,
-      conversationHistory,
-      signal: input.signal,
-    });
+    const brainDecision = workflowDecision?.skipBrain
+      ? undefined
+      : await this.planBrainTurn({
+          message,
+          route,
+          profile,
+          task,
+          body,
+          longTermSnapshot,
+          memoryContext,
+          taskContext,
+          conversationHistory,
+          signal: input.signal,
+        });
     if (brainDecision) {
-      route = enforceSocialIntentGate(
+      route = this.enforceRouteBoundary(
         {
           message,
           taskContext,
@@ -170,6 +183,7 @@ export class SocialAgentRouteDecisionService {
       route,
       message,
       longTermSnapshot,
+      workflowDecision,
     });
     const brainToolResults =
       await this.profileEnrichment.executeConversationBrainReadTools(
@@ -191,7 +205,16 @@ export class SocialAgentRouteDecisionService {
   private conversationIntent(
     body: SocialAgentRouteMessageBody,
   ): NonNullable<SocialAgentRouteMessageBody['conversationIntent']> | null {
-    return body.clientContext?.conversationIntent ?? body.conversationIntent ?? null;
+    return (
+      body.clientContext?.conversationIntent ?? body.conversationIntent ?? null
+    );
+  }
+
+  private enforceRouteBoundary(
+    input: Parameters<typeof enforceExplicitSocialExecutionRoute>[0],
+    route: SocialAgentIntentRouterResult,
+  ): SocialAgentIntentRouterResult {
+    return enforceExplicitSocialExecutionRoute(input, route);
   }
 
   private shouldApplyCurrentMessageToTaskSlots(
@@ -284,7 +307,10 @@ export class SocialAgentRouteDecisionService {
     }
   }
 
-  private applyCurrentMessageToTaskSlots(task: AgentTask, message: string): void {
+  private applyCurrentMessageToTaskSlots(
+    task: AgentTask,
+    message: string,
+  ): void {
     const slots =
       this.taskSlots ?? new SocialAgentTaskMemoryStateMachineService();
     try {
@@ -352,6 +378,7 @@ export class SocialAgentRouteDecisionService {
     route: SocialAgentIntentRouterResult;
     message: string;
     longTermSnapshot: LongTermMemorySnapshot | null;
+    workflowDecision?: SocialAgentWorkflowRouterDecision | null;
   }): Promise<void> {
     await this.messageLog
       .recordIntentRoute(input.task, input.route)
@@ -365,6 +392,13 @@ export class SocialAgentRouteDecisionService {
         );
       });
     this.metrics.recordIntent(input.route.intent, input.route.source);
+    if (input.workflowDecision) {
+      this.metrics.recordWorkflowRoute(
+        input.route.intent,
+        input.workflowDecision.reason,
+        { skipBrain: input.workflowDecision.skipBrain },
+      );
+    }
     appendSocialAgentUserMemo(input.task, input.message, input.route.intent);
     applySocialAgentTaskMemoryForIntent(input.task, input.message, input.route);
     await this.routeContext.applyRagContext({

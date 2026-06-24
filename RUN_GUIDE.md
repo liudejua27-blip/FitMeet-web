@@ -1,280 +1,167 @@
-# 🎯 运行网站详细步骤
+# FitMeet 本地运行指南
 
-## 📋 前置要求
+本指南只覆盖当前保留的 FitMeet Web + Agent 闭环。旧的独立页面和发布入口已经下线，不应再作为开发或验收目标。
 
-确保已安装以下软件：
-- Node.js 18+ 
-- pnpm (运行 `npm install -g pnpm`)
-- Docker Desktop (用于数据库)
+## 前置要求
 
-## 🚀 第一次运行（开发环境）
+- Node.js 22+
+- pnpm 10.23.0+
+- Docker Desktop
 
-### 步骤 1: 启动数据库和基础设施
+## 启动依赖
+
+在项目根目录启动后端依赖：
 
 ```bash
-# 在项目根目录 c:\Users\86152\fitness-app
-docker-compose up -d
+docker compose up -d postgres mongo redis
 ```
 
-等待所有服务启动（约30秒），你会看到：
-- ✅ PostgreSQL (端口 5432)
-- ✅ Redis (端口 6379)
-- ✅ MongoDB (端口 27017)
-- ✅ Kafka (端口 9092)
-
-验证服务状态：
-```bash
-docker-compose ps
-```
-
-### 步骤 2: 配置后端环境变量
+当前本地开发不需要 Kafka。后端默认采用 migration-first 策略：
+`DB_SYNCHRONIZE=false`，需要先运行迁移。
 
 ```bash
-# 进入后端目录
 cd backend
-
-# 创建开发环境配置（如果不存在）
-copy .env.example .env.development
+pnpm install --frozen-lockfile
+pnpm migration:run
+pnpm start:dev
 ```
 
-编辑 `backend/.env.development`，确保以下配置正确：
-```env
-NODE_ENV=development
-PORT=3000
-DB_HOST=localhost
-DB_PORT=5432
-DB_USERNAME=root
-DB_PASSWORD=password123
-DB_DATABASE=fitness_app
-MONGO_URI=mongodb://localhost:27017/fitness_app
-REDIS_HOST=localhost
-REDIS_PORT=6379
-JWT_SECRET=dev-secret-key-change-in-production
-ALLOWED_ORIGINS=http://localhost:5173,http://localhost:3000
+后端 API 默认地址：
+
+```text
+http://localhost:3000/api
 ```
 
-### 步骤 3: 安装后端依赖并启动
+## 启动前端
+
+新开一个终端：
 
 ```bash
-# 在 backend 目录
-pnpm install
-
-# 启动后端开发服务器
-pnpm run start:dev
+cd frontend
+pnpm install --frozen-lockfile
+pnpm dev
 ```
 
-看到以下信息表示成功：
+前端默认地址：
+
+```text
+http://localhost:5173
 ```
-🚀 Application is running on: http://localhost:3000/api
-```
 
-**保持这个终端窗口打开！**
+## 当前可访问页面
 
-### 步骤 4: 启动前端（新终端）
+主体验：
 
-打开新的终端窗口：
+- `/`
+- `/discover`
+- `/features`
+- `/agent`
+- `/safety`
+- `/download`
+- `/about`
+- `/demo`
+- `/login`
+- `/user/:id`
+- `/public-intent/:id`
+
+隐藏基础页：
+
+- `/messages`
+- `/privacy`
+- `/terms`
+- `/forgot-password`
+- `/admin/safety`
+- `/admin/waitlist`
+- `/admin/agent-l5`
+
+Agent 内部能力：
+
+- `/agent/chat`
+- `/agent/chat/:taskId`
+- `/agent/profile`
+
+## 核心验收
+
+Agent 约练闭环：
+
+1. 在 `/agent` 输入明确约练需求。
+2. Agent 生成约练卡片，草稿态显示 `发布卡片 / 修改信息 / 暂不发布`。
+3. 用户确认发布后，后端返回 `publicIntentId` 和 `discoverHref`。
+4. `/discover` 能看到真实公开卡片。
+5. 卡片详情打开 `/public-intent/:id`。
+
+交友闭环：
+
+1. 用户在 `/agent/profile` 完善基本信息、兴趣、运动偏好和安全边界。
+2. Agent 可提出个人信息更新预览，但保存前必须由用户确认。
+3. 约练卡片或公开画像进入候选池。
+4. Match Agent 返回候选卡，支持查看详情、收藏、开场白预览、邀请、加好友和私信。
+5. 邀请、加好友、私信等高风险动作必须 inline 确认。
+6. 回复、邀请和私信进入 `/messages`。
+
+Agent 成本边界：
+
+- 普通聊天只走 `Agent Brain`。
+- 个人信息补全只走 `Life Graph Agent`，每轮最多 2 个工具。
+- 约练、发现同步、候选匹配、邀请/私信/加好友走 `Match Agent`，每轮最多 3 个工具。
+- `docs/agent-skills/` 是 workflow/skill 合同，不是额外 subagent。
+
+## 常用验证命令
 
 ```bash
-# 进入前端目录
-cd c:\Users\86152\fitness-app\frontend
-
-# 安装依赖
-pnpm install
-
-# 启动前端开发服务器
-pnpm run dev
+pnpm --dir backend lint
+pnpm --dir backend build
+pnpm --dir frontend lint
+pnpm --dir frontend build
+node scripts/verify-agent-skills.mjs
+node scripts/run-agent-skill-evals.mjs --backend
 ```
 
-看到以下信息表示成功：
-```
-  VITE v5.x.x  ready in xxx ms
-
-  ➜  Local:   http://localhost:5173/
-  ➜  Network: use --host to expose
-```
-
-### 步骤 5: 访问网站
-
-在浏览器打开：**http://localhost:5173**
-
-你应该能看到健身应用的首页！
-
-## 🎉 快速测试
-
-### 测试 API
-
-在浏览器或 Postman 中访问：
-```
-http://localhost:3000/api/feed
-http://localhost:3000/api/categories
-http://localhost:3000/api/meets
-```
-
-### 测试注册登录
-
-1. 点击"注册"按钮
-2. 填写邮箱、密码、姓名
-3. 注册成功后自动登录
-4. 开始使用应用！
-
-## 🔧 常见问题解决
-
-### 问题 1: Docker 服务启动失败
+重点 Agent 闭环测试：
 
 ```bash
-# 停止所有服务
-docker-compose down
-
-# 清理并重新启动
-docker-compose up -d --force-recreate
+pnpm --dir backend exec jest \
+  src/agent-gateway/social-agent-chat.acceptance.spec.ts \
+  src/agent-gateway/social-agent-draft-publication.service.spec.ts \
+  src/agent-gateway/social-agent-candidate-pool.service.spec.ts \
+  src/agent-gateway/public-social-intent-list-query.spec.ts \
+  src/agent-gateway/public-social-intent.presenter.spec.ts \
+  src/users/social-profile.service.spec.ts --runInBand
 ```
 
-### 问题 2: 端口被占用
+重点前端路由和 Agent 测试：
 
 ```bash
-# 检查端口占用
-netstat -ano | findstr :3000
-netstat -ano | findstr :5173
-
-# 如果被占用，关闭占用的进程或修改端口
-# 修改后端端口：编辑 backend/.env.development 中的 PORT
-# 修改前端端口：编辑 frontend/vite.config.ts 中的 server.port
+pnpm --dir frontend exec vitest run \
+  src/test/AgentRouteIsolation.test.ts \
+  src/test/AgentWorkspacePage.test.tsx \
+  src/test/DiscoverClosure.test.ts \
+  src/test/DiscoverPage.test.tsx \
+  src/test/routeBoundaries.test.ts \
+  src/test/agentAdapter.test.ts \
+  src/test/agentWorkspaceRuntime.test.ts \
+  src/test/toolCardActions.test.ts \
+  src/test/toolUiSchema.test.ts
 ```
 
-### 问题 3: 后端连接数据库失败
+## 常见问题
 
-```bash
-# 检查 Docker 服务状态
-docker-compose ps
+如果前端无法请求后端，检查 `frontend/.env.local`：
 
-# 查看 PostgreSQL 日志
-docker-compose logs postgres
-
-# 重启数据库
-docker-compose restart postgres
-```
-
-### 问题 4: 前端无法连接后端
-
-检查 `frontend/.env.development` 文件：
 ```env
 VITE_API_BASE_URL=http://localhost:3000/api
 ```
 
-### 问题 5: pnpm 命令不存在
+如果登录或 Agent 请求被 CORS 拦截，检查后端 `ALLOWED_ORIGINS` 包含：
 
-```bash
-# 安装 pnpm
-npm install -g pnpm
-
-# 验证安装
-pnpm --version
+```text
+http://localhost:5173,http://127.0.0.1:5173
 ```
 
-## 🛑 停止服务
-
-### 停止前端和后端
-在各自的终端窗口按 `Ctrl + C`
-
-### 停止数据库
-```bash
-# 停止但保留数据
-docker-compose stop
-
-# 停止并删除容器（数据保留在 volume 中）
-docker-compose down
-
-# 完全清理（包括数据，谨慎使用！）
-docker-compose down -v
-```
-
-## 🔄 重新启动
-
-下次启动时，只需：
+如果数据库 schema 异常，先确认当前迁移目录只保留 core baseline：
 
 ```bash
-# 1. 启动数据库
-docker-compose up -d
-
-# 2. 启动后端（在 backend 目录）
-pnpm run start:dev
-
-# 3. 启动前端（在 frontend 目录，新终端）
-pnpm run dev
+find backend/src/database/migrations -maxdepth 1 -type f -print
 ```
 
-## 📊 查看日志
-
-### 后端日志
-后端终端会实时显示请求日志
-
-### 数据库日志
-```bash
-docker-compose logs -f postgres
-docker-compose logs -f redis
-docker-compose logs -f mongo
-```
-
-## 🧪 运行测试
-
-### 后端测试
-```bash
-cd backend
-pnpm run test
-```
-
-### 前端测试
-```bash
-cd frontend
-pnpm run test
-```
-
-## 📱 访问不同页面
-
-- 首页：http://localhost:5173/
-- 发现：http://localhost:5173/discover
-- 活动：http://localhost:5173/meet
-- 教练：http://localhost:5173/coach
-- 消息：http://localhost:5173/messages
-- 通知：http://localhost:5173/notifications
-
-## 🎨 开发提示
-
-### 热重载
-- 前端：修改代码后自动刷新
-- 后端：修改代码后自动重启（使用 `--watch` 模式）
-
-### 调试
-- 前端：使用浏览器开发者工具（F12）
-- 后端：查看终端日志或使用 VS Code 调试器
-
-### 数据库管理
-```bash
-# 连接 PostgreSQL
-docker exec -it fitness-postgres psql -U root -d fitness_app
-
-# 查看所有表
-\dt
-
-# 查看用户表
-SELECT * FROM users;
-
-# 退出
-\q
-```
-
-## 🚀 下一步
-
-网站运行成功后，你可以：
-
-1. **添加测试数据** - 注册几个用户，创建帖子和活动
-2. **测试功能** - 尝试所有功能（发帖、评论、点赞、参加活动等）
-3. **查看性能** - 打开浏览器开发者工具查看网络请求
-4. **准备部署** - 查看 `QUICK_START.md` 了解生产环境部署
-
-## 📞 需要帮助？
-
-- 查看 `SECURITY_CHECKLIST.md` - 安全配置
-- 查看 `PERFORMANCE_OPTIMIZATION.md` - 性能优化
-- 查看 `QUICK_START.md` - 部署指南
-- 查看终端日志了解详细错误信息
+旧生产库不能直接跑新的 baseline。需要先备份，再重建 schema 或做受控数据迁移。

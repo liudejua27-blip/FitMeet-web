@@ -1,12 +1,9 @@
-import { createContext, useContext, type ReactNode } from 'react';
+import type { ReactNode } from 'react';
 
-type AssistantMessageRuntimeContextValue = {
-  isLatestAssistantMessage: boolean;
-};
-
-const AssistantMessageRuntimeContext = createContext<AssistantMessageRuntimeContextValue>({
-  isLatestAssistantMessage: true,
-});
+import {
+  AssistantMessageRuntimeContext,
+  type AssistantMessageRuntimeContextValue,
+} from './message-runtime-store';
 
 export function AssistantMessageRuntimeProvider({
   children,
@@ -20,8 +17,4 @@ export function AssistantMessageRuntimeProvider({
       {children}
     </AssistantMessageRuntimeContext.Provider>
   );
-}
-
-export function useAssistantMessageRuntime() {
-  return useContext(AssistantMessageRuntimeContext);
 }

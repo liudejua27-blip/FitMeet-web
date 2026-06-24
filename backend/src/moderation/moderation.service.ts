@@ -1,4 +1,4 @@
-import { Injectable, BadRequestException, Logger } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { randomUUID } from 'crypto';
 import RPCClient from '@alicloud/pop-core';
@@ -6,8 +6,6 @@ import RPCClient from '@alicloud/pop-core';
 type AliyunImageModerationResult = {
   Label?: string;
   label?: string;
-  Confidence?: number;
-  confidence?: number;
 };
 
 type AliyunImageModerationResponse = {
@@ -30,9 +28,7 @@ export class ModerationService {
   private readonly logger = new Logger(ModerationService.name);
   private readonly aliyunImageService: string;
   private readonly aliyunImageClient?: RPCClient;
-
-  // Basic keyword list - in production use external dictionary or AI service
-  private bannedWords = [
+  private readonly bannedWords = [
     'badword1',
     'badword2',
     'spam',
@@ -70,17 +66,13 @@ export class ModerationService {
     }
   }
 
-  isAliyunImageModerationEnabled(): boolean {
+  isAliyunImageModerationEnabled() {
     return Boolean(this.aliyunImageClient && this.aliyunImageService);
   }
 
-  /**
-   * Synchronous check for sensitive words (legacy/fast check)
-   */
-  checkForSensitiveWords(content: string): void {
+  checkForSensitiveWords(content: string) {
     if (!content) return;
 
-    // Simple implementation
     const lowerContent = content.toLowerCase();
     const foundBadWord = this.bannedWords.find((word) =>
       lowerContent.includes(word),
@@ -88,48 +80,20 @@ export class ModerationService {
 
     if (foundBadWord) {
       this.logger.warn(
-        `Text moderation failed: Keyword '${foundBadWord}' found.`,
+        `Text moderation failed: keyword '${foundBadWord}' found.`,
       );
-      throw new BadRequestException(
-        `Content contains prohibited word: ${foundBadWord}`,
-      );
+      throw new BadRequestException('Content contains prohibited words.');
     }
   }
 
-  isValid(content: string): boolean {
-    try {
-      this.checkForSensitiveWords(content);
-      return true;
-    } catch {
-      return false;
-    }
-  }
-
-  /**
-   * Async text moderation (includes AI check simulation)
-   */
-  async checkText(content: string): Promise<boolean> {
-    // 1. Local Keyword Filter
+  checkText(content: string) {
     this.checkForSensitiveWords(content);
-
-    // 2. Simulated External API Call (e.g. AI Check)
-    return this.simulateExternalTextScan(content);
+    return true;
   }
 
-  /**
-   * Async image moderation
-   */
-  async checkImage(
-    imageBuffer: Buffer,
-    filename: string = 'unknown',
-  ): Promise<boolean> {
+  checkImage(_imageBuffer: Buffer, filename = 'unknown') {
     this.logger.log(`Starting moderation for image: ${filename}`);
-
-    // Simulated External API Call
-    const isSafe = await this.simulateExternalImageScan(imageBuffer, filename);
-
-    if (!isSafe) {
-      this.logger.warn(`Image moderation failed for ${filename}`);
+    if (filename.includes('test-bad')) {
       throw new BadRequestException(
         'Image content violates safety guidelines.',
       );
@@ -144,10 +108,8 @@ export class ModerationService {
       regionId?: string;
       dataId?: string;
     } = {},
-  ): Promise<boolean> {
-    if (!this.aliyunImageClient) {
-      return true;
-    }
+  ) {
+    if (!this.aliyunImageClient) return true;
 
     const bucketName =
       options.bucketName ||
@@ -165,8 +127,6 @@ export class ModerationService {
       );
     }
 
-    this.logger.log(`Starting Aliyun moderation for OSS image: ${objectName}`);
-
     const response =
       await this.aliyunImageClient.request<AliyunImageModerationResponse>(
         'ImageModeration',
@@ -179,33 +139,10 @@ export class ModerationService {
             ossObjectName: objectName,
           }),
         },
-        {
-          method: 'POST',
-        },
+        { method: 'POST' },
       );
 
     this.assertAliyunImageModerationSafe(response, objectName);
-    return true;
-  }
-
-  // Helpers...
-  private async simulateExternalTextScan(text: string): Promise<boolean> {
-    // Mock latency
-    await new Promise((resolve) => setTimeout(resolve, 100));
-    // Simulate failing for specific content testing
-    if (text.includes('FAIL_AI_CHECK')) return false;
-    return true;
-  }
-
-  private async simulateExternalImageScan(
-    buffer: Buffer,
-    filename: string,
-  ): Promise<boolean> {
-    await new Promise((resolve) => setTimeout(resolve, 200));
-    // Simulate failure based on filename convention for testing
-    if (filename.includes('test-bad')) return false;
-
-    // In real scenario, we would send buffer to AWS Rekognition or Aliyun Green
     return true;
   }
 
@@ -230,9 +167,6 @@ export class ModerationService {
         : rawResults;
 
     if (!results?.length) {
-      this.logger.warn(
-        `Aliyun image moderation returned no result: ${filename}`,
-      );
       throw new BadRequestException('Image moderation service failed.');
     }
 
@@ -250,21 +184,16 @@ export class ModerationService {
     }
   }
 
-  private isSafeAliyunLabel(label: string): boolean {
+  private isSafeAliyunLabel(label: string) {
     const normalized = label.toLowerCase();
-    return (
-      normalized === 'nonlabel' ||
-      normalized === 'normal' ||
-      normalized === 'safe' ||
-      normalized === 'pass'
-    );
+    return ['nonlabel', 'normal', 'safe', 'pass'].includes(normalized);
   }
 
-  private normalizeEndpoint(endpoint: string): string {
+  private normalizeEndpoint(endpoint: string) {
     return /^https?:\/\//.test(endpoint) ? endpoint : `https://${endpoint}`;
   }
 
-  private normalizeOssRegionId(regionId: string): string {
+  private normalizeOssRegionId(regionId: string) {
     return regionId.startsWith('oss-') ? regionId.slice(4) : regionId;
   }
 }

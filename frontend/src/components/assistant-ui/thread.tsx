@@ -1,8 +1,7 @@
 import { AuiIf, SelectionToolbarPrimitive, ThreadPrimitive } from '@assistant-ui/react';
-import { ArrowDown, LogIn, Quote, RefreshCcw, ShieldAlert } from 'lucide-react';
+import { ArrowDown, LogIn, Quote, RefreshCcw, ShieldAlert, UserRound } from 'lucide-react';
 import { type ReactNode } from 'react';
 
-import { cn } from '../../lib/utils';
 import type { SocialAgentProfileGateStatus } from '../../api/socialAgentApi';
 import type {
   FitMeetAssistantMessage,
@@ -40,6 +39,7 @@ export function ChatGPTThread({
   processStatusOwnedByMessage,
   sessionRestoring,
   recovery,
+  profileGate,
   requiresAuth,
   onLogin,
   onRetryRecovery,
@@ -77,6 +77,7 @@ export function ChatGPTThread({
       <AssistantSelectionToolbar />
       <AuiIf condition={(state) => state.thread.isEmpty && isEmpty}>
         <AssistantEmptyState
+          profileGate={profileGate}
           requiresAuth={requiresAuth}
           onLogin={onLogin}
         />
@@ -84,11 +85,16 @@ export function ChatGPTThread({
 
       <AuiIf condition={(state) => !state.thread.isEmpty || shouldShowViewport}>
         <ThreadPrimitive.Viewport
-          className="flex grow flex-col gap-6 overflow-y-auto overscroll-contain scroll-smooth pt-12 [scrollbar-gutter:stable] [scroll-padding-bottom:calc(8rem+env(safe-area-inset-bottom)+env(keyboard-inset-height,0px))] sm:pt-14"
-          turnAnchor="top"
+          className="flex grow flex-col gap-6 overflow-y-auto overscroll-contain pt-12 [overflow-anchor:none] [scroll-behavior:auto] [scrollbar-gutter:stable] [scroll-padding-bottom:calc(8rem+env(safe-area-inset-bottom)+env(keyboard-inset-height,0px))] sm:pt-14"
+          turnAnchor="bottom"
+          autoScroll
+          scrollToBottomOnRunStart
+          scrollToBottomOnInitialize
           data-testid="assistant-ui-thread-viewport"
           data-viewport-model="assistant-ui-thread-viewport"
-          data-scroll-model="anchored-thread"
+          data-scroll-model="bottom-anchored-thread"
+          data-scroll-anchor="bottom"
+          data-typing-scroll-policy="manual"
           data-footer-behavior="sticky-composer"
         >
           <div
@@ -123,9 +129,7 @@ export function ChatGPTThread({
             {shouldShowInlineThinking ? (
               <AssistantInlineThinking status={liveProcessStatus ?? undefined} />
             ) : null}
-            {sessionRestoring ? (
-              <AssistantInlineNote>正在恢复上一次对话与未完成步骤...</AssistantInlineNote>
-            ) : null}
+            {sessionRestoring ? <AssistantInlineNote>正在同步这段对话…</AssistantInlineNote> : null}
             {!isRunning && recovery ? (
               <AssistantRecoveryMessage
                 recovery={recovery}
@@ -227,12 +231,15 @@ function inlineThinkingStatus(status?: string) {
 }
 
 function AssistantEmptyState({
+  profileGate,
   requiresAuth,
   onLogin,
 }: {
+  profileGate?: SocialAgentProfileGateStatus | null;
   requiresAuth?: boolean;
   onLogin?: () => void;
 }) {
+  const shouldShowProfileGate = !requiresAuth && profileGate && !profileGate.passed;
   return (
     <section
       className="flex grow flex-col items-center justify-center px-0"
@@ -270,6 +277,7 @@ function AssistantEmptyState({
             开始你的全球社交
           </p>
         </div>
+        {shouldShowProfileGate ? <AssistantProfileGateHint profileGate={profileGate} /> : null}
         <div
           className="w-full [padding-bottom:calc(env(safe-area-inset-bottom)+env(keyboard-inset-height,0px))]"
           data-testid="assistant-ui-empty-composer-slot"
@@ -282,6 +290,73 @@ function AssistantEmptyState({
       </div>
     </section>
   );
+}
+
+function AssistantProfileGateHint({ profileGate }: { profileGate: SocialAgentProfileGateStatus }) {
+  const missing = profileGate.nextActions.length
+    ? profileGate.nextActions
+    : profileGate.missing.map(profileGateMissingLabel);
+  return (
+    <div
+      className="rounded-2xl border border-black/[0.08] bg-[#f7f7f8] p-4 text-left shadow-[0_12px_34px_rgba(0,0,0,0.06)]"
+      role="status"
+      data-testid="assistant-ui-profile-gate-hint"
+      data-display-model="lightweight-profile-completion"
+      data-blocks-chat="false"
+      data-can-enter-match-pool={profileGate.canEnterMatchPool ? 'true' : 'false'}
+    >
+      <div className="flex items-start gap-3">
+        <span className="mt-0.5 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-white text-[#18181b] ring-1 ring-black/[0.06]">
+          <UserRound className="h-4 w-4" aria-hidden="true" />
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="text-sm font-semibold text-[#18181b]">匹配前还差一点个人信息</p>
+            {typeof profileGate.profileCompleteness === 'number' ? (
+              <span className="rounded-full bg-white px-2 py-0.5 text-xs font-medium text-[#71717a] ring-1 ring-black/[0.05]">
+                完成度 {Math.round(profileGate.profileCompleteness)}%
+              </span>
+            ) : null}
+          </div>
+          <p className="mt-1 text-sm leading-6 text-[#52525b]">
+            补齐后我再开始匹配、发布约练或发邀请。普通聊天可以直接开始。
+          </p>
+          {missing.length > 0 ? (
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {missing.slice(0, 4).map((item) => (
+                <span
+                  key={item}
+                  className="rounded-full bg-white px-2.5 py-1 text-xs text-[#52525b] ring-1 ring-black/[0.05]"
+                >
+                  {item}
+                </span>
+              ))}
+            </div>
+          ) : null}
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <a
+              href="/agent/profile"
+              className="inline-flex items-center rounded-full bg-[#18181b] px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-black focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black/20"
+            >
+              完善个人信息
+            </a>
+            <span className="text-xs leading-5 text-[#8a8f98]">也可以本次使用，不保存。</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function profileGateMissingLabel(field: SocialAgentProfileGateStatus['missing'][number]) {
+  const labels: Record<SocialAgentProfileGateStatus['missing'][number], string> = {
+    city: '城市/大致区域',
+    activity: '想参与的运动或社交场景',
+    availability: '可约时间',
+    boundary: '社交边界',
+    publicAuthorization: '是否公开到发现',
+  };
+  return labels[field] ?? field;
 }
 
 function AssistantDisclaimer() {
@@ -317,8 +392,9 @@ function AssistantRecoveryMessage({
 }) {
   const isAuth = recovery.kind === 'unauthorized';
   const isCheckpoint = recovery.kind === 'checkpoint_available';
-  const actionLabel = isAuth ? '登录' : '继续';
-  const avatarLabel = isAuth ? 'F' : isCheckpoint ? '↻' : '!';
+  const actionLabel = isAuth ? '登录' : '继续上次任务';
+  const stateLabel = isAuth ? '需要登录' : isCheckpoint ? '需要确认' : '可以继续';
+  const copy = sanitizedRecoveryCopy(recovery);
   const actionIcon = isAuth ? (
     <LogIn className="h-4 w-4" aria-hidden="true" />
   ) : (
@@ -327,38 +403,41 @@ function AssistantRecoveryMessage({
 
   return (
     <div
-      className="mx-auto flex w-full max-w-3xl gap-4 px-4 py-3 text-sm text-[#18181b] sm:px-6"
+      className="mx-auto flex w-full max-w-3xl px-0 py-1.5 text-sm text-[#18181b]"
       role="status"
       data-testid="assistant-ui-interrupt-resume"
       data-kind={recovery.kind}
+      data-display-model="lightweight-inline-recovery"
+      data-recovery-surface="single-line"
+      data-recovery-card="false"
+      data-final-answer="false"
     >
-      <div className="mt-1 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[#18181b] text-[11px] font-semibold text-white">
-        {avatarLabel}
-      </div>
-      <div className="min-w-0 flex-1 space-y-3">
-        <div className="rounded-2xl bg-[#f7f7f8] px-4 py-3 ring-1 ring-black/5">
-          {isAuth ? null : (
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="inline-flex items-center gap-1.5 rounded-full bg-white px-2.5 py-1 text-xs font-medium text-[#52525b] ring-1 ring-black/5">
+      <div className="min-w-0 flex-1">
+        <div className="inline-flex max-w-full flex-wrap items-center gap-2 rounded-full bg-[#f7f7f8]/80 px-2.5 py-1.5 text-[#52525b] ring-1 ring-black/[0.05]">
+          <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-white px-2 py-0.5 text-[11px] font-medium text-[#52525b] ring-1 ring-black/[0.04]">
+              {isAuth ? (
+                <LogIn className="h-3.5 w-3.5" aria-hidden="true" />
+              ) : (
                 <ShieldAlert className="h-3.5 w-3.5" aria-hidden="true" />
-                {isCheckpoint ? '需要确认' : '可恢复'}
-              </span>
-            </div>
-          )}
-          <p className={cn('font-medium', isAuth ? 'mt-0' : 'mt-3')}>{recovery.title}</p>
-          <p className="mt-1 leading-6 text-[#52525b]">
-            {isAuth ? '登录后我可以继续同步这段会话、偏好和未完成步骤。' : recovery.message}
+              )}
+              {stateLabel}
+            </span>
+            <p className="min-w-0 flex-1 truncate font-medium text-[#27272a]">{copy.title}</p>
+          </div>
+          <p className="min-w-0 flex-[2] truncate leading-5 text-[#52525b]">
+            {isAuth ? '登录后我可以继续同步这段会话、偏好和未完成步骤。' : copy.message}
           </p>
           {!isAuth && recovery.prompt ? (
-            <p className="mt-2 rounded-xl bg-white px-3 py-2 text-xs leading-5 text-[#71717a] ring-1 ring-black/5">
-              {recovery.prompt}
+            <p className="max-w-[18rem] truncate text-xs leading-5 text-[#8a8f98]">
+              刚才说到：{recovery.prompt}
             </p>
           ) : null}
           {isAuth || recovery.retryable ? (
-            <div className="mt-3 flex flex-wrap gap-2">
+            <div className="ml-auto flex shrink-0 flex-wrap gap-1.5">
               <button
                 type="button"
-                className="inline-flex items-center gap-2 rounded-xl border border-black/10 bg-white px-3 py-1.5 text-sm transition-colors hover:bg-black/[0.04] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black/20"
+                className="inline-flex items-center gap-1.5 rounded-full border border-black/10 bg-white px-2.5 py-1 text-xs transition-colors hover:bg-black/[0.04] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black/20"
                 onClick={isAuth ? onLogin : onRetry}
               >
                 {actionIcon}
@@ -367,7 +446,7 @@ function AssistantRecoveryMessage({
               {!isAuth ? (
                 <button
                   type="button"
-                  className="inline-flex items-center gap-2 rounded-xl border border-transparent px-3 py-1.5 text-sm text-[#71717a] transition-colors hover:bg-black/[0.04] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black/20"
+                  className="inline-flex items-center gap-1.5 rounded-full border border-transparent px-2.5 py-1 text-xs text-[#71717a] transition-colors hover:bg-black/[0.04] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black/20"
                   onClick={onDismiss}
                 >
                   忽略，重新开始
@@ -380,3 +459,50 @@ function AssistantRecoveryMessage({
     </div>
   );
 }
+
+function sanitizedRecoveryCopy(recovery: FitMeetAssistantRecovery) {
+  const title = recovery.title.trim();
+  const message = recovery.message.trim();
+  return {
+    title: isBackendRecoveryTitle(title) ? '这段需求还在' : title || '这段需求还在',
+    message: isBackendRecoveryMessage(message)
+      ? '我保留了刚才的上下文。你可以点继续接着处理，也可以直接补充新的要求。'
+      : message || '我保留了刚才的上下文。你可以点继续接着处理，也可以直接补充新的要求。',
+  };
+}
+
+function isBackendRecoveryTitle(value: string) {
+  const normalized = value.trim().toLowerCase();
+  return (
+    backendRecoveryTitleTerms.some((term) => normalized === term) ||
+    /没有.{0,16}完成|未完成|处理失败|run failed|连接.{0,8}中断/.test(normalized)
+  );
+}
+
+function isBackendRecoveryMessage(value: string) {
+  const normalized = value.trim().toLowerCase();
+  return (
+    backendRecoveryMessageTerms.some((term) => normalized.includes(term)) ||
+    /没有.{0,16}完成|未完成|保留.{0,8}对话|稍后.{0,8}试|服务.{0,8}不可用|连接.{0,8}中断/.test(
+      normalized,
+    )
+  );
+}
+
+const backendRecoveryTitleTerms = [
+  '这次处理' + '没有完成',
+  '这一步' + '没有完成',
+  '这次' + '没有顺利完成',
+  '暂时' + '没有顺利完成',
+  '处理失败',
+  'run failed',
+];
+
+const backendRecoveryMessageTerms = [
+  'fitmeet agent',
+  '这次处理' + '没有完成',
+  '暂时' + '没有顺利完成',
+  '保留当前对话',
+  '稍后再试',
+  '服务暂时不可用',
+];

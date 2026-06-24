@@ -102,6 +102,13 @@ describe('social-agent-candidate-pool-result.presenter', () => {
       emptyReason: 'no_real_candidates',
       message: EMPTY_CANDIDATE_MESSAGE,
     });
+    expect(result.candidates).toHaveLength(0);
+    expect(result.message).toContain('发布');
+    expect(result.message).toContain('放宽');
+    expect(result.message).toContain('时间');
+    expect(result.message).toContain('兴趣');
+    expect(JSON.stringify(result)).not.toContain('mock');
+    expect(JSON.stringify(result)).not.toContain('fallback');
   });
 
   it('builds stable empty activity search envelopes', () => {

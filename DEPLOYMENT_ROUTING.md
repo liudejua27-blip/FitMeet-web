@@ -1,46 +1,76 @@
-# Deployment routing notes
+# Deployment Routing Notes
 
-## Local development
+当前部署只需要保护两个边界：
 
-Run the whole local stack with:
+1. 前端静态站点负责保留页面路由。
+2. 后端 Nest 服务负责 `/api/*`。
+
+旧产品入口已经不属于当前产品面，部署只需要覆盖当前保留路由。
+
+## Local Development
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\start-dev.ps1
 ```
 
-This starts Docker Desktop when needed, waits for the Docker daemon, starts the
-local compose services, then launches the Nest backend and Vite frontend.
+或者手动启动：
+
+```bash
+docker compose up -d postgres mongo redis
+pnpm --dir backend start:dev
+pnpm --dir frontend dev
+```
 
 Expected local URLs:
 
 - Backend health: `http://localhost:3000/api/health`
-- Feed API: `http://localhost:3000/api/feed`
+- Backend readiness: `http://localhost:3000/api/ready`
+- Core OpenAPI: `http://localhost:3000/api/openapi/fitmeet-core.json`
 - Frontend: `http://localhost:5173`
+- Discover: `http://localhost:5173/discover`
+- Agent: `http://localhost:5173/agent`
 
-## Why `/api/feed` can return `no_matching_function_for_path`
+## Production Layout
 
-The Nest backend registers `/api/feed`. If the response body says
-`no_matching_function_for_path /api/feed`, the request is reaching a static
-hosting or cloud-function router instead of the Nest backend.
+There are two valid layouts:
 
-There are two valid production layouts:
+1. One VPS/container host serves `frontend/dist` and proxies `/api/` to the
+   backend container.
+2. A static frontend platform serves `frontend/dist`, and `/api/*` is proxied to
+   a separate backend origin.
 
-1. Point `ourfitmeet.cn` to the VPS running `nginx/nginx.conf`. In this layout,
-   Nginx serves `frontend/dist` and proxies `/api/` to the `backend` container.
-2. Keep the frontend on EdgeOne Pages and proxy `/api/*` to a separate backend
-   origin. In this layout, configure an EdgeOne Pages environment variable:
+For layout 2, configure:
 
 ```text
 BACKEND_ORIGIN=https://your-backend-origin.example
 ```
 
-The file `edge-functions/api/[[default]].js` exists for layout 2. It forwards
-all `/api/*` requests from EdgeOne Pages to the configured backend origin.
+The file `edge-functions/api/[[default]].js` forwards `/api/*` requests to that
+backend origin. Do not point `BACKEND_ORIGIN` back to the same static frontend
+host, or requests will loop.
 
-Do not set `BACKEND_ORIGIN` to the same EdgeOne Pages hostname, or requests will
-loop back into the Pages function layer.
+## Route Smoke
 
-## Docker Hub timeout workaround
+After deploy, verify:
+
+```bash
+curl -fsS https://your-site.example/api/health
+curl -fsS https://your-site.example/api/ready
+curl -fsS https://your-site.example/api/openapi/fitmeet-core.json
+```
+
+Then check these browser routes:
+
+- `/`
+- `/discover`
+- `/agent`
+- `/messages`
+- `/public-intent/public_agent_api_smoke_qingdao_walk`
+
+Publishing a card from Agent must return `discoverHref` and `publicIntentId`;
+that card must be visible on `/discover` and openable at `/public-intent/:id`.
+
+## Docker Hub Timeout Workaround
 
 If Docker Desktop is running but production image builds fail while fetching
 `https://auth.docker.io/token`, use a reachable Node base image mirror:

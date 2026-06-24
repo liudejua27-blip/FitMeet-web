@@ -461,9 +461,11 @@ export function readSocialAgentTaskMemory(
       .map((entry) => ({
         id: typeof entry.id === 'number' ? entry.id : 0,
         type: typeof entry.type === 'string' ? entry.type : '',
-        actionType: typeof entry.actionType === 'string' ? entry.actionType : '',
+        actionType:
+          typeof entry.actionType === 'string' ? entry.actionType : '',
         summary: typeof entry.summary === 'string' ? entry.summary : '',
-        riskLevel: typeof entry.riskLevel === 'string' ? entry.riskLevel : 'low',
+        riskLevel:
+          typeof entry.riskLevel === 'string' ? entry.riskLevel : 'low',
         at: typeof entry.at === 'string' ? entry.at : new Date(0).toISOString(),
         payload: isRecord(entry.payload) ? entry.payload : undefined,
       })),

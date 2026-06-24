@@ -23,6 +23,8 @@ const validEnv = {
   REDIS_HOST: 'redis',
   REDIS_PORT: '6379',
   REDIS_PASSWORD: 'strong-redis-password',
+  SOCIAL_AGENT_CACHE_BACKEND: 'redis',
+  SOCIAL_AGENT_TOOL_RESULT_CACHE_BACKEND: 'redis',
   JWT_SECRET: '1234567890abcdef1234567890abcdef',
   AGENT_WEBHOOK_SIGNING_SECRET: 'webhook-secret-1234567890abcdef',
   ALIYUN_ACCESS_KEY_ID: 'aliyun-key-id',
@@ -61,8 +63,6 @@ const validEnv = {
   AGENT_OBSERVABILITY_ALERT_WEBHOOK_URL: '',
   AGENT_OBSERVABILITY_ALERT_WEBHOOK_TOKEN: '',
   AGENT_OBSERVABILITY_ALERT_COOLDOWN_MS: '300000',
-  KAFKA_BROKERS: 'kafka:29092',
-  ENABLE_KAFKA: 'true',
 };
 
 describe('production-env-readiness', () => {
@@ -243,6 +243,38 @@ describe('production-env-readiness', () => {
     );
   });
 
+  it('requires distributed Social Agent cache in production', () => {
+    const missingCache = buildProductionEnvReport({
+      ...validEnv,
+      SOCIAL_AGENT_CACHE_BACKEND: '',
+      SOCIAL_AGENT_TOOL_RESULT_CACHE_BACKEND: '',
+    });
+    const processLocalCache = buildProductionEnvReport({
+      ...validEnv,
+      SOCIAL_AGENT_CACHE_BACKEND: 'memory',
+      SOCIAL_AGENT_TOOL_RESULT_CACHE_BACKEND: 'memory',
+    });
+
+    expect(missingCache.ok).toBe(false);
+    expect(processLocalCache.ok).toBe(false);
+    expect(missingCache.errors).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ key: 'SOCIAL_AGENT_CACHE_BACKEND' }),
+        expect.objectContaining({
+          key: 'SOCIAL_AGENT_TOOL_RESULT_CACHE_BACKEND',
+        }),
+      ]),
+    );
+    expect(processLocalCache.errors).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ key: 'SOCIAL_AGENT_CACHE_BACKEND' }),
+        expect.objectContaining({
+          key: 'SOCIAL_AGENT_TOOL_RESULT_CACHE_BACKEND',
+        }),
+      ]),
+    );
+  });
+
   it('rejects missing or insecure WeChat OAuth redirect URIs', () => {
     const missingRedirect = buildProductionEnvReport({
       ...validEnv,
@@ -357,7 +389,9 @@ describe('production-env-readiness', () => {
         expect.objectContaining({
           key: 'SOCIAL_AGENT_FINAL_RESPONSE_FIRST_CHUNK_TIMEOUT_MS',
         }),
-        expect.objectContaining({ key: 'SOCIAL_AGENT_FINAL_RESPONSE_MAX_TOKENS' }),
+        expect.objectContaining({
+          key: 'SOCIAL_AGENT_FINAL_RESPONSE_MAX_TOKENS',
+        }),
         expect.objectContaining({ key: 'SOCIAL_AGENT_PLANNER_TIMEOUT_MS' }),
         expect.objectContaining({ key: 'SOCIAL_AGENT_INTENT_TIMEOUT_MS' }),
         expect.objectContaining({
@@ -475,8 +509,8 @@ describe('production-env-readiness', () => {
     const report = buildProductionEnvReport({
       ...validEnv,
       FITMEET_LIFE_GRAPH_AGENT_WORKER_MODEL: 'deepseek-chat',
-      FITMEET_SOCIAL_MATCH_AGENT_WORKER_MODEL: 'deepseek-v4-flash',
-      FITMEET_MEET_LOOP_AGENT_WORKER_MODEL: 'deepseek-v4',
+      FITMEET_MATCH_AGENT_WORKER_MODEL: 'deepseek-v4-flash',
+      FITMEET_AGENT_BRAIN_WORKER_MODEL: 'deepseek-v4',
       FITMEET_SUBAGENT_WORKER_MODEL: 'deepseek-fast-worker',
     });
 
@@ -487,10 +521,10 @@ describe('production-env-readiness', () => {
           key: 'FITMEET_LIFE_GRAPH_AGENT_WORKER_MODEL',
         }),
         expect.objectContaining({
-          key: 'FITMEET_SOCIAL_MATCH_AGENT_WORKER_MODEL',
+          key: 'FITMEET_MATCH_AGENT_WORKER_MODEL',
         }),
         expect.objectContaining({
-          key: 'FITMEET_MEET_LOOP_AGENT_WORKER_MODEL',
+          key: 'FITMEET_AGENT_BRAIN_WORKER_MODEL',
         }),
         expect.objectContaining({
           key: 'FITMEET_SUBAGENT_WORKER_MODEL',

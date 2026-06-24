@@ -243,9 +243,8 @@ export class FitMeetSubagentWorkerRuntimeService {
     agent: FitMeetAlphaAgentName,
   ): SocialAgentModelUseCase {
     if (agent === 'Life Graph Agent') return 'profile_extraction';
-    if (agent === 'Social Match Agent') return 'candidate_summary';
-    if (agent === 'Meet Loop Agent') return 'planner';
-    if (agent === 'Math Agent') return 'planner';
+    if (agent === 'Match Agent') return 'candidate_summary';
+    if (agent === 'Agent Brain') return 'planner';
     return 'planner';
   }
 

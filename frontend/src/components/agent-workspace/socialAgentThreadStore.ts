@@ -12,6 +12,7 @@ import type {
   FitMeetAssistantRecovery,
   FitMeetAssistantStep,
 } from './FitMeetAssistantUI.types';
+import { reduceSingleRunAssistantMessages } from './agentAssistantMessageReducer';
 
 export type AgentConversationIntent = 'conversation' | 'social' | 'approval';
 export type AgentThreadMessage = FitMeetAssistantMessage;
@@ -115,7 +116,10 @@ export function socialAgentThreadReducer(
 ): SocialAgentThreadState {
   switch (action.type) {
     case 'setMessages':
-      return { ...state, messages: applyUpdater(state.messages, action.value) };
+      return {
+        ...state,
+        messages: reduceSingleRunAssistantMessages(applyUpdater(state.messages, action.value)),
+      };
     case 'setSteps':
       return { ...state, steps: applyUpdater(state.steps, action.value) };
     case 'setUserResult':

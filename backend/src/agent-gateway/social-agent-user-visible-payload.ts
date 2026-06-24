@@ -35,10 +35,10 @@ function sanitizeUserVisiblePayloadValue(
   if (isUnsafeUserVisiblePayloadKey(keyHint)) return undefined;
   if (depth > MAX_USER_VISIBLE_PAYLOAD_DEPTH) return undefined;
   if (typeof value === 'string') {
-    const redacted = cleanDisplayText(
-      redactSensitiveText(value),
-      '',
-    ).slice(0, MAX_USER_VISIBLE_PAYLOAD_STRING);
+    const redacted = cleanDisplayText(redactSensitiveText(value), '').slice(
+      0,
+      MAX_USER_VISIBLE_PAYLOAD_STRING,
+    );
     if (!redacted) return undefined;
     if (USER_VISIBLE_PAYLOAD_INTERNAL_TEXT_RE.test(redacted)) return undefined;
     return redacted;

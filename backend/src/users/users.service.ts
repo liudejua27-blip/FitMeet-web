@@ -3,10 +3,8 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { User } from './user.entity';
 import { Follow } from '../friends/follow.entity';
-import { Post } from '../posts/post.entity';
 import { Meet } from '../meets/meet.entity';
 import { MeetParticipant } from '../meets/meet-participant.entity';
-import { Coach } from '../coaches/coach.entity';
 
 @Injectable()
 export class UsersService {
@@ -15,14 +13,10 @@ export class UsersService {
     private readonly userRepo: Repository<User>,
     @InjectRepository(Follow)
     private readonly followRepo: Repository<Follow>,
-    @InjectRepository(Post)
-    private readonly postRepo: Repository<Post>,
     @InjectRepository(Meet)
     private readonly meetRepo: Repository<Meet>,
     @InjectRepository(MeetParticipant)
     private readonly participantRepo: Repository<MeetParticipant>,
-    @InjectRepository(Coach)
-    private readonly coachRepo: Repository<Coach>,
   ) {}
 
   async findById(id: number) {
@@ -35,27 +29,17 @@ export class UsersService {
     const followingCount = await this.followRepo.count({
       where: { followerId: id },
     });
-    const postsCount = await this.postRepo.count({ where: { userId: id } });
     const meetHosted = await this.meetRepo.count({ where: { userId: id } });
     const meetJoined = await this.participantRepo.count({
       where: { userId: id },
     });
-    const coach = await this.coachRepo.findOne({ where: { userId: id } });
 
-    const rest = this.sanitizeUser(user);
+    const rest = this.toPublicUser(user);
     return {
       ...rest,
       followers: followersCount,
       following: followingCount,
-      posts: postsCount,
       meetCount: meetHosted + meetJoined,
-      coachSpecialty: coach?.specialty,
-      coachExperience: coach?.experience,
-      coachPrice: coach?.price,
-      coachRating: coach ? Number(coach.rating) : undefined,
-      coachStudents: coach?.students,
-      coachCerts: coach?.coachCerts,
-      coachIncome: coach?.income,
     };
   }
 
@@ -102,12 +86,50 @@ export class UsersService {
 
   async findAll() {
     const users = await this.userRepo.find();
-    return users.map((user) => this.sanitizeUser(user));
+    return users.map((user) => this.toPublicUser(user));
   }
 
-  private sanitizeUser(user: User) {
-    const result: Partial<User> = { ...user };
-    delete result.password;
-    return result;
+  private toPublicUser(user: User) {
+    return {
+      id: user.id,
+      name: this.publicText(user.name, 'FitMeet 用户'),
+      avatar: this.publicText(user.avatar, ''),
+      color: user.color,
+      gender: this.publicText(user.gender, ''),
+      age: user.age,
+      city: this.publicText(user.city, ''),
+      gym: this.publicText(user.gym, ''),
+      bio: this.publicText(user.bio, '这位用户正在寻找同频的运动社交伙伴。'),
+      coverUrl: this.publicText(user.coverUrl ?? '', ''),
+      singleCert: user.singleCert,
+      verified: user.verified,
+      interestTags: this.publicTags(user.interestTags ?? []),
+      trainingDays: user.trainingDays,
+      trainingCount: user.trainingCount,
+      caloriesBurned: user.caloriesBurned,
+      trustScore: user.trustScore,
+      socialTrustCount: user.socialTrustCount,
+      createdAt: user.createdAt,
+      updatedAt: user.updatedAt,
+    };
+  }
+
+  private publicTags(tags: string[]) {
+    return tags
+      .map((tag) => this.publicText(tag, ''))
+      .filter((tag) => tag.length > 0);
+  }
+
+  private publicText(value: string | null | undefined, fallback: string) {
+    const text = `${value ?? ''}`.trim();
+    if (!text || this.isInternalFixtureText(text)) return fallback;
+    if (/^unknown$/i.test(text)) return fallback;
+    return text;
+  }
+
+  private isInternalFixtureText(text: string) {
+    return /\b(agent\s*smoke|smoke\s*account|api\s*smoke|seed|fixture|test\s*account)\b/i.test(
+      text,
+    );
   }
 }

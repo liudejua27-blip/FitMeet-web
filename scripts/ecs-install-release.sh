@@ -86,6 +86,52 @@ archive_entries() {
   unzip -Z1 "$ARCHIVE"
 }
 
+read_staged_release_field() {
+  local field="$1"
+  local fallback="$2"
+  local value
+  value="$(
+    awk -v field="\"${field}\"" '
+      index($0, field) {
+        sub(/^[^:]*:[[:space:]]*"/, "", $0)
+        sub(/".*$/, "", $0)
+        print
+        exit
+      }
+    ' "$TARGET_DIR/release.json" 2>/dev/null || true
+  )"
+  if [[ -n "$value" ]]; then
+    printf '%s' "$value"
+  else
+    printf '%s' "$fallback"
+  fi
+}
+
+sync_release_env_metadata() {
+  local env_file="$TARGET_DIR/.env.production"
+  local release_file="$TARGET_DIR/release.json"
+  if [[ ! -f "$env_file" || ! -f "$release_file" ]]; then
+    return
+  fi
+
+  local release_commit release_source release_built_at tmp_env
+  release_commit="$(read_staged_release_field commit unknown)"
+  release_source="$(read_staged_release_field source deploy_zip)"
+  release_built_at="$(read_staged_release_field builtAt '')"
+  tmp_env="$(mktemp "${TMPDIR:-/tmp}/fitmeet-release-env.XXXXXX")"
+  awk '!/^(export[[:space:]]+)?FITMEET_RELEASE_(COMMIT|SOURCE|BUILT_AT)=/' \
+    "$env_file" >"$tmp_env"
+  {
+    printf '\n# Updated automatically by ecs-install-release.sh from release.json.\n'
+    printf 'FITMEET_RELEASE_COMMIT=%s\n' "$release_commit"
+    printf 'FITMEET_RELEASE_SOURCE=%s\n' "$release_source"
+    printf 'FITMEET_RELEASE_BUILT_AT=%s\n' "$release_built_at"
+  } >>"$tmp_env"
+  cat "$tmp_env" >"$env_file"
+  rm -f "$tmp_env"
+  ok "Updated .env.production release metadata to $release_commit"
+}
+
 require_cmd unzip
 require_cmd rsync
 if ! command -v sha256sum >/dev/null 2>&1 && ! command -v shasum >/dev/null 2>&1; then
@@ -168,6 +214,8 @@ rsync -a --delete \
   --exclude 'nginx/ssl/' \
   "$staged_dir/" "$TARGET_DIR/"
 
+sync_release_env_metadata
+
 if [[ ! -f "$TARGET_DIR/.env.production" ]]; then
   printf '\n[WARN] %s/.env.production is missing. Create it from deploy/env.production.ecs.example before deploying containers.\n' "$TARGET_DIR" >&2
 fi
@@ -184,7 +232,6 @@ printf '\nOne-off backend commands on ECS should run through the production cont
 printf '  ./scripts/ecs-backend-pnpm.sh -- uploads:check:prod\n'
 printf '  ./scripts/ecs-backend-pnpm.sh -- migration:run:prod\n'
 printf '  ./scripts/ecs-backend-pnpm.sh -- db:check-critical-tables:prod\n'
-printf '  AGENT_SMOKE_SEED_ALLOW_PRODUCTION=true ./scripts/ecs-backend-pnpm.sh -- seed:agent-smoke:prod -- --allow-production\n'
 printf '\nPost-deploy release verification:\n'
 printf '  EXPECTED_RELEASE_COMMIT="$(node -e '"'"'const fs=require("fs");const r=JSON.parse(fs.readFileSync("release.json","utf8"));process.stdout.write(String(r.commit||"unknown"))'"'"')"\n'
 printf '  EXPECTED_RELEASE_BUILT_AT="$(node -e '"'"'const fs=require("fs");const r=JSON.parse(fs.readFileSync("release.json","utf8"));process.stdout.write(String(r.builtAt||""))'"'"')"\n'

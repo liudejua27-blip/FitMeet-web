@@ -18,6 +18,20 @@ export type DeepSeekChatCompletionOptions = {
   retryAttempts?: number;
 };
 
+export type DeepSeekChatCompletionUsage = {
+  promptTokens: number | null;
+  promptCacheHitTokens: number | null;
+  promptCacheMissTokens: number | null;
+  completionTokens: number | null;
+  reasoningTokens: number | null;
+};
+
+export type DeepSeekChatCompletionResult = {
+  content: string;
+  usage: DeepSeekChatCompletionUsage;
+  systemFingerprint: string | null;
+};
+
 class DeepSeekHttpError extends Error {
   constructor(readonly status: number) {
     super(`DeepSeek HTTP ${status}`);
@@ -45,6 +59,12 @@ export function resolveDeepSeekModel(value?: string | null): string {
 export async function callDeepSeekChatCompletion(
   options: DeepSeekChatCompletionOptions,
 ): Promise<string> {
+  return (await callDeepSeekChatCompletionWithUsage(options)).content;
+}
+
+export async function callDeepSeekChatCompletionWithUsage(
+  options: DeepSeekChatCompletionOptions,
+): Promise<DeepSeekChatCompletionResult> {
   const attempts = positiveInteger(options.retryAttempts, 1);
   let lastError: unknown;
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
@@ -62,7 +82,7 @@ export async function callDeepSeekChatCompletion(
 
 async function callDeepSeekChatCompletionOnce(
   options: DeepSeekChatCompletionOptions,
-): Promise<string> {
+): Promise<DeepSeekChatCompletionResult> {
   assertNotClientAborted(options.signal);
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), options.timeoutMs);
@@ -98,17 +118,19 @@ async function callDeepSeekChatCompletionOnce(
     if (!res.ok) {
       throw new DeepSeekHttpError(res.status);
     }
-    const data = (await res.json()) as {
-      choices?: { message?: { content?: string } }[];
+    const data = (await res.json()) as Record<string, unknown>;
+    return {
+      content: readDeepSeekCompletionContent(data),
+      usage: readDeepSeekCompletionUsage(data),
+      systemFingerprint: stringValue(data.system_fingerprint),
     };
-    return data.choices?.[0]?.message?.content ?? '';
   } catch (error) {
     if (isAbortError(error)) {
       throw new Error(
         options.signal?.aborted
           ? 'client_aborted'
-          : options.timeoutMessage ??
-              `DeepSeek timeout after ${options.timeoutMs}ms`,
+          : (options.timeoutMessage ??
+              `DeepSeek timeout after ${options.timeoutMs}ms`),
       );
     }
     throw error;
@@ -116,6 +138,49 @@ async function callDeepSeekChatCompletionOnce(
     clearTimeout(timeout);
     options.signal?.removeEventListener('abort', abortFromParent);
   }
+}
+
+function readDeepSeekCompletionContent(data: Record<string, unknown>): string {
+  const choices = Array.isArray(data.choices) ? data.choices : [];
+  const first = isRecord(choices[0]) ? choices[0] : {};
+  const message = isRecord(first.message) ? first.message : {};
+  return typeof message.content === 'string' ? message.content : '';
+}
+
+function readDeepSeekCompletionUsage(
+  data: Record<string, unknown>,
+): DeepSeekChatCompletionUsage {
+  const usage = isRecord(data.usage) ? data.usage : {};
+  const promptDetails = isRecord(usage.prompt_tokens_details)
+    ? usage.prompt_tokens_details
+    : {};
+  const completionDetails = isRecord(usage.completion_tokens_details)
+    ? usage.completion_tokens_details
+    : {};
+  return {
+    promptTokens: numberValue(usage.prompt_tokens),
+    promptCacheHitTokens:
+      numberValue(usage.prompt_cache_hit_tokens) ??
+      numberValue(promptDetails.cached_tokens),
+    promptCacheMissTokens: numberValue(usage.prompt_cache_miss_tokens),
+    completionTokens: numberValue(usage.completion_tokens),
+    reasoningTokens:
+      numberValue(usage.reasoning_tokens) ??
+      numberValue(completionDetails.reasoning_tokens),
+  };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === 'object' && !Array.isArray(value));
+}
+
+function numberValue(value: unknown): number | null {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function stringValue(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() ? value : null;
 }
 
 function shouldRetryDeepSeekCompletion(error: unknown) {

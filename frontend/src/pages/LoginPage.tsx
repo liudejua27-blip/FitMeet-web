@@ -22,7 +22,7 @@ export function LoginPage() {
 
   useEffect(() => {
     if (isLoggedIn) {
-      navigate('/profile', { replace: true });
+      navigate('/agent/profile', { replace: true });
     }
   }, [isLoggedIn, navigate]);
 
@@ -52,7 +52,7 @@ export function LoginPage() {
       } else {
         await register({ email: normalizedEmail, password, name: trimmedName });
       }
-      navigate('/profile', { replace: true });
+      navigate('/agent/profile', { replace: true });
     } catch {
       // Auth store keeps user-facing error text.
     }
@@ -71,9 +71,7 @@ export function LoginPage() {
         <div className="login-page-copy">
           <p>Social World Account</p>
           <h1 id="login-page-title">{mode === 'login' ? '登录 FitMeet' : '创建 FitMeet 账号'}</h1>
-          <span>
-            登录后同步你的会话、Life Graph、安全确认和发现页操作。关键动作仍会先等你确认。
-          </span>
+          <span>登录后同步你的会话、个人信息、安全确认和发现页操作。关键动作仍会先等你确认。</span>
         </div>
 
         <div className="login-modal-tabs" role="tablist" aria-label="账号入口">
@@ -126,7 +124,9 @@ export function LoginPage() {
               type="password"
             />
           </label>
-          {localError || error ? <div className="login-modal-error">{localError || error}</div> : null}
+          {localError || error ? (
+            <div className="login-modal-error">{localError || error}</div>
+          ) : null}
           <button type="submit" disabled={loading} className="login-modal-submit">
             {loading ? '正在进入...' : mode === 'login' ? '继续进入' : '创建并进入'}
           </button>

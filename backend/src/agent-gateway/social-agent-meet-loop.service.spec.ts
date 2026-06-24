@@ -57,6 +57,9 @@ function makeHarness(options: { activities?: unknown } = {}) {
   const lifeGraph = {
     recordBehaviorEvent: jest.fn().mockResolvedValue({ id: 1 }),
   };
+  const interestEvents = {
+    recordEvent: jest.fn().mockResolvedValue({ id: 11 }),
+  };
   const l5Runtime = {
     transitionMeetLoop: jest.fn().mockResolvedValue(undefined),
   };
@@ -69,11 +72,13 @@ function makeHarness(options: { activities?: unknown } = {}) {
     lifeGraph as never,
     options.activities as never,
     l5Runtime as never,
+    interestEvents as never,
   );
   return {
     approvals,
     eventRepo,
     lifeGraph,
+    interestEvents,
     l5Runtime,
     metrics,
     savedEvents,
@@ -106,6 +111,13 @@ describe('SocialAgentMeetLoopService', () => {
         agentTaskId: 101,
         type: 'create_activity',
         actionType: 'create_activity',
+        payload: expect.objectContaining({
+          taskId: 101,
+          agentTaskId: 101,
+          targetUserId: 22,
+          candidateUserId: 22,
+          socialRequestId: 301,
+        }),
       }),
     );
     expect(draft).toMatchObject({
@@ -141,6 +153,7 @@ describe('SocialAgentMeetLoopService', () => {
     const duplicateActivityAction = duplicateDraft.cards?.[0]?.actions?.find(
       (action) => action.schemaAction === 'activity.confirm_create',
     );
+    expect(duplicateDraft.cards).toHaveLength(1);
     expect(duplicateDraft).toMatchObject({
       action: 'await_confirmation',
       pendingApproval: expect.objectContaining({
@@ -152,6 +165,7 @@ describe('SocialAgentMeetLoopService', () => {
     expect(duplicateDraft.cards?.[0]).toMatchObject({
       type: 'activity_plan',
       data: expect.objectContaining({
+        approvalId: 9001,
         publicPlaceOnly: true,
         noPreciseLocation: true,
       }),
@@ -171,7 +185,7 @@ describe('SocialAgentMeetLoopService', () => {
     });
     expect(harness.approvals.approve).toHaveBeenCalledWith(9001, 7);
     expect(confirmed.cards?.[0]).toMatchObject({
-      type: 'review_card',
+      type: 'meet_loop_timeline',
       schemaType: 'meet_loop.timeline',
       data: expect.objectContaining({
         schemaType: 'meet_loop.timeline',
@@ -236,7 +250,7 @@ describe('SocialAgentMeetLoopService', () => {
       payload: checkedIn.cards?.[0]?.actions?.[0]?.payload ?? {},
     });
     expect(completed.cards?.[0]).toMatchObject({
-      type: 'review_card',
+      type: 'meet_loop_timeline',
       data: expect.objectContaining({ loopStage: 'activity_completed' }),
     });
     expect(harness.l5Runtime.transitionMeetLoop).toHaveBeenCalledWith(
@@ -250,6 +264,17 @@ describe('SocialAgentMeetLoopService', () => {
           status: 'activity_completed',
           loopStage: 'activity_completed',
         }),
+      }),
+    );
+    expect(harness.interestEvents.recordEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ownerUserId: 7,
+        agentTaskId: 101,
+        eventType: 'activity_complete',
+        targetUserId: 22,
+        activityTags: expect.arrayContaining(['running']),
+        locationText: '青岛大学附近公共场所',
+        source: 'meet_loop',
       }),
     );
 
@@ -274,6 +299,17 @@ describe('SocialAgentMeetLoopService', () => {
       expect.objectContaining({
         eventType: LifeGraphBehaviorEventType.ActivityReviewedPositive,
         metadata: expect.objectContaining({ rating: 5 }),
+      }),
+    );
+    expect(harness.interestEvents.recordEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ownerUserId: 7,
+        agentTaskId: 101,
+        eventType: 'review_positive',
+        targetUserId: 22,
+        activityTags: expect.arrayContaining(['running']),
+        metadata: expect.objectContaining({ rating: 5, positive: true }),
+        source: 'meet_loop',
       }),
     );
     expect(harness.task.result).toMatchObject({
@@ -341,6 +377,21 @@ describe('SocialAgentMeetLoopService', () => {
         actionType: 'create_activity',
       }),
     });
+    expect(harness.approvals.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        relatedSocialRequestId: 301,
+        relatedCandidateId: 501,
+        payload: expect.objectContaining({
+          taskId: 101,
+          agentTaskId: 101,
+          targetUserId: 22,
+          candidateUserId: 22,
+          candidateRecordId: 501,
+          socialRequestCandidateId: 501,
+          socialRequestId: 301,
+        }),
+      }),
+    );
     expect(draft.cards?.[0]).toMatchObject({
       schemaType: 'social_match.activity',
       data: expect.objectContaining({
@@ -380,7 +431,7 @@ describe('SocialAgentMeetLoopService', () => {
     );
     expect(activities.confirm).toHaveBeenCalledWith(700, 7);
     expect(confirmed.cards?.[0]).toMatchObject({
-      type: 'review_card',
+      type: 'meet_loop_timeline',
       schemaType: 'meet_loop.timeline',
       data: expect.objectContaining({
         schemaType: 'meet_loop.timeline',
@@ -620,7 +671,7 @@ describe('SocialAgentMeetLoopService', () => {
       assistantMessage: expect.stringContaining('恢复到上次保存的邀约进度'),
       cards: [
         expect.objectContaining({
-          type: 'review_card',
+          type: 'meet_loop_timeline',
           data: expect.objectContaining({
             loopStage: 'message_sent',
             timeline: expect.objectContaining({
@@ -675,6 +726,7 @@ describe('SocialAgentMeetLoopService', () => {
         activityId: 700,
         candidateUserId: 22,
         source: 'counterpart_reply',
+        replyIntent: 'accepted',
         replyPreview: '可以呀，周六下午在公共操场附近见可以吗？',
       },
     });
@@ -690,7 +742,7 @@ describe('SocialAgentMeetLoopService', () => {
       (card) => card.schemaType === 'life_graph.diff',
     );
     expect(timelineCard).toMatchObject({
-      type: 'review_card',
+      type: 'meet_loop_timeline',
       data: expect.objectContaining({
         candidateUserId: 22,
         loopStage: 'reply_received',
@@ -747,6 +799,20 @@ describe('SocialAgentMeetLoopService', () => {
         }),
       }),
     );
+    expect(harness.interestEvents.recordEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ownerUserId: 7,
+        agentTaskId: 101,
+        eventType: 'invite_accepted',
+        targetUserId: 22,
+        activityId: 700,
+        source: 'meet_loop',
+        metadata: expect.objectContaining({
+          counterpartIntent: 'accepted',
+          replyPreview: '可以呀，周六下午在公共操场附近见可以吗？',
+        }),
+      }),
+    );
     expect(harness.savedEvents).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -783,7 +849,7 @@ describe('SocialAgentMeetLoopService', () => {
         assistantMessage: expect.stringContaining('不会自动通知对方'),
         cards: [
           expect.objectContaining({
-            type: 'review_card',
+            type: 'meet_loop_timeline',
             data: expect.objectContaining({
               loopStage: 'reschedule_requested',
               timeline: expect.objectContaining({
@@ -817,4 +883,81 @@ describe('SocialAgentMeetLoopService', () => {
       });
     },
   );
+
+  it('cancels and hides an opportunity card when the user skips publishing', async () => {
+    const harness = makeHarness();
+
+    const result = await harness.service.performActivityAction(7, 101, {
+      action: 'activity.skip_publish',
+      payload: {
+        taskId: 101,
+        activityId: 700,
+        candidateUserId: 22,
+        title: '青岛大学轻松散步',
+      },
+    });
+
+    expect(harness.approvals.create).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      action: 'reply',
+      assistantMessage: expect.stringContaining('已取消发布'),
+      cards: [],
+    });
+    expect(harness.task.result).toMatchObject({
+      chatRun: expect.objectContaining({
+        socialRequestDraft: null,
+        publishStatus: 'cancelled',
+        publicIntentId: null,
+        discoverHref: null,
+        publicIntentHref: null,
+      }),
+      activityDraft: expect.objectContaining({
+        visibility: 'hidden',
+        autoPublished: false,
+        dismissed: true,
+        publishStatus: 'cancelled',
+      }),
+      meetLoop: expect.objectContaining({
+        status: 'draft_cancelled',
+        loopStage: 'activity_publish_cancelled',
+        visibility: 'hidden',
+        waitingFor: 'user_next_message',
+      }),
+    });
+    expect(harness.task.memory).toMatchObject({
+      shortTerm: expect.objectContaining({
+        socialRequestDraft: null,
+        publishStatus: 'cancelled',
+        hasSearched: false,
+        lastSearchCandidateCount: 0,
+      }),
+      socialAgentChat: expect.objectContaining({
+        socialRequestDraft: null,
+        publishStatus: 'cancelled',
+        publicIntentId: null,
+        discoverHref: null,
+        publicIntentHref: null,
+      }),
+      taskMemory: {
+        currentTask: expect.objectContaining({
+          waitingFor: 'user_next_message',
+          lastCompletedStep: 'activity_publish_cancelled',
+        }),
+      },
+    });
+    expect(harness.l5Runtime.transitionMeetLoop).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ownerUserId: 7,
+        agentTaskId: 101,
+        activityId: 700,
+        candidateUserId: 22,
+        stage: 'activity_publish_cancelled',
+        waitingFor: 'user_next_message',
+        state: expect.objectContaining({
+          loopStage: 'activity_publish_cancelled',
+          visibility: 'hidden',
+        }),
+      }),
+    );
+  });
 });

@@ -24,10 +24,24 @@ export function buildSocialAgentCandidateActionApprovalInput(input: {
   relatedCandidateId: number | null;
   runtimeContext?: SocialAgentActionApprovalRuntimeContext | null;
 }) {
+  const targetUserId =
+    input.targetUserId ??
+    positiveNumber(
+      input.candidate?.targetUserId ??
+        input.candidate?.candidateUserId ??
+        input.candidate?.userId,
+    );
+  const candidateRecordId =
+    input.relatedCandidateId ??
+    positiveNumber(
+      input.candidate?.candidateRecordId ??
+        input.candidate?.socialRequestCandidateId,
+    );
+  const socialRequestId = positiveNumber(input.candidate?.socialRequestId);
   const inferred = inferSocialAgentCandidateActionApproval(
     input.message,
     input.candidate,
-    input.targetUserId,
+    targetUserId,
   );
   const runtimeContext = buildActionApprovalRuntimeContextSummary(
     input.runtimeContext,
@@ -44,8 +58,21 @@ export function buildSocialAgentCandidateActionApprovalInput(input: {
       userMessage: input.message,
       intent: input.route.intent,
       entities: input.route.entities,
-      candidateUserId: input.targetUserId,
+      taskId: input.taskId,
       agentTaskId: input.taskId,
+      ...(targetUserId
+        ? {
+            targetUserId,
+            candidateUserId: targetUserId,
+          }
+        : {}),
+      ...(candidateRecordId
+        ? {
+            candidateRecordId,
+            socialRequestCandidateId: candidateRecordId,
+          }
+        : {}),
+      ...(socialRequestId ? { socialRequestId } : {}),
       ...(runtimeContext
         ? {
             socialCodex: {
@@ -58,7 +85,7 @@ export function buildSocialAgentCandidateActionApprovalInput(input: {
     riskLevel: inferred.riskLevel,
     reason: '由 Social Agent 聊天意图路由生成，待用户在前端确认。',
     createdBy: 'agent' as const,
-    relatedCandidateId: input.relatedCandidateId,
+    relatedCandidateId: candidateRecordId,
   };
 }
 
@@ -86,42 +113,49 @@ export function buildSocialAgentCandidateActionApprovalState(input: {
   };
 }
 
+function positiveNumber(value: unknown): number | null {
+  const num = Number(value);
+  return Number.isFinite(num) && num > 0 ? num : null;
+}
+
 function inferSocialAgentCandidateActionApproval(
   message: string,
   candidate: Record<string, unknown> | undefined,
   targetUserId: number | null,
 ) {
-  const candidateLabel = candidate
-    ? `候选人 #${cleanDisplayText(candidate.userId ?? candidate.candidateUserId ?? targetUserId, '')}`
-    : '候选人';
+  const candidateLabel =
+    cleanDisplayText(
+      candidate?.displayName ?? candidate?.nickname ?? candidate?.name,
+      '',
+    ) || (targetUserId ? '这位用户' : '对方');
   if (/(加好友|关注|加微信|加联系方式)/.test(message)) {
     return {
       type: ApprovalType.ContactRequest,
       actionType: 'connect_candidate',
-      riskLevel: ApprovalRiskLevel.Medium,
-      summary: `用户请求添加${candidateLabel}为好友/关注`,
+      riskLevel: ApprovalRiskLevel.High,
+      summary: `加好友并聊天：${candidateLabel}`,
     };
   }
   if (/(发消息|打招呼|私信|联系)/.test(message)) {
     return {
       type: ApprovalType.SendMessage,
       actionType: 'send_invite',
-      riskLevel: ApprovalRiskLevel.Medium,
-      summary: `用户请求向${candidateLabel}发送消息`,
+      riskLevel: ApprovalRiskLevel.High,
+      summary: `发送消息给${candidateLabel}`,
     };
   }
   if (/(邀请|约|约练|约局)/.test(message)) {
     return {
       type: ApprovalType.JoinActivity,
-      actionType: 'invite_candidate',
-      riskLevel: ApprovalRiskLevel.Medium,
-      summary: `用户请求邀请${candidateLabel}参加活动`,
+      actionType: 'send_invite',
+      riskLevel: ApprovalRiskLevel.High,
+      summary: `邀请${candidateLabel}参加约练`,
     };
   }
   return {
     type: ApprovalType.Custom,
     actionType: 'social_agent_action',
     riskLevel: ApprovalRiskLevel.Low,
-    summary: `用户请求执行动作：${message.slice(0, 80)}`,
+    summary: `继续处理：${cleanDisplayText(message, '这个请求').slice(0, 80)}`,
   };
 }

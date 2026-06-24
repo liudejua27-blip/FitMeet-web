@@ -11,6 +11,7 @@ import { SocialAgentChatService } from './social-agent-chat.service';
 import { AgentTaskStatus } from './entities/agent-task.entity';
 import { SocialAgentCandidateCommandService } from './social-agent-candidate-command.service';
 import { SocialAgentTaskMemoryStateMachineService } from './social-agent-task-memory-state-machine.service';
+import { withSocialAgentStoredRun } from './social-agent-chat-run.presenter';
 
 describe('SocialAgentChatController protocol boundaries', () => {
   const controllerSource = () =>
@@ -115,6 +116,124 @@ describe('SocialAgentChatController protocol boundaries', () => {
     expect(source).toContain('private async streamCheckpointStepAction');
     expect(source).toContain('await socialCodexEvents.writeRunStarted');
     expect(source).toContain('await socialCodexEvents.writeHydrateContext');
+  });
+});
+
+describe('SocialAgentChatController final response routing', () => {
+  it('does not rewrite deterministic route replies with final-response LLM', async () => {
+    const finalResponses = {
+      generate: jest.fn().mockResolvedValue('LLM 改写回复'),
+    };
+    const controller = new SocialAgentChatController(
+      {} as unknown as SocialAgentChatService,
+      {} as unknown as SocialAgentCandidateCommandService,
+      {} as unknown as UserFacingResponseSanitizerService,
+      undefined,
+      undefined,
+      finalResponses as never,
+    );
+
+    const result = await (
+      controller as unknown as {
+        writeLlmAssistantTextForResult: (
+          write: jest.Mock,
+          input: Record<string, unknown>,
+        ) => Promise<Record<string, unknown>>;
+      }
+    ).writeLlmAssistantTextForResult(jest.fn(), {
+      rawResult: {
+        assistantMessage: '没有找到真实候选，可以发布到发现。',
+        assistantMessageSource: 'deterministic_route',
+      },
+      userMessage: '继续找人',
+      messageId: 'agent-message:101:run-1',
+      userId: 7,
+    });
+
+    expect(finalResponses.generate).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      streamed: false,
+      text: null,
+      source: 'deterministic_route',
+    });
+  });
+});
+
+describe('SocialAgentChatController user interest events', () => {
+  const createController = (interestEvents: { recordEvent: jest.Mock }) =>
+    new SocialAgentChatController(
+      {} as unknown as SocialAgentChatService,
+      {} as unknown as SocialAgentCandidateCommandService,
+      {} as unknown as UserFacingResponseSanitizerService,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      interestEvents as never,
+    );
+
+  it('records authenticated Discover and profile behavior as recommendation signals', async () => {
+    const interestEvents = {
+      recordEvent: jest.fn().mockResolvedValue({ id: 91 }),
+    };
+    const controller = createController(interestEvents);
+
+    await expect(
+      controller.recordInterestEvent({ user: { id: 7 } } as never, {
+        eventType: 'discover_click',
+        targetUserId: 11,
+        socialRequestId: 23,
+        activityId: 45,
+        activityTags: ['散步', '低压力'],
+        candidatePreferenceTags: ['女生'],
+        city: '青岛',
+        locationText: '青岛大学附近',
+        timeWindow: '今天晚上',
+        source: 'discover_page',
+        dedupeKey: 'discover:publicIntent:abc:2026-06-22',
+        metadata: {
+          detailHref: '/public-intent/abc',
+          ignoredNested: { unsafe: true },
+        },
+      }),
+    ).resolves.toEqual({ ok: true, recorded: true, eventId: 91 });
+
+    expect(interestEvents.recordEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ownerUserId: 7,
+        eventType: 'discover_click',
+        targetUserId: 11,
+        socialRequestId: 23,
+        activityId: 45,
+        activityTags: ['散步', '低压力'],
+        candidatePreferenceTags: ['女生'],
+        city: '青岛',
+        locationText: '青岛大学附近',
+        timeWindow: '今天晚上',
+        source: 'discover_page',
+        dedupeKey: 'discover:publicIntent:abc:2026-06-22',
+      }),
+    );
+  });
+
+  it('rejects unknown interest event types instead of creating loose analytics rows', async () => {
+    const controller = createController({ recordEvent: jest.fn() });
+
+    await expect(
+      controller.recordInterestEvent({ user: { id: 7 } } as never, {
+        eventType: 'raw_tool_call_started',
+      }),
+    ).rejects.toThrow('Unsupported social agent interest event type');
   });
 });
 
@@ -471,14 +590,19 @@ describe('SocialAgentChatController user-facing stream', () => {
 
     const early = writes.join('');
     expect(early).toContain('"type":"run.started"');
-    expect(early).toContain('正在思考');
+    expect(early).toContain('正在理解你的需求');
     expect(early).toContain('会直接回复，不触发社交工具');
-    expect(early).not.toContain('正在理解你的需求');
+    expect(early).not.toContain('正在思考');
     expect(early).not.toContain('"type":"assistant_delta"');
 
     releaseRun();
     await stream;
-    expect(writes.join('')).toContain('"type":"assistant_delta"');
+    const serialized = writes.join('');
+    expect(serialized).toContain('"type":"assistant_delta"');
+    expect(serialized).not.toContain('"messageId":"ordinary-chat"');
+    expect(serialized).toMatch(
+      /"messageId":"agent-message:task:social-codex:message:7:thread-ordinary:[^"]+"/,
+    );
   });
 
   it('writes an immediate Social Codex status before a slow message stream resolves', async () => {
@@ -590,6 +714,155 @@ describe('SocialAgentChatController user-facing stream', () => {
     expect(serialized).toContain('"type":"assistant_delta"');
     expect(serialized).toContain('"type":"assistant.delta"');
     expect(serialized).toContain('"type":"result"');
+  });
+
+  it('uses completed queued search result in the same message stream when available', async () => {
+    const writes: string[] = [];
+    const queuedRun = {
+      taskId: 800,
+      runId: 'sar_completed_inline',
+      status: 'completed',
+      phase: 'completed',
+      message: '已完成搜索并刷新候选人',
+      visibleSteps: [],
+      queuedAt: new Date().toISOString(),
+      startedAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      completedAt: new Date().toISOString(),
+      failedAt: null,
+      pollAfterMs: 1500,
+      error: null,
+      replan: null,
+      result: {
+        taskId: 800,
+        status: AgentTaskStatus.Succeeded,
+        visibleSteps: [],
+        assistantMessage: '找到 3 个候选，先看陈砚。',
+        socialRequestDraft: null,
+        candidates: [{ userId: 22, displayName: '陈砚' }],
+        approvalRequiredActions: [],
+        events: [],
+        cards: [
+          {
+            id: 'candidate-22',
+            type: 'candidate_card',
+            schemaType: 'social_match.candidate',
+            title: '和陈砚低压力认识',
+            subtitle: '青岛 · 今天晚上 · 散步',
+            status: 'ready',
+            data: {
+              candidateRecordId: 22,
+              candidateUserId: 22,
+              name: '陈砚',
+              timePreference: '今天晚上',
+              locationName: '青岛大学附近',
+            },
+            actions: [],
+          },
+        ],
+        safety: {
+          blocked: false,
+          level: 'low',
+          reasons: [],
+          boundaryNotes: [],
+          requiredConfirmations: [],
+        },
+      },
+    };
+    const task = {
+      id: 800,
+      ownerUserId: 7,
+      result: withSocialAgentStoredRun({}, queuedRun as never),
+    };
+    const chat = {
+      handleMessageStream: jest.fn(async () => ({
+        taskId: 800,
+        status: AgentTaskStatus.Planning,
+        intent: 'social_search',
+        confidence: 0.9,
+        entities: {},
+        shouldSearch: true,
+        shouldReplan: false,
+        shouldUpdateProfile: false,
+        shouldExecuteAction: false,
+        replyStrategy: 'search_candidates',
+        source: 'rules',
+        action: 'queue_search',
+        savedContext: true,
+        profileUpdated: false,
+        shouldQueueRun: true,
+        runMode: 'initial',
+        queuedRun,
+        assistantMessage: '我这就帮你看看。',
+        cards: [],
+        permissionMode: 'limited_auto',
+        safety: {
+          blocked: false,
+          level: 'low',
+          reasons: [],
+          boundaryNotes: [],
+          requiredConfirmations: [],
+        },
+      })),
+    };
+    const taskLifecycle = {
+      assertTaskOwner: jest.fn().mockResolvedValue(task),
+    };
+    const controller = new SocialAgentChatController(
+      chat as unknown as SocialAgentChatService,
+      {} as unknown as SocialAgentCandidateCommandService,
+      new UserFacingResponseSanitizerService(
+        new LightStatusMapperService(),
+        new AgentCardAssemblerService(),
+      ),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      new SocialAgentTaskMemoryStateMachineService(),
+      undefined,
+      undefined,
+      taskLifecycle as never,
+    );
+    const response = {
+      status: jest.fn(),
+      setHeader: jest.fn(),
+      flushHeaders: jest.fn(),
+      flush: jest.fn(),
+      write: jest.fn((chunk: string) => {
+        writes.push(chunk);
+      }),
+      end: jest.fn(),
+    } as unknown as Response;
+
+    await controller.handleMessageStream(
+      { user: { id: 7 } } as Parameters<
+        SocialAgentChatController['handleMessageStream']
+      >[0],
+      {
+        message: '我想在青岛大学附近今天晚上找散步搭子',
+        conversationIntent: 'social',
+        clientContext: {
+          source: 'web',
+          threadId: 'agent-task:800',
+          conversationIntent: 'social',
+        },
+      },
+      response,
+    );
+
+    const serialized = writes.join('');
+    expect(taskLifecycle.assertTaskOwner).toHaveBeenCalledWith(800, 7);
+    expect(serialized).toContain('找到 3 个候选，先看陈砚');
+    expect(serialized).toContain('和陈砚低压力认识');
+    expect(serialized).toContain('今天晚上');
+    expect(serialized).not.toContain('我这就帮你看看');
   });
 
   it('binds message stream initial trace to the result task when downstream emits no task event', async () => {
@@ -1040,9 +1313,7 @@ describe('SocialAgentChatController user-facing stream', () => {
       recordAssistantMessage: jest.fn().mockResolvedValue(undefined),
     };
     const taskLifecycle = {
-      assertTaskOwner: jest
-        .fn()
-        .mockResolvedValue({ id: 515, ownerUserId: 7 }),
+      assertTaskOwner: jest.fn().mockResolvedValue({ id: 515, ownerUserId: 7 }),
     };
     const controller = new SocialAgentChatController(
       chat as unknown as SocialAgentChatService,
@@ -1282,7 +1553,7 @@ describe('SocialAgentChatController user-facing stream', () => {
             taskId: 101,
             status: AgentTaskStatus.Succeeded,
             visibleSteps: [],
-            assistantMessage: '我会先结合你的 Life Graph，再筛选合适的人。',
+            assistantMessage: '我会先结合你的长期偏好，再筛选合适的人。',
             socialRequestDraft: null,
             candidates: [],
             approvalRequiredActions: [],
@@ -1358,8 +1629,8 @@ describe('SocialAgentChatController user-facing stream', () => {
     expect(serialized).toContain('"assistantMessageSource":"fallback"');
     expect(serialized).toContain('"type":"progress"');
     expect(serialized).toContain('"lifecycle":"analyzing_intent"');
-    expect(serialized).toContain('正在处理这一步');
     expect(serialized).toContain('正在理解你的需求');
+    expect(serialized).not.toContain(['正在处理', '当前', '步骤'].join(''));
     expect(serialized).toContain('assistantMessage');
     expect(serialized).toContain('"lifecycle":"checking_safety"');
     expect(serialized).toContain('cards');
@@ -1520,7 +1791,7 @@ describe('SocialAgentChatController user-facing stream', () => {
     expect(serialized).toContain('已检查安全边界');
     expect(serialized).toContain('"type":"approval.required"');
     expect(serialized).toContain('发送邀请前需要你确认');
-    expect(serialized).toContain('"checkpointId":909');
+    expect(serialized).not.toContain('"checkpointId":');
     expect(serialized).toContain('发布到发现前预览');
     expect(serialized).toContain('"lifecycleNode":"approval"');
     expect(serialized).toContain('"type":"run.completed"');
@@ -2137,7 +2408,7 @@ describe('SocialAgentChatController user-facing stream', () => {
     expect(serialized).toContain('"recoveryNotice"');
     expect(serialized).toContain('"kind":"failed"');
     expect(serialized).toContain('"source":"stream_error"');
-    expect(serialized).toContain('FitMeet Agent 暂时没有顺利完成');
+    expect(serialized).toContain('连接中断了，可以继续');
     expect(serialized).not.toContain('traceId');
     expect(serialized).not.toContain('planner');
     expect(serialized).not.toContain('tool call');
@@ -2186,9 +2457,10 @@ describe('SocialAgentChatController user-facing stream', () => {
     expect(serialized).toContain('"type":"run.started"');
     expect(serialized).toContain('"type":"run.failed"');
     expect(serialized).toContain('"stage":"detect_social_intent"');
-    expect(serialized).toContain('这次处理没有完成');
+    expect(serialized).toContain('连接中断了，可以继续');
     expect(serialized).toContain('"type":"error"');
-    expect(serialized).toContain('这次处理时间有点久');
+    expect(serialized).toContain('这段需求还在');
+    expect(serialized).not.toContain('这次处理时间有点久');
     expect(serialized).not.toContain('QueryFailedError');
     expect(serialized).not.toContain('database');
     expect(serialized).not.toContain('traceId');
@@ -2266,12 +2538,16 @@ describe('SocialAgentChatController user-facing stream', () => {
 
     const serialized = writes.join('');
     expect(serialized).toContain('"type":"run.started"');
-    expect(serialized).toContain('正在处理你的选择');
+    expect(serialized).toContain('正在确认你的选择');
     expect(serialized).toContain('"type":"visible_process.delta"');
     expect(serialized).toContain('"stage":"hydrate_context"');
     expect(serialized).toContain('正在读取你的偏好');
-    expect(serialized).not.toContain('"lightStatus":"正在理解你的需求"');
+    expect(serialized).not.toContain('"lightStatus":"正在处理你的选择"');
     expect(serialized).toContain('"type":"assistant_delta"');
+    expect(serialized).not.toContain('"messageId":"action-1"');
+    expect(serialized).toMatch(
+      /"messageId":"agent-message:101:social-codex:action:7:101:[^"]+"/,
+    );
     expect(serialized).toContain('"type":"assistant.delta"');
     expect(serialized).toContain('"source":"llm"');
     expect(serialized).toContain('"type":"assistant_done"');
@@ -2283,6 +2559,124 @@ describe('SocialAgentChatController user-facing stream', () => {
       expect.any(Function),
       expect.objectContaining({ signal: expect.any(AbortSignal) }),
     );
+  });
+
+  it('uses deterministic card action replies for low-risk actions without final LLM calls', async () => {
+    const writes: string[] = [];
+    const task = { id: 101, ownerUserId: 7 };
+    const chat = {
+      performCardActionStream: jest.fn(async () => ({
+        taskId: 101,
+        status: AgentTaskStatus.Succeeded,
+        intent: 'candidate_followup',
+        confidence: 0.9,
+        entities: {},
+        shouldSearch: false,
+        shouldReplan: false,
+        shouldUpdateProfile: false,
+        shouldExecuteAction: true,
+        replyStrategy: 'action',
+        source: 'rules',
+        action: 'candidate.like',
+        savedContext: true,
+        profileUpdated: false,
+        shouldQueueRun: false,
+        runMode: null,
+        assistantMessage:
+          '已收藏陈砚。我会把这个偏好用于后续排序，但不会自动发送消息或建立连接。',
+        cards: [],
+        permissionMode: 'limited_auto',
+        safety: {
+          blocked: false,
+          level: 'low',
+          reasons: [],
+          boundaryNotes: ['收藏只是记录偏好。'],
+          requiredConfirmations: [],
+        },
+      })),
+    };
+    const finalResponses = {
+      generate: jest.fn(async () => '不应该调用模型。'),
+    };
+    const messageLog = {
+      recordAssistantMessage: jest.fn().mockResolvedValue(undefined),
+    };
+    const taskLifecycle = {
+      assertTaskOwner: jest.fn().mockResolvedValue(task),
+    };
+    const controller = new SocialAgentChatController(
+      chat as unknown as SocialAgentChatService,
+      {} as unknown as SocialAgentCandidateCommandService,
+      new UserFacingResponseSanitizerService(
+        new LightStatusMapperService(),
+        new AgentCardAssemblerService(),
+      ),
+      undefined,
+      undefined,
+      finalResponses as never,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      messageLog as never,
+      taskLifecycle as never,
+    );
+    const response = {
+      status: jest.fn(),
+      setHeader: jest.fn(),
+      flushHeaders: jest.fn(),
+      write: jest.fn((chunk: string) => {
+        writes.push(chunk);
+      }),
+      end: jest.fn(),
+    } as unknown as Response;
+
+    await controller.performTaskActionStream(
+      { user: { id: 7 } } as Parameters<
+        SocialAgentChatController['performTaskActionStream']
+      >[0],
+      101,
+      { action: 'candidate.like', idempotencyKey: 'save-1' },
+      response,
+    );
+
+    for (const action of [
+      'view_activity',
+      'see_more',
+      'dislike_candidate',
+      'regenerate_opener',
+      'skip_publish',
+    ]) {
+      await controller.performTaskActionStream(
+        { user: { id: 7 } } as Parameters<
+          SocialAgentChatController['performTaskActionStream']
+        >[0],
+        101,
+        { action: action as never, idempotencyKey: `${action}-1` },
+        response,
+      );
+    }
+
+    const serialized = writes.join('');
+    expect(finalResponses.generate).not.toHaveBeenCalled();
+    expect(taskLifecycle.assertTaskOwner).toHaveBeenCalledWith(101, 7);
+    expect(messageLog.recordAssistantMessage).toHaveBeenCalledWith(
+      task,
+      '已收藏陈砚。我会把这个偏好用于后续排序，但不会自动发送消息或建立连接。',
+      expect.objectContaining({
+        assistantMessage:
+          '已收藏陈砚。我会把这个偏好用于后续排序，但不会自动发送消息或建立连接。',
+        assistantMessageSource: 'deterministic_action',
+      }),
+      { replaceLastAssistantTurn: true },
+    );
+    expect(serialized).toContain('已收藏陈砚');
+    expect(serialized).not.toContain('"assistantMessageSource":"llm"');
   });
 
   it('persists final LLM card action text by replacing the prior action summary', async () => {
@@ -2394,49 +2788,51 @@ describe('SocialAgentChatController user-facing stream', () => {
       releaseAction = resolve;
     });
     const chat = {
-      performCardActionStream: jest.fn(async (_userId, _taskId, _body, emit) => {
-        downstreamStarted = true;
-        await downstreamGate;
-        await emit({
-          type: 'assistant_delta',
-          messageId: 'slow-action-1',
-          delta: '我会先确认安全边界，再继续。',
-          source: 'llm',
-        });
-        await emit({
-          type: 'assistant_done',
-          messageId: 'slow-action-1',
-          source: 'llm',
-        });
-        return {
-          taskId: 101,
-          status: AgentTaskStatus.Succeeded,
-          intent: 'candidate_followup',
-          confidence: 0.9,
-          entities: {},
-          shouldSearch: false,
-          shouldReplan: false,
-          shouldUpdateProfile: false,
-          shouldExecuteAction: true,
-          replyStrategy: 'action',
-          source: 'rules',
-          action: 'await_confirmation',
-          savedContext: false,
-          profileUpdated: false,
-          shouldQueueRun: false,
-          runMode: null,
-          assistantMessage: '我会先确认安全边界，再继续。',
-          cards: [],
-          permissionMode: 'confirm',
-          safety: {
-            blocked: false,
-            level: 'low',
-            reasons: [],
-            boundaryNotes: ['确认前不会发送。'],
-            requiredConfirmations: ['发送消息'],
-          },
-        };
-      }),
+      performCardActionStream: jest.fn(
+        async (_userId, _taskId, _body, emit) => {
+          downstreamStarted = true;
+          await downstreamGate;
+          await emit({
+            type: 'assistant_delta',
+            messageId: 'slow-action-1',
+            delta: '我会先确认安全边界，再继续。',
+            source: 'llm',
+          });
+          await emit({
+            type: 'assistant_done',
+            messageId: 'slow-action-1',
+            source: 'llm',
+          });
+          return {
+            taskId: 101,
+            status: AgentTaskStatus.Succeeded,
+            intent: 'candidate_followup',
+            confidence: 0.9,
+            entities: {},
+            shouldSearch: false,
+            shouldReplan: false,
+            shouldUpdateProfile: false,
+            shouldExecuteAction: true,
+            replyStrategy: 'action',
+            source: 'rules',
+            action: 'await_confirmation',
+            savedContext: false,
+            profileUpdated: false,
+            shouldQueueRun: false,
+            runMode: null,
+            assistantMessage: '我会先确认安全边界，再继续。',
+            cards: [],
+            permissionMode: 'confirm',
+            safety: {
+              blocked: false,
+              level: 'low',
+              reasons: [],
+              boundaryNotes: ['确认前不会发送。'],
+              requiredConfirmations: ['发送消息'],
+            },
+          };
+        },
+      ),
     };
     const controller = new SocialAgentChatController(
       chat as unknown as SocialAgentChatService,
@@ -2473,7 +2869,7 @@ describe('SocialAgentChatController user-facing stream', () => {
     expect(response.setHeader).toHaveBeenCalledWith('X-Accel-Buffering', 'no');
     expect(response.flush).toHaveBeenCalled();
     expect(early).toContain('"type":"run.started"');
-    expect(early).toContain('"title":"正在处理你的选择"');
+    expect(early).toContain('"title":"正在确认你的选择"');
     expect(early).toContain('"type":"visible_process.delta"');
     expect(early).toContain('"title":"正在读取你的偏好"');
     expect(early).not.toContain('"type":"assistant_delta"');
@@ -2799,7 +3195,7 @@ describe('SocialAgentChatController user-facing stream', () => {
       const serialized = writes.join('');
       expect(serialized).toContain('"type":"run.started"');
       expect(serialized).toContain('"type":"visible_process.delta"');
-      expect(serialized).toContain('正在恢复保存点');
+      expect(serialized).toContain('正在接着刚才的进度');
       expect(serialized).toContain('"type":"assistant_delta"');
       expect(serialized).toContain('"type":"assistant_done"');
       expect(serialized).toContain('"type":"result"');
@@ -2833,7 +3229,7 @@ describe('SocialAgentChatController user-facing stream', () => {
         emit({
           type: 'assistant_delta',
           messageId: 'checkpoint-retry',
-          delta: '我会从保存点重新尝试。',
+          delta: '我会接着刚才这一步重新尝试。',
           source: 'llm',
         });
         emit({
@@ -2858,7 +3254,7 @@ describe('SocialAgentChatController user-facing stream', () => {
           profileUpdated: false,
           shouldQueueRun: false,
           runMode: null,
-          assistantMessage: '我会从保存点重新尝试。',
+          assistantMessage: '我会接着刚才这一步重新尝试。',
           cards: [],
           permissionMode: 'confirm',
           safety: {
@@ -2937,7 +3333,7 @@ describe('SocialAgentChatController user-facing stream', () => {
     const serialized = writes.join('');
     expect(serialized).toContain('"type":"run.started"');
     expect(serialized).toContain('"type":"visible_process.delta"');
-    expect(serialized).toContain('正在恢复保存点');
+    expect(serialized).toContain('正在接着刚才的进度');
     expect(serialized).toContain('"type":"assistant_delta"');
     expect(serialized).toContain('"type":"assistant_done"');
     expect(serialized).toContain('"type":"result"');
@@ -3058,11 +3454,13 @@ describe('SocialAgentChatController user-facing stream', () => {
     });
     expect(chat.handleMessageStream).not.toHaveBeenCalled();
     expect(early).toContain('"type":"run.started"');
-    expect(early).toContain('"title":"正在重新运行这一步"');
-    expect(early).toContain('会先恢复保存点，再继续处理这一步。');
+    expect(early).toContain('"title":"正在重新整理"');
+    expect(early).toContain(
+      '会接着刚才的进度继续处理，不会重复执行已经完成的动作。',
+    );
     expect(early).toContain('"type":"visible_process.delta"');
-    expect(early).toContain('"title":"正在恢复保存点"');
-    expect(early).toContain('不会重复执行已经完成的步骤');
+    expect(early).toContain('"title":"正在接着刚才的进度"');
+    expect(early).toContain('不会重复执行已经完成的内容');
     expect(early).not.toContain('"type":"assistant_delta"');
     expect(early).not.toContain('"type":"result"');
 
@@ -3226,7 +3624,7 @@ describe('SocialAgentChatController user-facing stream', () => {
     const serialized = writes.join('');
     expect(serialized).toContain('"type":"run.started"');
     expect(serialized).toContain('"type":"visible_process.delta"');
-    expect(serialized).toContain('正在恢复保存点');
+    expect(serialized).toContain('正在接着刚才的进度');
     expect(serialized).toContain('"type":"approval.resolved"');
     expect(serialized).toContain('已取消这一步');
     expect(serialized).toContain('"approvalId":88');

@@ -60,7 +60,6 @@ type RealtimeEnvelope = {
   userId: number;
   payload: Record<string, unknown>;
   createdAt: string;
-  traceId?: string;
 };
 
 function connectRealtimeSocket(

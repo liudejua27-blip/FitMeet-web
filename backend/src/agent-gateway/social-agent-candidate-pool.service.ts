@@ -33,7 +33,9 @@ import {
 import type { CandidateProfileDataQuality } from './social-agent-candidate-profile-presenter';
 import { extractCandidateTags } from './social-agent-candidate-query-parser';
 import {
+  candidateClampScore,
   candidateCommonTags,
+  candidateMatchLevel,
   candidateTotalScore,
 } from './social-agent-candidate-scoring';
 import {
@@ -74,6 +76,7 @@ import {
   buildCandidatePoolActivitySearchResult,
   buildCandidatePoolSearchResult,
 } from './social-agent-candidate-pool-result.presenter';
+import { SocialAgentMetricsService } from './social-agent-metrics.service';
 import type { CandidateEmotionalInsight } from './social-agent-candidate-emotional-insight';
 import {
   buildProfileCandidateReasons,
@@ -93,6 +96,11 @@ import {
   isSocialAgentActivityLikePublicIntent,
   isSocialAgentProfileCandidateOptedIn,
 } from './social-agent-candidate-pool-eligibility';
+import { SocialAgentToolResultCacheService } from './social-agent-tool-result-cache.service';
+import {
+  SocialAgentUserInterestEventService,
+  type SocialAgentUserInterestSummary,
+} from './social-agent-user-interest-event.service';
 
 export type {
   CandidatePoolIntent,
@@ -113,6 +121,13 @@ export type {
 export type { CandidateEmotionalInsight } from './social-agent-candidate-emotional-insight';
 
 export type CandidatePoolDataQuality = CandidateProfileDataQuality;
+
+type CandidatePublicProfileSummary = {
+  city: string;
+  tags: string[];
+  completeness: number;
+  displayName: string;
+};
 
 export type CandidatePoolCandidate = {
   source: CandidatePoolSource;
@@ -142,6 +157,15 @@ export type CandidatePoolCandidate = {
   suggestedMessage: string;
   commonTags: string[];
   distanceKm: number | null;
+  distanceLabel?: string | null;
+  area?: string | null;
+  activityType?: string | null;
+  sport?: string | null;
+  timePreference?: string | null;
+  locationText?: string | null;
+  timeLabel?: string | null;
+  timeWindow?: string | null;
+  sharedInterests?: string[];
   scoreBreakdown: Record<string, number>;
   candidateRecordId?: number | null;
   status?: SocialRequestCandidateStatus;
@@ -202,9 +226,13 @@ export type CandidatePoolActivitySearchResult = {
 };
 
 const DEFAULT_LIMIT = 10;
+const SOURCE_CACHE_TTL_MS = 30_000;
 
 @Injectable()
 export class SocialAgentCandidatePoolService {
+  private readonly localToolResultCache =
+    new SocialAgentToolResultCacheService();
+
   constructor(
     @InjectRepository(User)
     private readonly userRepo: Repository<User>,
@@ -228,6 +256,12 @@ export class SocialAgentCandidatePoolService {
     private readonly candidateExplanation: CandidateExplanationService,
     private readonly sceneRisk: SceneRiskPolicyService,
     @Optional() private readonly lifeGraph?: LifeGraphService,
+    @Optional()
+    private readonly toolResultCache?: SocialAgentToolResultCacheService,
+    @Optional()
+    private readonly metrics?: SocialAgentMetricsService,
+    @Optional()
+    private readonly interestEvents?: SocialAgentUserInterestEventService,
   ) {}
 
   async searchSocial(
@@ -246,17 +280,31 @@ export class SocialAgentCandidatePoolService {
       legacyRequests,
       blockedIds,
       lifeGraphSignals,
+      userInterestSummary,
     ] = await Promise.all([
       this.loadCounts(),
-      this.safeFind(this.userRepo, { order: { updatedAt: 'DESC' } }),
-      this.safeFind(this.profileRepo, { order: { updatedAt: 'DESC' } }),
-      this.safeFind(this.aiDelegateRepo, { order: { updatedAt: 'DESC' } }),
-      this.safeFind(this.publicIntentRepo, { order: { updatedAt: 'DESC' } }),
-      this.safeFind(this.legacySocialRequestRepo, {
+      this.cachedFind('users:updated_desc', this.userRepo, {
         order: { updatedAt: 'DESC' },
       }),
-      this.loadBlockedIds(input.ownerUserId),
-      this.loadLifeGraphSignals(input.ownerUserId),
+      this.cachedFind('profiles:updated_desc', this.profileRepo, {
+        order: { updatedAt: 'DESC' },
+      }),
+      this.cachedFind('ai_delegates:updated_desc', this.aiDelegateRepo, {
+        order: { updatedAt: 'DESC' },
+      }),
+      this.cachedFind('public_intents:updated_desc', this.publicIntentRepo, {
+        order: { updatedAt: 'DESC' },
+      }),
+      this.cachedFind(
+        'legacy_social_requests:updated_desc',
+        this.legacySocialRequestRepo,
+        {
+          order: { updatedAt: 'DESC' },
+        },
+      ),
+      this.cachedBlockedIds(input.ownerUserId),
+      this.cachedLifeGraphSignals(input.ownerUserId),
+      this.loadUserInterestSummary(input.ownerUserId),
     ]);
 
     const profileMap = new Map(
@@ -294,8 +342,12 @@ export class SocialAgentCandidatePoolService {
       ...profileCandidates,
       ...publicCandidates,
     ]);
+    const behaviorRanked = this.applyUserInterestSignals(
+      merged,
+      userInterestSummary,
+    );
     const limit = this.normalizeLimit(input.limit);
-    const candidates = merged.slice(0, limit);
+    const candidates = behaviorRanked.slice(0, limit);
     if (input.persistCandidates !== false) {
       await this.persistCandidateRows(query.socialRequestId, candidates);
     }
@@ -328,11 +380,19 @@ export class SocialAgentCandidatePoolService {
     const [counts, activities, publicIntents, profiles, delegates, blockedIds] =
       await Promise.all([
         this.loadCounts(),
-        this.safeFind(this.activityRepo, { order: { updatedAt: 'DESC' } }),
-        this.safeFind(this.publicIntentRepo, { order: { updatedAt: 'DESC' } }),
-        this.safeFind(this.profileRepo, { order: { updatedAt: 'DESC' } }),
-        this.safeFind(this.aiDelegateRepo, { order: { updatedAt: 'DESC' } }),
-        this.loadBlockedIds(input.ownerUserId),
+        this.cachedFind('activities:updated_desc', this.activityRepo, {
+          order: { updatedAt: 'DESC' },
+        }),
+        this.cachedFind('public_intents:updated_desc', this.publicIntentRepo, {
+          order: { updatedAt: 'DESC' },
+        }),
+        this.cachedFind('profiles:updated_desc', this.profileRepo, {
+          order: { updatedAt: 'DESC' },
+        }),
+        this.cachedFind('ai_delegates:updated_desc', this.aiDelegateRepo, {
+          order: { updatedAt: 'DESC' },
+        }),
+        this.cachedBlockedIds(input.ownerUserId),
       ]);
     const profileMap = new Map(
       profiles.map((profile) => [profile.userId, profile]),
@@ -693,9 +753,13 @@ export class SocialAgentCandidatePoolService {
     query: CandidatePoolResolvedQuery,
     lifeGraphSignals: LifeGraphUnifiedMatchSignalsDto | null = null,
   ): CandidatePoolCandidate {
-    const city = this.firstText(profile?.city, user.city, delegate?.city);
-    const tags = candidateProfileTags(user, profile, delegate);
-    const completeness = candidateProfileCompleteness(user, profile, delegate);
+    const profileSummary = this.cachedPublicProfileSummary({
+      user,
+      profile,
+      delegate,
+      city: this.firstText(profile?.city, user.city, delegate?.city),
+    });
+    const { city, tags, completeness, displayName } = profileSummary;
     const commonTags = candidateCommonTags(query.interestTags, tags);
     const scoreBreakdown = buildProfileCandidateScoreBreakdown({
       user,
@@ -710,13 +774,13 @@ export class SocialAgentCandidatePoolService {
       sceneRisk: this.sceneRisk,
     });
     const matchScore = candidateTotalScore(scoreBreakdown);
-    const displayName = candidateDisplayName(user, profile, city);
     const matchReasons = buildProfileCandidateReasons({
       query,
       city,
       commonTags,
       completeness,
       verified: user.verified,
+      preferenceFit: scoreBreakdown.preferenceFit ?? 0,
     });
     return buildCandidatePoolCandidate({
       source: 'profile_candidate',
@@ -753,18 +817,23 @@ export class SocialAgentCandidatePoolService {
     query: CandidatePoolResolvedQuery,
     lifeGraphSignals: LifeGraphUnifiedMatchSignalsDto | null = null,
   ): CandidatePoolCandidate {
-    const city = this.firstText(
-      intent.city,
-      profile?.city,
-      user.city,
-      delegate?.city,
-    );
+    const profileSummary = this.cachedPublicProfileSummary({
+      user,
+      profile,
+      delegate,
+      city: this.firstText(
+        intent.city,
+        profile?.city,
+        user.city,
+        delegate?.city,
+      ),
+    });
+    const { city, completeness, displayName } = profileSummary;
     const tags = this.uniqueStrings([
       ...this.normalizeArray(intent.interestTags),
       intent.requestType,
-      ...candidateProfileTags(user, profile, delegate),
+      ...profileSummary.tags,
     ]);
-    const completeness = candidateProfileCompleteness(user, profile, delegate);
     const commonTags = candidateCommonTags(query.interestTags, tags);
     const scoreBreakdown = buildPublicIntentCandidateScoreBreakdown({
       query,
@@ -773,16 +842,24 @@ export class SocialAgentCandidatePoolService {
       commonTags,
       completeness,
       updatedAt: intent.updatedAt,
+      candidateSignals: [
+        intent.title,
+        intent.description,
+        intent.requestType,
+        intent.locationPreference,
+        intent.timePreference,
+        intent.socialGoal,
+      ],
       lifeGraphSignals,
       sceneRisk: this.sceneRisk,
     });
     const matchScore = candidateTotalScore(scoreBreakdown);
-    const displayName = candidateDisplayName(user, profile, city);
     const matchReasons = buildPublicIntentCandidateReasons({
       intent,
       query,
       city,
       commonTags,
+      preferenceFit: scoreBreakdown.preferenceFit ?? 0,
     });
     return buildCandidatePoolCandidate({
       source: 'public_intent',
@@ -800,6 +877,7 @@ export class SocialAgentCandidatePoolService {
         title: intent.title,
         requestType: intent.requestType,
         timePreference: intent.timePreference,
+        locationPreference: intent.locationPreference,
         updatedAt: intent.updatedAt,
       }),
       publicIntentId: intent.id,
@@ -820,18 +898,23 @@ export class SocialAgentCandidatePoolService {
     query: CandidatePoolResolvedQuery,
     lifeGraphSignals: LifeGraphUnifiedMatchSignalsDto | null = null,
   ): CandidatePoolCandidate {
-    const city = this.firstText(
-      request.city,
-      profile?.city,
-      user.city,
-      delegate?.city,
-    );
+    const profileSummary = this.cachedPublicProfileSummary({
+      user,
+      profile,
+      delegate,
+      city: this.firstText(
+        request.city,
+        profile?.city,
+        user.city,
+        delegate?.city,
+      ),
+    });
+    const { city, completeness, displayName } = profileSummary;
     const tags = this.uniqueStrings([
       request.requestType,
       ...extractCandidateTags(`${request.title} ${request.description}`),
-      ...candidateProfileTags(user, profile, delegate),
+      ...profileSummary.tags,
     ]);
-    const completeness = candidateProfileCompleteness(user, profile, delegate);
     const commonTags = candidateCommonTags(query.interestTags, tags);
     const scoreBreakdown = buildPublicIntentCandidateScoreBreakdown({
       query,
@@ -840,10 +923,16 @@ export class SocialAgentCandidatePoolService {
       commonTags,
       completeness,
       updatedAt: request.updatedAt,
+      candidateSignals: [
+        request.title,
+        request.description,
+        request.requestType,
+        request.loc,
+        request.timePreference,
+      ],
       lifeGraphSignals,
       sceneRisk: this.sceneRisk,
     });
-    const displayName = candidateDisplayName(user, profile, city);
     const matchReasons = buildPublicIntentCandidateReasons({
       intent: {
         title: request.title,
@@ -853,6 +942,7 @@ export class SocialAgentCandidatePoolService {
       query,
       city,
       commonTags,
+      preferenceFit: scoreBreakdown.preferenceFit ?? 0,
     });
     return buildCandidatePoolCandidate({
       source: 'public_intent',
@@ -882,6 +972,63 @@ export class SocialAgentCandidatePoolService {
     });
   }
 
+  private cachedPublicProfileSummary(input: {
+    user: User;
+    profile: UserSocialProfile | null;
+    delegate: AiDelegateProfile | null;
+    city: string;
+  }): CandidatePublicProfileSummary {
+    const key = this.publicProfileSummaryCacheKey(input);
+    const cached = this.cache().getWithMeta<CandidatePublicProfileSummary>(key);
+    if (cached) {
+      this.metrics?.recordToolResultCache({
+        cacheName: 'candidate_public_profile_summary',
+        hit: true,
+        approxChars: cached.approxStoredChars,
+      });
+      return {
+        ...cached.value,
+        tags: [...cached.value.tags],
+      };
+    }
+    const summary: CandidatePublicProfileSummary = {
+      city: input.city,
+      tags: candidateProfileTags(input.user, input.profile, input.delegate),
+      completeness: candidateProfileCompleteness(
+        input.user,
+        input.profile,
+        input.delegate,
+      ),
+      displayName: candidateDisplayName(input.user, input.profile, input.city),
+    };
+    this.cache().set(key, summary, { ttlMs: SOURCE_CACHE_TTL_MS });
+    this.metrics?.recordToolResultCache({
+      cacheName: 'candidate_public_profile_summary',
+      hit: false,
+      approxChars: this.approxChars(summary),
+    });
+    return {
+      ...summary,
+      tags: [...summary.tags],
+    };
+  }
+
+  private publicProfileSummaryCacheKey(input: {
+    user: User;
+    profile: UserSocialProfile | null;
+    delegate: AiDelegateProfile | null;
+    city: string;
+  }): string {
+    return [
+      'candidate_public_profile_summary',
+      input.user.id,
+      this.updatedAtKey(input.user.updatedAt),
+      this.updatedAtKey(input.profile?.updatedAt),
+      this.updatedAtKey(input.delegate?.updatedAt),
+      cleanDisplayText(input.city, '').toLowerCase(),
+    ].join(':');
+  }
+
   private profileCandidatePublicActivitySignals(input: {
     city: string;
     commonTags: string[];
@@ -901,14 +1048,191 @@ export class SocialAgentCandidatePoolService {
     title: string;
     requestType: string;
     timePreference?: string | null;
+    locationPreference?: string | null;
     updatedAt: Date | string | null | undefined;
   }): string[] {
     return this.uniqueStrings([
-      cleanDisplayText(input.title, '') ? `公开约练：${cleanDisplayText(input.title, '')}` : '',
-      cleanDisplayText(input.requestType, '') ? `公开类型：${cleanDisplayText(input.requestType, '')}` : '',
-      cleanDisplayText(input.timePreference, '') ? `公开时间：${cleanDisplayText(input.timePreference, '')}` : '',
+      cleanDisplayText(input.title, '')
+        ? `公开约练：${cleanDisplayText(input.title, '')}`
+        : '',
+      cleanDisplayText(input.requestType, '')
+        ? `公开类型：${cleanDisplayText(input.requestType, '')}`
+        : '',
+      cleanDisplayText(input.timePreference, '')
+        ? `公开时间：${cleanDisplayText(input.timePreference, '')}`
+        : '',
+      cleanDisplayText(input.locationPreference, '')
+        ? `公开地点：${cleanDisplayText(input.locationPreference, '')}`
+        : '',
       this.updatedAtSignal(input.updatedAt),
     ]).slice(0, 4);
+  }
+
+  private applyUserInterestSignals(
+    candidates: CandidatePoolCandidate[],
+    summary: SocialAgentUserInterestSummary | null,
+  ): CandidatePoolCandidate[] {
+    if (!summary || summary.eventCount <= 0) {
+      return candidates.sort((a, b) => b.matchScore - a.matchScore);
+    }
+    return candidates
+      .map((candidate) => this.applyUserInterestSignal(candidate, summary))
+      .sort((a, b) => b.matchScore - a.matchScore);
+  }
+
+  private applyUserInterestSignal(
+    candidate: CandidatePoolCandidate,
+    summary: SocialAgentUserInterestSummary,
+  ): CandidatePoolCandidate {
+    const signals: string[] = [];
+    let adjustment = 0;
+    if (summary.positiveTargetUserIds.includes(candidate.candidateUserId)) {
+      adjustment += 10;
+      signals.push('你之前对这位候选表现过兴趣');
+    }
+    if (summary.negativeTargetUserIds.includes(candidate.candidateUserId)) {
+      adjustment -= 25;
+      signals.push('你之前跳过过这位候选，本次会降低排序');
+    }
+    const tagScore = this.weightedTextOverlapScore({
+      candidate,
+      weights: [
+        ...summary.activityTagWeights,
+        ...summary.candidatePreferenceWeights,
+      ],
+      positiveLabel: '你之前偏好类似兴趣',
+      negativeLabel: '你之前减少过类似推荐',
+      signals,
+      maxPositive: 12,
+      maxNegative: 12,
+    });
+    adjustment += tagScore;
+    const cityScore = this.weightedTextOverlapScore({
+      candidate,
+      weights: summary.cityWeights,
+      positiveLabel: '你之前更常选择这个城市',
+      negativeLabel: '你之前降低过这个城市的类似机会',
+      signals,
+      maxPositive: 4,
+      maxNegative: 4,
+    });
+    adjustment += cityScore;
+    const locationScore = this.weightedTextOverlapScore({
+      candidate,
+      weights: summary.locationWeights,
+      positiveLabel: '你之前更常选择这个区域',
+      negativeLabel: '你之前降低过这个区域的类似机会',
+      signals,
+      maxPositive: 5,
+      maxNegative: 5,
+    });
+    adjustment += locationScore;
+    const timeWindowScore = this.weightedTextOverlapScore({
+      candidate,
+      weights: summary.timeWindowWeights,
+      positiveLabel: '你之前更常选择这个时间',
+      negativeLabel: '你之前降低过这个时间的类似机会',
+      signals,
+      maxPositive: 4,
+      maxNegative: 4,
+    });
+    adjustment += timeWindowScore;
+    const newScore = candidateClampScore(candidate.matchScore + adjustment);
+    const preferenceHistorySignals = this.uniqueStrings([
+      ...signals,
+      ...candidate.preferenceHistorySignals,
+    ]).slice(0, 8);
+    return {
+      ...candidate,
+      matchScore: newScore,
+      score: newScore,
+      level: candidateMatchLevel(newScore),
+      scoreBreakdown: {
+        ...candidate.scoreBreakdown,
+        behaviorPreference: Math.round(adjustment),
+      },
+      preferenceHistorySignals,
+    };
+  }
+
+  private weightedTextOverlapScore(input: {
+    candidate: CandidatePoolCandidate;
+    weights: Array<{ tag: string; weight: number }>;
+    positiveLabel: string;
+    negativeLabel: string;
+    signals: string[];
+    maxPositive: number;
+    maxNegative: number;
+  }): number {
+    if (input.weights.length === 0) return 0;
+    const haystack = this.candidateBehaviorText(input.candidate);
+    let positive = 0;
+    let negative = 0;
+    const positiveTags: string[] = [];
+    const negativeTags: string[] = [];
+    for (const item of input.weights) {
+      const tag = cleanDisplayText(item.tag, '').trim();
+      if (!tag || !this.textContains(haystack, tag)) continue;
+      if (item.weight > 0) {
+        positive += Math.min(item.weight, 4);
+        positiveTags.push(tag);
+      } else if (item.weight < 0) {
+        negative += Math.min(Math.abs(item.weight), 4);
+        negativeTags.push(tag);
+      }
+    }
+    if (positiveTags.length > 0) {
+      input.signals.push(
+        `${input.positiveLabel}：${this.uniqueStrings(positiveTags)
+          .slice(0, 3)
+          .join('、')}`,
+      );
+    }
+    if (negativeTags.length > 0) {
+      input.signals.push(
+        `${input.negativeLabel}：${this.uniqueStrings(negativeTags)
+          .slice(0, 3)
+          .join('、')}`,
+      );
+    }
+    return (
+      Math.min(positive, input.maxPositive) -
+      Math.min(negative, input.maxNegative)
+    );
+  }
+
+  private candidateBehaviorText(candidate: CandidatePoolCandidate): string {
+    return [
+      candidate.displayName,
+      candidate.city,
+      candidate.distanceLabel,
+      candidate.timeLabel,
+      candidate.timeWindow,
+      candidate.locationText,
+      ...candidate.interestTags,
+      ...candidate.commonTags,
+      ...candidate.matchReasons,
+      ...(candidate.recentPublicActivity ?? []),
+      candidate.publicReason,
+      candidate.privateReason,
+      candidate.whyYouMayLike,
+      candidate.whyNow,
+    ]
+      .map((item) => cleanDisplayText(item, '').toLowerCase())
+      .filter(Boolean)
+      .join(' ');
+  }
+
+  private textContains(haystack: string, tag: string): boolean {
+    const needle = tag.toLowerCase();
+    return Boolean(
+      needle &&
+      (haystack.includes(needle) ||
+        needle
+          .split(/[,\s，、/]+/)
+          .filter(Boolean)
+          .some((part) => part.length >= 2 && haystack.includes(part))),
+    );
   }
 
   private updatedAtSignal(value: Date | string | null | undefined): string {
@@ -916,6 +1240,13 @@ export class SocialAgentCandidatePoolService {
     const date = value instanceof Date ? value : new Date(value);
     if (Number.isNaN(date.getTime())) return '';
     return `最近公开更新：${date.toISOString().slice(0, 10)}`;
+  }
+
+  private updatedAtKey(value: Date | string | null | undefined): string {
+    if (!value) return 'none';
+    const date = value instanceof Date ? value : new Date(value);
+    if (Number.isNaN(date.getTime())) return cleanDisplayText(value, 'unknown');
+    return date.toISOString();
   }
 
   private toActivityResult(
@@ -1031,12 +1362,15 @@ export class SocialAgentCandidatePoolService {
       socialRequests,
       socialActivities,
     ] = await Promise.all([
-      this.safeCount(this.userRepo),
-      this.safeCount(this.profileRepo),
-      this.safeCount(this.aiDelegateRepo),
-      this.safeCount(this.publicIntentRepo),
-      this.safeCount(this.legacySocialRequestRepo),
-      this.safeCount(this.activityRepo),
+      this.cachedCount('count:users', this.userRepo),
+      this.cachedCount('count:profiles', this.profileRepo),
+      this.cachedCount('count:ai_delegates', this.aiDelegateRepo),
+      this.cachedCount('count:public_intents', this.publicIntentRepo),
+      this.cachedCount(
+        'count:legacy_social_requests',
+        this.legacySocialRequestRepo,
+      ),
+      this.cachedCount('count:activities', this.activityRepo),
     ]);
     return {
       users,
@@ -1066,6 +1400,37 @@ export class SocialAgentCandidatePoolService {
       return await this.safety.getMutualBlockUserIds(ownerUserId);
     } catch {
       return new Set<number>();
+    }
+  }
+
+  private async cachedBlockedIds(ownerUserId: number): Promise<Set<number>> {
+    const cached = await this.readThroughSourceCache(
+      `blocked_ids:${ownerUserId}`,
+      () => this.loadBlockedIds(ownerUserId),
+    );
+    return new Set(cached);
+  }
+
+  private async cachedLifeGraphSignals(
+    ownerUserId: number,
+  ): Promise<LifeGraphUnifiedMatchSignalsDto | null> {
+    return this.readThroughSourceCache(`life_graph:${ownerUserId}`, () =>
+      this.loadLifeGraphSignals(ownerUserId),
+    );
+  }
+
+  private async loadUserInterestSummary(
+    ownerUserId: number,
+  ): Promise<SocialAgentUserInterestSummary | null> {
+    try {
+      return (
+        (await this.interestEvents?.summarizeForUser({
+          ownerUserId,
+          limit: 200,
+        })) ?? null
+      );
+    } catch {
+      return null;
     }
   }
 
@@ -1104,6 +1469,13 @@ export class SocialAgentCandidatePoolService {
     }
   }
 
+  private async cachedCount<T extends ObjectLiteral>(
+    key: string,
+    repo: Repository<T>,
+  ): Promise<number> {
+    return this.readThroughSourceCache(key, () => this.safeCount(repo));
+  }
+
   private async safeFind<T extends ObjectLiteral>(
     repo: Repository<T>,
     options: Parameters<Repository<T>['find']>[0],
@@ -1113,6 +1485,40 @@ export class SocialAgentCandidatePoolService {
     } catch {
       return [];
     }
+  }
+
+  private async cachedFind<T extends ObjectLiteral>(
+    key: string,
+    repo: Repository<T>,
+    options: Parameters<Repository<T>['find']>[0],
+  ): Promise<T[]> {
+    const rows = await this.readThroughSourceCache(key, () =>
+      this.safeFind(repo, options),
+    );
+    return rows.slice();
+  }
+
+  private async readThroughSourceCache<T>(
+    key: string,
+    loader: () => Promise<T>,
+  ): Promise<T> {
+    const result = await this.cache().getOrSetWithMeta(
+      `candidate_pool:${key}`,
+      loader,
+      {
+        ttlMs: SOURCE_CACHE_TTL_MS,
+      },
+    );
+    this.metrics?.recordToolResultCache({
+      cacheName: 'candidate_pool_source',
+      hit: result.hit,
+      approxChars: result.approxStoredChars,
+    });
+    return result.value;
+  }
+
+  private cache(): SocialAgentToolResultCacheService {
+    return this.toolResultCache ?? this.localToolResultCache;
   }
 
   private normalizeArray(value: unknown): string[] {
@@ -1143,6 +1549,14 @@ export class SocialAgentCandidatePoolService {
       if (Number.isFinite(parsed)) return parsed;
     }
     return null;
+  }
+
+  private approxChars(value: unknown): number {
+    try {
+      return JSON.stringify(value)?.length ?? 0;
+    } catch {
+      return 0;
+    }
   }
 
   private isUniqueConstraintViolation(error: unknown): boolean {

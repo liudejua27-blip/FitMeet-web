@@ -22,5 +22,5 @@
     "noFallthroughCasesInSwitch": false,
     "useDefineForClassFields": false
   },
-  "exclude": ["dist", "scripts/test-social-skills-runtime-flow.ts"]
+  "exclude": ["dist", "scripts/test-social capabilities-runtime-flow.ts"]
 }

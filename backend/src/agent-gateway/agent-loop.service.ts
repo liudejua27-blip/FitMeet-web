@@ -249,7 +249,7 @@ export class AgentLoopService {
             ? 'tool_failed'
             : 'ready',
         userSafeMessage: requiresApproval
-          ? '这一步需要你确认后我才能继续执行；我还没有发送消息、连接候选人或创建活动。'
+          ? '这个动作需要你确认后我才能继续执行；我还没有发送消息、加好友或发布活动。'
           : sawToolFailure
             ? '刚才调用工具时失败了，我没有继续执行可能产生影响的动作。你可以让我重试，或换一种说法继续。'
             : null,
@@ -519,6 +519,12 @@ export class AgentLoopService {
     return (
       /^recommendation_/.test(tool.toolName) ||
       /^route_.*_turn$/.test(tool.toolName) ||
+      [
+        'social_match_search_turn',
+        'life_graph_profile_turn',
+        'life_graph_conversation_turn',
+        'meet_loop_action_turn',
+      ].includes(tool.toolName) ||
       tool.toolName === 'candidate_confirmation_check' ||
       tool.toolName === 'main_agent_prepare_turn'
     );

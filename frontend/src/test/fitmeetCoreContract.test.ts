@@ -7,13 +7,11 @@ describe('fitMeetCoreEndpoints', () => {
     expect(fitMeetCoreEndpoints.auth.getProfile).toBe('/auth/profile');
     expect(fitMeetCoreEndpoints.users.updateProfile).toBe('/users/profile');
     expect(fitMeetCoreEndpoints.uploads.image).toBe('/uploads/image');
-    expect(fitMeetCoreEndpoints.feed.getFeed).toBe('/feed');
-    expect(fitMeetCoreEndpoints.feed.createPost).toBe('/feed');
-    expect(fitMeetCoreEndpoints.feed.publicSocialIntents).toBe('/public/social-intents');
-    expect(fitMeetCoreEndpoints.feed.publicSocialIntent('intent:city run')).toBe(
+    expect(fitMeetCoreEndpoints.discover.publicSocialIntents).toBe('/public/social-intents');
+    expect(fitMeetCoreEndpoints.discover.publicSocialIntent('intent:city run')).toBe(
       '/public/social-intents/intent%3Acity%20run',
     );
-    expect(fitMeetCoreEndpoints.feed.publicSocialIntentMatches('intent:city run')).toBe(
+    expect(fitMeetCoreEndpoints.discover.publicSocialIntentMatches('intent:city run')).toBe(
       '/public/social-intents/intent%3Acity%20run/matches',
     );
     expect(fitMeetCoreEndpoints.messages.startConversation).toBe('/messages/start');
@@ -34,34 +32,6 @@ describe('fitMeetCoreEndpoints', () => {
       '/messages/public-intents/intent%3Acity%20run/start',
     );
     expect(fitMeetCoreEndpoints.messages.getUnreadCount).toBe('/messages/unread');
-    expect(fitMeetCoreEndpoints.agentInbox.conversations).toBe('/agents/inbox/conversations');
-    expect(fitMeetCoreEndpoints.agentInbox.events).toBe('/agents/inbox/events');
-    expect(fitMeetCoreEndpoints.agentInbox.ackEvents).toBe('/agents/inbox/events/ack');
-    expect(fitMeetCoreEndpoints.agentProfileMatches.list).toBe('/agents/profile-matches');
-    expect(fitMeetCoreEndpoints.agentProfileMatches.ignore(101)).toBe(
-      '/agents/profile-matches/101/ignore',
-    );
-    expect(fitMeetCoreEndpoints.agentProfileMatches.favorite(101)).toBe(
-      '/agents/profile-matches/101/favorite',
-    );
-    expect(fitMeetCoreEndpoints.agentProfileMatches.draftOpener(101)).toBe(
-      '/agents/profile-matches/101/draft-opener',
-    );
-    expect(fitMeetCoreEndpoints.agentProfileMatches.confirmContact(101)).toBe(
-      '/agents/profile-matches/101/confirm-contact',
-    );
-    expect(fitMeetCoreEndpoints.agentProfileMatches.requestContactExchange(101)).toBe(
-      '/agents/profile-matches/101/request-contact-exchange',
-    );
-    expect(fitMeetCoreEndpoints.agentProfileMatches.sendIntro(101)).toBe(
-      '/agents/profile-matches/101/send-intro',
-    );
-    expect(fitMeetCoreEndpoints.agentInbox.messages('conversation:city run')).toBe(
-      '/agents/inbox/conversations/conversation%3Acity%20run/messages',
-    );
-    expect(fitMeetCoreEndpoints.agentInbox.reply('conversation:city run')).toBe(
-      '/agents/inbox/conversations/conversation%3Acity%20run/reply',
-    );
     expect(fitMeetCoreEndpoints.socialAgentChat.session).toBe('/social-agent/chat/session');
     expect(fitMeetCoreEndpoints.socialAgentChat.run).toBe('/social-agent/chat/run');
     expect(fitMeetCoreEndpoints.socialAgentChat.runAsync).toBe('/social-agent/chat/run-async');
@@ -221,33 +191,15 @@ describe('fitMeetCoreEndpoints', () => {
         '/auth/refresh',
         '/auth/profile',
         '/users/profile',
-        '/feed',
         '/public/social-intents',
         '/public/social-intents/{id}',
         '/public/social-intents/{id}/matches',
-        '/feed/interactions',
-        '/feed/{id}/like',
-        '/feed/{id}/save',
-        '/feed/{postId}/comments',
-        '/feed/comments/{commentId}/like',
         '/messages/start',
         '/messages/conversations',
         '/messages/conversations/{conversationId}',
         '/messages/conversations/{conversationId}/send',
         '/messages/public-intents/{id}/start',
         '/messages/unread',
-        '/agents/inbox/conversations',
-        '/agents/inbox/events',
-        '/agents/inbox/events/ack',
-        '/agents/inbox/conversations/{conversationId}/messages',
-        '/agents/inbox/conversations/{conversationId}/reply',
-        '/agents/profile-matches',
-        '/agents/profile-matches/{id}/ignore',
-        '/agents/profile-matches/{id}/favorite',
-        '/agents/profile-matches/{id}/draft-opener',
-        '/agents/profile-matches/{id}/confirm-contact',
-        '/agents/profile-matches/{id}/request-contact-exchange',
-        '/agents/profile-matches/{id}/send-intro',
         '/social-agent/chat/run',
         '/social-agent/chat/run-async',
         '/social-agent/chat/messages',
@@ -320,32 +272,12 @@ describe('fitMeetCoreEndpoints', () => {
   it('normalizes dynamic endpoint builders back to their OpenAPI templates', () => {
     const examples = [
       {
-        built: fitMeetCoreEndpoints.feed.publicSocialIntent('intent:city run'),
-        template: fitMeetCoreEndpointTemplates.feed.publicSocialIntent,
+        built: fitMeetCoreEndpoints.discover.publicSocialIntent('intent:city run'),
+        template: fitMeetCoreEndpointTemplates.discover.publicSocialIntent,
       },
       {
-        built: fitMeetCoreEndpoints.feed.publicSocialIntentMatches('intent:city run'),
-        template: fitMeetCoreEndpointTemplates.feed.publicSocialIntentMatches,
-      },
-      {
-        built: fitMeetCoreEndpoints.feed.likePost(123),
-        template: fitMeetCoreEndpointTemplates.feed.likePost,
-      },
-      {
-        built: fitMeetCoreEndpoints.feed.savePost(123),
-        template: fitMeetCoreEndpointTemplates.feed.savePost,
-      },
-      {
-        built: fitMeetCoreEndpoints.feed.getComments(123),
-        template: fitMeetCoreEndpointTemplates.feed.getComments,
-      },
-      {
-        built: fitMeetCoreEndpoints.feed.addComment(123),
-        template: fitMeetCoreEndpointTemplates.feed.addComment,
-      },
-      {
-        built: fitMeetCoreEndpoints.feed.likeComment(456),
-        template: fitMeetCoreEndpointTemplates.feed.likeComment,
+        built: fitMeetCoreEndpoints.discover.publicSocialIntentMatches('intent:city run'),
+        template: fitMeetCoreEndpointTemplates.discover.publicSocialIntentMatches,
       },
       {
         built: fitMeetCoreEndpoints.messages.getConversationMessages('conversation:city run'),
@@ -358,38 +290,6 @@ describe('fitMeetCoreEndpoints', () => {
       {
         built: fitMeetCoreEndpoints.messages.startPublicIntentConversation('intent:city run'),
         template: fitMeetCoreEndpointTemplates.messages.startPublicIntentConversation,
-      },
-      {
-        built: fitMeetCoreEndpoints.agentInbox.messages('conversation:city run'),
-        template: fitMeetCoreEndpointTemplates.agentInbox.messages,
-      },
-      {
-        built: fitMeetCoreEndpoints.agentInbox.reply('conversation:city run'),
-        template: fitMeetCoreEndpointTemplates.agentInbox.reply,
-      },
-      {
-        built: fitMeetCoreEndpoints.agentProfileMatches.ignore(101),
-        template: fitMeetCoreEndpointTemplates.agentProfileMatches.ignore,
-      },
-      {
-        built: fitMeetCoreEndpoints.agentProfileMatches.favorite(101),
-        template: fitMeetCoreEndpointTemplates.agentProfileMatches.favorite,
-      },
-      {
-        built: fitMeetCoreEndpoints.agentProfileMatches.draftOpener(101),
-        template: fitMeetCoreEndpointTemplates.agentProfileMatches.draftOpener,
-      },
-      {
-        built: fitMeetCoreEndpoints.agentProfileMatches.confirmContact(101),
-        template: fitMeetCoreEndpointTemplates.agentProfileMatches.confirmContact,
-      },
-      {
-        built: fitMeetCoreEndpoints.agentProfileMatches.requestContactExchange(101),
-        template: fitMeetCoreEndpointTemplates.agentProfileMatches.requestContactExchange,
-      },
-      {
-        built: fitMeetCoreEndpoints.agentProfileMatches.sendIntro(101),
-        template: fitMeetCoreEndpointTemplates.agentProfileMatches.sendIntro,
       },
       {
         built: fitMeetCoreEndpoints.socialAgentChat.taskSession(101),

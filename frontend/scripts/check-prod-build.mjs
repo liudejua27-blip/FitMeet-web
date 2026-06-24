@@ -1,5 +1,6 @@
 import { readdir, readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
+import { spawnSync } from 'node:child_process';
 
 const distDir = path.resolve(process.cwd(), 'dist');
 const assetsDir = path.join(distDir, 'assets');
@@ -69,8 +70,8 @@ const requiredToolUiChunks = [
     pattern: /^tool-activity-card-.+\.js$/,
   },
   {
-    label: 'Life Graph Tool UI',
-    pattern: /^tool-life-graph-card-.+\.js$/,
+    label: 'personal profile update Tool UI',
+    pattern: /^tool-personal-profile-update-card-.+\.js$/,
   },
   {
     label: 'Meet Loop Tool UI',
@@ -151,6 +152,15 @@ if (matches.length > 0) {
   console.error('[check:prod-build] Production build checks failed:');
   for (const match of matches) console.error(`- ${match}`);
   process.exit(1);
+}
+
+const boundaryAudit = spawnSync(
+  process.execPath,
+  [path.join(process.cwd(), 'scripts/audit-user-facing-boundary.mjs')],
+  { cwd: process.cwd(), stdio: 'inherit' },
+);
+if (boundaryAudit.status !== 0) {
+  process.exit(boundaryAudit.status ?? 1);
 }
 
 console.log(

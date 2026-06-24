@@ -18,6 +18,7 @@ export type SocialAgentRouteTurnCallbacks = {
     ownerUserId: number,
     task: AgentTask,
     goal: string,
+    options?: { signal?: AbortSignal | null; waitForCompletionMs?: number },
   ) => Promise<SocialAgentAsyncRunSnapshot>;
 };
 
@@ -32,11 +33,13 @@ export class SocialAgentChatTurnCallbacksService {
     return {
       replanAndRefresh: (_currentOwnerUserId, taskId, body) =>
         this.replanFacade.replanAndRefresh(ownerUserId, taskId, body),
-      queueInitialSearchForTask: (_currentOwnerUserId, task, goal) =>
+      queueInitialSearchForTask: (_currentOwnerUserId, task, goal, options) =>
         this.initialSearchQueue.queueInitialSearchForTask({
           ownerUserId,
           task,
           goal,
+          signal: options?.signal ?? null,
+          waitForCompletionMs: options?.waitForCompletionMs,
         }),
     };
   }

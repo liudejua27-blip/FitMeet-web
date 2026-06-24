@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/require-await */
 import { InviteCode } from './entities/invite-code.entity';
 import { WaitlistAnalyticsEvent } from './entities/waitlist-analytics-event.entity';
 import { WaitlistAppEntry } from './entities/waitlist-app-entry.entity';

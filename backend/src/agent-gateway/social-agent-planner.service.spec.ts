@@ -11,6 +11,7 @@ import {
   AgentTaskPermissionMode,
 } from './entities/agent-task.entity';
 import { FitMeetAgentToolRegistryService } from './fitmeet-agent-tool-registry.service';
+import { SocialAgentLlmOutputCacheService } from './social-agent-llm-output-cache.service';
 import { SocialAgentPlannerService } from './social-agent-planner.service';
 
 const taskRepo = () => ({
@@ -58,6 +59,7 @@ function serviceWith(
   config: ConfigService,
   deepSeek?: { complete: jest.Mock },
   contextHydrator?: { hydrateContext: jest.Mock },
+  llmOutputCache?: SocialAgentLlmOutputCacheService,
 ) {
   const tasks = taskRepo();
   const events = eventRepo();
@@ -70,6 +72,7 @@ function serviceWith(
     undefined,
     deepSeek as never,
     contextHydrator as never,
+    llmOutputCache,
   );
   return { service, tasks, events };
 }
@@ -218,6 +221,49 @@ describe('SocialAgentPlannerService', () => {
     expect(result.plan[0]).toMatchObject({
       id: 'search',
       action: SocialAgentAction.SearchProfiles,
+    });
+  });
+
+  it('caches repeated task planner output for identical task context', async () => {
+    const deepSeek = {
+      complete: jest.fn().mockResolvedValue(
+        JSON.stringify({
+          steps: [
+            {
+              id: 'search',
+              action: 'search_profiles',
+              title: 'Search public candidates',
+            },
+          ],
+        }),
+      ),
+    };
+    const cache = new SocialAgentLlmOutputCacheService();
+    const { service, tasks } = serviceWith(
+      makeConfig({
+        DEEPSEEK_API_KEY: 'key',
+        SOCIAL_AGENT_TASK_PLANNER_CACHE_TTL_MS: '60000',
+      }),
+      deepSeek,
+      undefined,
+      cache,
+    );
+    tasks.findOne.mockImplementation(() => Promise.resolve(makeTask()));
+
+    await expect(service.planTask(10)).resolves.toMatchObject({
+      source: 'deepseek',
+      plan: [expect.objectContaining({ id: 'search' })],
+    });
+    await expect(service.planTask(10)).resolves.toMatchObject({
+      source: 'deepseek',
+      plan: [expect.objectContaining({ id: 'search' })],
+    });
+
+    expect(deepSeek.complete).toHaveBeenCalledTimes(1);
+    expect(cache.stats()).toMatchObject({
+      hits: 1,
+      misses: 1,
+      writes: 1,
     });
   });
 
@@ -418,9 +464,7 @@ describe('SocialAgentPlannerService', () => {
             'planner/router/Brain/subagent 必须基于 knownSlots 继续推进；除非用户主动修改，否则不得重复询问 doNotAskAgainFor 中的字段。',
         },
         lifeGraphFactProposals: [],
-        lifeGraphFactDisplaySummaries: [
-          '常在周末或晚上安排低强度散步',
-        ],
+        lifeGraphFactDisplaySummaries: ['常在周末或晚上安排低强度散步'],
         lifeGraphGovernanceSummary: {
           total: 1,
           autoSaveCount: 1,
@@ -457,111 +501,44 @@ describe('SocialAgentPlannerService', () => {
       } as never),
     );
 
-    await service.planTask(10);
+    const result = await service.planTask(10);
 
     expect(contextHydrator.hydrateContext).toHaveBeenCalledWith({
       userId: 1,
       taskId: 10,
       threadId: 'agent-task:10',
     });
-    const request = (global.fetch as jest.Mock).mock.calls[0]?.[1] as {
-      body?: string;
-    };
-    const body = JSON.parse(String(request.body)) as Record<string, unknown>;
-    const messages = body.messages as Array<Record<string, unknown>>;
-    const userPayload = JSON.parse(String(messages[1].content)) as Record<
-      string,
-      unknown
-    >;
-    const taskContext = userPayload.taskContext as Record<string, unknown>;
-    const brainMemory = userPayload.brainMemory as Record<string, unknown>;
-
-    expect(userPayload.conversationHistory).toHaveLength(80);
-    expect(userPayload.conversationHistory).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ text: 'turn-6' }),
-        expect.objectContaining({
-          text: '可以，继续按今晚青岛大学散步和舞蹈公开标签找人',
-        }),
-      ]),
-    );
-    expect(userPayload.memoryContract).toMatchObject({
-      recentMessagesAreAuthoritative: true,
-      taskSlotsAreHardConstraints: true,
-      lifeGraphSummaryIsLongTermPreferenceContext: true,
-      pendingApprovalsMustBeResolvedBeforeSideEffects: true,
-      candidateActionsMustNotBeRepeated: true,
-    });
-    expect(taskContext).toMatchObject({
-      taskSlots: expect.objectContaining({
-        time_window: expect.objectContaining({
-          value: '今天晚上',
-          state: 'completed',
-        }),
-        location_text: expect.objectContaining({
-          value: '青岛大学附近',
-          state: 'completed',
-        }),
-        candidate_preference: expect.objectContaining({
-          value: '舞蹈相关公开标签优先',
-          state: 'answered',
-        }),
-      }),
-      taskSlotSummary: expect.objectContaining({
-        时间: '今天晚上',
-        地点: '青岛大学附近',
-        候选偏好: '舞蹈相关公开标签优先',
-      }),
-      knownTaskSlotConstraints: expect.objectContaining({
-        treatAsHardConstraints: true,
-        doNotAskAgainFor: expect.arrayContaining([
-          'activity',
-          'time_window',
-          'location_text',
-          'candidate_preference',
-        ]),
-        knownSlots: expect.arrayContaining([
-          expect.objectContaining({ key: 'time_window', value: '今天晚上' }),
-          expect.objectContaining({
-            key: 'location_text',
-            value: '青岛大学附近',
-          }),
-          expect.objectContaining({
-            key: 'candidate_preference',
-            value: '舞蹈相关公开标签优先',
-          }),
-        ]),
-      }),
-      lifeGraphSummary: expect.objectContaining({
-        preferences: ['低强度散步'],
-        boundaries: ['第一次见面优先公共场所'],
-      }),
-      pendingApprovals: [{ action: 'publish_social_request' }],
-      candidateActions: { savedIds: [23], skippedIds: [29] },
-    });
-    expect(brainMemory).toMatchObject({
-      hydratedContext: expect.objectContaining({
-        threadId: 'agent-task:10',
-        taskId: 10,
-        recentMessageCount: 85,
+    expect(global.fetch).not.toHaveBeenCalled();
+    expect(result.source).toBe('workflow');
+    expect(result.fallbackReason).toBeNull();
+    expect(result.plan.map((step) => step.action)).toEqual([
+      SocialAgentAction.SearchProfiles,
+      SocialAgentAction.GenerateContent,
+      SocialAgentAction.DraftMessage,
+    ]);
+    expect(result.plan[0]).toMatchObject({
+      status: 'planned',
+      requiresUserConfirmation: false,
+      riskLevel: 'low',
+      input: expect.objectContaining({
         taskSlotSummary: expect.objectContaining({
           活动: '散步',
           时间: '今天晚上',
+          地点: '青岛大学附近',
+          候选偏好: '舞蹈相关公开标签优先',
         }),
         knownTaskSlotConstraints: expect.objectContaining({
           treatAsHardConstraints: true,
-          doNotAskAgainFor: expect.arrayContaining(['time_window']),
+          doNotAskAgainFor: expect.arrayContaining([
+            'activity',
+            'time_window',
+            'location_text',
+            'candidate_preference',
+          ]),
         }),
-        pendingApprovals: [{ action: 'publish_social_request' }],
         candidateActions: { savedIds: [23], skippedIds: [29] },
       }),
     });
-    expect(userPayload.replanningRules).toEqual(
-      expect.arrayContaining([
-        expect.stringContaining('must not be asked again'),
-        expect.stringContaining('candidate_preference only against public'),
-      ]),
-    );
   });
 
   it('does not let an empty hydrated planner context erase stored task memory', async () => {
@@ -676,36 +653,16 @@ describe('SocialAgentPlannerService', () => {
       } as never),
     );
 
-    await service.planTask(10);
+    const result = await service.planTask(10);
 
-    const request = (global.fetch as jest.Mock).mock.calls[0]?.[1] as {
-      body?: string;
-    };
-    const body = JSON.parse(String(request.body)) as Record<string, unknown>;
-    const messages = body.messages as Array<Record<string, unknown>>;
-    const userPayload = JSON.parse(String(messages[1].content)) as Record<
-      string,
-      unknown
-    >;
-    const taskContext = userPayload.taskContext as Record<string, unknown>;
-
-    expect(userPayload.conversationHistory).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          text: expect.stringContaining('青岛大学'),
-        }),
-      ]),
-    );
-    expect(taskContext).toMatchObject({
-      currentGoal: '今晚青岛大学附近散步',
-      taskSlots: expect.objectContaining({
-        activity: expect.objectContaining({ value: '散步' }),
-        time_window: expect.objectContaining({ value: '今天晚上' }),
-        location_text: expect.objectContaining({ value: '青岛大学附近' }),
-        candidate_preference: expect.objectContaining({
-          value: '舞蹈相关公开标签优先',
-        }),
-      }),
+    expect(global.fetch).not.toHaveBeenCalled();
+    expect(result.source).toBe('workflow');
+    expect(result.plan.map((step) => step.action)).toEqual([
+      SocialAgentAction.SearchProfiles,
+      SocialAgentAction.GenerateContent,
+      SocialAgentAction.DraftMessage,
+    ]);
+    expect(result.plan[0].input).toMatchObject({
       taskSlotSummary: expect.objectContaining({
         时间: '今天晚上',
         地点: '青岛大学附近',
@@ -723,9 +680,6 @@ describe('SocialAgentPlannerService', () => {
       candidateActions: expect.objectContaining({
         savedIds: [23],
       }),
-      pendingApprovals: expect.arrayContaining([
-        expect.objectContaining({ action: 'publish_social_request' }),
-      ]),
     });
   });
 
@@ -797,7 +751,7 @@ describe('SocialAgentPlannerService', () => {
     );
   });
 
-  it('passes completed task slots and candidate preferences into DeepSeek planner context', async () => {
+  it('uses deterministic workflow planning when completed task slots already indicate candidate search', async () => {
     global.fetch = jest.fn().mockResolvedValue({
       ok: true,
       json: jest.fn().mockResolvedValue({
@@ -883,61 +837,32 @@ describe('SocialAgentPlannerService', () => {
       } as never),
     );
 
-    await service.planTask(10);
+    const result = await service.planTask(10);
 
-    const request = (global.fetch as jest.Mock).mock.calls[0]?.[1] as {
-      body?: string;
-    };
-    const body = JSON.parse(String(request.body)) as Record<string, unknown>;
-    const messages = body.messages as Array<Record<string, unknown>>;
-    const userPayload = JSON.parse(String(messages[1].content)) as Record<
-      string,
-      unknown
-    >;
-    const taskContext = userPayload.taskContext as Record<string, unknown>;
-
-    expect(taskContext).toMatchObject({
-      currentGoal: '今晚青岛大学附近散步',
-      currentTask: expect.objectContaining({
-        state: 'searching_candidates',
-        shouldSearchNow: true,
-      }),
+    expect(global.fetch).not.toHaveBeenCalled();
+    expect(result.source).toBe('workflow');
+    expect(result.fallbackReason).toBeNull();
+    expect(result.plan.map((step) => step.action)).toEqual([
+      SocialAgentAction.SearchProfiles,
+      SocialAgentAction.GenerateContent,
+      SocialAgentAction.DraftMessage,
+    ]);
+    expect(result.plan.every((step) => !step.requiresUserConfirmation)).toBe(
+      true,
+    );
+    expect(result.plan[0].input).toMatchObject({
+      goal: '今晚青岛大学附近散步，优先舞蹈相关公开标签',
       taskSlotSummary: {
         活动: '散步',
         时间: '今天晚上',
         地点: '青岛大学附近',
         候选偏好: '舞蹈相关公开标签优先',
       },
-      taskSlots: expect.objectContaining({
-        activity: expect.objectContaining({
-          value: '散步',
-          state: 'completed',
-        }),
-        time_window: expect.objectContaining({
-          value: '今天晚上',
-          state: 'completed',
-        }),
-        location_text: expect.objectContaining({
-          value: '青岛大学附近',
-          state: 'completed',
-        }),
-        candidate_preference: expect.objectContaining({
-          value: '舞蹈相关公开标签优先',
-          state: 'answered',
-        }),
-      }),
-      candidateState: expect.objectContaining({
+      candidateActions: expect.objectContaining({
         savedIds: [23],
         rejectedIds: [29],
       }),
     });
-    expect(userPayload.replanningRules).toEqual(
-      expect.arrayContaining([
-        expect.stringContaining('taskContext.taskSlots as hard constraints'),
-        expect.stringContaining('must not be asked again'),
-        expect.stringContaining('candidate_preference only against public'),
-      ]),
-    );
   });
 
   it('defers tool execution when DeepSeek returns an invalid JSON plan', async () => {
@@ -951,8 +876,10 @@ describe('SocialAgentPlannerService', () => {
     const { service, tasks, events } = serviceWith(
       makeConfig({ DEEPSEEK_API_KEY: 'key' }),
     );
-    tasks.findOne.mockResolvedValue(
-      makeTask({ permissionMode: AgentTaskPermissionMode.Confirm }),
+    tasks.findOne.mockImplementation(() =>
+      Promise.resolve(
+        makeTask({ permissionMode: AgentTaskPermissionMode.Confirm }),
+      ),
     );
 
     const result = await service.planTask(10);
@@ -976,7 +903,7 @@ describe('SocialAgentPlannerService', () => {
       expect.arrayContaining([
         SocialAgentAction.SearchProfiles,
         SocialAgentAction.FavoriteCandidate,
-        SocialAgentAction.WriteInbox,
+        SocialAgentAction.WriteMessageEvent,
         SocialAgentAction.SendMessage,
         SocialAgentAction.SendInvite,
         SocialAgentAction.AddFriend,
@@ -1180,8 +1107,8 @@ describe('SocialAgentPlannerService', () => {
       userMessage: '可以，继续帮我找人',
     });
 
-    expect(result.source).toBe('fallback');
-    expect(result.fallbackReason).toBe('DEEPSEEK_API_KEY missing');
+    expect(result.source).toBe('workflow');
+    expect(result.fallbackReason).toBeNull();
     expect(result.plan.map((step) => step.action)).toEqual(
       expect.arrayContaining([
         SocialAgentAction.SearchProfiles,
@@ -1222,11 +1149,16 @@ describe('SocialAgentPlannerService', () => {
         }),
       } as never);
 
+    const cache = new SocialAgentLlmOutputCacheService();
     const { service, tasks } = serviceWith(
       makeConfig({
         DEEPSEEK_API_KEY: 'key',
         SOCIAL_AGENT_PLANNER_RETRY_ATTEMPTS: '2',
+        SOCIAL_AGENT_TASK_PLANNER_CACHE_TTL_MS: '60000',
       }),
+      undefined,
+      undefined,
+      cache,
     );
     tasks.findOne.mockResolvedValue(
       makeTask({ permissionMode: AgentTaskPermissionMode.Confirm }),
@@ -1245,6 +1177,11 @@ describe('SocialAgentPlannerService', () => {
         }),
       ]),
     );
+    expect(cache.stats()).toMatchObject({
+      misses: 2,
+      writes: 1,
+      size: 1,
+    });
   });
 
   it('keeps outbound DeepSeek plan steps approval-gated even in limited auto mode', async () => {
@@ -1378,7 +1315,7 @@ describe('SocialAgentPlannerService', () => {
       expect.arrayContaining([
         SocialAgentAction.SearchProfiles,
         SocialAgentAction.FavoriteCandidate,
-        SocialAgentAction.WriteInbox,
+        SocialAgentAction.WriteMessageEvent,
         SocialAgentAction.SendMessage,
         SocialAgentAction.SendInvite,
         SocialAgentAction.AddFriend,
@@ -1464,7 +1401,7 @@ describe('SocialAgentPlannerService', () => {
     expect(result.plan.map((step) => step.action)).not.toEqual(
       expect.arrayContaining([
         SocialAgentAction.FavoriteCandidate,
-        SocialAgentAction.WriteInbox,
+        SocialAgentAction.WriteMessageEvent,
         SocialAgentAction.SendMessage,
         SocialAgentAction.SendInvite,
         SocialAgentAction.AddFriend,

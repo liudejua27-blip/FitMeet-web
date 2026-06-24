@@ -161,6 +161,7 @@ export class SocialAgentRunOrchestratorService {
           ...input,
         });
       },
+      runId: runtimeRun?.id ?? null,
     });
     task = recommendation.task;
     const result = recommendation.result;
@@ -245,5 +246,4 @@ export class SocialAgentRunOrchestratorService {
       ? mode
       : AgentTaskPermissionMode.Confirm;
   }
-
 }

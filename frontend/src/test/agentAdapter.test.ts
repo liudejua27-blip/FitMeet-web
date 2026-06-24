@@ -8,7 +8,6 @@ import {
   resolveAgentAdapterMode,
   type AgentStreamEvent,
 } from '../components/agent-workspace/api';
-import { createMockAgentAdapter } from '../components/agent-workspace/api/mockAgentAdapter';
 
 describe('Agent adapter layer', () => {
   it('keeps production on the real adapter even when mock env flags are misconfigured', () => {
@@ -17,155 +16,14 @@ describe('Agent adapter layer', () => {
     expect(resolveAgentAdapterMode({ MODE: 'production' } as unknown as ImportMetaEnv)).toBe(
       'real',
     );
-    expect(
-      resolveAgentAdapterMode({
-        PROD: true,
-        VITE_AGENT_MOCK_FLOW: 'true',
-      } as unknown as ImportMetaEnv),
-    ).toBe('real');
-    expect(
-      resolveAgentAdapterMode({
-        PROD: true,
-        VITE_AGENT_ADAPTER: 'mock',
-      } as unknown as ImportMetaEnv),
-    ).toBe('real');
-    expect(
-      resolveAgentAdapterMode({ VITE_AGENT_ADAPTER: 'mock' } as unknown as ImportMetaEnv),
-    ).toBe('mock');
+    expect(resolveAgentAdapterMode({ VITE_AGENT_ADAPTER: 'mock' } as unknown as ImportMetaEnv)).toBe(
+      'real',
+    );
     expect(
       resolveAgentAdapterMode({ VITE_AGENT_ADAPTER: 'real' } as unknown as ImportMetaEnv),
     ).toBe('real');
     expect(isRealAgentMode({ PROD: true } as unknown as ImportMetaEnv)).toBe(true);
-    expect(isRealAgentMode({ VITE_AGENT_MOCK_FLOW: 'true' } as unknown as ImportMetaEnv)).toBe(
-      false,
-    );
-  });
-
-  it('emits the mock run lifecycle in SSE-like order', async () => {
-    vi.useFakeTimers();
-    const adapter = createMockAgentAdapter();
-    const events: AgentStreamEvent[] = [];
-    const run = adapter.run(
-      {
-        goal: '青岛今晚想找人一起轻松喝咖啡，公共场所先站内聊',
-        permissionMode: 'limited_auto',
-        idempotencyKey: 'run-1',
-      },
-      { onEvent: (event) => events.push(event) },
-    );
-
-    await vi.runAllTimersAsync();
-    const response = await run;
-
-    expect(response.response.cards[0]?.title).toBe('咖啡轻聊搭子');
-    expect(events.map((event) => event.type)).toContain('progress');
-    expect(events).toContainEqual(
-      expect.objectContaining({
-        type: 'progress',
-        id: 'social-codex:summary',
-        lifecycle: 'analyzing_intent',
-        metadata: expect.objectContaining({
-          displayMode: 'covering_status',
-          sourceProtocol: 'mock_agent_stream',
-        }),
-      }),
-    );
-    expect(events.map((event) => ('lifecycle' in event ? event.lifecycle : null))).toContain(
-      'searching_candidates',
-    );
-    expect(events.at(-1)?.type).toBe('result');
-  });
-
-  it('asks clarifying questions before mock social discovery when required context is missing', async () => {
-    vi.useFakeTimers();
-    const adapter = createMockAgentAdapter();
-    const events: AgentStreamEvent[] = [];
-    const run = adapter.run(
-      {
-        goal: '我想找人一起跑步',
-        permissionMode: 'limited_auto',
-        idempotencyKey: 'run-clarify-1',
-      },
-      { onEvent: (event) => events.push(event) },
-    );
-
-    await vi.runAllTimersAsync();
-    const response = await run;
-
-    expect(response.response.cards).toHaveLength(0);
-    expect(response.response.assistantMessage).toContain('为了只推荐安全、合适的机会');
-    expect(response.response.assistantMessage).toContain('城市/大致区域');
-    expect(response.response.assistantMessage).toContain('时间');
-    expect(response.response.assistantMessage).toContain('运动强度');
-    expect(response.response.assistantMessage).toContain('社交边界');
-    expect(events.map((event) => ('lifecycle' in event ? event.lifecycle : null))).not.toContain(
-      'searching_candidates',
-    );
-  });
-
-  it('continues mock social discovery after the user answers the clarification', async () => {
-    vi.useFakeTimers();
-    const adapter = createMockAgentAdapter();
-    const firstEvents: AgentStreamEvent[] = [];
-    const firstRun = adapter.run(
-      {
-        goal: '我想找人一起跑步',
-        permissionMode: 'limited_auto',
-        idempotencyKey: 'run-clarify-2',
-      },
-      { onEvent: (event) => firstEvents.push(event) },
-    );
-
-    await vi.runAllTimersAsync();
-    const firstResponse = await firstRun;
-    expect(firstResponse.response.cards).toHaveLength(0);
-    expect(firstResponse.response.assistantMessage).toContain('为了只推荐安全、合适的机会');
-
-    const followupEvents: AgentStreamEvent[] = [];
-    const followupRun = adapter.run(
-      {
-        goal: '青岛周末下午，轻松跑步，只在公共场所，先站内聊',
-        permissionMode: 'limited_auto',
-        idempotencyKey: 'run-clarify-followup-1',
-      },
-      { onEvent: (event) => followupEvents.push(event) },
-    );
-
-    await vi.runAllTimersAsync();
-    const followupResponse = await followupRun;
-
-    expect(followupResponse.response.cards[0]?.type).toBe('candidate_card');
-    expect(followupResponse.response.cards[0]?.data.recommendationLine).toContain('咖啡');
-    expect(
-      followupEvents.map((event) => ('lifecycle' in event ? event.lifecycle : null)),
-    ).toContain('searching_candidates');
-  });
-
-  it('keeps ordinary mock chat out of the social discovery flow', async () => {
-    vi.useFakeTimers();
-    const adapter = createMockAgentAdapter();
-    const events: AgentStreamEvent[] = [];
-    const run = adapter.run(
-      {
-        goal: '帮我解释一下什么是渐进式超负荷',
-        permissionMode: 'limited_auto',
-        idempotencyKey: 'run-conversation-1',
-      },
-      { onEvent: (event) => events.push(event) },
-    );
-
-    await vi.runAllTimersAsync();
-    const response = await run;
-
-    expect(response.response.cards).toHaveLength(0);
-    expect(response.response.assistantMessage).toContain('按普通对话');
-    expect(events.map((event) => ('lifecycle' in event ? event.lifecycle : null))).not.toContain(
-      'searching_candidates',
-    );
-    expect(
-      events.some((event) => 'lightStatus' in event && event.lightStatus === '正在筛选合适的人'),
-    ).toBe(false);
-    expect(events.some((event) => event.type === 'status')).toBe(false);
+    expect(isRealAgentMode({ VITE_AGENT_ADAPTER: 'mock' } as unknown as ImportMetaEnv)).toBe(true);
   });
 
   it('maps AgentError codes to user-facing copy', () => {
@@ -200,7 +58,7 @@ describe('Agent adapter layer', () => {
       recoveryNotice: {
         kind: 'timeout' as const,
         title: '这次处理时间有点久',
-        message: '我已经保留当前对话。你可以重试，或者继续告诉我下一步。',
+        message: '可以继续处理，也可以补充新的要求。',
         retryable: true,
         source: 'stream_error' as const,
       },
@@ -209,23 +67,13 @@ describe('Agent adapter layer', () => {
     expect(mapAgentError(error)).toMatchObject({
       code: 'SERVER_ERROR',
       title: '这次处理时间有点久',
-      message: '我已经保留当前对话。你可以重试，或者继续告诉我下一步。',
+      message: '可以继续处理，也可以补充新的要求。',
       retryable: true,
       recoveryNotice: {
         kind: 'timeout',
         source: 'stream_error',
       },
     });
-  });
-
-  it('requires idempotencyKey for actions', async () => {
-    const adapter = createMockAgentAdapter();
-    await expect(
-      adapter.performAction(9001, {
-        action: 'candidate.generate_opener',
-        idempotencyKey: '',
-      }),
-    ).rejects.toThrow(/idempotencyKey/);
   });
 
   it('sends real card action idempotencyKey as a top-level API field', async () => {
@@ -386,7 +234,7 @@ describe('Agent adapter layer', () => {
     ]);
   });
 
-  it('keeps social turns on the user-facing run stream', async () => {
+  it('uses the route message stream for new social turns', async () => {
     const streamed = mockResponse();
     const apiClient = {
       runUserFacingStream: vi.fn().mockResolvedValue(streamed),
@@ -408,16 +256,18 @@ describe('Agent adapter layer', () => {
       { onEvent: vi.fn() },
     );
 
-    expect(apiClient.runUserFacingStream).toHaveBeenCalledWith(
+    expect(apiClient.handleMessageStream).toHaveBeenCalledWith(
       expect.objectContaining({
-        goal: '我想今晚在青岛大学找人散步',
-        conversationIntent: 'social',
+        message: '我想今晚在青岛大学找人散步',
+        taskId: undefined,
         idempotencyKey: 'run-social-chat',
+        conversationIntent: 'social',
+        clientContext: undefined,
       }),
       expect.any(Function),
       undefined,
     );
-    expect(apiClient.handleMessageStream).not.toHaveBeenCalled();
+    expect(apiClient.runUserFacingStream).not.toHaveBeenCalled();
   });
 
   it('uses task message stream for ordinary conversation inside an active task', async () => {
@@ -496,7 +346,7 @@ describe('Agent adapter layer', () => {
     expect(apiClient.runUserFacingStream).not.toHaveBeenCalled();
   });
 
-  it('keeps active social task execution on the user-facing run stream', async () => {
+  it('uses the task message stream for active social task execution', async () => {
     const streamed = mockResponse();
     const apiClient = {
       runUserFacingStream: vi.fn().mockResolvedValue(streamed),
@@ -519,17 +369,18 @@ describe('Agent adapter layer', () => {
       { onEvent: vi.fn() },
     );
 
-    expect(apiClient.runUserFacingStream).toHaveBeenCalledWith(
+    expect(apiClient.handleMessageStream).toHaveBeenCalledWith(
       expect.objectContaining({
-        goal: '可以，继续帮我找人',
+        message: '可以，继续帮我找人',
         taskId: 77,
-        conversationIntent: 'social',
         idempotencyKey: 'run-task-social-followup',
+        conversationIntent: 'social',
+        clientContext: undefined,
       }),
       expect.any(Function),
       undefined,
     );
-    expect(apiClient.handleMessageStream).not.toHaveBeenCalled();
+    expect(apiClient.runUserFacingStream).not.toHaveBeenCalled();
   });
 
   it('recovers an interrupted real stream from the session endpoint when a task exists', async () => {
@@ -835,8 +686,9 @@ describe('Agent adapter layer', () => {
 
     expect(
       events
-        .filter((event): event is Extract<AgentStreamEvent, { type: 'assistant_delta' }> =>
-          event.type === 'assistant_delta',
+        .filter(
+          (event): event is Extract<AgentStreamEvent, { type: 'assistant_delta' }> =>
+            event.type === 'assistant_delta',
         )
         .map((event) => event.delta),
     ).toEqual(['我会先理解你的需求。', '然后继续处理。']);
@@ -890,6 +742,36 @@ describe('Agent adapter layer', () => {
         source: 'llm',
       }),
     ]);
+  });
+
+  it('maps SocialAgentEventV2 failed fallback to a light reconnect status', () => {
+    const mapped = mapUserFacingAgentStreamEvent({
+      type: 'run.failed',
+      eventId: 'run-v2-failed-fallback:1',
+      seq: 1,
+      createdAt: '2026-06-21T00:00:00.000Z',
+      userId: '7',
+      threadId: '202',
+      taskId: 202,
+      runId: 'run-v2-failed-fallback',
+      stage: 'hydrate_context',
+      visibility: 'user_visible',
+      display: {
+        title: 'run failed',
+        detail: 'planner traceId payload',
+        state: 'failed',
+      },
+    });
+
+    expect(mapped).toEqual(
+      expect.objectContaining({
+        type: 'progress',
+        title: '这段需求还在',
+        detail: '我保留了这段需求，你可以继续处理或重新发送。',
+      }),
+    );
+    expect(JSON.stringify(mapped)).not.toContain('这次没有处理好');
+    expect(JSON.stringify(mapped)).not.toMatch(/planner|traceId|payload/i);
   });
 
   it('sanitizes SocialAgentEventV2 display text before it reaches process UI', async () => {
@@ -1026,8 +908,8 @@ describe('Agent adapter layer', () => {
           agentName: 'Social Match Agent',
           toolName: 'social_match_search_turn',
           status: 'running',
-          title: '正在筛选合适的人',
-          detail: '正在筛选合适的人',
+          title: '正在筛选公开可发现的人',
+          detail: '正在筛选公开可发现的人',
         });
         onEvent({
           type: 'tool_call',
@@ -1036,7 +918,7 @@ describe('Agent adapter layer', () => {
           agentName: 'Social Match Agent',
           toolName: 'social_match_search_turn',
           title: '正在处理这一步',
-          detail: '正在筛选合适的人',
+          detail: '正在筛选公开可发现的人',
         });
         onEvent({
           type: 'tool_result',
@@ -1044,8 +926,8 @@ describe('Agent adapter layer', () => {
           stepId: 'rank.candidates:2',
           agentName: 'Social Match Agent',
           toolName: 'social_match_search_turn',
-          title: '已整理结果',
-          detail: '正在筛选合适的人',
+          title: '已筛选公开可发现的人',
+          detail: '正在筛选公开可发现的人',
           status: 'done',
         });
         onEvent({
@@ -1054,7 +936,7 @@ describe('Agent adapter layer', () => {
           id: 'rank.candidates:2',
           kind: 'tool',
           title: '正在处理这一步',
-          detail: '正在筛选合适的人',
+          detail: '正在筛选公开可发现的人',
           state: 'done',
           metadata: {
             stepId: 'rank.candidates:2',
@@ -1090,15 +972,15 @@ describe('Agent adapter layer', () => {
       'social-codex:summary',
     ]);
     expect(progressEvents.map((event) => event.title)).toEqual([
-      '正在筛选合适的人',
+      '正在筛选公开可发现的人',
       '正在筛选公开可发现的人',
       '已筛选公开可发现的人',
       '已筛选公开可发现的人',
     ]);
     expect(progressEvents.every((event) => event.kind === 'status')).toBe(true);
-    expect(
-      progressEvents.every((event) => event.metadata?.processType === 'run_summary'),
-    ).toBe(true);
+    expect(progressEvents.every((event) => event.metadata?.processType === 'run_summary')).toBe(
+      true,
+    );
     expect(
       progressEvents.every((event) => event.metadata?.sourceProtocol === 'legacy_agent_stream'),
     ).toBe(true);
@@ -1172,9 +1054,9 @@ describe('Agent adapter layer', () => {
       'social-codex:summary',
       'social-codex:summary',
     ]);
-    expect(
-      progressEvents.every((event) => event.metadata?.processType === 'run_summary'),
-    ).toBe(true);
+    expect(progressEvents.every((event) => event.metadata?.processType === 'run_summary')).toBe(
+      true,
+    );
     expect(progressEvents.map((event) => event.metadata?.originalProcessType)).toEqual([
       'slot_memory',
       'candidate_search',
@@ -1291,14 +1173,22 @@ describe('Agent adapter layer', () => {
     );
     expect(
       mapped
-        .filter((event): event is Extract<AgentStreamEvent, { type: 'progress' }> =>
-          event?.type === 'progress',
+        .filter(
+          (event): event is Extract<AgentStreamEvent, { type: 'progress' }> =>
+            event?.type === 'progress',
         )
         .map((event) => event.metadata?.sourceProtocol),
     ).toEqual(expect.arrayContaining(['social_agent_event_v2']));
     expect(JSON.stringify(mapped)).not.toMatch(
       /tool_call_started|slot_filled|hydrate_context|planner|traceId|raw JSON|payload/i,
     );
+    expect(JSON.stringify(mapped)).not.toContain('这次处理没有完成');
+    expect(
+      mapped.find(
+        (event): event is Extract<AgentStreamEvent, { type: 'progress' }> =>
+          event?.type === 'progress' && event.metadata?.eventId === 'v2-contract-17',
+      ),
+    ).toEqual(expect.objectContaining({ title: '这段需求还在' }));
   });
 
   it('maps SocialAgentEventV2 visible process events to one cover-style public progress row', async () => {
@@ -2045,8 +1935,8 @@ describe('Agent adapter layer', () => {
           dryRunPreviewSummary: '确认前不会触达对方。',
           sideEffectAllowedBeforeApproval: false,
           auditRequired: true,
-          executionBoundary: '需要预览、确认和审计后继续',
-          resumePolicy: '同意后从保存点继续',
+          executionBoundary: '需要先预览，并由你确认后继续',
+          resumePolicy: '同意后接着当前进度继续',
         }),
       }),
     );
@@ -2072,7 +1962,7 @@ describe('Agent adapter layer', () => {
           visibility: 'user_visible',
           display: {
             title: '已取消这一步',
-            detail: '我不会执行刚才的高风险动作，会继续保留当前对话。',
+            detail: '这一步已取消，不会触达对方，也不会公开位置或联系方式。',
             state: 'done',
           },
           payload: {
@@ -2111,7 +2001,7 @@ describe('Agent adapter layer', () => {
         type: 'progress',
         state: 'done',
         lifecycle: 'waiting_confirmation',
-        detail: '我不会执行刚才的高风险动作，会继续保留当前对话。',
+        detail: '确认前不会执行真实发布、邀请或联系动作。',
         metadata: expect.objectContaining({
           processType: 'approval',
           stageLabel: '等待确认',
@@ -2119,6 +2009,7 @@ describe('Agent adapter layer', () => {
         }),
       }),
     );
+    expect(JSON.stringify(resolved)).not.toContain('保留当前对话');
     expect(JSON.stringify(resolved)).not.toMatch(
       /run-hidden|"payload"|planner|traceId|resumeToken|checkpointId/,
     );
@@ -2235,7 +2126,7 @@ describe('Agent adapter layer', () => {
 function mockResponse(): UserFacingAgentResponse {
   return {
     assistantMessage: '我找到了一些建议。',
-    lightStatus: '正在筛选合适的人',
+    lightStatus: '正在筛选公开可发现的人',
     permissionMode: 'limited_auto',
     safeStatus: {
       blocked: false,

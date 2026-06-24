@@ -105,7 +105,9 @@ describe('SocialRequestsService', () => {
     });
 
     expect(ai.generateSocialRequestCard).toHaveBeenCalledWith(
-      expect.stringContaining('已确认信息：活动：散步；时间：今天晚上；地点：青岛大学附近'),
+      expect.stringContaining(
+        '已确认信息：活动：散步；时间：今天晚上；地点：青岛大学附近',
+      ),
       expect.objectContaining({ city: '青岛' }),
     );
     expect(result.draft).toMatchObject({
@@ -173,7 +175,9 @@ describe('SocialRequestsService', () => {
     );
 
     expect(ai.parseSocialRequest).toHaveBeenCalledWith(
-      expect.stringContaining('已确认信息：活动：散步；时间：今天晚上；地点：青岛大学附近'),
+      expect.stringContaining(
+        '已确认信息：活动：散步；时间：今天晚上；地点：青岛大学附近',
+      ),
     );
     expect(result).toMatchObject({
       type: SocialRequestType.CityWalk,

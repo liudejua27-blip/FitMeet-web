@@ -27,9 +27,14 @@ export function shouldPersistSocialAgentCurrentTaskSummary(input: {
   request: Record<string, unknown>;
   bool: (value: unknown) => boolean | undefined;
 }): boolean {
-  return input.bool(input.request.persistLongTerm ?? input.request.writeLongTerm) === true;
+  return (
+    input.bool(input.request.persistLongTerm ?? input.request.writeLongTerm) ===
+    true
+  );
 }
 
 function contextWindow(value: unknown, limit?: number): unknown[] {
-  return Array.isArray(value) ? selectSocialAgentContextWindow(value, limit) : [];
+  return Array.isArray(value)
+    ? selectSocialAgentContextWindow(value, limit)
+    : [];
 }

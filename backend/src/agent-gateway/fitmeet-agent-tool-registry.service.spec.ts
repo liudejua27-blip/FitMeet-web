@@ -177,8 +177,8 @@ describe('FitMeetAgentToolRegistryService', () => {
     expect(service.resolveExecutorToolName('search_matches')).toBe(
       'search_matches',
     );
-    expect(service.resolveExecutorToolName('get_agent_inbox')).toBe(
-      'get_agent_inbox',
+    expect(service.resolveExecutorToolName('get_agent_message_events')).toBe(
+      'get_agent_message_events',
     );
     expect(service.resolveExecutorToolName('unknown_tool')).toBeNull();
   });

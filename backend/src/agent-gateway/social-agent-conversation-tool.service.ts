@@ -20,7 +20,7 @@ import { SocialAgentToolName } from './social-agent-tool.types';
 import type { SocialAgentShortTermMemory } from './social-agent-memory.util';
 import { AgentL5RuntimeService } from './agent-l5-runtime.service';
 
-export type SocialAgentConversationToolInboxEvent = {
+export type SocialAgentConversationToolMessageEvent = {
   eventType: string;
   input: {
     conversationId?: string | null;
@@ -44,7 +44,7 @@ export type SocialAgentConversationToolResult = {
   loopUpdates?: Partial<SocialAgentLoopMemory>;
   shortTermUpdates?: Partial<SocialAgentShortTermMemory>;
   receivedMessages?: SocialAgentMessageRecord[];
-  inboxEvent?: SocialAgentConversationToolInboxEvent;
+  messageEvent?: SocialAgentConversationToolMessageEvent;
   taskEvent?: SocialAgentConversationToolTaskEvent;
 };
 
@@ -75,7 +75,7 @@ export class SocialAgentConversationToolService {
       task.agentConnectionId ?? this.toolInput.number(input.agentConnectionId);
     const rawMessages =
       agentConnectionId && conversationId
-        ? await this.messages.getAgentInboxMessages(
+        ? await this.messages.getAgentConversationMessages(
             conversationId,
             agentConnectionId,
             { limit },
@@ -167,7 +167,7 @@ export class SocialAgentConversationToolService {
             },
           }
         : undefined,
-      inboxEvent: latest
+      messageEvent: latest
         ? {
             eventType: 'social_agent.message.received',
             input: {
@@ -255,7 +255,7 @@ export class SocialAgentConversationToolService {
           'done',
         ),
       },
-      inboxEvent: {
+      messageEvent: {
         eventType: 'social_agent.reply.summarized',
         input: {
           conversationId: loop.conversationId ?? null,

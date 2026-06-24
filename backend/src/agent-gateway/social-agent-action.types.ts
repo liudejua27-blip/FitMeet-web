@@ -1,6 +1,8 @@
 import type { SocialAgentRouteMessageBody } from './social-agent-chat.types';
 
-export type SocialAgentCardExecutableAction = import('./fitmeet-alpha-agent.types').FitMeetAgentSchemaAction | 'connect_candidate';
+export type SocialAgentCardExecutableAction =
+  | import('./fitmeet-alpha-agent.types').FitMeetAgentSchemaAction
+  | 'connect_candidate';
 export type CandidateTargetBody = {
   targetUserId?: unknown;
   candidateUserId?: unknown;

@@ -15,9 +15,7 @@ const FITMEET_SUBAGENT_WORKER_AGENT_NAMES: readonly FitMeetAlphaAgentName[] = [
   'FitMeet Main Agent',
   'Agent Brain',
   'Life Graph Agent',
-  'Social Match Agent',
-  'Meet Loop Agent',
-  'Math Agent',
+  'Match Agent',
 ];
 const FITMEET_SUBAGENT_HIGH_RISK_TOOL_NAME_PATTERNS: readonly RegExp[] = [
   /\bsend_message_to_candidate\b/,
@@ -325,24 +323,18 @@ function mergeTaskContexts(
       readRecord(context, 'candidateState') ??
       readRecord(taskMemory, 'candidateActions') ??
       readRecord(taskMemory, 'candidateState');
-    if (candidateActions) Object.assign(mergedCandidateActions, candidateActions);
+    if (candidateActions)
+      Object.assign(mergedCandidateActions, candidateActions);
     const lifeGraphSummary =
       readRecord(context, 'lifeGraphSummary') ??
       readRecord(taskMemory, 'lifeGraphSummary');
-    if (lifeGraphSummary) Object.assign(mergedLifeGraphSummary, lifeGraphSummary);
+    if (lifeGraphSummary)
+      Object.assign(mergedLifeGraphSummary, lifeGraphSummary);
     const pendingApprovals = [
-      ...(Array.isArray(context.pendingApprovals)
-        ? context.pendingApprovals
-        : []),
-      ...(Array.isArray(context.pendingActions)
-        ? context.pendingActions
-        : []),
-      ...(Array.isArray(taskMemory?.pendingApprovals)
-        ? taskMemory.pendingApprovals
-        : []),
-      ...(Array.isArray(taskMemory?.pendingActions)
-        ? taskMemory.pendingActions
-        : []),
+      ...readRecordArray(context, 'pendingApprovals'),
+      ...readRecordArray(context, 'pendingActions'),
+      ...readRecordArray(taskMemory, 'pendingApprovals'),
+      ...readRecordArray(taskMemory, 'pendingActions'),
     ];
     if (pendingApprovals.length > 0) {
       const normalized = jsonRoundTrip(
@@ -536,10 +528,7 @@ function isToolCommand(
   ) {
     return false;
   }
-  if (
-    isHighRiskSubagentToolName(toolName) &&
-    value.requiresApproval !== true
-  ) {
+  if (isHighRiskSubagentToolName(toolName) && value.requiresApproval !== true) {
     return false;
   }
   return isJsonSerializable(value);
@@ -596,11 +585,12 @@ function normalizeContextSnapshot(input: {
     readRecord(source, 'taskMemory') ?? readRecord(taskContext, 'taskMemory');
   const taskSlots = isRecord(source.taskSlots)
     ? source.taskSlots
-    : readRecord(taskContext, 'taskSlots') ?? readRecord(taskMemory, 'taskSlots');
+    : (readRecord(taskContext, 'taskSlots') ??
+      readRecord(taskMemory, 'taskSlots'));
   const taskSlotSummary = isRecord(source.taskSlotSummary)
     ? source.taskSlotSummary
-    : readRecord(taskContext, 'taskSlotSummary') ??
-      readRecord(taskMemory, 'taskSlotSummary');
+    : (readRecord(taskContext, 'taskSlotSummary') ??
+      readRecord(taskMemory, 'taskSlotSummary'));
   const knownTaskSlotConstraints =
     readRecord(source, 'knownTaskSlotConstraints') ??
     readRecord(taskContext, 'knownTaskSlotConstraints') ??
@@ -620,31 +610,28 @@ function normalizeContextSnapshot(input: {
   const pendingApprovals = Array.isArray(source.pendingApprovals)
     ? jsonRoundTrip(source.pendingApprovals, 'contextSnapshot.pendingApprovals')
     : Array.isArray(sourcePendingActions)
-      ? jsonRoundTrip(
-          sourcePendingActions,
-          'contextSnapshot.pendingApprovals',
-        )
-    : Array.isArray(taskContext?.pendingApprovals)
-      ? jsonRoundTrip(
-          taskContext.pendingApprovals,
-          'contextSnapshot.pendingApprovals',
-        )
-      : Array.isArray(taskContext?.pendingActions)
+      ? jsonRoundTrip(sourcePendingActions, 'contextSnapshot.pendingApprovals')
+      : Array.isArray(taskContext?.pendingApprovals)
         ? jsonRoundTrip(
-            taskContext.pendingActions,
+            taskContext.pendingApprovals,
             'contextSnapshot.pendingApprovals',
           )
-      : Array.isArray(taskMemory?.pendingApprovals)
-        ? jsonRoundTrip(
-            taskMemory.pendingApprovals,
-            'contextSnapshot.pendingApprovals',
-          )
-      : Array.isArray(taskMemory?.pendingActions)
-        ? jsonRoundTrip(
-            taskMemory.pendingActions,
-            'contextSnapshot.pendingApprovals',
-          )
-      : [];
+        : Array.isArray(taskContext?.pendingActions)
+          ? jsonRoundTrip(
+              taskContext.pendingActions,
+              'contextSnapshot.pendingApprovals',
+            )
+          : Array.isArray(taskMemory?.pendingApprovals)
+            ? jsonRoundTrip(
+                taskMemory.pendingApprovals,
+                'contextSnapshot.pendingApprovals',
+              )
+            : Array.isArray(taskMemory?.pendingActions)
+              ? jsonRoundTrip(
+                  taskMemory.pendingActions,
+                  'contextSnapshot.pendingApprovals',
+                )
+              : [];
   return jsonRecord(
     {
       threadId:

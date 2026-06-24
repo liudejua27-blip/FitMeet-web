@@ -68,6 +68,8 @@ function makeHarness(
     longTermFails?: boolean;
     ownedTask?: AgentTask;
     hydratedContext?: Record<string, unknown> | null;
+    routeTaskContext?: Record<string, unknown>;
+    workflowRouter?: { route: jest.Mock };
   } = {},
 ) {
   const socialProfiles = {
@@ -82,6 +84,7 @@ function makeHarness(
   const metrics = {
     recordError: jest.fn(),
     recordIntent: jest.fn(),
+    recordWorkflowRoute: jest.fn(),
   };
   const longTermSnapshot = {
     taskCount: 2,
@@ -104,7 +107,9 @@ function makeHarness(
   };
   const routeContext = {
     buildMemoryContext: jest.fn().mockReturnValue({ summary: 'memory' }),
-    buildTaskContext: jest.fn().mockReturnValue({ taskId: 101 }),
+    buildTaskContext: jest
+      .fn()
+      .mockReturnValue(options.routeTaskContext ?? { taskId: 101 }),
     applyRagContext: jest.fn().mockResolvedValue(undefined),
   };
   const messageLog = {
@@ -163,6 +168,8 @@ function makeHarness(
         } as never)
       : undefined,
     contextHydrator as never,
+    undefined,
+    options.workflowRouter as never,
   );
   return {
     brain,
@@ -207,6 +214,11 @@ describe('SocialAgentRouteDecisionService', () => {
     });
 
     expect(result.route).toBe(brainDecision.route);
+    expect(result.route).toMatchObject({
+      intent: 'social_search',
+      shouldSearch: true,
+      replyStrategy: 'search_candidates',
+    });
     expect(result.longTermSnapshot).toBe(longTermSnapshot);
     expect(result.profile).toMatchObject({
       city: '青岛',
@@ -235,10 +247,7 @@ describe('SocialAgentRouteDecisionService', () => {
       result.task,
       brainDecision.route,
     );
-    expect(metrics.recordIntent).toHaveBeenCalledWith(
-      'profile_update',
-      'rules',
-    );
+    expect(metrics.recordIntent).toHaveBeenCalledWith('social_search', 'rules');
     expect(routeContext.applyRagContext).toHaveBeenCalledWith(
       expect.objectContaining({
         task: result.task,
@@ -256,12 +265,58 @@ describe('SocialAgentRouteDecisionService', () => {
       taskMemory: {
         lastUserMessages: [
           expect.objectContaining({
-            intent: 'profile_update',
+            intent: 'social_search',
             text: '帮我找周末下午能一起跑步的人',
           }),
         ],
       },
     });
+  });
+
+  it('uses deterministic workflow routing without calling LLM intent routing or Brain', async () => {
+    const workflowRoute = makeRoute({
+      intent: 'social_search',
+      shouldSearch: true,
+      replyStrategy: 'search_candidates',
+    });
+    const workflowRouter = {
+      route: jest.fn().mockReturnValue({
+        route: workflowRoute,
+        reason: 'explicit_social_workflow',
+        skipBrain: true,
+      }),
+    };
+    const { brain, intentRouter, metrics, profileEnrichment, service } =
+      makeHarness({ workflowRouter });
+
+    const result = await service.prepare({
+      ownerUserId: 7,
+      task: makeTask(),
+      body: {
+        taskId: 101,
+        message: '帮我找今晚青岛大学附近散步搭子',
+        conversationIntent: 'social',
+      },
+      message: '帮我找今晚青岛大学附近散步搭子',
+    });
+
+    expect(result.route).toStrictEqual(workflowRoute);
+    expect(workflowRouter.route).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: '帮我找今晚青岛大学附近散步搭子',
+        conversationIntent: 'social',
+      }),
+    );
+    expect(intentRouter.route).not.toHaveBeenCalled();
+    expect(brain.planTurn).not.toHaveBeenCalled();
+    expect(metrics.recordWorkflowRoute).toHaveBeenCalledWith(
+      'social_search',
+      'explicit_social_workflow',
+      { skipBrain: true },
+    );
+    expect(
+      profileEnrichment.executeConversationBrainReadTools,
+    ).toHaveBeenCalledWith(7, result.task, undefined);
   });
 
   it('uses the configured context window for intent routing and brain planning', async () => {
@@ -654,9 +709,7 @@ describe('SocialAgentRouteDecisionService', () => {
       taskSlotSummary: {},
       knownTaskSlotConstraints: {
         treatAsHardConstraints: true,
-        knownSlots: [
-          { key: 'time_window', label: '时间', value: '周末下午' },
-        ],
+        knownSlots: [{ key: 'time_window', label: '时间', value: '周末下午' }],
         doNotAskAgainFor: ['time_window'],
         userVisibleSummary: '时间：周末下午',
         candidatePreferencePolicy: 'old policy',
@@ -717,7 +770,10 @@ describe('SocialAgentRouteDecisionService', () => {
     await service.prepare({
       ownerUserId: 7,
       task: ownedTask,
-      body: { taskId: 101, message: '今天晚上在青岛大学附近，找个女舞蹈生散步。' },
+      body: {
+        taskId: 101,
+        message: '今天晚上在青岛大学附近，找个女舞蹈生散步。',
+      },
       message: '今天晚上在青岛大学附近，找个女舞蹈生散步。',
     });
 
@@ -851,6 +907,44 @@ describe('SocialAgentRouteDecisionService', () => {
         'location_text',
       ]),
     });
+  });
+
+  it('keeps candidate refinement follow-ups inside the existing social task instead of answering generically', async () => {
+    const casualRoute = makeRoute({
+      intent: 'casual_chat',
+      shouldSearch: false,
+      replyStrategy: 'conversational_answer',
+    });
+    const brainDecision = makeBrainDecision(casualRoute, {
+      conversationMode: 'answer',
+      shouldExecuteTool: false,
+      tools: [],
+      userIntent: 'casual_chat',
+      reason: 'model downgraded candidate preference',
+      responseGoal: 'answer normally',
+    });
+    const { service } = makeHarness({
+      brainDecision,
+      routeTaskContext: {
+        taskId: 101,
+        hasCandidates: true,
+        candidateCount: 4,
+      },
+    });
+
+    const result = await service.prepare({
+      ownerUserId: 7,
+      task: makeTask({ goal: '青岛散步搭子' }),
+      body: { taskId: 101, message: '有没有女生' },
+      message: '有没有女生',
+    });
+
+    expect(result.route).toMatchObject({
+      intent: 'candidate_followup',
+      shouldSearch: true,
+      replyStrategy: 'search_candidates',
+    });
+    expect(result.brainDecision?.route).toBe(result.route);
   });
 
   it('records long-term memory failures and continues with a null snapshot', async () => {

@@ -3,7 +3,9 @@ import {
   SocialAgentLongTermMemoryService,
   LongTermMemorySnapshot,
 } from './social-agent-long-term-memory.service';
+import { SocialAgentEmbeddingCacheService } from './social-agent-embedding-cache.service';
 import type { SocialAgentIntentType } from './social-agent-intent-router.service';
+import { SocialAgentMetricsService } from './social-agent-metrics.service';
 
 /**
  * RAG / SOP v1 (no Vector DB).
@@ -81,6 +83,13 @@ export type SocialAgentRagDoc =
   | SuccessfulMatchCaseDoc
   | UserMemorySummaryDoc;
 
+type TaggedRagDoc =
+  | SafetySopDoc
+  | OpeningTemplateDoc
+  | ActivitySopDoc
+  | SuccessfulMatchCaseDoc
+  | { tags: string[] };
+
 export interface SocialAgentRagRetrievalInput {
   intent: SocialAgentIntentType;
   ownerUserId: number;
@@ -133,6 +142,7 @@ const INTENT_KIND_MAP: Record<SocialAgentIntentType, SocialAgentRagDocKind[]> =
 @Injectable()
 export class SocialAgentRagService {
   private readonly logger = new Logger(SocialAgentRagService.name);
+  private localEmbeddingCache?: SocialAgentEmbeddingCacheService;
 
   private readonly safetySop: SafetySopDoc[] = [
     {
@@ -244,6 +254,8 @@ export class SocialAgentRagService {
 
   constructor(
     private readonly longTermMemory: SocialAgentLongTermMemoryService,
+    private readonly embeddingCache?: SocialAgentEmbeddingCacheService,
+    private readonly metrics?: SocialAgentMetricsService,
   ) {}
 
   async retrieve(
@@ -266,31 +278,27 @@ export class SocialAgentRagService {
     const activityType = (input.activityType ?? '').toLowerCase();
 
     if (kinds.includes('safety_sop')) {
-      context.safetySop = this.filterByTags(
-        this.safetySop,
-        message,
-        activityType,
+      context.safetySop = (
+        await this.filterByTags(this.safetySop, message, activityType)
       ).slice(0, limit);
     }
     if (kinds.includes('opening_templates')) {
-      context.openingTemplates = this.filterByTags(
-        this.openingTemplates,
-        message,
-        activityType,
+      context.openingTemplates = (
+        await this.filterByTags(this.openingTemplates, message, activityType)
       ).slice(0, limit);
     }
     if (kinds.includes('activity_sop')) {
-      context.activitySop = this.filterByTags(
-        this.activitySop,
-        message,
-        activityType,
+      context.activitySop = (
+        await this.filterByTags(this.activitySop, message, activityType)
       ).slice(0, limit);
     }
     if (kinds.includes('successful_match_cases')) {
-      context.successfulMatchCases = this.filterByTags(
-        this.successfulMatchCases,
-        message,
-        activityType,
+      context.successfulMatchCases = (
+        await this.filterByTags(
+          this.successfulMatchCases,
+          message,
+          activityType,
+        )
       ).slice(0, limit);
     }
     if (kinds.includes('user_memory_summary')) {
@@ -311,28 +319,125 @@ export class SocialAgentRagService {
     return context;
   }
 
-  private filterByTags<T extends { tags: string[] }>(
+  private async filterByTags<T extends { tags: string[] }>(
     docs: T[],
     message: string,
     activityType: string,
-  ): T[] {
+  ): Promise<T[]> {
     if (!message && !activityType) return docs.slice();
-    const scored = docs
-      .map((doc) => {
-        const score = doc.tags.reduce((sum, tag) => {
+    const queryText = [message, activityType].filter(Boolean).join(' ');
+    const queryVector = await this.cachedLexicalEmbedding(
+      'rag_query',
+      queryText,
+      queryText,
+    );
+    const scored = docs.map(async (doc) => {
+      const docText = this.docEmbeddingText(doc);
+      const docVector = await this.cachedLexicalEmbedding(
+        'rag_doc',
+        docText,
+        this.docEmbeddingHash(doc),
+      );
+      const score = doc.tags.reduce(
+        (sum, tag) => {
           const lower = tag.toLowerCase();
           let next = sum;
           if (activityType && lower.includes(activityType)) next += 2;
           if (message && message.includes(lower)) next += 1;
           return next;
-        }, 0);
-        return { doc, score };
-      })
-      .sort((a, b) => b.score - a.score);
-    const positive = scored
+        },
+        this.cosineSimilarity(queryVector, docVector),
+      );
+      return { doc, score };
+    });
+    const scoredDocs = await Promise.all(scored);
+    scoredDocs.sort((a, b) => b.score - a.score);
+    const positive = scoredDocs
       .filter((entry) => entry.score > 0)
       .map((entry) => entry.doc);
     return positive.length > 0 ? positive : docs.slice();
+  }
+
+  private async cachedLexicalEmbedding(
+    namespace: string,
+    text: string,
+    contentHash: string,
+  ): Promise<number[]> {
+    const read = await this.embeddingCacheService().getOrSetWithMeta(
+      {
+        namespace,
+        model: 'fitmeet-lexical-v1',
+        text,
+        dimensions: 64,
+        contentHash,
+      },
+      () => this.lexicalEmbedding(text),
+    );
+    this.metrics?.recordEmbeddingCache({
+      cacheName: namespace,
+      hit: read.hit,
+      approxChars: read.approxInputChars,
+    });
+    return read.vector;
+  }
+
+  private embeddingCacheService(): SocialAgentEmbeddingCacheService {
+    if (this.embeddingCache) return this.embeddingCache;
+    this.localEmbeddingCache ??= new SocialAgentEmbeddingCacheService();
+    return this.localEmbeddingCache;
+  }
+
+  private lexicalEmbedding(text: string): number[] {
+    const normalized = text.toLowerCase().replace(/\s+/g, '');
+    const vector = Array.from({ length: 64 }, () => 0);
+    if (!normalized) return vector;
+    for (let index = 0; index < normalized.length; index += 1) {
+      const gram =
+        index < normalized.length - 1
+          ? normalized.slice(index, index + 2)
+          : normalized[index];
+      vector[this.hashToBucket(gram, vector.length)] += 1;
+    }
+    const magnitude = Math.sqrt(
+      vector.reduce((sum, value) => sum + value * value, 0),
+    );
+    if (magnitude <= 0) return vector;
+    return vector.map((value) => value / magnitude);
+  }
+
+  private hashToBucket(value: string, buckets: number): number {
+    let hash = 0;
+    for (let index = 0; index < value.length; index += 1) {
+      hash = (hash * 31 + value.charCodeAt(index)) >>> 0;
+    }
+    return hash % buckets;
+  }
+
+  private cosineSimilarity(left: number[], right: number[]): number {
+    const limit = Math.min(left.length, right.length);
+    let score = 0;
+    for (let index = 0; index < limit; index += 1) {
+      score += (left[index] ?? 0) * (right[index] ?? 0);
+    }
+    return score;
+  }
+
+  private docEmbeddingText(doc: TaggedRagDoc): string {
+    if ('title' in doc) return [doc.title, ...doc.tags].join(' ');
+    if ('scenario' in doc)
+      return [doc.scenario, doc.template, ...doc.tags].join(' ');
+    if ('activityType' in doc) {
+      return [doc.activityType, ...doc.checklist, ...doc.tags].join(' ');
+    }
+    if ('summary' in doc) {
+      return [doc.summary, ...doc.highlights, ...doc.tags].join(' ');
+    }
+    return doc.tags.join(' ');
+  }
+
+  private docEmbeddingHash(doc: TaggedRagDoc): string {
+    if ('id' in doc) return `${doc.kind}:${doc.id}`;
+    return this.docEmbeddingText(doc);
   }
 
   private async buildUserMemorySummary(

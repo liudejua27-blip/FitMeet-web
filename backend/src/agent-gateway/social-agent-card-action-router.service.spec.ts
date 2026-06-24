@@ -53,6 +53,14 @@ function makeHarness(options: { runRunner?: boolean } = {}) {
   const lifeGraphActions = {
     performUpdateAction: jest.fn(),
   };
+  const draftPublication = {
+    publishDraft: jest.fn(),
+    dismissDraft: jest.fn().mockResolvedValue({
+      success: true,
+      status: 'dismissed',
+      message: '已取消发布，这张约练卡不会出现在发现页，也不会继续匹配。',
+    }),
+  };
   const executeCalls: Array<Record<string, unknown>> = [];
   const agentLoop = {
     execute: jest.fn(async (input: Record<string, unknown>) => {
@@ -72,11 +80,16 @@ function makeHarness(options: { runRunner?: boolean } = {}) {
       };
     }),
   };
+  const metrics = {
+    recordDeterministicAction: jest.fn(),
+  };
   const service = new SocialAgentCardActionRouterService(
     candidateActions as never,
     meetLoop as never,
     lifeGraphActions as never,
     agentLoop as never,
+    draftPublication as never,
+    metrics as never,
   );
   const handleMessage = jest.fn().mockResolvedValue(
     routeResult({
@@ -90,11 +103,261 @@ function makeHarness(options: { runRunner?: boolean } = {}) {
     handleMessage,
     lifeGraphActions,
     meetLoop,
+    metrics,
+    draftPublication,
     service,
   };
 }
 
 describe('SocialAgentCardActionRouterService', () => {
+  it('keeps low-risk candidate card actions approval-free while still dispatching through AgentLoop', async () => {
+    const { candidateActions, executeCalls, handleMessage, metrics, service } =
+      makeHarness();
+    candidateActions.performCandidatePreferenceAction.mockResolvedValue(
+      routeResult({
+        action: 'reply',
+        assistantMessage: '已收藏这个候选，后续推荐会参考。',
+        pendingApproval: null,
+      }),
+    );
+    candidateActions.createOpenerDraftFromCardAction.mockResolvedValue(
+      routeResult({
+        action: 'reply',
+        assistantMessage: '我先帮你写了一条低压力的开场白。确认前不会发送。',
+        pendingApproval: null,
+        cards: [
+          {
+            id: 'opener-draft-501',
+            type: 'candidate_card',
+            schemaVersion: 'fitmeet.tool-ui.v1',
+            schemaType: 'social_match.candidate',
+            title: '陈砚',
+            body: '开场白已准备好。',
+            data: { candidateRecordId: 501 },
+            actions: [],
+          },
+        ],
+      }),
+    );
+
+    const saveResult = await service.perform({
+      ownerUserId: 7,
+      taskId: 101,
+      body: {
+        action: 'candidate.like' as never,
+        payload: { candidateRecordId: 501, targetUserId: 22 },
+      },
+      handleMessage,
+    });
+    const openerResult = await service.perform({
+      ownerUserId: 7,
+      taskId: 101,
+      body: {
+        action: 'candidate.generate_opener' as never,
+        payload: { candidateRecordId: 501, targetUserId: 22 },
+      },
+      handleMessage,
+    });
+
+    expect(handleMessage).not.toHaveBeenCalled();
+    expect(saveResult.pendingApproval).toBeNull();
+    expect(openerResult.pendingApproval).toBeNull();
+    expect(
+      candidateActions.performCandidatePreferenceAction,
+    ).toHaveBeenCalledWith(
+      7,
+      101,
+      expect.objectContaining({ action: 'candidate.like' }),
+    );
+    expect(
+      candidateActions.createOpenerDraftFromCardAction,
+    ).toHaveBeenCalledWith(
+      7,
+      101,
+      expect.objectContaining({ action: 'candidate.generate_opener' }),
+    );
+    expect(executeCalls).toHaveLength(2);
+    expect(metrics.recordDeterministicAction).toHaveBeenCalledWith(
+      'candidate.like',
+      { estimatedAvoidedLlmCalls: 1 },
+    );
+    expect(metrics.recordDeterministicAction).toHaveBeenCalledWith(
+      'candidate.generate_opener',
+      { estimatedAvoidedLlmCalls: 1 },
+    );
+    expect(
+      executeCalls.map((call) => ({
+        goal: call.goal,
+        tool: (
+          call.plan as {
+            tools: Array<{
+              agent: string;
+              toolName: string;
+              input: Record<string, unknown>;
+            }>;
+          }
+        ).tools[0],
+      })),
+    ).toEqual([
+      {
+        goal: 'card_action:candidate.like',
+        tool: expect.objectContaining({
+          agent: 'Match Agent',
+          toolName: 'card_action_dispatch',
+          input: expect.objectContaining({ action: 'candidate.like' }),
+        }),
+      },
+      {
+        goal: 'card_action:candidate.generate_opener',
+        tool: expect.objectContaining({
+          agent: 'Match Agent',
+          toolName: 'card_action_dispatch',
+          input: expect.objectContaining({
+            action: 'candidate.generate_opener',
+          }),
+        }),
+      },
+    ]);
+  });
+
+  it('does not continue private candidate search after publish is skipped', async () => {
+    const { candidateActions, handleMessage, metrics, service } = makeHarness();
+    candidateActions.performCandidatePreferenceAction.mockResolvedValue(
+      routeResult({
+        action: 'reply',
+        assistantMessage: '已记录这次私密匹配偏好。',
+      }),
+    );
+
+    const result = await service.perform({
+      ownerUserId: 7,
+      taskId: 101,
+      body: {
+        action: 'candidate.more_like_this' as never,
+        idempotencyKey: 'private-more-like-this-101',
+        payload: {
+          privateMatchMode: true,
+          publicDiscoverPublishSkipped: true,
+          candidateSearchMode: 'private_match_without_discover_publish',
+          sourceAction: 'activity.skip_publish',
+          city: '青岛',
+          title: '青岛大学轻松散步',
+          timePreference: '今天晚上',
+          locationPreference: '青岛大学附近',
+          activityType: '散步',
+          targetGender: '女生',
+        },
+        clientContext: { threadId: 'agent-task:101' },
+      },
+      handleMessage,
+    });
+
+    expect(
+      candidateActions.performCandidatePreferenceAction,
+    ).toHaveBeenCalledWith(
+      7,
+      101,
+      expect.objectContaining({ action: 'candidate.more_like_this' }),
+    );
+    expect(handleMessage).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      action: 'reply',
+      assistantMessage: '已记录这次私密匹配偏好。',
+    });
+    expect(result.structuredIntent).toBeUndefined();
+    expect(metrics.recordDeterministicAction).toHaveBeenCalledWith(
+      'candidate.more_like_this',
+      expect.objectContaining({ estimatedAvoidedLlmCalls: 1 }),
+    );
+  });
+
+  it('normalizes legacy low-risk action aliases before dispatching', async () => {
+    const { candidateActions, handleMessage, meetLoop, service } =
+      makeHarness();
+    candidateActions.performCandidatePreferenceAction.mockResolvedValue(
+      routeResult({
+        action: 'reply',
+        assistantMessage: '已记录这个偏好。',
+        pendingApproval: null,
+      }),
+    );
+    candidateActions.regenerateOpenerDraftFromCardAction.mockResolvedValue(
+      routeResult({
+        action: 'reply',
+        assistantMessage: '已重新生成开场白草稿。',
+        pendingApproval: null,
+      }),
+    );
+    meetLoop.performActivityAction.mockResolvedValue(
+      routeResult({
+        action: 'reply',
+        assistantMessage: '当前活动详情已整理好。',
+        pendingApproval: null,
+      }),
+    );
+
+    for (const [action, canonical] of [
+      ['save_candidate', 'candidate.like'],
+      ['dislike_candidate', 'candidate.skip'],
+      ['see_more', 'candidate.more_like_this'],
+      ['expand_radius', 'candidate.more_like_this'],
+      ['relax_preference', 'candidate.more_like_this'],
+      ['filter_school', 'candidate.more_like_this'],
+      ['filter_gender_female', 'candidate.more_like_this'],
+      ['refine_request', 'candidate.more_like_this'],
+    ] as const) {
+      await service.perform({
+        ownerUserId: 7,
+        taskId: 101,
+        body: {
+          action: action as never,
+          payload: { candidateRecordId: 501, targetUserId: 22 },
+        },
+        handleMessage,
+      });
+      expect(
+        candidateActions.performCandidatePreferenceAction,
+      ).toHaveBeenLastCalledWith(
+        7,
+        101,
+        expect.objectContaining({ action: canonical }),
+      );
+    }
+
+    await service.perform({
+      ownerUserId: 7,
+      taskId: 101,
+      body: {
+        action: 'regenerate_opener' as never,
+        payload: { candidateRecordId: 501, targetUserId: 22 },
+      },
+      handleMessage,
+    });
+    expect(
+      candidateActions.regenerateOpenerDraftFromCardAction,
+    ).toHaveBeenCalledWith(
+      7,
+      101,
+      expect.objectContaining({ action: 'opener.regenerate' }),
+    );
+
+    await service.perform({
+      ownerUserId: 7,
+      taskId: 101,
+      body: {
+        action: 'view_activity' as never,
+        payload: { activityId: 700 },
+      },
+      handleMessage,
+    });
+    expect(meetLoop.performActivityAction).toHaveBeenCalledWith(
+      7,
+      101,
+      expect.objectContaining({ action: 'activity.view_detail' }),
+    );
+    expect(handleMessage).not.toHaveBeenCalled();
+  });
+
   it('dispatches high-risk schema actions only through AgentLoop and preserves pending approval results', async () => {
     const {
       candidateActions,
@@ -102,18 +365,20 @@ describe('SocialAgentCardActionRouterService', () => {
       handleMessage,
       lifeGraphActions,
       meetLoop,
+      metrics,
+      draftPublication,
       service,
     } = makeHarness();
     candidateActions.connectCandidateFromCardAction.mockResolvedValue(
       routeResult({
         action: 'await_confirmation',
-        assistantMessage: '发送邀请前还需要你确认。',
+        assistantMessage: '加好友并聊天前还需要你确认。',
         pendingApproval: {
           id: 9001,
           type: 'contact_request' as never,
           actionType: 'connect_candidate',
-          summary: '发送邀请给候选人 #22',
-          riskLevel: 'medium' as never,
+          summary: '加好友并聊天：这位用户',
+          riskLevel: 'high' as never,
           payload: {
             schemaAction: 'candidate.connect',
             checkpointRequired: true,
@@ -123,55 +388,59 @@ describe('SocialAgentCardActionRouterService', () => {
         },
       }),
     );
-    meetLoop.performActivityAction.mockResolvedValueOnce(
-      routeResult({
-        action: 'await_confirmation',
-        assistantMessage: '确认前不会创建活动。',
-        pendingApproval: {
-          id: 9002,
-          type: 'create_activity' as never,
-          actionType: 'create_activity',
-          summary: '创建线下约练计划',
-          riskLevel: 'medium' as never,
-          payload: {
-            schemaAction: 'activity.confirm_create',
-            checkpointRequired: true,
-            resumeMode: 'resume_after_approval',
-          },
-          expiresAt: null,
-        },
-      }),
-    );
+    meetLoop.performActivityAction.mockImplementation((_owner, _task, body) => {
+      if (body.action === 'activity.confirm_create') {
+        return Promise.resolve(
+          routeResult({
+            action: 'await_confirmation',
+            assistantMessage: '确认前不会创建活动。',
+            pendingApproval: {
+              id: 9002,
+              type: 'create_activity' as never,
+              actionType: 'create_activity',
+              summary: '创建线下约练计划',
+              riskLevel: 'medium' as never,
+              payload: {
+                schemaAction: 'activity.confirm_create',
+                checkpointRequired: true,
+                resumeMode: 'resume_after_approval',
+              },
+              expiresAt: null,
+            },
+          }),
+        );
+      }
+      return Promise.resolve(
+        routeResult({
+          action: 'reply',
+          assistantMessage:
+            '我已恢复到上次保存的邀约进度。下一步仍需要你确认。',
+          cards: [
+            {
+              id: 'meet-loop-resume',
+              type: 'meet_loop_timeline',
+              schemaVersion: 'fitmeet.tool-ui.v1',
+              schemaType: 'meet_loop.timeline',
+              title: '邀约进展',
+              status: 'waiting_confirmation',
+              body: '确认前不会发送消息、连接候选人或创建活动。',
+              data: {
+                loopStage: 'activity_draft_created',
+                waitingFor: 'meet_loop_resume_confirmation',
+              },
+              actions: [],
+            },
+          ],
+        }),
+      );
+    });
     lifeGraphActions.performUpdateAction.mockResolvedValue(
       routeResult({
         action: 'reply',
         profileUpdated: true,
-        assistantMessage: '已保存 Life Graph 信息。',
+        assistantMessage: '已保存画像信息。',
       }),
     );
-    meetLoop.performActivityAction.mockResolvedValueOnce(
-      routeResult({
-        action: 'reply',
-        assistantMessage: '我已恢复到上次保存的邀约进度。下一步仍需要你确认。',
-        cards: [
-          {
-            id: 'meet-loop-resume',
-            type: 'review_card',
-            schemaVersion: 'fitmeet.tool-ui.v1',
-            schemaType: 'meet_loop.timeline',
-            title: '邀约进展',
-            status: 'waiting_confirmation',
-            body: '确认前不会发送消息、连接候选人或创建活动。',
-            data: {
-              loopStage: 'activity_draft_created',
-              waitingFor: 'meet_loop_resume_confirmation',
-            },
-            actions: [],
-          },
-        ],
-      }),
-    );
-
     const cases = [
       {
         action: 'candidate.connect',
@@ -180,7 +449,7 @@ describe('SocialAgentCardActionRouterService', () => {
           checkpointRequired: true,
           resumeMode: 'resume_after_approval',
         },
-        expectedAgent: 'Social Match Agent',
+        expectedAgent: 'Match Agent',
         expectedHandler: candidateActions.connectCandidateFromCardAction,
       },
       {
@@ -190,8 +459,17 @@ describe('SocialAgentCardActionRouterService', () => {
           checkpointRequired: true,
           resumeMode: 'resume_after_approval',
         },
-        expectedAgent: 'Meet Loop Agent',
+        expectedAgent: 'Match Agent',
         expectedHandler: meetLoop.performActivityAction,
+      },
+      {
+        action: 'social_intent.decline_publish',
+        payload: {
+          candidateUserId: 22,
+          checkpointRequired: false,
+        },
+        expectedAgent: 'FitMeet Main Agent',
+        expectedHandler: draftPublication.dismissDraft,
       },
       {
         action: 'life_graph.accept_update',
@@ -210,7 +488,7 @@ describe('SocialAgentCardActionRouterService', () => {
           checkpointRequired: true,
           resumeMode: 'resume_after_approval',
         },
-        expectedAgent: 'Meet Loop Agent',
+        expectedAgent: 'Match Agent',
         expectedHandler: meetLoop.performActivityAction,
       },
     ];
@@ -266,7 +544,13 @@ describe('SocialAgentCardActionRouterService', () => {
       }),
       agentLoop: expect.objectContaining({ runId: 'loop:101:test' }),
     });
-    expect(results[3].cards).toEqual(
+    expect(results[2]).toMatchObject({
+      action: 'reply',
+      assistantMessage: expect.stringContaining('不会出现在发现页'),
+      pendingApproval: null,
+      publicLoop: expect.objectContaining({ stage: 'dismissed' }),
+    });
+    expect(results[4].cards).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           schemaType: 'meet_loop.timeline',
@@ -300,12 +584,23 @@ describe('SocialAgentCardActionRouterService', () => {
       });
       expect(item.expectedHandler).toHaveBeenCalled();
     }
+    for (const action of [
+      'candidate.connect',
+      'activity.confirm_create',
+      'social_intent.decline_publish',
+      'life_graph.accept_update',
+      'meet_loop.resume',
+    ]) {
+      expect(metrics.recordDeterministicAction).toHaveBeenCalledWith(action, {
+        estimatedAvoidedLlmCalls: 1,
+      });
+    }
   });
 
-  it('keeps fallback card actions bound to the active thread context', async () => {
-    const { handleMessage, service } = makeHarness();
+  it('handles unknown card actions deterministically without re-entering chat LLM', async () => {
+    const { handleMessage, metrics, service } = makeHarness();
 
-    await service.perform({
+    const result = await service.perform({
       ownerUserId: 7,
       taskId: 101,
       body: {
@@ -320,20 +615,653 @@ describe('SocialAgentCardActionRouterService', () => {
       handleMessage,
     });
 
+    expect(handleMessage).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      action: 'reply',
+      taskId: 101,
+      pendingApproval: null,
+      assistantMessage: expect.stringContaining('暂时不可用'),
+    });
+    expect(metrics.recordDeterministicAction).toHaveBeenCalledWith(
+      'unsupported_card_action',
+      { estimatedAvoidedLlmCalls: 1 },
+    );
+  });
+
+  it('keeps opener send and candidate connect actions on separate handlers', async () => {
+    const { candidateActions, executeCalls, handleMessage, metrics, service } =
+      makeHarness();
+    candidateActions.confirmOpenerSendFromCardAction.mockResolvedValue(
+      routeResult({
+        action: 'await_confirmation',
+        assistantMessage: '发送邀请前需要你确认。',
+        pendingApproval: {
+          id: 8801,
+          type: 'send_message' as never,
+          actionType: 'send_invite',
+          summary: '发送邀请给这位用户',
+          riskLevel: 'medium' as never,
+          payload: {
+            schemaAction: 'opener.confirm_send',
+            checkpointRequired: true,
+            resumeMode: 'resume_after_approval',
+          },
+          expiresAt: null,
+        },
+      }),
+    );
+    candidateActions.connectCandidateFromCardAction.mockResolvedValue(
+      routeResult({
+        action: 'await_confirmation',
+        assistantMessage: '加好友并聊天前需要你确认。',
+        pendingApproval: {
+          id: 8802,
+          type: 'contact_request' as never,
+          actionType: 'connect_candidate',
+          summary: '加好友并聊天：这位用户',
+          riskLevel: 'high' as never,
+          payload: {
+            schemaAction: 'candidate.connect',
+            checkpointRequired: true,
+            resumeMode: 'resume_after_approval',
+          },
+          expiresAt: null,
+        },
+      }),
+    );
+
+    const sendInviteResult = await service.perform({
+      ownerUserId: 7,
+      taskId: 101,
+      body: {
+        action: 'opener.confirm_send' as never,
+        payload: {
+          actionType: 'send_invite',
+          candidateUserId: 22,
+          message: '你好，要不要一起散步？',
+        },
+      },
+      handleMessage,
+    });
+    const directMessageResult = await service.perform({
+      ownerUserId: 7,
+      taskId: 101,
+      body: {
+        action: 'send_candidate_message' as never,
+        payload: {
+          actionType: 'send_invite',
+          candidateUserId: 22,
+          message: '你好，想约你一起散步。',
+        },
+      },
+      handleMessage,
+    });
+    const connectResult = await service.perform({
+      ownerUserId: 7,
+      taskId: 101,
+      body: {
+        action: 'candidate.connect' as never,
+        payload: {
+          actionType: 'connect_candidate',
+          targetUserId: 22,
+        },
+      },
+      handleMessage,
+    });
+
+    expect(handleMessage).not.toHaveBeenCalled();
+    expect(
+      candidateActions.confirmOpenerSendFromCardAction,
+    ).toHaveBeenCalledTimes(2);
+    expect(
+      candidateActions.connectCandidateFromCardAction,
+    ).toHaveBeenCalledTimes(1);
+    expect(sendInviteResult.pendingApproval).toEqual(
+      expect.objectContaining({
+        actionType: 'send_invite',
+        payload: expect.objectContaining({
+          schemaAction: 'opener.confirm_send',
+        }),
+      }),
+    );
+    expect(directMessageResult.pendingApproval).toEqual(
+      expect.objectContaining({
+        actionType: 'send_invite',
+        payload: expect.objectContaining({
+          schemaAction: 'opener.confirm_send',
+        }),
+      }),
+    );
+    expect(connectResult.pendingApproval).toEqual(
+      expect.objectContaining({
+        actionType: 'connect_candidate',
+        payload: expect.objectContaining({
+          schemaAction: 'candidate.connect',
+        }),
+      }),
+    );
+    expect(executeCalls).toHaveLength(3);
+    for (const action of ['opener.confirm_send', 'candidate.connect']) {
+      expect(metrics.recordDeterministicAction).toHaveBeenCalledWith(action, {
+        estimatedAvoidedLlmCalls: 1,
+      });
+    }
+    expect(
+      executeCalls.map((call) => ({
+        goal: call.goal,
+        toolInput: (
+          call.plan as {
+            tools: Array<{ agent: string; input: Record<string, unknown> }>;
+          }
+        ).tools[0],
+      })),
+    ).toEqual([
+      {
+        goal: 'card_action:opener.confirm_send',
+        toolInput: expect.objectContaining({
+          agent: 'Match Agent',
+          input: expect.objectContaining({
+            action: 'opener.confirm_send',
+          }),
+        }),
+      },
+      {
+        goal: 'card_action:opener.confirm_send',
+        toolInput: expect.objectContaining({
+          agent: 'Match Agent',
+          input: expect.objectContaining({
+            action: 'opener.confirm_send',
+          }),
+        }),
+      },
+      {
+        goal: 'card_action:candidate.connect',
+        toolInput: expect.objectContaining({
+          agent: 'Match Agent',
+          input: expect.objectContaining({
+            action: 'candidate.connect',
+          }),
+        }),
+      },
+    ]);
+  });
+
+  it('normalizes legacy raw card actions before dispatching to subagent handlers', async () => {
+    const {
+      candidateActions,
+      draftPublication,
+      executeCalls,
+      handleMessage,
+      meetLoop,
+      service,
+    } = makeHarness();
+    candidateActions.performCandidatePreferenceAction.mockResolvedValue(
+      routeResult({
+        action: 'reply',
+        assistantMessage: '已收藏这个候选。',
+        pendingApproval: null,
+      }),
+    );
+    candidateActions.createOpenerDraftFromCardAction.mockResolvedValue(
+      routeResult({
+        action: 'reply',
+        assistantMessage: '已生成开场白草稿。',
+        pendingApproval: null,
+      }),
+    );
+    candidateActions.confirmOpenerSendFromCardAction.mockResolvedValue(
+      routeResult({
+        action: 'await_confirmation',
+        assistantMessage: '发送邀请前需要你确认。',
+        pendingApproval: {
+          id: 8801,
+          type: 'send_message' as never,
+          actionType: 'send_invite',
+          summary: '发送邀请给这位用户',
+          riskLevel: 'medium' as never,
+          payload: {
+            schemaAction: 'opener.confirm_send',
+            checkpointRequired: true,
+          },
+          expiresAt: null,
+        },
+      }),
+    );
+    candidateActions.connectCandidateFromCardAction.mockResolvedValue(
+      routeResult({
+        action: 'await_confirmation',
+        assistantMessage: '加好友并聊天前需要你确认。',
+        pendingApproval: {
+          id: 8802,
+          type: 'contact_request' as never,
+          actionType: 'connect_candidate',
+          summary: '加好友并聊天：这位用户',
+          riskLevel: 'high' as never,
+          payload: {
+            schemaAction: 'candidate.connect',
+            checkpointRequired: true,
+          },
+          expiresAt: null,
+        },
+      }),
+    );
+    draftPublication.publishDraft.mockResolvedValue({
+      success: true,
+      status: 'published',
+      synced: true,
+      publicIntentId: 'public-intent:walk-qdu',
+    });
+
+    const rawActions = [
+      'save_candidate',
+      'generate_opener',
+      'send_invite',
+      'connect_candidate',
+      'publish_social_request',
+    ];
+    const results: SocialAgentIntentRouteResult[] = [];
+    for (const action of rawActions) {
+      results.push(
+        await service.perform({
+          ownerUserId: 7,
+          taskId: 101,
+          body: {
+            action: action as never,
+            payload: {
+              candidateRecordId: 501,
+              targetUserId: 22,
+              opportunityId: 'walk-qdu',
+              title: '青岛大学散步约练',
+              city: '青岛',
+              activityType: '散步',
+              confirmedPublish: action === 'publish_social_request',
+            },
+          },
+          handleMessage,
+        }),
+      );
+    }
+
+    expect(handleMessage).toHaveBeenCalledTimes(1);
     expect(handleMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         taskId: 101,
-        hasCandidates: true,
-        idempotencyKey: 'card-fallback-1',
+        conversationIntent: 'social',
+        message: expect.stringContaining('这张约练卡已发布到发现页'),
+        idempotencyKey:
+          'post-publish-candidate-search:101:public-intent:walk-qdu',
         clientContext: expect.objectContaining({
-          threadId: 'agent-task:101',
-          source: 'card_action',
-          timezone: 'Asia/Shanghai',
-          locale: 'zh-CN',
+          source: 'publish_to_discover_followup',
+          conversationIntent: 'social',
         }),
       }),
       undefined,
       undefined,
+    );
+    expect(
+      candidateActions.performCandidatePreferenceAction,
+    ).toHaveBeenCalledWith(
+      7,
+      101,
+      expect.objectContaining({ action: 'candidate.like' }),
+    );
+    expect(
+      candidateActions.createOpenerDraftFromCardAction,
+    ).toHaveBeenCalledWith(
+      7,
+      101,
+      expect.objectContaining({ action: 'candidate.generate_opener' }),
+    );
+    expect(
+      candidateActions.confirmOpenerSendFromCardAction,
+    ).toHaveBeenCalledWith(
+      7,
+      101,
+      expect.objectContaining({ action: 'opener.confirm_send' }),
+      { signal: null },
+    );
+    expect(
+      candidateActions.connectCandidateFromCardAction,
+    ).toHaveBeenCalledWith(
+      7,
+      101,
+      expect.objectContaining({ action: 'candidate.connect' }),
+    );
+    expect(meetLoop.performActivityAction).not.toHaveBeenCalledWith(
+      7,
+      101,
+      expect.objectContaining({ action: 'publish_to_discover' }),
+    );
+    expect(draftPublication.publishDraft).toHaveBeenCalledWith(
+      7,
+      101,
+      expect.objectContaining({
+        title: '青岛大学散步约练',
+        city: '青岛',
+        activityType: '散步',
+        visibility: 'public',
+        status: 'matching',
+      }),
+    );
+    expect(results[0].pendingApproval).toBeNull();
+    expect(results[1].pendingApproval).toBeNull();
+    expect(results[2].pendingApproval).toEqual(
+      expect.objectContaining({ actionType: 'send_invite' }),
+    );
+    expect(results[3].pendingApproval).toEqual(
+      expect.objectContaining({ actionType: 'connect_candidate' }),
+    );
+    expect(results[4].pendingApproval).toBeNull();
+    expect(results[4].assistantMessage).toContain('已发布到发现页');
+    expect(results[4].assistantMessage).toContain('fallback handled');
+    expect(results[4].cards?.[0]?.data).toEqual(
+      expect.objectContaining({
+        publicIntentId: 'public-intent:walk-qdu',
+        discoverHref: '/discover?publicIntentId=public-intent%3Awalk-qdu',
+        publicIntentHref: '/public-intent/public-intent%3Awalk-qdu',
+      }),
+    );
+    expect(executeCalls.map((call) => call.goal)).toEqual([
+      'card_action:candidate.like',
+      'card_action:candidate.generate_opener',
+      'card_action:opener.confirm_send',
+      'card_action:candidate.connect',
+      'card_action:publish_to_discover',
+    ]);
+  });
+
+  it('continues matching after a successful Discover publish and keeps the published card first', async () => {
+    const { draftPublication, handleMessage, service } = makeHarness();
+    draftPublication.publishDraft.mockResolvedValue({
+      success: true,
+      status: 'published',
+      synced: true,
+      socialRequestId: 301,
+      publicIntentId: 'public-intent:walk-qdu',
+      discoverHref: '/discover?publicIntentId=public-intent%3Awalk-qdu',
+      publicIntentHref: '/public-intent/public-intent%3Awalk-qdu',
+    });
+    handleMessage.mockResolvedValue(
+      routeResult({
+        intent: 'social_search' as never,
+        action: 'queue_search',
+        shouldSearch: true,
+        shouldQueueRun: false,
+        runMode: 'initial',
+        assistantMessage: '已根据这张卡找到 2 个适合先轻松跑步的人。',
+        cards: [
+          {
+            id: 'candidate-card-chen',
+            type: 'candidate_card',
+            schemaVersion: 'fitmeet.tool-ui.v1',
+            schemaType: 'social_match.candidate',
+            title: '陈砚',
+            body: '适合从一次轻松晨跑开始。',
+            status: 'ready',
+            data: { candidateRecordId: 501, candidateUserId: 22 },
+            actions: [],
+          },
+        ],
+      }),
+    );
+
+    const result = await service.perform({
+      ownerUserId: 7,
+      taskId: 101,
+      body: {
+        action: 'publish_to_discover' as never,
+        payload: {
+          confirmedPublish: true,
+          title: '青岛大学散步约练',
+          city: '青岛',
+          timePreference: '今天晚上',
+          locationPreference: '青岛大学附近',
+          activityType: '跑步',
+          socialRequestId: 301,
+        },
+        clientContext: { threadId: 'agent-task:101' },
+      },
+      handleMessage,
+    });
+
+    expect(draftPublication.publishDraft).toHaveBeenCalled();
+    expect(draftPublication.publishDraft).toHaveBeenCalledWith(
+      7,
+      101,
+      expect.objectContaining({
+        title: '青岛大学散步约练',
+        city: '青岛',
+        activityType: '跑步',
+        socialRequestId: 301,
+        visibility: 'public',
+        status: 'matching',
+      }),
+    );
+    expect(handleMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        taskId: 101,
+        conversationIntent: 'social',
+        idempotencyKey:
+          'post-publish-candidate-search:101:public-intent:walk-qdu',
+        message: expect.stringContaining('不要再次生成约练卡'),
+        clientContext: expect.objectContaining({
+          threadId: 'agent-task:101',
+          source: 'publish_to_discover_followup',
+        }),
+      }),
+      undefined,
+      undefined,
+    );
+    expect(result.intent).toBe('social_search');
+    expect(result.assistantMessage).toContain('已发布到发现页');
+    expect(result.assistantMessage).toContain('找到 2 个');
+    expect(result.cards?.map((card) => card.title)).toEqual([
+      '已发布到发现',
+      '陈砚',
+    ]);
+    expect(result.cards?.[0]).toEqual(
+      expect.objectContaining({
+        schemaType: 'social_match.activity',
+        status: 'completed',
+        data: expect.objectContaining({
+          publicIntentId: 'public-intent:walk-qdu',
+          discoverHref: '/discover?publicIntentId=public-intent%3Awalk-qdu',
+        }),
+      }),
+    );
+  });
+
+  it('returns an inline publish confirmation card before publishing to Discover', async () => {
+    const { draftPublication, handleMessage, metrics, service } = makeHarness();
+
+    const result = await service.perform({
+      ownerUserId: 7,
+      taskId: 101,
+      body: {
+        action: 'publish_to_discover' as never,
+        payload: {
+          opportunityId: 'walk-qdu',
+          title: '青岛大学散步约练',
+          city: '青岛',
+          activityType: '散步',
+        },
+      },
+      handleMessage,
+    });
+
+    expect(handleMessage).not.toHaveBeenCalled();
+    expect(draftPublication.publishDraft).not.toHaveBeenCalled();
+    expect(metrics.recordDeterministicAction).toHaveBeenCalledWith(
+      'publish_to_discover',
+      { estimatedAvoidedLlmCalls: 1 },
+    );
+    expect(result.pendingApproval).toBeNull();
+    expect(result.cards).toEqual([
+      expect.objectContaining({
+        schemaType: 'safety.approval',
+        status: 'waiting_confirmation',
+        title: '确认发布到发现',
+        data: expect.objectContaining({
+          actionType: 'publish_social_request',
+          riskLevel: 'medium',
+        }),
+        actions: expect.arrayContaining([
+          expect.objectContaining({
+            schemaAction: 'publish_to_discover',
+            requiresConfirmation: true,
+            payload: expect.objectContaining({
+              confirmedPublish: true,
+              title: '青岛大学散步约练',
+            }),
+          }),
+          expect.objectContaining({
+            schemaAction: 'social_intent.decline_publish',
+            requiresConfirmation: false,
+          }),
+        ]),
+      }),
+    ]);
+  });
+
+  it('keeps publish action waiting when the publish tool returns a pending approval', async () => {
+    const { draftPublication, handleMessage, metrics, service } = makeHarness();
+    draftPublication.publishDraft.mockResolvedValue({
+      success: false,
+      status: 'pending_approval',
+      taskStatus: 'awaiting_confirmation',
+      approvalId: 501,
+      pendingApproval: {
+        id: 501,
+        type: 'post_publish',
+        actionType: 'create_social_request',
+        summary: '创建社交需求属于高风险动作，需要确认后再执行。',
+        riskLevel: 'high',
+        payload: { socialRequestId: 301 },
+        expiresAt: null,
+      },
+      synced: false,
+    });
+
+    const result = await service.perform({
+      ownerUserId: 7,
+      taskId: 101,
+      body: {
+        action: 'publish_to_discover' as never,
+        payload: {
+          confirmedPublish: true,
+          opportunityId: 'walk-qdu',
+          title: '青岛大学散步约练',
+          city: '青岛',
+          activityType: '散步',
+          socialRequestId: 301,
+        },
+      },
+      handleMessage,
+    });
+
+    expect(handleMessage).not.toHaveBeenCalled();
+    expect(metrics.recordDeterministicAction).toHaveBeenCalledWith(
+      'publish_to_discover',
+      { estimatedAvoidedLlmCalls: 1 },
+    );
+    expect(result.assistantMessage).toContain('发布到发现前还需要你确认');
+    expect(result.pendingApproval).toEqual(
+      expect.objectContaining({
+        id: 501,
+        actionType: 'create_social_request',
+      }),
+    );
+    expect(result.cards).toEqual([
+      expect.objectContaining({
+        schemaType: 'safety.approval',
+        status: 'waiting_confirmation',
+        title: '确认发布到发现',
+        data: expect.objectContaining({
+          approvalId: 501,
+          actionType: 'publish_social_request',
+        }),
+        actions: expect.arrayContaining([
+          expect.objectContaining({
+            label: '确认发布',
+            schemaAction: 'publish_to_discover',
+            requiresConfirmation: true,
+            payload: expect.objectContaining({
+              approvalId: 501,
+              confirmedPublish: true,
+              socialRequestId: 301,
+            }),
+          }),
+        ]),
+      }),
+    ]);
+  });
+
+  it('routes empty-candidate recovery actions deterministically without chat LLM', async () => {
+    const { candidateActions, handleMessage, meetLoop, metrics, service } =
+      makeHarness();
+    candidateActions.performCandidatePreferenceAction.mockResolvedValue(
+      routeResult({
+        action: 'reply',
+        assistantMessage: '我会按放宽后的条件继续找真实公开候选。',
+        pendingApproval: null,
+      }),
+    );
+    meetLoop.performActivityAction.mockResolvedValue(
+      routeResult({
+        action: 'reply',
+        assistantMessage: '我先保留约练卡，等你确认新的时间。',
+        pendingApproval: null,
+      }),
+    );
+
+    const actions = [
+      ['expand_radius', candidateActions.performCandidatePreferenceAction],
+      ['relax_preference', candidateActions.performCandidatePreferenceAction],
+      ['change_time', meetLoop.performActivityAction],
+    ] as const;
+
+    for (const [action] of actions) {
+      await service.perform({
+        ownerUserId: 7,
+        taskId: 101,
+        body: {
+          action: action as never,
+          payload: {
+            recoveryMode: action,
+            socialRequestDraft: {
+              title: '青岛大学散步约练',
+              city: '青岛',
+              activityType: '散步',
+            },
+          },
+        },
+        handleMessage,
+      });
+    }
+
+    expect(handleMessage).not.toHaveBeenCalled();
+    expect(
+      candidateActions.performCandidatePreferenceAction,
+    ).toHaveBeenCalledWith(
+      7,
+      101,
+      expect.objectContaining({ action: 'candidate.more_like_this' }),
+    );
+    expect(
+      candidateActions.performCandidatePreferenceAction,
+    ).toHaveBeenCalledTimes(2);
+    expect(meetLoop.performActivityAction).toHaveBeenCalledWith(
+      7,
+      101,
+      expect.objectContaining({ action: 'activity.modify_time' }),
+    );
+    expect(metrics.recordDeterministicAction).toHaveBeenCalledWith(
+      'candidate.more_like_this',
+      { estimatedAvoidedLlmCalls: 1 },
+    );
+    expect(metrics.recordDeterministicAction).toHaveBeenCalledWith(
+      'activity.modify_time',
+      { estimatedAvoidedLlmCalls: 1 },
     );
   });
 
@@ -367,7 +1295,7 @@ describe('SocialAgentCardActionRouterService', () => {
         reason: 'Card actions dispatch only through AgentLoop.',
         tools: [
           {
-            agent: 'Social Match Agent',
+            agent: 'Match Agent',
             toolName: 'card_action_dispatch',
             input: expect.objectContaining({
               action: 'candidate.more_context',
@@ -383,7 +1311,9 @@ describe('SocialAgentCardActionRouterService', () => {
     expect(
       candidateActions.performCandidatePreferenceAction,
     ).not.toHaveBeenCalled();
-    expect(candidateActions.connectCandidateFromCardAction).not.toHaveBeenCalled();
+    expect(
+      candidateActions.connectCandidateFromCardAction,
+    ).not.toHaveBeenCalled();
     expect(meetLoop.performActivityAction).not.toHaveBeenCalled();
     expect(lifeGraphActions.performUpdateAction).not.toHaveBeenCalled();
   });

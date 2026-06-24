@@ -54,6 +54,14 @@ function makeHarness(options: { lifeGraph?: unknown } = {}) {
   };
   const socialProfiles = {
     saveAnswer: jest.fn().mockResolvedValue(undefined),
+    generateAiDraft: jest.fn().mockResolvedValue({
+      mode: 'fallback',
+      draft: {
+        basic: { city: '', nickname: '' },
+        tags: { fitnessGoals: [], interestTags: [] },
+      },
+      completion: { percent: 40, missingFields: ['availableTimes'] },
+    }),
   };
   const metrics = {
     recordError: jest.fn(),
@@ -256,7 +264,7 @@ describe('SocialAgentRouteProfileTurnService', () => {
     });
   });
 
-  it('persists routed profile updates when no Life Graph proposal is available', async () => {
+  it('creates a profile update preview when no Life Graph proposal is available', async () => {
     const { eventRepo, service, socialProfiles, taskRepo } = makeHarness();
     const task = makeTask();
 
@@ -270,30 +278,40 @@ describe('SocialAgentRouteProfileTurnService', () => {
     expect(result).toMatchObject({
       handled: true,
       task,
-      assistantMessage: expect.stringContaining('现在开始搜索'),
+      assistantMessage: expect.stringContaining('更新预览'),
       savedContext: true,
-      profileUpdated: true,
+      profileUpdated: false,
       profileUpdateProposal: null,
     });
-    expect(socialProfiles.saveAnswer).toHaveBeenCalledWith(
+    expect(socialProfiles.generateAiDraft).toHaveBeenCalledWith(
       7,
-      'availableTimes',
-      '我周末下午比较有空',
+      expect.objectContaining({
+        answers: [{ key: 'availableTimes', answer: '我周末下午比较有空' }],
+        rawText: '我周末下午比较有空',
+        source: 'social_agent_profile_turn',
+      }),
     );
+    expect(socialProfiles.saveAnswer).not.toHaveBeenCalled();
     expect(task.status).toBe(AgentTaskStatus.AwaitingFeedback);
-    expect(task.statusReason).toBe('intent_profile_update_saved');
+    expect(task.statusReason).toBe(
+      'profile_update_preview_pending_confirmation',
+    );
     expect(task.result).toMatchObject({
       latestIntent: {
         intent: 'profile_update',
         message: '我周末下午比较有空',
+      },
+      profileUpdatePreview: {
+        status: 'pending_confirmation',
+        confirmationRequired: true,
       },
     });
     expect(task.memory).toMatchObject({
       taskMemory: {
         currentTask: {
           awaitingSearchConfirmation: true,
-          waitingFor: 'availability_boundaries_or_search_confirmation',
-          lastCompletedStep: 'profile_saved',
+          waitingFor: 'profile_update_preview_confirmation',
+          lastCompletedStep: 'profile_update_preview_created',
         },
       },
     });
@@ -333,7 +351,7 @@ describe('SocialAgentRouteProfileTurnService', () => {
       expect(task.memory).toMatchObject({
         taskMemory: {
           currentTask: {
-            waitingFor: 'life_graph_profile_confirmation',
+            waitingFor: 'profile_update_preview_confirmation',
             lastCompletedStep: 'profile_context_saved_pending_confirmation',
           },
         },

@@ -74,9 +74,9 @@ function readSource(file: string): string {
 }
 
 function readMethodBody(source: string, methodName: string): string {
-  const match = new RegExp(`private\\s+(?:async\\s+)?${methodName}\\b`).exec(
-    source,
-  );
+  const match = new RegExp(
+    `(?:^|\\n)\\s*(?:(?:private|public|protected)\\s+)?(?:async\\s+)?${methodName}\\b`,
+  ).exec(source);
   const start = match?.index ?? -1;
   expect(start).toBeGreaterThanOrEqual(0);
   const openBrace = source.indexOf('{', start);
@@ -177,7 +177,9 @@ describe('Social Agent DeepSeek quality production boundary', () => {
       'defaultChatModel',
     );
 
-    expect(routerSource).not.toContain("allowFast: this.routingMode() === 'fast'");
+    expect(routerSource).not.toContain(
+      "allowFast: this.routingMode() === 'fast'",
+    );
     expect(routerDefaultChatModel).not.toContain('DEEPSEEK_FAST_MODEL');
     expect(routerDefaultChatModel).not.toContain(
       'SOCIAL_AGENT_DEFAULT_FAST_MODEL',
@@ -190,7 +192,7 @@ describe('Social Agent DeepSeek quality production boundary', () => {
 
     expect(source).not.toContain('SOCIAL_AGENT_DEFAULT_FAST_MODEL');
     expect(source).not.toContain('DEEPSEEK_FAST_MODEL');
-    expect(source).not.toContain("allowFast: !qualityMode");
+    expect(source).not.toContain('allowFast: !qualityMode');
     expect(source).not.toContain("SOCIAL_AGENT_MODEL_ROUTING_MODE') ?? ''");
   });
 
@@ -315,25 +317,37 @@ describe('Social Agent DeepSeek quality production boundary', () => {
 
   it('keeps final replies from degrading into stale fallback slot questions', () => {
     const source = readSource('social-agent-final-response.service.ts');
+    const packerSource = readSource(
+      'social-agent-token-budget-context-packer.service.ts',
+    );
     const generateMethod = source.slice(
       source.indexOf('async generate('),
       source.indexOf('private async generateWithDeepSeek'),
     );
     const fallbackMethod = readMethodBody(source, 'contextAwareFallbackReply');
-    const knownSlotsMethod = readMethodBody(source, 'knownSlots');
-    const slotEntriesMethod = readMethodBody(source, 'slotEntries');
+    const packerKnownSlotsMethod = readMethodBody(packerSource, 'knownSlots');
+    const taskSlotConstraintsMethod = readMethodBody(
+      packerSource,
+      'taskSlotConstraints',
+    );
+    const slotEntriesMethod = readMethodBody(packerSource, 'slotEntries');
     const knownConstraintSlotEntriesMethod = readMethodBody(
-      source,
+      packerSource,
       'extractKnownConstraintSlotEntries',
     );
     const systemPromptMethod = readMethodBody(source, 'systemPrompt');
 
     expect(generateMethod).toContain('this.contextAwareFallbackReply(input)');
     expect(generateMethod).not.toContain('return input.fallbackReply');
-    expect(fallbackMethod).toContain('this.knownSlots(input)');
+    expect(fallbackMethod).toContain(
+      'this.tokenBudgetContextPacker().knownSlots(input)',
+    );
     expect(fallbackMethod).toContain('this.isStaleSlotClarification');
     expect(fallbackMethod).toContain('我记得你已经补充了');
-    expect(knownSlotsMethod).not.toContain(
+    expect(packerKnownSlotsMethod).not.toContain(
+      "slot.confirmation === 'user_confirmed'",
+    );
+    expect(taskSlotConstraintsMethod).toContain(
       "slot.confirmation === 'user_confirmed'",
     );
     expect(knownConstraintSlotEntriesMethod).toContain(

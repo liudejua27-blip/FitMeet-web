@@ -8,7 +8,6 @@ import {
   JoinColumn,
 } from 'typeorm';
 import { User } from '../users/user.entity';
-import { Club } from '../clubs/club.entity';
 
 @Entity('meets')
 export class Meet {
@@ -98,13 +97,6 @@ export class Meet {
 
   @Column()
   userId: number;
-
-  @ManyToOne(() => Club, { nullable: true, onDelete: 'SET NULL' })
-  @JoinColumn({ name: 'clubId' })
-  club: Club | null;
-
-  @Column({ type: 'integer', nullable: true })
-  clubId: number | null;
 
   @Column({ default: '' })
   city: string;

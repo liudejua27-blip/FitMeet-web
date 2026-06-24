@@ -499,11 +499,10 @@ export class SocialProfileService {
   async saveAiDraft(userId: number, input: SaveAiDraftInput) {
     const card = input.profile;
     const dto = this.profileCardToDto(card);
-    const wantsMatching =
-      input.enableMatching !== false &&
-      (dto.profileDiscoverable === true || dto.agentCanRecommendMe === true);
+    const wantsMatching = input.enableMatching !== false;
     if (wantsMatching) {
       this.assertOwnerAuthorizedProfileVisibility(input);
+      dto.agentCanRecommendMe = true;
     }
     if (input.enableMatching === false) {
       dto.profileDiscoverable = false;
@@ -1184,7 +1183,7 @@ export class SocialProfileService {
     return this.repo.save(profile);
   }
 
-  /** GET /api/ai-profile/privacy payload. */
+  /** GET /api/users/me/social-profile/privacy payload. */
   async getPrivacy(userId: number) {
     const profile = await this.get(userId);
     const completion = this.getCompletionFromProfile(profile);
@@ -1204,7 +1203,7 @@ export class SocialProfileService {
     };
   }
 
-  /** PATCH /api/ai-profile/privacy — only privacy switches, never tags. */
+  /** PATCH /api/users/me/social-profile/privacy — only privacy switches, never tags. */
   async updatePrivacy(
     userId: number,
     body: {
@@ -1246,7 +1245,7 @@ export class SocialProfileService {
     );
   }
 
-  /** GET /api/ai-profile/sensitive-tags/pending. */
+  /** GET /api/users/me/social-profile/sensitive-tags/pending. */
   async getPendingSensitiveTags(userId: number) {
     const profile = await this.get(userId);
     await this.refreshSensitiveDecisions(profile);
@@ -1261,12 +1260,12 @@ export class SocialProfileService {
     return { pending, total: pending.length };
   }
 
-  /** POST /api/ai-profile/sensitive-tags/confirm. */
+  /** POST /api/users/me/social-profile/sensitive-tags/confirm. */
   async confirmSensitiveTag(userId: number, tag: string) {
     return this.setSensitiveDecision(userId, tag, 'confirmed');
   }
 
-  /** POST /api/ai-profile/sensitive-tags/reject. */
+  /** POST /api/users/me/social-profile/sensitive-tags/reject. */
   async rejectSensitiveTag(userId: number, tag: string) {
     return this.setSensitiveDecision(userId, tag, 'rejected');
   }

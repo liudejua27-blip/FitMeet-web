@@ -50,14 +50,23 @@ echo "[2/7] Prepare package manager"
 corepack enable
 COREPACK_ENABLE_DOWNLOAD_PROMPT=0 corepack prepare pnpm@"$PNPM_VERSION" --activate
 
+read_release_field() {
+  local field="$1"
+  local fallback="$2"
+  node -e "const fs=require('fs');const r=JSON.parse(fs.readFileSync('release.json','utf8'));process.stdout.write(String(r[process.argv[1]] ?? process.argv[2] ?? ''))" \
+    "$field" "$fallback" 2>/dev/null || printf '%s' "$fallback"
+}
+
 if [ -f "release.json" ]; then
-  FITMEET_RELEASE_COMMIT="${FITMEET_RELEASE_COMMIT:-$(node -e "const fs=require('fs');const r=JSON.parse(fs.readFileSync('release.json','utf8'));process.stdout.write(String(r.commit||'unknown'))" 2>/dev/null || printf 'unknown')}"
-  FITMEET_RELEASE_BUILT_AT="${FITMEET_RELEASE_BUILT_AT:-$(node -e "const fs=require('fs');const r=JSON.parse(fs.readFileSync('release.json','utf8'));process.stdout.write(String(r.builtAt||''))" 2>/dev/null || true)}"
-  FITMEET_RELEASE_SOURCE="${FITMEET_RELEASE_SOURCE:-$(node -e "const fs=require('fs');const r=JSON.parse(fs.readFileSync('release.json','utf8'));process.stdout.write(String(r.source||'deploy_zip'))" 2>/dev/null || printf 'deploy_zip')}"
+  # Always trust the installed release metadata. .env.production is preserved
+  # across installs and may contain stale FITMEET_RELEASE_* values.
+  FITMEET_RELEASE_COMMIT="$(read_release_field commit unknown)"
+  FITMEET_RELEASE_BUILT_AT="$(read_release_field builtAt '')"
+  FITMEET_RELEASE_SOURCE="$(read_release_field source deploy_zip)"
 else
-  FITMEET_RELEASE_COMMIT="${FITMEET_RELEASE_COMMIT:-unknown}"
-  FITMEET_RELEASE_BUILT_AT="${FITMEET_RELEASE_BUILT_AT:-}"
-  FITMEET_RELEASE_SOURCE="${FITMEET_RELEASE_SOURCE:-uploaded_tree}"
+  FITMEET_RELEASE_COMMIT="unknown"
+  FITMEET_RELEASE_BUILT_AT=""
+  FITMEET_RELEASE_SOURCE="uploaded_tree"
 fi
 export FITMEET_RELEASE_COMMIT FITMEET_RELEASE_BUILT_AT FITMEET_RELEASE_SOURCE
 echo "[release] commit=${FITMEET_RELEASE_COMMIT} source=${FITMEET_RELEASE_SOURCE} builtAt=${FITMEET_RELEASE_BUILT_AT:-unknown}"
@@ -90,6 +99,30 @@ else
 fi
 
 COMPOSE=(docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE")
+COMPOSE_SERVICES="$("${COMPOSE[@]}" config --services)"
+
+compose_has_service() {
+  grep -qx "$1" <<<"$COMPOSE_SERVICES"
+}
+
+start_compose_services() {
+  local label="$1"
+  shift
+  local selected=()
+  local service
+  for service in "$@"; do
+    if compose_has_service "$service"; then
+      selected+=("$service")
+    else
+      echo "[skip] Compose service ${service} is not defined; not starting it for ${label}."
+    fi
+  done
+  if ((${#selected[@]} == 0)); then
+    echo "[FAIL] No compose services selected for ${label}." >&2
+    exit 1
+  fi
+  "${COMPOSE[@]}" up -d "${selected[@]}"
+}
 
 run_backend_pnpm() {
   "${COMPOSE[@]}" run --rm --no-deps backend sh -lc \
@@ -98,7 +131,7 @@ run_backend_pnpm() {
 }
 
 echo "[6/9] Start production dependencies"
-"${COMPOSE[@]}" up -d postgres redis mongo zookeeper kafka
+start_compose_services "production dependencies" postgres redis mongo
 
 echo "[7/9] Build backend runtime images"
 "${COMPOSE[@]}" build backend subagent-worker

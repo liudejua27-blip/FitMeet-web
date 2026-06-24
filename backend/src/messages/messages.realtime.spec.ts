@@ -321,7 +321,7 @@ describe('MessagesService realtime events', () => {
     expect(msgModel.create).not.toHaveBeenCalled();
   });
 
-  it('rejects invalid agent inbox conversation ids before querying messages', async () => {
+  it('rejects invalid agent message event conversation ids before querying messages', async () => {
     const convModel = {
       findById: jest.fn(),
       updateOne: jest.fn(),
@@ -343,7 +343,7 @@ describe('MessagesService realtime events', () => {
     );
 
     await expect(
-      service.getAgentInboxMessages('not-an-object-id', 7),
+      service.getAgentConversationMessages('not-an-object-id', 7),
     ).rejects.toThrow(BadRequestException);
     expect(convModel.findById).not.toHaveBeenCalled();
     expect(convModel.updateOne).not.toHaveBeenCalled();

@@ -10,9 +10,9 @@ RUN_READINESS_TESTS="${RUN_READINESS_TESTS:-true}"
 RUN_DOMAIN_CHECK="${RUN_DOMAIN_CHECK:-true}"
 RUN_IOS_TESTFLIGHT_CHECK="${RUN_IOS_TESTFLIGHT_CHECK:-true}"
 RUN_RAILWAY_DOCKER_BUILD="${RUN_RAILWAY_DOCKER_BUILD:-false}"
-REQUIRE_AGENT_REMOTE_SMOKE_EVIDENCE="${REQUIRE_AGENT_REMOTE_SMOKE_EVIDENCE:-false}"
-AGENT_REMOTE_SMOKE_EVIDENCE_FILE="${AGENT_REMOTE_SMOKE_EVIDENCE_FILE:-}"
-VALIDATE_AGENT_REMOTE_SMOKE_EVIDENCE_ONLY="${VALIDATE_AGENT_REMOTE_SMOKE_EVIDENCE_ONLY:-false}"
+REQUIRE_AGENT_TOKEN_COST_EVIDENCE="${REQUIRE_AGENT_TOKEN_COST_EVIDENCE:-false}"
+AGENT_TOKEN_COST_EVIDENCE_FILE="${AGENT_TOKEN_COST_EVIDENCE_FILE:-}"
+VALIDATE_AGENT_TOKEN_COST_EVIDENCE_ONLY="${VALIDATE_AGENT_TOKEN_COST_EVIDENCE_ONLY:-false}"
 FITMEET_APP_DIR="${FITMEET_APP_DIR:-/Users/liuchongjiang/Documents/FitMeet app}"
 
 # shellcheck source=scripts/lib/toolchain.sh
@@ -24,7 +24,7 @@ warnings=0
 
 usage() {
   cat <<'EOF'
-Usage: scripts/launch-status.sh [--topology vercel-railway|ecs] [--include-railway-docker-build] [--skip-readiness-tests] [--skip-domain-check] [--skip-ios-testflight-check] [--validate-agent-remote-smoke-evidence-only]
+Usage: scripts/launch-status.sh [--topology vercel-railway|ecs] [--include-railway-docker-build] [--skip-readiness-tests] [--skip-domain-check] [--skip-ios-testflight-check] [--validate-agent-token-cost-evidence-only]
 
 Aggregates the non-mutating FitMeet launch gates:
   - local deploy readiness Jest guard
@@ -50,12 +50,23 @@ Environment:
                               Skip strict iOS TestFlight readiness.
   RUN_RAILWAY_DOCKER_BUILD=true
                               Also run scripts/railway-docker-build-check.sh.
-  REQUIRE_AGENT_REMOTE_SMOKE_EVIDENCE=true
-                              Require redacted Agent remote smoke evidence file.
-  AGENT_REMOTE_SMOKE_EVIDENCE_FILE
-                              Evidence markdown from scripts/agent-remote-smoke-evidence.sh.
-  VALIDATE_AGENT_REMOTE_SMOKE_EVIDENCE_ONLY=true
-                              Validate only the redacted Agent remote smoke evidence file.
+  REQUIRE_AGENT_TOKEN_COST_EVIDENCE=true
+                              Require Agent token/cost JSON evidence file.
+  AGENT_TOKEN_COST_EVIDENCE_FILE
+                              Evidence JSON from scripts/verify-agent-token-cost.sh.
+  MIN_PROMPT_PREFIX_REUSE_RATE
+                              Optional launch-time override for public prompt prefix reuse.
+  MIN_STAGE_PROMPT_PREFIX_REUSE_RATE
+                              Optional launch-time override for each required LLM stage.
+  MAX_PROMPT_PREFIX_DISTINCT_RATIO
+                              Optional launch-time override for public prompt prefix hash drift.
+  MAX_STAGE_PROMPT_PREFIX_DISTINCT_RATIO
+                              Optional launch-time override for stage prompt prefix hash drift.
+  MIN_CACHE_HIT_RATE          Optional launch-time override for public cache hit rate.
+  MIN_WORKFLOW_ROUTE_RATE     Optional launch-time override for workflow bypass coverage.
+  MAX_AVG_LLM_CALLS_PER_RUN   Optional launch-time override for live avg LLM calls/run.
+  VALIDATE_AGENT_TOKEN_COST_EVIDENCE_ONLY=true
+                              Validate only the Agent token/cost evidence file.
 EOF
 }
 
@@ -77,9 +88,9 @@ while [[ $# -gt 0 ]]; do
     --skip-ios-testflight-check)
       RUN_IOS_TESTFLIGHT_CHECK=false
       ;;
-    --validate-agent-remote-smoke-evidence-only)
-      VALIDATE_AGENT_REMOTE_SMOKE_EVIDENCE_ONLY=true
-      REQUIRE_AGENT_REMOTE_SMOKE_EVIDENCE=true
+    --validate-agent-token-cost-evidence-only)
+      VALIDATE_AGENT_TOKEN_COST_EVIDENCE_ONLY=true
+      REQUIRE_AGENT_TOKEN_COST_EVIDENCE=true
       ;;
     -h|--help)
       usage
@@ -130,76 +141,149 @@ run_gate() {
   fi
 }
 
-validate_agent_remote_smoke_evidence() {
-  local evidence_file="${AGENT_REMOTE_SMOKE_EVIDENCE_FILE}"
+validate_agent_token_cost_evidence() {
+  local evidence_file="${AGENT_TOKEN_COST_EVIDENCE_FILE}"
 
   if [[ -z "${evidence_file}" ]]; then
-    echo "[FAIL] AGENT_REMOTE_SMOKE_EVIDENCE_FILE is required when REQUIRE_AGENT_REMOTE_SMOKE_EVIDENCE=true." >&2
+    echo "[FAIL] AGENT_TOKEN_COST_EVIDENCE_FILE is required when REQUIRE_AGENT_TOKEN_COST_EVIDENCE=true." >&2
     return 1
   fi
   if [[ ! -f "${evidence_file}" ]]; then
-    echo "[FAIL] Agent remote smoke evidence file does not exist: ${evidence_file}" >&2
+    echo "[FAIL] Agent token/cost evidence file does not exist: ${evidence_file}" >&2
     return 1
   fi
 
-  local required_patterns=(
-    '# FitMeet Agent Remote Smoke Evidence'
-    'ECS post-deploy Agent readiness smoke'
-    'ECS post-deploy Agent full smoke'
-    'ECS post-deploy Agent sse-abort smoke'
-    'Post-deploy smoke completed.'
-  )
-
-  local pattern
-  for pattern in "${required_patterns[@]}"; do
-    if ! grep -Fq -- "${pattern}" "${evidence_file}"; then
-      echo "[FAIL] Agent remote smoke evidence is missing: ${pattern}" >&2
-      return 1
-    fi
-  done
-
-  local zero_exit_count
-  zero_exit_count="$(grep -Fc -- '- Exit code: `0`' "${evidence_file}")"
-  if [[ "${zero_exit_count}" -lt 3 ]]; then
-    echo "[FAIL] Agent remote smoke evidence must contain at least 3 successful smoke exit codes; found ${zero_exit_count}." >&2
-    return 1
-  fi
-
-  local trace_eval_count
-  trace_eval_count="$(grep -Fc -- 'Social Codex trace eval passed' "${evidence_file}")"
-  if [[ "${trace_eval_count}" -lt 2 ]]; then
-    echo "[FAIL] Agent remote smoke evidence must prove Social Codex trace eval for readiness and full opportunity smoke; found ${trace_eval_count}." >&2
-    return 1
-  fi
-
-  local secret_assignment_pattern='(AGENT_SMOKE_PASSWORD|USER_JWT|FITMEET_USER_JWT|AGENT_SMOKE_JWT|AUTHORIZATION|Authorization)=["'\'']?[^"'\'']?[^\\"'\'']*[[:alnum:]_.~+/=-]+'
-  local redacted_assignment_pattern='(AGENT_SMOKE_PASSWORD|USER_JWT|FITMEET_USER_JWT|AGENT_SMOKE_JWT|AUTHORIZATION|Authorization)=["'\'']?\[redacted\]["'\'']?'
-  if grep -Eiq "${secret_assignment_pattern}" "${evidence_file}" &&
-    grep -Ei "${secret_assignment_pattern}" "${evidence_file}" | grep -Eivq "${redacted_assignment_pattern}"; then
-    echo "[FAIL] Agent remote smoke evidence appears to contain unredacted secrets or email addresses." >&2
-    return 1
-  fi
-
-  local bearer_pattern='Bearer[[:space:]]+[A-Za-z0-9._~+/=-]+'
-  local redacted_bearer_pattern='Bearer[[:space:]]+\[redacted\]'
-  if grep -Eiq "${bearer_pattern}" "${evidence_file}" &&
-    grep -Ei "${bearer_pattern}" "${evidence_file}" | grep -Eivq "${redacted_bearer_pattern}"; then
-    echo "[FAIL] Agent remote smoke evidence appears to contain an unredacted bearer token." >&2
-    return 1
-  fi
-
-  if grep -Eiq '[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}' "${evidence_file}"; then
-    echo "[FAIL] Agent remote smoke evidence appears to contain an unredacted email address." >&2
-    return 1
-  fi
-
-  echo "[PASS] Agent remote smoke evidence is present and redacted: ${evidence_file}"
+  node - "${evidence_file}" <<'NODE'
+const fs = require('fs');
+const file = process.argv[2];
+const doc = JSON.parse(fs.readFileSync(file, 'utf8'));
+const fail = (message) => {
+  console.error(`[FAIL] ${message}`);
+  process.exit(1);
+};
+const number = (value) => (Number.isFinite(Number(value)) ? Number(value) : 0);
+const optionalNumber = (value) =>
+  value === null || value === undefined || value === ''
+    ? null
+    : Number.isFinite(Number(value))
+      ? Number(value)
+      : null;
+const envNumber = (key) => {
+  const raw = process.env[key];
+  if (raw === undefined || raw === '') return null;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed)) fail(`Invalid numeric threshold ${key}=${raw}`);
+  return parsed;
+};
+const threshold = (name, envKey) => {
+  const envValue = envNumber(envKey);
+  if (envValue !== null) return envValue;
+  return optionalNumber(doc.thresholds && doc.thresholds[name]);
+};
+const assertMin = (label, value, min) => {
+  if (min === null) return;
+  if (optionalNumber(value) === null) fail(`${label} is missing.`);
+  if (number(value) < min) fail(`${label} ${number(value)} is below required ${min}.`);
+};
+const assertMax = (label, value, max) => {
+  if (max === null) return;
+  if (optionalNumber(value) === null) fail(`${label} is missing.`);
+  if (number(value) > max) fail(`${label} ${number(value)} is above allowed ${max}.`);
+};
+const ratio = (numerator, denominator) => {
+  const den = number(denominator);
+  if (den <= 0) return null;
+  return number(numerator) / den;
+};
+if (doc.schemaVersion !== 'fitmeet.agent-token-cost-evidence.v1') {
+  fail(`Unexpected token/cost evidence schema: ${doc.schemaVersion || 'missing'}`);
+}
+if (doc.status !== 'passed') {
+  fail(`Agent token/cost evidence status is ${doc.status || 'missing'}`);
+}
+if (Array.isArray(doc.missing) && doc.missing.length > 0) {
+  fail(`Agent token/cost evidence has missing items: ${doc.missing.join(', ')}`);
+}
+if (!doc.l5Observability || typeof doc.l5Observability !== 'object') {
+  fail('Agent token/cost evidence is missing L5 observability data.');
+}
+const l5 = doc.l5Observability;
+if (number(l5.agentRunCount) < 1) fail('Agent token/cost evidence has no agent runs.');
+if (number(l5.llmCallCount) < 1) fail('Agent token/cost evidence has no LLM calls.');
+if (number(l5.avgLlmCallsPerRun) <= 0) {
+  fail('Agent token/cost evidence has invalid avg LLM calls/run.');
+}
+assertMax(
+  'Agent token/cost avg LLM calls/run',
+  l5.avgLlmCallsPerRun,
+  threshold('maxAvgLlmCallsPerRun', 'MAX_AVG_LLM_CALLS_PER_RUN'),
+);
+const aggregate = l5.aggregate || {};
+if (number(aggregate.promptTokens) < 1) {
+  fail('Agent token/cost evidence has no prompt token data.');
+}
+const publicMetrics = doc.publicMetrics || {};
+assertMin(
+  'Agent token/cost workflow route rate',
+  publicMetrics.workflowRouteRate,
+  threshold('minWorkflowRouteRate', 'MIN_WORKFLOW_ROUTE_RATE'),
+);
+assertMin(
+  'Agent token/cost cache hit rate',
+  publicMetrics.cacheHitRate,
+  threshold('minCacheHitRate', 'MIN_CACHE_HIT_RATE'),
+);
+assertMin(
+  'Agent token/cost prompt prefix reuse rate',
+  publicMetrics.promptPrefixReuseRate,
+  threshold('minPromptPrefixReuseRate', 'MIN_PROMPT_PREFIX_REUSE_RATE'),
+);
+assertMax(
+  'Agent token/cost prompt prefix distinct ratio',
+  publicMetrics.promptPrefixDistinctRatio ??
+    ratio(
+      publicMetrics.distinctPromptPrefixHashes,
+      publicMetrics.promptPrefixObservations,
+    ),
+  threshold('maxPromptPrefixDistinctRatio', 'MAX_PROMPT_PREFIX_DISTINCT_RATIO'),
+);
+const requiredStages = Array.isArray(doc.requiredStages) ? doc.requiredStages : [];
+const useCases = l5.useCases || {};
+const minStagePromptPrefixReuseRate = threshold(
+  'minStagePromptPrefixReuseRate',
+  'MIN_STAGE_PROMPT_PREFIX_REUSE_RATE',
+);
+const maxStagePromptPrefixDistinctRatio = threshold(
+  'maxStagePromptPrefixDistinctRatio',
+  'MAX_STAGE_PROMPT_PREFIX_DISTINCT_RATIO',
+);
+for (const stage of requiredStages) {
+  const bucket = useCases[stage];
+  if (!bucket) fail(`Agent token/cost evidence missing stage: ${stage}`);
+  if (number(bucket.calls) < 1) fail(`Agent token/cost evidence stage has no calls: ${stage}`);
+  if (number(bucket.promptTokens) < 1) {
+    fail(`Agent token/cost evidence stage has no prompt tokens: ${stage}`);
+  }
+  assertMin(
+    `Agent token/cost ${stage} prompt prefix reuse rate`,
+    bucket.promptPrefixReuseRate,
+    minStagePromptPrefixReuseRate,
+  );
+  assertMax(
+    `Agent token/cost ${stage} prompt prefix distinct ratio`,
+    bucket.promptPrefixDistinctRatio ??
+      ratio(bucket.distinctPromptPrefixHashes, bucket.calls),
+    maxStagePromptPrefixDistinctRatio,
+  );
+}
+console.log(`[PASS] Agent token/cost evidence is present: ${file}`);
+NODE
 }
 
 cd "${ROOT_DIR}" || exit 1
 
-if [[ "${VALIDATE_AGENT_REMOTE_SMOKE_EVIDENCE_ONLY}" == "true" ]]; then
-  validate_agent_remote_smoke_evidence
+if [[ "${VALIDATE_AGENT_TOKEN_COST_EVIDENCE_ONLY}" == "true" ]]; then
+  validate_agent_token_cost_evidence
   exit $?
 fi
 
@@ -221,8 +305,6 @@ run_gate "Shell syntax for production scripts" \
   scripts/ecs-post-deploy-smoke.sh \
   scripts/verify-agent-release.sh \
   scripts/agent-release-matrix.sh \
-  scripts/agent-remote-smoke-preflight.sh \
-  scripts/agent-remote-smoke-evidence.sh \
   scripts/launch-status.sh
 
 if [[ -d "${FITMEET_APP_DIR}" ]]; then
@@ -293,10 +375,10 @@ else
   warn "Skipped Railway production Docker image build. Re-run with --include-railway-docker-build before Railway deploy."
 fi
 
-if [[ "${REQUIRE_AGENT_REMOTE_SMOKE_EVIDENCE}" == "true" ]]; then
-  run_gate "Agent remote smoke evidence" validate_agent_remote_smoke_evidence
+if [[ "${REQUIRE_AGENT_TOKEN_COST_EVIDENCE}" == "true" ]]; then
+  run_gate "Agent token/cost evidence" validate_agent_token_cost_evidence
 else
-  warn "Skipped Agent remote smoke evidence gate. Set REQUIRE_AGENT_REMOTE_SMOKE_EVIDENCE=true before final Agent cutover."
+  warn "Skipped Agent token/cost evidence gate. Set REQUIRE_AGENT_TOKEN_COST_EVIDENCE=true before final Agent cutover."
 fi
 
 printf '\nLaunch status: %s failure(s), %s warning(s).\n' "${failures}" "${warnings}"

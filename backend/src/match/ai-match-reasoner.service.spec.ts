@@ -66,7 +66,6 @@ function user(overrides: Partial<User> = {}): User {
     trainingCount: 0,
     caloriesBurned: 0,
     bestRecords: [],
-    isCoach: false,
     trustScore: 10,
     socialTrustCount: 0,
     createdAt: new Date(0),

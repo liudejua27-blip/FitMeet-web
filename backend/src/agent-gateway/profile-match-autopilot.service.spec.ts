@@ -80,7 +80,7 @@ describe('ProfileMatchAutopilotService', () => {
   let profileMatch: { runOnce: jest.Mock };
   let matchService: { runMatch: jest.Mock };
   let notifications: { create: jest.Mock };
-  let messages: { createAgentInboxEvent: jest.Mock };
+  let messages: { createAgentMessageEvent: jest.Mock };
   let webhooks: { emitToConnection: jest.Mock };
 
   const ORIGINAL_ENV = { ...process.env };
@@ -97,7 +97,7 @@ describe('ProfileMatchAutopilotService', () => {
     profileMatch = { runOnce: jest.fn() };
     matchService = { runMatch: jest.fn() };
     notifications = { create: jest.fn().mockResolvedValue({}) };
-    messages = { createAgentInboxEvent: jest.fn().mockResolvedValue({}) };
+    messages = { createAgentMessageEvent: jest.fn().mockResolvedValue({}) };
     webhooks = {
       emitToConnection: jest.fn().mockResolvedValue({ delivered: true }),
     };
@@ -205,7 +205,7 @@ describe('ProfileMatchAutopilotService', () => {
       skipped: false,
       scannedProfiles: 2,
       generatedRecommendations: 2,
-      inboxEvents: 0,
+      messageEvents: 0,
       skippedDuplicates: 0,
       errors: 0,
     });
@@ -307,7 +307,7 @@ describe('ProfileMatchAutopilotService', () => {
       profileMatch.runOnce.mockResolvedValue({
         ok: true,
         matchedCount: 0,
-        inboxEvents: 0,
+        messageEvents: 0,
         skippedDuplicates: 2,
         skippedReasons,
         recommendations: [],
@@ -376,7 +376,7 @@ describe('ProfileMatchAutopilotService', () => {
     profileMatch.runOnce.mockResolvedValue({
       ok: true,
       matchedCount: 0,
-      inboxEvents: 0,
+      messageEvents: 0,
       skippedDuplicates: 0,
       skippedReasons: createEmptyProfileMatchSkippedReasons(),
       recommendations: [],
@@ -523,7 +523,7 @@ describe('ProfileMatchAutopilotService', () => {
     expect(matchService.runMatch).toHaveBeenCalledWith(55, 7, {
       limit: expect.any(Number),
     });
-    expect(messages.createAgentInboxEvent).toHaveBeenCalledWith(
+    expect(messages.createAgentMessageEvent).toHaveBeenCalledWith(
       expect.objectContaining({
         agentConnectionId: 99,
         ownerUserId: 7,
@@ -549,6 +549,6 @@ describe('ProfileMatchAutopilotService', () => {
       }),
     );
     expect(summary.generatedRequestCandidates).toBe(1);
-    expect(summary.inboxEvents).toBe(1);
+    expect(summary.messageEvents).toBe(1);
   });
 });

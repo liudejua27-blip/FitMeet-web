@@ -47,7 +47,7 @@ describe('RealtimeEventService', () => {
       notification: {
         type: 'system',
         text: 'hello',
-        pushPayload: { route: '/notifications' },
+        pushPayload: { route: '/messages' },
       },
     });
     await Promise.resolve();
@@ -58,7 +58,7 @@ describe('RealtimeEventService', () => {
         read: false,
         pushPayload: expect.objectContaining({
           eventType: 'notification:new',
-          route: '/notifications',
+          route: '/messages',
         }),
       }),
     );

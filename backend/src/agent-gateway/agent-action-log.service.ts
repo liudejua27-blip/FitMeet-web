@@ -220,12 +220,12 @@ function buildCombinedAuditSql(
   const legacyEventId = payloadTextSql('l', [
     'eventId',
     'event_id',
-    'inboxEventId',
+    'messageEventId',
   ]);
   const canonicalEventId = payloadTextSql('a', [
     'eventId',
     'event_id',
-    'inboxEventId',
+    'messageEventId',
   ]);
   const agentDedupeSql = agentScoped
     ? 'a."agentId" IS NOT DISTINCT FROM l."agentConnectionId"'

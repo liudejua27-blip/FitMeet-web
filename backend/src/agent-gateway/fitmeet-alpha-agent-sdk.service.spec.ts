@@ -42,7 +42,7 @@ describe('FitMeetAlphaAgentSdkService', () => {
     expect(decision.safety.blocked).toBe(false);
     expect(decision.structuredIntent).toMatchObject({
       intent: 'find_nearby_partner',
-      nextAgent: 'social_match',
+      nextAgent: 'match_agent',
       activityType: '跑步',
       locationText: '青岛大学',
       timePreference: '今晚',
@@ -54,14 +54,14 @@ describe('FitMeetAlphaAgentSdkService', () => {
     expect(decision.structuredIntent?.['agentPlan']).toEqual(
       expect.arrayContaining([
         expect.stringContaining('Life Graph Agent'),
-        expect.stringContaining('Social Match Agent'),
+        expect.stringContaining('Match Agent'),
       ]),
     );
     expect(decision.agentTrace.sdkEnabled).toBe(false);
     expect(decision.agentTrace.observations).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          agent: 'Social Match Agent',
+          agent: 'Match Agent',
           intent: 'find_nearby_partner',
           readiness: 'search',
           nextAction: 'plan_tool_search',
@@ -104,7 +104,7 @@ describe('FitMeetAlphaAgentSdkService', () => {
     expect(decision.safety.blocked).toBe(false);
     expect(decision.structuredIntent).toMatchObject({
       intent: 'find_nearby_partner',
-      nextAgent: 'social_match',
+      nextAgent: 'match_agent',
       activityType: '散步',
       timePreference: '今天晚上',
       locationText: '青岛大学附近',
@@ -135,7 +135,7 @@ describe('FitMeetAlphaAgentSdkService', () => {
     expect(decision.safety.blocked).toBe(false);
     expect(decision.structuredIntent).toMatchObject({
       intent: 'find_nearby_partner',
-      nextAgent: 'social_match',
+      nextAgent: 'match_agent',
       activityType: '散步',
       timePreference: '周末',
       locationText: '青岛大学',
@@ -175,10 +175,10 @@ describe('FitMeetAlphaAgentSdkService', () => {
     const samples = [
       ['完善 Life Graph', 'complete_life_graph', 'Life Graph Agent'],
       ['分析我的生活节奏', 'analyze_life_rhythm', 'Life Graph Agent'],
-      ['推荐本周活动', 'recommend_weekly_activity', 'Social Match Agent'],
+      ['推荐本周活动', 'recommend_weekly_activity', 'Match Agent'],
       ['查看我的画像变化', 'view_profile_changes', 'Life Graph Agent'],
-      ['5公里30分钟配速是多少', 'fitness_math', 'Math Agent'],
-      ['下班后找附近健身搭子', 'find_nearby_partner', 'Social Match Agent'],
+      ['5公里30分钟配速是多少', 'fitness_math', 'Agent Brain'],
+      ['下班后找附近健身搭子', 'find_nearby_partner', 'Match Agent'],
     ];
 
     for (const [message, intent, agentName] of samples) {
@@ -200,7 +200,7 @@ describe('FitMeetAlphaAgentSdkService', () => {
     }
   });
 
-  it('builds user-facing cards for draft, candidates, safety and approvals', () => {
+  it('builds user-facing cards for draft and candidates without standalone safety or approval summaries', () => {
     const service = new FitMeetAlphaAgentSdkService(config);
 
     const cards = service.buildResultCards({
@@ -211,6 +211,10 @@ describe('FitMeetAlphaAgentSdkService', () => {
         city: '青岛',
         activityType: '跑步',
         interestTags: ['跑步', '同城'],
+      },
+      taskSlotSummary: {
+        time_window: '今天晚上',
+        location_text: '青岛大学附近',
       },
       candidates: [
         {
@@ -251,13 +255,10 @@ describe('FitMeetAlphaAgentSdkService', () => {
     );
 
     expect(cards.map((card) => card.type)).toEqual(
-      expect.arrayContaining([
-        'activity_plan',
-        'candidate_card',
-        'safety_boundary',
-        'audit_update',
-      ]),
+      expect.arrayContaining(['activity_plan', 'candidate_card']),
     );
+    expect(cards.map((card) => card.type)).not.toContain('safety_boundary');
+    expect(cards.map((card) => card.type)).not.toContain('audit_update');
     expect(cards[0]?.type).toBe('candidate_card');
     expect(candidateCards).toHaveLength(2);
     expect(candidateCards.map((card) => card.data?.['displayName'])).toEqual([
@@ -269,15 +270,33 @@ describe('FitMeetAlphaAgentSdkService', () => {
     ).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          label: '生成邀请开场白',
+          label: '生成开场白',
           action: 'candidate.generate_opener',
           requiresConfirmation: false,
         }),
         expect.objectContaining({
-          label: '确认后发邀请',
+          label: '先收藏',
+          action: 'save_candidate',
+          schemaAction: 'candidate.like',
+          requiresConfirmation: false,
+        }),
+        expect.objectContaining({
+          label: '发送邀请',
+          action: 'send_message',
+          schemaAction: 'opener.confirm_send',
+          requiresConfirmation: true,
+          payload: expect.objectContaining({
+            actionType: 'send_invite',
+          }),
+        }),
+        expect.objectContaining({
+          label: '确认后邀请Ta',
           action: 'candidate.connect',
           schemaAction: 'candidate.connect',
           requiresConfirmation: true,
+          payload: expect.objectContaining({
+            actionType: 'connect_candidate',
+          }),
         }),
         expect.objectContaining({
           label: '不感兴趣',
@@ -294,16 +313,22 @@ describe('FitMeetAlphaAgentSdkService', () => {
       schemaVersion: 'fitmeet.tool-ui.v1',
       schemaType: 'social_match.candidate',
       opportunityCard: true,
-      confirmedContext: ['青岛', '跑步', expect.stringContaining('公共操场')],
+      confirmedContext: expect.arrayContaining([
+        '青岛',
+        '今天晚上',
+        '跑步',
+        expect.stringContaining('公共操场'),
+      ]),
       opportunity: expect.objectContaining({
         type: 'person',
         name: '小刘',
         avatarUrl: 'https://cdn.example.com/xiaoliu.png',
+        time: '今天晚上',
         score: 86,
         relationshipGoal: '先从低压力运动搭子开始',
         idealType: '同城周末有空、愿意先站内聊',
         invitePolicy: '发送邀请前必须由我确认',
-        interests: expect.arrayContaining(['跑步', '同城']),
+        interests: ['跑步', '同城'],
         distanceLabel: '1.8km',
         explanationSteps: expect.arrayContaining([
           expect.stringContaining('来源：青岛大学'),
@@ -328,9 +353,14 @@ describe('FitMeetAlphaAgentSdkService', () => {
         ]),
         coldStartSignals: expect.arrayContaining([
           expect.stringContaining('区域：青岛'),
-          expect.stringContaining('共同兴趣：跑步、同城'),
+          expect.stringContaining('共同兴趣：跑步'),
         ]),
-        confirmedContext: ['青岛', '跑步', expect.stringContaining('公共操场')],
+        confirmedContext: expect.arrayContaining([
+          '青岛',
+          '今天晚上',
+          '跑步',
+          expect.stringContaining('公共操场'),
+        ]),
         recommendedNextAction: expect.stringContaining('确认后再发送'),
       }),
       relationshipGoal: '先从低压力运动搭子开始',
@@ -339,15 +369,30 @@ describe('FitMeetAlphaAgentSdkService', () => {
       recommendationLine: expect.any(String),
       whyNow: expect.any(String),
       safetyBoundary: expect.any(String),
-      sharedInterests: expect.arrayContaining(['跑步', '同城']),
+      timePreference: '今天晚上',
+      sharedInterests: ['跑步', '同城'],
       explanationSteps: expect.arrayContaining([
         expect.stringContaining('来源：青岛大学'),
       ]),
       rankingBreakdown: expect.arrayContaining([
         expect.objectContaining({ key: 'boundary', label: '安全边界' }),
       ]),
-      nextActions: expect.arrayContaining(['生成邀请开场白', '确认后发邀请']),
+      nextActions: expect.arrayContaining(['生成开场白', '确认后邀请Ta']),
     });
+    expect(
+      cards.find((card) => card.type === 'candidate_card')?.data?.[
+        'opportunity'
+      ],
+    ).toEqual(
+      expect.objectContaining({
+        safetyBoundary: expect.any(String),
+        safetyBadges: expect.arrayContaining([
+          expect.stringContaining('公开可发现'),
+          expect.stringContaining('脱敏'),
+          '位置已模糊',
+        ]),
+      }),
+    );
     expect(cards.find((card) => card.type === 'activity_plan')).toMatchObject({
       schemaVersion: 'fitmeet.tool-ui.v1',
       schemaType: 'social_match.activity',
@@ -360,25 +405,28 @@ describe('FitMeetAlphaAgentSdkService', () => {
         opportunityType: 'activity',
         opportunityTitle: '跑步约练',
         opportunitySubtitle: expect.stringContaining('青岛'),
-        confirmedContext: [
+        confirmedContext: expect.arrayContaining([
           '青岛',
+          '今天晚上',
           '跑步',
-          '青岛的公共场所',
+          '青岛大学附近',
           expect.stringContaining('公共场所'),
-        ],
+        ]),
         opportunity: expect.objectContaining({
           type: 'activity',
           title: '跑步约练',
           city: '青岛',
-          location: '青岛的公共场所',
+          location: '青岛大学附近',
+          time: '今天晚上',
           activityType: '跑步',
           safetyBadges: ['公共场所', '不共享精确位置', '确认后创建'],
-          confirmedContext: [
+          confirmedContext: expect.arrayContaining([
             '青岛',
+            '今天晚上',
             '跑步',
-            '青岛的公共场所',
+            '青岛大学附近',
             expect.stringContaining('公共场所'),
-          ],
+          ]),
         }),
         publicPlaceOnly: true,
         noPreciseLocation: true,
@@ -389,8 +437,17 @@ describe('FitMeetAlphaAgentSdkService', () => {
       }),
       actions: expect.arrayContaining([
         expect.objectContaining({
-          action: 'activity.confirm_create',
-          schemaAction: 'activity.confirm_create',
+          label: '查看详情',
+          action: 'activity.view_detail',
+          schemaAction: 'activity.view_detail',
+          requiresConfirmation: false,
+        }),
+        expect.objectContaining({
+          label: '确认发布',
+          action: 'publish_to_discover',
+          schemaAction: expect.stringMatching(
+            /^(publish_to_discover|activity\.confirm_create)$/,
+          ),
           requiresConfirmation: true,
           payload: expect.objectContaining({
             approvalRequired: true,
@@ -402,44 +459,109 @@ describe('FitMeetAlphaAgentSdkService', () => {
             ]),
           }),
         }),
+        expect.objectContaining({
+          label: '修改卡片',
+          action: 'reschedule_meet_loop',
+          schemaAction: 'activity.modify_time',
+          requiresConfirmation: false,
+        }),
+        expect.objectContaining({
+          label: '暂不发布',
+          action: 'activity.skip_publish',
+          schemaAction: 'activity.skip_publish',
+          requiresConfirmation: false,
+        }),
       ]),
     });
-    expect(cards.find((card) => card.type === 'safety_boundary')).toMatchObject(
-      {
-        schemaVersion: 'fitmeet.tool-ui.v1',
-        schemaType: 'safety.approval',
-        data: expect.objectContaining({
-          schemaName: 'SafetyApprovalCard',
-          schemaVersion: 'fitmeet.tool-ui.v1',
-          schemaType: 'safety.approval',
-          approval: expect.objectContaining({
-            riskLevel: 'low',
-            confirmationLabel: '后续动作需确认',
-            checkpointLabel: '安全边界已保存',
-          }),
-        }),
-      },
-    );
-    expect(cards.find((card) => card.type === 'audit_update')).toMatchObject({
-      schemaVersion: 'fitmeet.tool-ui.v1',
-      schemaType: 'safety.approval',
-      data: expect.objectContaining({
-        schemaName: 'SafetyApprovalCard',
-        schemaVersion: 'fitmeet.tool-ui.v1',
-        schemaType: 'safety.approval',
-        riskLevel: 'medium',
-        reasons: expect.arrayContaining(['send_message']),
-        approval: expect.objectContaining({
-          riskLevel: 'medium',
-          reasons: expect.arrayContaining(['send_message']),
-          confirmationLabel: '确认后才执行',
-          checkpointLabel: '审批中断点已保存',
-        }),
-      }),
-    });
+    expect(
+      cards.find((card) => card.type === 'safety_boundary'),
+    ).toBeUndefined();
   });
 
-  it('limits user-visible opportunity cards to three while keeping safety and audit cards', () => {
+  it('builds a recovery card instead of fake candidates when real candidate search is empty', () => {
+    const service = new FitMeetAlphaAgentSdkService(config);
+
+    const cards = service.buildResultCards({
+      taskId: 42,
+      socialRequestDraft: {
+        description: '今晚在青岛大学附近找舞蹈生散步',
+        city: '青岛',
+        activityType: '散步',
+        timePreference: '今天晚上',
+        locationName: '青岛大学附近',
+        candidatePreference: '公开资料里有舞蹈相关标签的女生优先',
+      },
+      candidates: [],
+      approvalRequiredActions: [],
+    });
+
+    const emptyCard = cards.find(
+      (card) => card.type === 'candidate_empty_state',
+    );
+
+    expect(emptyCard).toMatchObject({
+      schemaVersion: 'fitmeet.tool-ui.v1',
+      schemaType: 'social_match.empty',
+      title: '暂时没有找到合适的人',
+      status: 'ready',
+      data: expect.objectContaining({
+        schemaName: 'CandidateEmptyStateCard',
+        schemaType: 'social_match.empty',
+        reason: 'no_real_candidates',
+        criteria: expect.arrayContaining([
+          '散步',
+          '青岛',
+          '青岛大学附近',
+          '今天晚上',
+          '公开资料里有舞蹈相关标签的女生优先',
+        ]),
+        recoveryOptions: expect.arrayContaining([
+          expect.objectContaining({
+            key: 'publish_to_discover',
+            label: '发布到发现',
+            requiresConfirmation: true,
+          }),
+          expect.objectContaining({
+            key: 'expand_radius',
+            label: '扩大范围',
+          }),
+          expect.objectContaining({
+            key: 'change_time',
+            label: '换个时间',
+          }),
+        ]),
+        safetyBoundary: expect.stringContaining('不会编造候选'),
+      }),
+      actions: expect.arrayContaining([
+        expect.objectContaining({
+          id: 'publish_to_discover',
+          schemaAction: 'publish_to_discover',
+          requiresConfirmation: true,
+          payload: expect.objectContaining({
+            approvalRequired: true,
+            checkpointRequired: true,
+            sideEffect: 'publish_public_intent',
+          }),
+        }),
+        expect.objectContaining({
+          id: 'expand_radius',
+          schemaAction: 'candidate.more_like_this',
+          requiresConfirmation: false,
+        }),
+        expect.objectContaining({
+          id: 'change_time',
+          schemaAction: 'activity.modify_time',
+          requiresConfirmation: false,
+        }),
+      ]),
+    });
+    expect(emptyCard?.body).toContain('不会用假候选凑数');
+    expect(cards.filter((card) => card.type === 'candidate_card')).toHaveLength(
+      0,
+    );
+  });
+
+  it('keeps three candidate cards while preserving the activity publish card', () => {
     const service = new FitMeetAlphaAgentSdkService(config);
 
     const cards = service.buildResultCards({
@@ -464,14 +586,19 @@ describe('FitMeetAlphaAgentSdkService', () => {
       (card) => card.data?.['opportunityCard'] === true,
     );
 
-    expect(opportunityCards).toHaveLength(3);
+    expect(opportunityCards).toHaveLength(4);
     expect(opportunityCards.map((card) => card.type)).toEqual([
       'candidate_card',
       'candidate_card',
       'candidate_card',
+      'activity_plan',
     ]);
+    const candidateOpportunityCards = opportunityCards.filter(
+      (card) => card.type === 'candidate_card',
+    );
+
     expect(
-      opportunityCards.every(
+      candidateOpportunityCards.every(
         (card) =>
           card.schemaVersion === 'fitmeet.tool-ui.v1' &&
           card.schemaType === 'social_match.candidate' &&
@@ -479,8 +606,9 @@ describe('FitMeetAlphaAgentSdkService', () => {
           card.data?.['opportunityCard'] === true,
       ),
     ).toBe(true);
+
     expect(
-      opportunityCards.every((card) => {
+      candidateOpportunityCards.every((card) => {
         const data = card.data ?? {};
         const opportunity = data['opportunity'] as
           | Record<string, unknown>
@@ -499,7 +627,7 @@ describe('FitMeetAlphaAgentSdkService', () => {
       }),
     ).toBe(true);
     expect(
-      opportunityCards.every((card) => {
+      candidateOpportunityCards.every((card) => {
         const schemaActions = card.actions.map((action) => action.schemaAction);
         return (
           schemaActions.includes('candidate.view_detail') &&
@@ -510,7 +638,7 @@ describe('FitMeetAlphaAgentSdkService', () => {
       }),
     ).toBe(true);
     expect(
-      opportunityCards.every((card) =>
+      candidateOpportunityCards.every((card) =>
         card.actions.some(
           (action) =>
             action.schemaAction === 'candidate.connect' &&
@@ -523,13 +651,102 @@ describe('FitMeetAlphaAgentSdkService', () => {
         ),
       ),
     ).toBe(true);
-    expect(opportunityCards.map((card) => card.data?.['displayName'])).toEqual([
-      '候选 A',
-      '候选 B',
-      '候选 C',
-    ]);
-    expect(cards.find((card) => card.type === 'activity_plan')).toBeUndefined();
-    expect(cards.find((card) => card.type === 'safety_boundary')).toBeDefined();
-    expect(cards.find((card) => card.type === 'audit_update')).toBeDefined();
+    expect(
+      candidateOpportunityCards.map((card) => card.data?.['displayName']),
+    ).toEqual(['候选 A', '候选 B', '候选 C']);
+    expect(cards.find((card) => card.type === 'activity_plan')).toMatchObject({
+      type: 'activity_plan',
+      actions: expect.arrayContaining([
+        expect.objectContaining({
+          label: '查看详情',
+          schemaAction: 'activity.view_detail',
+          requiresConfirmation: false,
+        }),
+        expect.objectContaining({
+          label: '确认发布',
+          schemaAction: expect.stringMatching(
+            /^(publish_to_discover|activity\.confirm_create)$/,
+          ),
+          requiresConfirmation: true,
+        }),
+      ]),
+    });
+    expect(
+      cards.find((card) => card.type === 'safety_boundary'),
+    ).toBeUndefined();
+    expect(cards.find((card) => card.type === 'audit_update')).toBeUndefined();
+  });
+
+  it('keeps blocked safety as a standalone card even when product cards exist', () => {
+    const service = new FitMeetAlphaAgentSdkService(config);
+
+    const cards = service.buildResultCards({
+      taskId: 12,
+      traceId: 'trace-blocked-safety',
+      socialRequestDraft: {
+        description: '今晚在青岛大学附近找跑步搭子',
+        city: '青岛',
+        activityType: '跑步',
+      },
+      candidates: [
+        {
+          userId: 7,
+          displayName: '小刘',
+          matchScore: 86,
+          commonTags: ['跑步'],
+          reasons: ['同城同兴趣'],
+        },
+      ],
+      safety: {
+        blocked: true,
+        level: 'high',
+        reasons: ['请求包含不安全的线下行为'],
+        boundaryNotes: ['不会继续搜索、联系或发布'],
+        requiredConfirmations: [],
+      },
+    });
+
+    expect(cards.find((card) => card.type === 'candidate_card')).toBeDefined();
+    expect(cards.find((card) => card.type === 'safety_boundary')).toMatchObject(
+      {
+        schemaVersion: 'fitmeet.tool-ui.v1',
+        schemaType: 'safety.approval',
+        status: 'blocked',
+        data: expect.objectContaining({
+          schemaName: 'SafetyApprovalCard',
+          approval: expect.objectContaining({
+            riskLevel: 'high',
+            confirmationLabel: '已阻断',
+            checkpointLabel: '不会继续执行',
+          }),
+        }),
+      },
+    );
+  });
+
+  it('keeps a standalone approval card when no product card can own the action', () => {
+    const service = new FitMeetAlphaAgentSdkService(config);
+
+    const cards = service.buildResultCards({
+      taskId: 12,
+      traceId: 'trace-standalone-approval',
+      socialRequestDraft: null,
+      candidates: [],
+      approvalRequiredActions: [
+        { id: 1, actionType: 'send_message', riskLevel: 'medium' },
+      ],
+    });
+
+    expect(cards.find((card) => card.type === 'audit_update')).toMatchObject({
+      schemaVersion: 'fitmeet.tool-ui.v1',
+      schemaType: 'safety.approval',
+      data: expect.objectContaining({
+        schemaName: 'SafetyApprovalCard',
+        approval: expect.objectContaining({
+          riskLevel: 'medium',
+          confirmationLabel: '确认后才执行',
+        }),
+      }),
+    });
   });
 });

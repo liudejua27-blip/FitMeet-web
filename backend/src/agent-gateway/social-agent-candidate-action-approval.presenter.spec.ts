@@ -48,11 +48,15 @@ describe('social agent candidate action approval presenter', () => {
         userMessage: '帮我给她发消息',
         intent: 'action_request',
         entities: route.entities,
-        candidateUserId: 22,
+        taskId: 101,
         agentTaskId: 101,
+        targetUserId: 22,
+        candidateUserId: 22,
+        candidateRecordId: 501,
+        socialRequestCandidateId: 501,
       },
-      summary: '用户请求向候选人 #22发送消息',
-      riskLevel: 'medium',
+      summary: '发送消息给小林',
+      riskLevel: 'high',
       reason: '由 Social Agent 聊天意图路由生成，待用户在前端确认。',
       createdBy: 'agent',
       relatedCandidateId: 501,
@@ -73,8 +77,8 @@ describe('social agent candidate action approval presenter', () => {
     ).toMatchObject({
       type: 'contact_request',
       actionType: 'connect_candidate',
-      summary: '用户请求添加候选人 #22为好友/关注',
-      riskLevel: 'medium',
+      summary: '加好友并聊天：小林',
+      riskLevel: 'high',
     });
     expect(
       buildSocialAgentCandidateActionApprovalInput({
@@ -88,9 +92,37 @@ describe('social agent candidate action approval presenter', () => {
       }),
     ).toMatchObject({
       type: 'join_activity',
-      actionType: 'invite_candidate',
-      summary: '用户请求邀请候选人 #22参加活动',
-      riskLevel: 'medium',
+      actionType: 'send_invite',
+      summary: '邀请小林参加约练',
+      riskLevel: 'high',
+    });
+  });
+
+  it('keeps stable card identity in approval payload for inline card placement', () => {
+    expect(
+      buildSocialAgentCandidateActionApprovalInput({
+        ownerUserId: 7,
+        taskId: 101,
+        message: '帮我加好友并聊聊',
+        route,
+        candidate: {
+          ...candidate,
+          socialRequestId: 301,
+        },
+        targetUserId: 22,
+        relatedCandidateId: 501,
+      }),
+    ).toMatchObject({
+      payload: {
+        taskId: 101,
+        agentTaskId: 101,
+        targetUserId: 22,
+        candidateUserId: 22,
+        candidateRecordId: 501,
+        socialRequestCandidateId: 501,
+        socialRequestId: 301,
+      },
+      relatedCandidateId: 501,
     });
   });
 
@@ -109,9 +141,7 @@ describe('social agent candidate action approval presenter', () => {
             userId: 7,
             threadId: 'agent-task:101',
             taskId: 101,
-            recentMessages: [
-              { role: 'user', content: '今晚青岛大学附近散步' },
-            ],
+            recentMessages: [{ role: 'user', content: '今晚青岛大学附近散步' }],
             taskMemory: null,
             taskSlots: {
               time_window: { value: '今晚', state: 'completed' },
@@ -176,10 +206,21 @@ describe('social agent candidate action approval presenter', () => {
     ).toMatchObject({
       type: 'custom',
       actionType: 'social_agent_action',
-      summary: '用户请求执行动作：帮我想想下一步',
+      summary: '继续处理：帮我想想下一步',
       riskLevel: 'low',
       relatedCandidateId: null,
     });
+    expect(
+      buildSocialAgentCandidateActionApprovalInput({
+        ownerUserId: 7,
+        taskId: 101,
+        message: '帮我想想下一步',
+        route,
+        candidate: undefined,
+        targetUserId: null,
+        relatedCandidateId: null,
+      }).summary,
+    ).not.toMatch(/用户请求执行动作|动作：/);
   });
 
   it('builds pending action and confirmation state patch', () => {
@@ -189,7 +230,7 @@ describe('social agent candidate action approval presenter', () => {
           id: 9001,
           type: ApprovalType.SendMessage,
           actionType: 'send_invite',
-          summary: '用户请求向候选人 #22发送消息',
+          summary: '发送消息给小林',
           riskLevel: ApprovalRiskLevel.Medium,
           payload: {},
           expiresAt: '2026-06-08T00:00:00.000Z',
@@ -201,7 +242,7 @@ describe('social agent candidate action approval presenter', () => {
         id: 9001,
         type: ApprovalType.SendMessage,
         actionType: 'send_invite',
-        summary: '用户请求向候选人 #22发送消息',
+        summary: '发送消息给小林',
         riskLevel: ApprovalRiskLevel.Medium,
         at: '2026-06-07T00:00:00.000Z',
       },

@@ -53,11 +53,15 @@ function makeHarness() {
   const metrics = {
     recordApproval: jest.fn(),
   };
+  const taskRepo = {
+    save: jest.fn(async (task: AgentTask) => task),
+  };
   const service = new SocialAgentRouteActionTurnService(
+    taskRepo as never,
     candidateActions as never,
     metrics as never,
   );
-  return { candidateActions, metrics, service };
+  return { candidateActions, metrics, service, taskRepo };
 }
 
 describe('SocialAgentRouteActionTurnService', () => {
@@ -128,6 +132,104 @@ describe('SocialAgentRouteActionTurnService', () => {
     });
   });
 
+  it('turns a natural-language publish request into a confirmable Discover publish card', async () => {
+    const { candidateActions, metrics, service, taskRepo } = makeHarness();
+    const task = makeTask({
+      goal: '今晚青岛大学附近健身约练',
+      memory: {
+        taskSlots: {
+          activity: { value: '健身', state: 'completed' },
+          time_window: { value: '今晚', state: 'completed' },
+          location_text: { value: '青岛大学附近', state: 'completed' },
+          safety_boundary: {
+            value: '公共场所，先站内聊',
+            state: 'completed',
+          },
+        },
+      },
+    });
+
+    const result = await service.handle({
+      ownerUserId: 7,
+      task,
+      route: makeRoute(),
+      message: '发布吧',
+      assistantMessage: '可以，我会先等你确认。',
+    });
+
+    expect(candidateActions.createActionApproval).not.toHaveBeenCalled();
+    expect(metrics.recordApproval).not.toHaveBeenCalled();
+    expect(taskRepo.save).toHaveBeenCalledWith(task);
+    expect(task.result).toMatchObject({
+      chatRun: {
+        socialRequestDraft: expect.objectContaining({
+          activityType: '健身',
+          timePreference: '今晚',
+          locationName: '青岛大学附近',
+        }),
+        publishStatus: 'draft',
+      },
+    });
+    expect(task.memory).toMatchObject({
+      socialAgentChat: {
+        socialRequestDraft: expect.objectContaining({
+          activityType: '健身',
+        }),
+        publishStatus: 'draft',
+      },
+      shortTerm: {
+        publishStatus: 'draft',
+      },
+    });
+    expect(result).toMatchObject({
+      handled: true,
+      pendingApproval: null,
+      assistantMessage: expect.stringContaining('发布确认卡'),
+      cards: [
+        expect.objectContaining({
+          type: 'activity_plan',
+          schemaVersion: 'fitmeet.tool-ui.v1',
+          schemaType: 'social_match.activity',
+          status: 'waiting_confirmation',
+          data: expect.objectContaining({
+            taskId: 101,
+            schemaName: 'OpportunityCard',
+            opportunityCard: true,
+            activityType: '健身',
+            time: '今晚',
+            locationName: '青岛大学附近',
+          }),
+          actions: expect.arrayContaining([
+            expect.objectContaining({
+              label: '发布卡片',
+              schemaAction: 'publish_to_discover',
+              requiresConfirmation: true,
+              payload: expect.objectContaining({
+                taskId: 101,
+                socialRequestDraft: expect.objectContaining({
+                  activityType: '健身',
+                  timePreference: '今晚',
+                  locationName: '青岛大学附近',
+                  requireUserConfirmation: true,
+                }),
+              }),
+            }),
+            expect.objectContaining({
+              label: '修改卡片',
+              schemaAction: 'activity.modify_time',
+              requiresConfirmation: false,
+            }),
+            expect.objectContaining({
+              label: '暂不发布',
+              schemaAction: 'activity.skip_publish',
+              requiresConfirmation: false,
+            }),
+          ]),
+        }),
+      ],
+    });
+  });
+
   it('passes hydrated runtime context into approval creation and stores non-sensitive telemetry', async () => {
     const { candidateActions, service } = makeHarness();
     const task = makeTask();
@@ -144,9 +246,7 @@ describe('SocialAgentRouteActionTurnService', () => {
         userId: 7,
         threadId: 'agent-task:101',
         taskId: 101,
-        recentMessages: [
-          { role: 'user', content: '今晚青岛大学附近散步' },
-        ],
+        recentMessages: [{ role: 'user', content: '今晚青岛大学附近散步' }],
         taskMemory: null,
         taskSlots: {
           time_window: { value: '今天晚上', state: 'completed' },

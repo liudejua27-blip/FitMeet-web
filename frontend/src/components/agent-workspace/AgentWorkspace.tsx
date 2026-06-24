@@ -20,7 +20,7 @@ export function AgentWorkspace({ view }: { view: AgentView }) {
 function AgentWorkspaceShellFallback() {
   return (
     <div
-      className="flex h-[100dvh] min-h-[100svh] bg-white text-[#0d0d0d]"
+      className="flex h-[100svh] min-h-[100svh] bg-white text-[#0d0d0d]"
       data-testid="assistant-ui-shell-loading"
     >
       <aside className="hidden w-64 shrink-0 border-r border-black/[0.06] bg-[#f9f9f9] p-3 lg:block">

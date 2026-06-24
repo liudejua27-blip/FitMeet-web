@@ -7,9 +7,9 @@ import { MessagesGateway } from './messages.gateway';
 import { Conversation, ConversationSchema } from './conversation.schema';
 import { Message, MessageSchema } from './message.schema';
 import {
-  AgentInboxEvent,
-  AgentInboxEventSchema,
-} from './agent-inbox-event.schema';
+  AgentMessageEvent,
+  AgentMessageEventSchema,
+} from './agent-message-event.schema';
 import { User } from '../users/user.entity';
 import { AuthModule } from '../auth/auth.module';
 import { AgentConnection } from '../agent-gateway/entities/agent-connection.entity';
@@ -18,13 +18,15 @@ import { AgentActionLog } from '../agent-gateway/entities/agent-action-log.entit
 import { PublicSocialIntent } from '../agent-gateway/entities/public-social-intent.entity';
 import { UserSocialRequest } from '../social-requests/social-request.entity';
 import { RealtimeModule } from '../realtime/realtime.module';
+import { AgentSideEffectLedger } from '../agent-gateway/entities/agent-side-effect-ledger.entity';
+import { AgentSideEffectLedgerService } from '../agent-gateway/agent-side-effect-ledger.service';
 
 @Module({
   imports: [
     MongooseModule.forFeature([
       { name: Conversation.name, schema: ConversationSchema },
       { name: Message.name, schema: MessageSchema },
-      { name: AgentInboxEvent.name, schema: AgentInboxEventSchema },
+      { name: AgentMessageEvent.name, schema: AgentMessageEventSchema },
     ]),
     TypeOrmModule.forFeature([
       User,
@@ -33,12 +35,13 @@ import { RealtimeModule } from '../realtime/realtime.module';
       AgentActionLog,
       PublicSocialIntent,
       UserSocialRequest,
+      AgentSideEffectLedger,
     ]),
     AuthModule,
     RealtimeModule,
   ],
   controllers: [MessagesController],
-  providers: [MessagesService, MessagesGateway],
+  providers: [MessagesService, MessagesGateway, AgentSideEffectLedgerService],
   exports: [MessagesService, MessagesGateway],
 })
 export class MessagesModule {}

@@ -45,6 +45,7 @@ function makeHarness() {
     handleActivitySearch: jest.fn().mockResolvedValue({
       activityResults: [{ id: 'activity-1', title: '周末晨跑' }],
       assistantMessage: '找到 1 条活动',
+      assistantMessageSource: 'llm',
     }),
   };
   const profileGate = {
@@ -55,12 +56,16 @@ function makeHarness() {
       profileCompleteness: 82,
     }),
   };
+  const taskRepo = {
+    save: jest.fn(async (task: AgentTask) => task),
+  };
   const service = new SocialAgentRouteSearchTurnService(
+    taskRepo as never,
     profileEnrichment as never,
     activitySearch as never,
     profileGate as never,
   );
-  return { activitySearch, profileEnrichment, profileGate, service };
+  return { activitySearch, profileEnrichment, profileGate, service, taskRepo };
 }
 
 describe('SocialAgentRouteSearchTurnService', () => {
@@ -91,15 +96,15 @@ describe('SocialAgentRouteSearchTurnService', () => {
     expect(result).toMatchObject({
       handled: true,
       savedContext: true,
+      assistantMessageSource: 'deterministic_route',
       activityResults: [],
       queuedRun: null,
       runMode: null,
     });
     expect(result.assistantMessage).toContain('城市/大致区域');
     expect(result.assistantMessage).toContain('时间');
-    expect(result.assistantMessage).toContain(
-      '安全边界和是否发布到发现，会在真正发送邀请或公开前再让你确认',
-    );
+    expect(result.assistantMessage).toContain('确认前不会公开');
+    expect(result.assistantMessage).toContain('不会替你联系别人');
     expect(activitySearch.handleActivitySearch).not.toHaveBeenCalled();
   });
 
@@ -139,6 +144,7 @@ describe('SocialAgentRouteSearchTurnService', () => {
     expect(result).toMatchObject({
       handled: true,
       assistantMessage: '找到 1 条活动',
+      assistantMessageSource: 'llm',
       activityResults: [{ id: 'activity-1', title: '周末晨跑' }],
       queuedRun: null,
       runMode: null,
@@ -152,6 +158,149 @@ describe('SocialAgentRouteSearchTurnService', () => {
         buildMemoryContext,
         taskContext,
       }),
+    );
+  });
+
+  it('creates an OpportunityCard before candidate search for find-partner requests', async () => {
+    const { profileGate, service } = makeHarness();
+    profileGate.evaluateForSocialExecution.mockResolvedValue({
+      passed: false,
+      missing: ['publicAuthorization'],
+      assistantMessage: '缺少公开授权',
+      profileCompleteness: 10,
+    });
+    const task = makeTask({
+      goal: '今天晚上青岛大学附近找轻松跑步搭子',
+      memory: {
+        taskSlots: {
+          activity: { value: '跑步', state: 'completed' },
+          time_window: { value: '今天晚上', state: 'completed' },
+          location_text: { value: '青岛大学附近', state: 'completed' },
+          intensity: { value: '轻松', state: 'completed' },
+          safety_boundary: {
+            value: '公共场所，先站内聊',
+            state: 'completed',
+          },
+        },
+      },
+    });
+    const queueInitialSearchForTask = jest.fn();
+
+    const result = await service.handle({
+      ownerUserId: 7,
+      task,
+      route: makeRoute({
+        entities: {
+          city: '青岛',
+          activityType: '跑步',
+          targetGender: '',
+          timePreference: '今天晚上',
+          locationPreference: '青岛大学附近',
+        },
+      }),
+      message: '今天晚上青岛大学附近找轻松跑步搭子，先站内聊',
+      replanAndRefresh: jest.fn(),
+      queueInitialSearchForTask,
+      buildMemoryContext: jest.fn(),
+    });
+
+    expect(profileGate.evaluateForSocialExecution).not.toHaveBeenCalled();
+    expect(queueInitialSearchForTask).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      handled: true,
+      savedContext: true,
+      queuedRun: null,
+      runMode: null,
+      activityResults: [],
+      cards: [
+        expect.objectContaining({
+          schemaType: 'social_match.activity',
+          status: 'waiting_confirmation',
+          data: expect.objectContaining({
+            schemaName: 'OpportunityCard',
+            activityType: '跑步',
+            time: '今天晚上',
+            locationName: '青岛大学附近',
+          }),
+          actions: expect.arrayContaining([
+            expect.objectContaining({
+              label: '发布卡片',
+              schemaAction: 'publish_to_discover',
+            }),
+            expect.objectContaining({
+              label: '修改卡片',
+              schemaAction: 'activity.modify_time',
+            }),
+            expect.objectContaining({
+              label: '暂不发布',
+              schemaAction: 'activity.skip_publish',
+            }),
+          ]),
+        }),
+      ],
+    });
+  });
+
+  it('continues candidate search after an opportunity card has already been published', async () => {
+    const { service } = makeHarness();
+    const task = makeTask({
+      goal: '今天晚上青岛大学附近找轻松跑步搭子',
+      memory: {
+        shortTerm: {
+          publishStatus: 'published',
+          publicIntentId: 'public-intent:walk-qdu',
+        },
+        taskSlots: {
+          activity: { value: '跑步', state: 'completed' },
+          time_window: { value: '今天晚上', state: 'completed' },
+          location_text: { value: '青岛大学附近', state: 'completed' },
+          intensity: { value: '轻松', state: 'completed' },
+          safety_boundary: {
+            value: '公共场所，先站内聊',
+            state: 'completed',
+          },
+        },
+      },
+      result: {
+        publishSocialRequest: {
+          status: 'published',
+          publicIntentId: 'public-intent:walk-qdu',
+        },
+      },
+    });
+    const queueInitialSearchForTask = jest
+      .fn()
+      .mockResolvedValue({ status: 'queued', taskId: 101 });
+
+    const result = await service.handle({
+      ownerUserId: 7,
+      task,
+      route: makeRoute({
+        entities: {
+          city: '青岛',
+          activityType: '跑步',
+          targetGender: '',
+          timePreference: '今天晚上',
+          locationPreference: '青岛大学附近',
+        },
+      }),
+      message: '根据这张已发布的约练卡继续匹配候选',
+      replanAndRefresh: jest.fn(),
+      queueInitialSearchForTask,
+      buildMemoryContext: jest.fn(),
+    });
+
+    expect(queueInitialSearchForTask).toHaveBeenCalledTimes(1);
+    expect(result.cards).toEqual([]);
+    expect(result).toMatchObject({
+      handled: true,
+      queuedRun: { status: 'queued', taskId: 101 },
+      runMode: 'initial',
+    });
+    expect(queueInitialSearchForTask.mock.calls[0]?.[2]).toContain('已确认');
+    expect(queueInitialSearchForTask.mock.calls[0]?.[2]).toContain('跑步');
+    expect(queueInitialSearchForTask.mock.calls[0]?.[2]).toContain(
+      '青岛大学附近',
     );
   });
 
@@ -184,8 +333,7 @@ describe('SocialAgentRouteSearchTurnService', () => {
           lastSearchIntent: 'activity_search',
           lastSearchCandidateCount: 0,
           lastSearchEmptyReason: 'no_real_candidates',
-          lastSearchNextStep:
-            '换城市、时间或活动类型，或确认发布约练卡到发现',
+          lastSearchNextStep: '换城市、时间或活动类型，或确认发布约练卡到发现',
         },
       },
     });
@@ -215,6 +363,7 @@ describe('SocialAgentRouteSearchTurnService', () => {
       queuedRun: null,
       runMode: null,
       savedContext: true,
+      assistantMessageSource: 'deterministic_route',
     });
     expect(result.assistantMessage).toContain('没有找到真实、公开可发现');
     expect(result.assistantMessage).toContain('活动或公开约练卡片');
@@ -251,8 +400,7 @@ describe('SocialAgentRouteSearchTurnService', () => {
           lastSearchIntent: 'activity_search',
           lastSearchCandidateCount: 0,
           lastSearchEmptyReason: 'no_real_candidates',
-          lastSearchNextStep:
-            '换城市、时间或活动类型，或确认发布约练卡到发现',
+          lastSearchNextStep: '换城市、时间或活动类型，或确认发布约练卡到发现',
         },
       },
     });
@@ -298,7 +446,7 @@ describe('SocialAgentRouteSearchTurnService', () => {
       task: makeTask(),
       route: makeRoute(),
       message:
-        '帮我找青岛周末下午轻松跑步搭子，想认识同城周末有空、先运动再慢慢熟悉的人，公共场所先站内聊，接受陌生人，可以公开发起活动',
+        '先不发布卡片，只推荐候选：帮我找青岛周末下午轻松跑步搭子，想认识同城周末有空、先运动再慢慢熟悉的人，公共场所先站内聊，接受陌生人',
       replanAndRefresh: jest.fn(),
       queueInitialSearchForTask,
       buildMemoryContext: jest.fn(),
@@ -314,6 +462,48 @@ describe('SocialAgentRouteSearchTurnService', () => {
     expect(queueInitialSearchForTask).toHaveBeenCalledTimes(1);
     expect(queueInitialSearchForTask.mock.calls[0]?.[2]).toContain('周末下午');
     expect(queueInitialSearchForTask.mock.calls[0]?.[2]).toContain('跑步');
+    expect(queueInitialSearchForTask.mock.calls[0]?.[2]).toContain('先不发布');
+  });
+
+  it('ignores Life Graph district follow-up when city is already confirmed', async () => {
+    const { profileEnrichment, service } = makeHarness();
+    profileEnrichment.lifeGraphSearchClarification.mockResolvedValue(
+      '你大概在青岛哪个区、或者平时习惯在哪一带跑？',
+    );
+    const queueInitialSearchForTask = jest
+      .fn()
+      .mockResolvedValue({ status: 'queued', taskId: 101 });
+
+    const result = await service.handle({
+      ownerUserId: 7,
+      task: makeTask(),
+      route: makeRoute({
+        entities: {
+          city: '青岛',
+          activityType: '跑步',
+          targetGender: '',
+          timePreference: '今天晚上',
+          locationPreference: '',
+        },
+      }),
+      message:
+        '先不发布卡片，只推荐候选：青岛今天晚上，轻松跑步，只在公共场所，先站内聊，发送前确认',
+      replanAndRefresh: jest.fn(),
+      queueInitialSearchForTask,
+      buildMemoryContext: jest.fn(),
+    });
+
+    expect(result).toMatchObject({
+      handled: true,
+      savedContext: false,
+      queuedRun: { status: 'queued', taskId: 101 },
+      runMode: 'initial',
+    });
+    expect(result.assistantMessage).toBeUndefined();
+    expect(queueInitialSearchForTask).toHaveBeenCalledTimes(1);
+    expect(queueInitialSearchForTask.mock.calls[0]?.[2]).toContain('青岛');
+    expect(queueInitialSearchForTask.mock.calls[0]?.[2]).toContain('今天晚上');
+    expect(queueInitialSearchForTask.mock.calls[0]?.[2]).toContain('跑步');
   });
 
   it('keeps non-stale Life Graph safety clarification before queueing search', async () => {
@@ -328,7 +518,7 @@ describe('SocialAgentRouteSearchTurnService', () => {
       task: makeTask(),
       route: makeRoute(),
       message:
-        '帮我找青岛周末下午轻松跑步搭子，想认识同城周末有空、先运动再慢慢熟悉的人',
+        '先不发布卡片，只推荐候选：帮我找青岛周末下午轻松跑步搭子，想认识同城周末有空、先运动再慢慢熟悉的人',
       replanAndRefresh: jest.fn(),
       queueInitialSearchForTask,
       buildMemoryContext: jest.fn(),
@@ -350,7 +540,8 @@ describe('SocialAgentRouteSearchTurnService', () => {
     profileGate.evaluateForSocialExecution.mockResolvedValue({
       passed: false,
       missing: ['publicAuthorization'],
-      assistantMessage: '为了让推荐更准，也避免误公开你的需求，我还需要补齐公开授权。',
+      assistantMessage:
+        '为了让推荐更准，也避免误公开你的需求，我还需要补齐公开授权。',
       profileCompleteness: 42,
     });
     const queueInitialSearchForTask = jest.fn();
@@ -360,7 +551,7 @@ describe('SocialAgentRouteSearchTurnService', () => {
       task: makeTask(),
       route: makeRoute(),
       message:
-        '帮我找青岛周末下午轻松跑步搭子，想认识同城周末有空、先运动再慢慢熟悉的人，公共场所先站内聊，接受陌生人，可以公开发起活动',
+        '先不发布卡片，只推荐候选：帮我找青岛周末下午轻松跑步搭子，想认识同城周末有空、先运动再慢慢熟悉的人，公共场所先站内聊，接受陌生人',
       replanAndRefresh: jest.fn(),
       queueInitialSearchForTask,
       buildMemoryContext: jest.fn(),
@@ -406,9 +597,8 @@ describe('SocialAgentRouteSearchTurnService', () => {
     });
     expect(result.assistantMessage).toContain('城市/大致区域');
     expect(result.assistantMessage).toContain('时间');
-    expect(result.assistantMessage).toContain(
-      '安全边界和是否发布到发现，会在真正发送邀请或公开前再让你确认',
-    );
+    expect(result.assistantMessage).toContain('确认前不会公开');
+    expect(result.assistantMessage).toContain('不会替你联系别人');
     expect(result.assistantMessage).not.toContain('是否接受陌生人');
     expect(result.assistantMessage).not.toContain('是否公开发起活动');
     expect(result.assistantMessage).not.toContain('运动强度');
@@ -445,7 +635,9 @@ describe('SocialAgentRouteSearchTurnService', () => {
     });
     expect(result.assistantMessage).toContain('城市/大致区域');
     expect(result.assistantMessage).toContain('时间');
-    expect(result.assistantMessage).toContain('场景：新朋友');
+    expect(result.assistantMessage).toContain('目标：新朋友');
+    expect(result.assistantMessage).toContain('偏好：新朋友');
+    expect(result.assistantMessage).toContain('运动或见面场景');
     expect(result.assistantMessage).not.toContain('是否接受陌生人');
     expect(result.assistantMessage).not.toContain('是否公开发起活动');
     expect(result.assistantMessage).not.toContain('运动强度');
@@ -482,12 +674,13 @@ describe('SocialAgentRouteSearchTurnService', () => {
     });
     expect(result.assistantMessage).toContain('城市/大致区域');
     expect(result.assistantMessage).toContain('时间');
+    expect(result.assistantMessage).toContain('运动或见面场景');
     expect(result.assistantMessage).not.toContain('是否接受陌生人');
     expect(result.assistantMessage).not.toContain('是否公开发起活动');
     expect(queueInitialSearchForTask).not.toHaveBeenCalled();
   });
 
-  it('continues queued candidate search after the user answers opportunity clarification', async () => {
+  it('continues private candidate search after the user answers clarification and skips publishing', async () => {
     const { profileEnrichment, service } = makeHarness();
     const task = makeTask();
     const queueInitialSearchForTask = jest
@@ -532,7 +725,7 @@ describe('SocialAgentRouteSearchTurnService', () => {
         },
       }),
       message:
-        '青岛周末下午，轻松跑步，想认识同城周末有空、愿意先运动再慢慢熟悉的人，只在公共场所，先站内聊，接受陌生人，可以公开发起活动',
+        '青岛周末下午，轻松跑步，想认识同城周末有空、愿意先运动再慢慢熟悉的人，只在公共场所，先站内聊，接受陌生人，先不发布到发现',
       replanAndRefresh: jest.fn(),
       queueInitialSearchForTask,
       buildMemoryContext: jest.fn(),
@@ -548,9 +741,9 @@ describe('SocialAgentRouteSearchTurnService', () => {
       7,
       task,
       expect.stringContaining(
-        '青岛周末下午，轻松跑步，想认识同城周末有空、愿意先运动再慢慢熟悉的人，只在公共场所，先站内聊，接受陌生人，可以公开发起活动',
+        '青岛周末下午，轻松跑步，想认识同城周末有空、愿意先运动再慢慢熟悉的人，只在公共场所，先站内聊，接受陌生人，先不发布到发现',
       ),
-      { signal: null },
+      { signal: null, waitForCompletionMs: 45_000 },
     );
     expect(queueInitialSearchForTask.mock.calls[0]?.[2]).toContain(
       '已确认：青岛、周末下午、跑步、轻松/低压力、同城周末有空、愿意先运动再慢慢熟悉',
@@ -558,7 +751,7 @@ describe('SocialAgentRouteSearchTurnService', () => {
     expect(profileEnrichment.lifeGraphSearchClarification).toHaveBeenCalledWith(
       7,
       expect.stringContaining(
-        '青岛周末下午，轻松跑步，想认识同城周末有空、愿意先运动再慢慢熟悉的人，只在公共场所，先站内聊，接受陌生人，可以公开发起活动',
+        '青岛周末下午，轻松跑步，想认识同城周末有空、愿意先运动再慢慢熟悉的人，只在公共场所，先站内聊，接受陌生人，先不发布到发现',
       ),
     );
     expect(profileEnrichment.lifeGraphSearchClarification).toHaveBeenCalledWith(
@@ -601,12 +794,16 @@ describe('SocialAgentRouteSearchTurnService', () => {
     expect(result.assistantMessage).toBeUndefined();
     expect(queueInitialSearchForTask).toHaveBeenCalledTimes(1);
     expect(queueInitialSearchForTask.mock.calls[0]?.[2]).toContain('公共场所');
-    expect(queueInitialSearchForTask.mock.calls[0]?.[2]).not.toContain('接受陌生人');
-    expect(queueInitialSearchForTask.mock.calls[0]?.[2]).not.toContain('可公开发起活动');
+    expect(queueInitialSearchForTask.mock.calls[0]?.[2]).not.toContain(
+      '接受陌生人',
+    );
+    expect(queueInitialSearchForTask.mock.calls[0]?.[2]).not.toContain(
+      '可公开发起活动',
+    );
   });
 
-  it('treats stranger and public-activity answers as completed opportunity boundaries', async () => {
-    const { service } = makeHarness();
+  it('creates a publish confirmation card after clarification answer allows public activity', async () => {
+    const { service, taskRepo } = makeHarness();
     const task = makeTask();
     const queueInitialSearchForTask = jest
       .fn()
@@ -639,11 +836,11 @@ describe('SocialAgentRouteSearchTurnService', () => {
           activityType: '跑步',
           targetGender: '',
           timePreference: '周末下午',
-          locationPreference: '',
+          locationPreference: '青岛大学操场',
         },
       }),
       message:
-        '青岛周末下午，轻松跑步，想认识同城周末有空、愿意先运动再慢慢熟悉的人，接受陌生人，可以公开发起活动，发送前确认',
+        '青岛周末下午，青岛大学操场，轻松跑步，想认识同城周末有空、愿意先运动再慢慢熟悉的人，只在公共场所，先站内聊，接受陌生人，可以公开发起活动，发送前确认',
       replanAndRefresh: jest.fn(),
       queueInitialSearchForTask,
       buildMemoryContext: jest.fn(),
@@ -651,15 +848,63 @@ describe('SocialAgentRouteSearchTurnService', () => {
 
     expect(result).toMatchObject({
       handled: true,
-      queuedRun: { status: 'queued', taskId: 101 },
-      runMode: 'initial',
+      savedContext: true,
+      queuedRun: null,
+      runMode: null,
+      cards: [
+        expect.objectContaining({
+          schemaType: 'social_match.activity',
+          title: '约练卡待发布',
+          status: 'waiting_confirmation',
+          data: expect.objectContaining({
+            opportunityCard: true,
+            publishStatus: 'draft',
+          }),
+          actions: expect.arrayContaining([
+            expect.objectContaining({
+              label: '发布卡片',
+              schemaAction: 'publish_to_discover',
+            }),
+            expect.objectContaining({
+              label: '修改卡片',
+              schemaAction: 'activity.modify_time',
+            }),
+            expect.objectContaining({
+              label: '暂不发布',
+              schemaAction: 'activity.skip_publish',
+            }),
+          ]),
+        }),
+      ],
     });
-    expect(queueInitialSearchForTask).toHaveBeenCalledTimes(1);
-    const searchGoal = queueInitialSearchForTask.mock.calls[0]?.[2] ?? '';
-    expect(searchGoal).toContain('已确认：青岛、周末下午、跑步、轻松/低压力');
-    expect(searchGoal).toContain('同城周末有空');
-    expect(searchGoal).toContain('接受陌生人');
-    expect(searchGoal).toContain('可公开发起活动');
+    expect(result.assistantMessage).toContain('约练卡片');
+    expect(result.assistantMessage).toContain('确认后再发布');
+    expect(queueInitialSearchForTask).not.toHaveBeenCalled();
+    expect(taskRepo.save).toHaveBeenCalledWith(task);
+    expect(task.result).toMatchObject({
+      chatRun: {
+        socialRequestDraft: expect.objectContaining({
+          activityType: '跑步',
+          timePreference: '周末下午',
+          locationName: '青岛大学',
+        }),
+        publishStatus: 'draft',
+      },
+    });
+    expect(task.memory).toMatchObject({
+      socialAgentChat: {
+        socialRequestDraft: expect.objectContaining({
+          activityType: '跑步',
+        }),
+        publishStatus: 'draft',
+      },
+      shortTerm: {
+        publishStatus: 'draft',
+      },
+    });
+    expect(
+      result.cards?.[0]?.actions?.map((action) => action.label),
+    ).not.toContain('删除卡片');
   });
 
   it('queues the clarified search from text even when route entities are empty', async () => {
@@ -691,7 +936,7 @@ describe('SocialAgentRouteSearchTurnService', () => {
       task,
       route: makeRoute({ entities: emptyEntities }),
       message:
-        '青岛周末下午，轻松跑步，想认识同城周末有空、愿意先运动再慢慢熟悉的人，只在公共场所，先站内聊，接受陌生人，可以公开发起活动',
+        '青岛周末下午，轻松跑步，想认识同城周末有空、愿意先运动再慢慢熟悉的人，只在公共场所，先站内聊，接受陌生人，先不发布到发现',
       replanAndRefresh: jest.fn(),
       queueInitialSearchForTask,
       buildMemoryContext: jest.fn(),
@@ -708,7 +953,7 @@ describe('SocialAgentRouteSearchTurnService', () => {
     expect(searchGoal).toContain('公共场所');
     expect(searchGoal).toContain('先站内沟通');
     expect(searchGoal).toContain('接受陌生人');
-    expect(searchGoal).toContain('可公开发起活动');
+    expect(searchGoal).toContain('先不发布到发现');
   });
 
   it('queues initial social searches with the user message as the search goal', async () => {
@@ -724,7 +969,7 @@ describe('SocialAgentRouteSearchTurnService', () => {
       task,
       route: makeRoute(),
       message:
-        '帮我找青岛周末下午轻松跑步搭子，想认识同城周末有空、先运动再慢慢熟悉的人，公共场所先站内聊，接受陌生人，可以公开发起活动',
+        '先不发布卡片，只推荐候选：帮我找青岛周末下午轻松跑步搭子，想认识同城周末有空、先运动再慢慢熟悉的人，公共场所先站内聊，接受陌生人',
       replanAndRefresh,
       queueInitialSearchForTask,
       buildMemoryContext: jest.fn(),
@@ -738,8 +983,8 @@ describe('SocialAgentRouteSearchTurnService', () => {
     expect(queueInitialSearchForTask).toHaveBeenCalledWith(
       7,
       task,
-      '帮我找青岛周末下午轻松跑步搭子，想认识同城周末有空、先运动再慢慢熟悉的人，公共场所先站内聊，接受陌生人，可以公开发起活动（已确认：青岛、周末、跑步、轻松/低压力、同城周末有空、先运动再慢慢熟悉、公共场所、先站内沟通、接受陌生人、可公开发起活动）',
-      { signal: null },
+      '先不发布卡片，只推荐候选：帮我找青岛周末下午轻松跑步搭子，想认识同城周末有空、先运动再慢慢熟悉的人，公共场所先站内聊，接受陌生人（已确认：青岛、周末、跑步、轻松/低压力、同城周末有空、先运动再慢慢熟悉、公共场所、先站内沟通、接受陌生人）',
+      { signal: null, waitForCompletionMs: 45_000 },
     );
     expect(replanAndRefresh).not.toHaveBeenCalled();
   });
@@ -1181,8 +1426,7 @@ describe('SocialAgentRouteSearchTurnService', () => {
       runMode: 'initial',
     });
     expect(replanAndRefresh).not.toHaveBeenCalled();
-    const userMessage =
-      queueInitialSearchForTask.mock.calls[0]?.[2] ?? '';
+    const userMessage = queueInitialSearchForTask.mock.calls[0]?.[2] ?? '';
     expect(userMessage).toContain('可以，帮我找人');
     expect(userMessage).toContain('今天晚上');
     expect(userMessage).toContain('青岛大学附近');

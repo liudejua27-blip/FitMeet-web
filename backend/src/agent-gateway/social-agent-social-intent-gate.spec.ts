@@ -1,8 +1,14 @@
 import {
   enforceSocialIntentGate,
+  enforceExplicitSocialExecutionRoute,
+  hasExplicitCandidateRefinementIntent,
   hasExplicitCandidateMessageConfirmationIntent,
+  hasExplicitEmptyCandidateRecoveryIntent,
   hasExistingSocialActionContext,
+  hasExplicitPublishSideEffectIntent,
+  hasExplicitSocialSideEffectIntent,
   hasExplicitSocialExecutionIntent,
+  explicitlyRejectsSocialExecution,
   isConversationOnlySocialMention,
   shouldAllowSocialExecution,
 } from './social-agent-social-intent-gate';
@@ -49,6 +55,7 @@ describe('social agent social intent gate', () => {
     '推荐几个公开可发现的篮球搭子',
     '帮我找几个适合我的青岛跑步搭子',
     '我想认识周末能一起咖啡散步的新朋友',
+    '我想在青岛大学附近，今天晚上，散步，找女生，最好喜欢编程',
   ])('allows explicit opportunity discovery: %s', (message) => {
     expect(hasExplicitSocialExecutionIntent(message)).toBe(true);
     expect(
@@ -59,7 +66,75 @@ describe('social agent social intent gate', () => {
     ).toBe(true);
   });
 
+  it('keeps rich profile facts as profile enrichment unless the user asks to search now', () => {
+    const profileFacts =
+      '我是白羊男，18，身高181，体重70kg，在青岛上学，性格开放、infp。常住在崂山区青岛大学，想找个同校的女生';
+
+    expect(hasExplicitSocialExecutionIntent(profileFacts)).toBe(false);
+    expect(
+      shouldAllowSocialExecution({
+        message: profileFacts,
+        intent: 'social_search',
+      }),
+    ).toBe(false);
+    expect(
+      enforceSocialIntentGate({ message: profileFacts }, {
+        intent: 'social_search',
+        confidence: 0.9,
+        entities: {
+          city: '青岛',
+          activityType: '',
+          targetGender: '女生',
+          timePreference: '',
+          locationPreference: '青岛大学',
+        },
+        shouldSearch: true,
+        shouldReplan: false,
+        shouldUpdateProfile: false,
+        shouldExecuteAction: false,
+        replyStrategy: 'search_candidates',
+        source: 'deepseek',
+      } satisfies SocialAgentIntentRouterResult),
+    ).toMatchObject({
+      intent: 'profile_enrichment',
+      shouldSearch: false,
+      shouldUpdateProfile: true,
+      replyStrategy: 'conversational_answer',
+    });
+  });
+
+  it('keeps explicit profile completion requests out of social search', () => {
+    const message = '请帮我完善人物画像：我周末下午一般有空，喜欢跑步。';
+
+    expect(hasExplicitSocialExecutionIntent(message)).toBe(false);
+    expect(
+      enforceSocialIntentGate({ message }, {
+        intent: 'social_search',
+        confidence: 0.88,
+        entities: {
+          city: '',
+          activityType: '跑步',
+          targetGender: '',
+          timePreference: '周末下午',
+          locationPreference: '',
+        },
+        shouldSearch: true,
+        shouldReplan: false,
+        shouldUpdateProfile: false,
+        shouldExecuteAction: false,
+        replyStrategy: 'search_candidates',
+        source: 'deepseek',
+      } satisfies SocialAgentIntentRouterResult),
+    ).toMatchObject({
+      intent: 'profile_enrichment_request',
+      shouldSearch: false,
+      shouldUpdateProfile: true,
+      replyStrategy: 'conversational_answer',
+    });
+  });
+
   it('allows candidate follow-up only when there is existing social context', () => {
+    expect(hasExplicitCandidateRefinementIntent('有没有女生')).toBe(true);
     expect(
       shouldAllowSocialExecution({
         message: '第二个更合适吗？',
@@ -73,6 +148,39 @@ describe('social agent social intent gate', () => {
         taskContext: { hasCandidates: true },
       }),
     ).toBe(true);
+  });
+
+  it('forces explicit candidate refinement back into candidate follow-up even if model routes generic chat', () => {
+    const route = enforceExplicitSocialExecutionRoute(
+      {
+        message: '有没有女生',
+        taskContext: { hasCandidates: true, candidateCount: 4 },
+        conversationIntent: 'conversation',
+      },
+      {
+        intent: 'casual_chat',
+        confidence: 0.78,
+        entities: {
+          city: '',
+          activityType: '',
+          targetGender: '',
+          timePreference: '',
+          locationPreference: '',
+        },
+        shouldSearch: false,
+        shouldReplan: false,
+        shouldUpdateProfile: false,
+        shouldExecuteAction: false,
+        replyStrategy: 'conversational_answer',
+        source: 'deepseek',
+      } satisfies SocialAgentIntentRouterResult,
+    );
+
+    expect(route).toMatchObject({
+      intent: 'candidate_followup',
+      shouldSearch: true,
+      replyStrategy: 'search_candidates',
+    });
   });
 
   it('uses conversation intent to block implicit social continuation from stale context', () => {
@@ -128,6 +236,60 @@ describe('social agent social intent gate', () => {
     ).toBe(true);
   });
 
+  it('allows cold-start matching when the user opts out of publishing a card', () => {
+    const message = '我不想发布卡片，只想根据我的画像找几个合适的人';
+
+    expect(explicitlyRejectsSocialExecution(message)).toBe(false);
+    expect(hasExplicitSocialExecutionIntent(message)).toBe(true);
+    expect(hasExplicitPublishSideEffectIntent(message)).toBe(false);
+    expect(hasExplicitSocialSideEffectIntent(message)).toBe(false);
+    expect(
+      shouldAllowSocialExecution({
+        message,
+        intent: 'social_search',
+        conversationIntent: 'social',
+      }),
+    ).toBe(true);
+  });
+
+  it('recognizes explicit publish requests without reducing them to candidate search only', () => {
+    const message =
+      '我想今天晚上在青岛大学附近散步，帮我生成并发布一张约练卡到发现，只公开模糊地点。';
+
+    expect(hasExplicitSocialExecutionIntent(message)).toBe(true);
+    expect(hasExplicitPublishSideEffectIntent(message)).toBe(true);
+    expect(hasExplicitSocialSideEffectIntent(message)).toBe(true);
+  });
+
+  it.each(['发布吧', '就发布', '发到发现吧', '把这张卡发布到发现'])(
+    'recognizes short publish follow-up "%s" as a publish side effect',
+    (message) => {
+      expect(hasExplicitSocialExecutionIntent(message)).toBe(true);
+      expect(hasExplicitPublishSideEffectIntent(message)).toBe(true);
+      expect(hasExplicitSocialSideEffectIntent(message)).toBe(true);
+    },
+  );
+
+  it('keeps publish opt-out from becoming a publish side effect while preserving explicit matching', () => {
+    expect(hasExplicitPublishSideEffectIntent('先不发布到发现')).toBe(false);
+    expect(hasExplicitPublishSideEffectIntent('先不要发布吧')).toBe(false);
+    expect(
+      shouldAllowSocialExecution({
+        message: '先不发布到发现，也不要推荐人，我只是想普通聊聊',
+        intent: 'social_search',
+        taskContext: { hasSearchContext: true },
+        conversationIntent: 'social',
+      }),
+    ).toBe(false);
+    expect(
+      shouldAllowSocialExecution({
+        message: '先不发布到发现，帮我按兴趣匹配几个公开可发现用户',
+        intent: 'social_search',
+        conversationIntent: 'social',
+      }),
+    ).toBe(true);
+  });
+
   it('allows short follow-up social search only when an existing task context is active', () => {
     expect(
       shouldAllowSocialExecution({
@@ -179,6 +341,34 @@ describe('social agent social intent gate', () => {
         },
       }),
     ).toBe(true);
+    expect(
+      shouldAllowSocialExecution({
+        message: '发布吧',
+        intent: 'action_request',
+        taskContext: {
+          taskSlots: {
+            activity: { value: '健身', state: 'completed' },
+            time_window: { value: '今晚', state: 'completed' },
+            location_text: { value: '青岛大学附近', state: 'completed' },
+          },
+        },
+      }),
+    ).toBe(true);
+    expect(
+      shouldAllowSocialExecution({
+        message: '发送吧',
+        intent: 'action_request',
+      }),
+    ).toBe(false);
+    expect(
+      shouldAllowSocialExecution({
+        message: '发送吧',
+        intent: 'action_request',
+        taskContext: {
+          pendingActions: [{ actionType: 'send_invite' }],
+        },
+      }),
+    ).toBe(true);
   });
 
   it('keeps explicit opt-out and conversation-only messages from continuing task search', () => {
@@ -212,6 +402,22 @@ describe('social agent social intent gate', () => {
       hasExplicitCandidateMessageConfirmationIntent('可以，帮我找人'),
     ).toBe(false);
     expect(hasExplicitCandidateMessageConfirmationIntent('还不发')).toBe(false);
+  });
+
+  it('detects empty-candidate recovery instructions without treating help questions as execution', () => {
+    expect(hasExplicitEmptyCandidateRecoveryIntent('扩大到 10 公里')).toBe(
+      true,
+    );
+    expect(hasExplicitEmptyCandidateRecoveryIntent('放宽舞蹈相关偏好')).toBe(
+      true,
+    );
+    expect(hasExplicitEmptyCandidateRecoveryIntent('改到周末下午')).toBe(true);
+    expect(hasExplicitEmptyCandidateRecoveryIntent('怎么扩大匹配范围？')).toBe(
+      false,
+    );
+    expect(
+      hasExplicitEmptyCandidateRecoveryIntent('我只是想找一下设置入口'),
+    ).toBe(false);
   });
 
   it('normalizes allowed social search routes so complete requests can queue search', () => {

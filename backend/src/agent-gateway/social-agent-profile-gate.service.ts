@@ -27,11 +27,12 @@ export type SocialAgentProfileGateResult = {
   profileCompleteness: number | null;
 };
 
-export type SocialAgentMinimumProfileGateStatus = SocialAgentProfileGateResult & {
-  readinessLevel: string | null;
-  canEnterMatchPool: boolean;
-  nextActions: string[];
-};
+export type SocialAgentMinimumProfileGateStatus =
+  SocialAgentProfileGateResult & {
+    readinessLevel: string | null;
+    canEnterMatchPool: boolean;
+    nextActions: string[];
+  };
 
 type LifeGraphFieldRecord = {
   category?: string;
@@ -83,7 +84,11 @@ export class SocialAgentProfileGateService {
         socialProfile?.weekdayAvailability,
         socialProfile?.weekendAvailability,
         this.lifeGraphValue(lifeGraph.fields, 'lifestyle', 'availableTimes'),
-        this.lifeGraphValue(lifeGraph.fields, 'lifestyle', 'weekendAvailability'),
+        this.lifeGraphValue(
+          lifeGraph.fields,
+          'lifestyle',
+          'weekendAvailability',
+        ),
       ])
     ) {
       missing.push('availability');
@@ -125,10 +130,8 @@ export class SocialAgentProfileGateService {
       missing,
       assistantMessage: passed ? '' : this.buildQuestion(missing),
       profileCompleteness,
-      readinessLevel: cleanDisplayText(
-        socialProfile?.completion?.readinessLevel,
-        '',
-      ) || null,
+      readinessLevel:
+        cleanDisplayText(socialProfile?.completion?.readinessLevel, '') || null,
       canEnterMatchPool:
         passed &&
         (socialProfile?.completion?.canEnterMatchPool === true ||
@@ -149,7 +152,9 @@ export class SocialAgentProfileGateService {
   ): Promise<SocialAgentMinimumProfileGateStatus> {
     const status = await this.getMinimumProfileStatus(ownerUserId);
     const slots = this.readTaskSlotValues(taskSlots);
-    const missing = status.missing.filter((field) => !this.taskSlotsSatisfy(field, slots));
+    const missing = status.missing.filter(
+      (field) => !this.taskSlotsSatisfy(field, slots),
+    );
     const passed = missing.length === 0;
     return {
       ...status,
@@ -187,6 +192,7 @@ export class SocialAgentProfileGateService {
       !this.hasAny([
         routeEntities.city,
         memory.activeEntities.city,
+        taskSlots.city,
         taskSlots.geo_area,
         taskSlots.location_text,
         this.lifeGraphValue(lifeGraph.fields, 'identity', 'city'),
@@ -218,7 +224,11 @@ export class SocialAgentProfileGateService {
         memory.activeEntities.timePreference,
         taskSlots.time_window,
         this.lifeGraphValue(lifeGraph.fields, 'lifestyle', 'availableTimes'),
-        this.lifeGraphValue(lifeGraph.fields, 'lifestyle', 'weekendAvailability'),
+        this.lifeGraphValue(
+          lifeGraph.fields,
+          'lifestyle',
+          'weekendAvailability',
+        ),
         this.extractTime(text),
       ])
     ) {
@@ -293,8 +303,9 @@ export class SocialAgentProfileGateService {
       const graph = await this.lifeGraph.getLifeGraph(userId);
       const fields = Object.values(graph.fields ?? {})
         .flat()
-        .filter((field) => Boolean(field && typeof field === 'object')) as
-        LifeGraphFieldRecord[];
+        .filter((field) =>
+          Boolean(field && typeof field === 'object'),
+        ) as LifeGraphFieldRecord[];
       return {
         completenessScore: graph.completeness?.completenessScore ?? null,
         fields,
@@ -335,10 +346,13 @@ export class SocialAgentProfileGateService {
   }
 
   private buildQuestion(missing: SocialAgentProfileGateMissingField[]) {
-    const missingText = missing.map((field) => this.missingFieldLabel(field)).join('、');
+    const missingText = missing
+      .map((field) => this.missingFieldLabel(field))
+      .join('、');
     const examples = [
-      '可以，我先把最低画像补齐，这样不会乱推荐，也不会误公开你的需求。',
-      `还差：${missingText}。`,
+      '可以，我先把基础资料补齐，这样不会乱推荐，也不会误公开你的需求。',
+      `我会一次性确认这些信息，还差：${missingText}。`,
+      '你可以直接一句话补齐；每一项都可以说“暂不确定”，也可以选择“本次使用，不保存”。',
       this.profileGateExample(missing),
     ];
     if (missing.includes('publicAuthorization')) {
@@ -390,7 +404,16 @@ export class SocialAgentProfileGateService {
   private readTaskSlots(task: AgentTask): Record<string, string> {
     const memory = this.isRecord(task.memory) ? task.memory : {};
     const rawSlots = this.isRecord(memory.taskSlots) ? memory.taskSlots : {};
-    return this.readTaskSlotValues(rawSlots);
+    const taskMemory = this.isRecord(memory.taskMemory)
+      ? memory.taskMemory
+      : {};
+    const nestedSlots = this.isRecord(taskMemory.taskSlots)
+      ? taskMemory.taskSlots
+      : {};
+    return {
+      ...this.readTaskSlotValues(nestedSlots),
+      ...this.readTaskSlotValues(rawSlots),
+    };
   }
 
   private readTaskSlotValues(taskSlots: unknown): Record<string, string> {
@@ -425,7 +448,11 @@ export class SocialAgentProfileGateService {
     taskSlots: Record<string, string>,
   ) {
     if (field === 'city') {
-      return this.hasAny([taskSlots.geo_area, taskSlots.location_text]);
+      return this.hasAny([
+        taskSlots.city,
+        taskSlots.geo_area,
+        taskSlots.location_text,
+      ]);
     }
     if (field === 'activity') return this.hasAny([taskSlots.activity]);
     if (field === 'availability') return this.hasAny([taskSlots.time_window]);
@@ -466,7 +493,7 @@ export class SocialAgentProfileGateService {
   private extractActivity(text: string) {
     return cleanDisplayText(
       text.match(
-        /(跑步|慢跑|夜跑|羽毛球|瑜伽|健身|撸铁|普拉提|徒步|户外|骑行|篮球|足球|网球|游泳|飞盘|咖啡|散步|拍照|city\s*walk|citywalk|约练|训练|低压力社交|认识新朋友|新朋友)/i,
+        /(跑步|慢跑|夜跑|羽毛球|瑜伽|健身|撸铁|普拉提|徒步|户外|骑行|篮球|足球|网球|游泳|飞盘|咖啡|散步|拍照|city\s*walk|citywalk)/i,
       )?.[1],
       '',
     );

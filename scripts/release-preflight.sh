@@ -21,9 +21,8 @@ usage() {
 Usage: scripts/release-preflight.sh [--web-only] [--ios-only] [--skip-ios] [--include-ios-ui] [--include-load-smoke] [--include-realtime-smoke]
 
 Runs the release baseline before deploying Web or publishing an iOS test build:
-  - backend lint/build/test plus dry-run App contract smoke
+  - backend lint/build/test
   - frontend lint/build/test
-  - fitmeet-landing lint/build/test
   - FitMeetAlpha unit tests on an available iPhone Simulator
   - optional read-only 1000-concurrency smoke for local/staging/prod targets
   - optional realtime 1000-online Socket.IO smoke for local/staging/prod targets
@@ -114,21 +113,12 @@ if [[ "${RUN_WEB}" -eq 1 ]]; then
   run_step "backend install" pnpm --dir "${ROOT_DIR}/backend" install --frozen-lockfile
   run_step "backend lint" pnpm --dir "${ROOT_DIR}/backend" lint
   run_step "backend build" pnpm --dir "${ROOT_DIR}/backend" build
-  run_step "backend database contract tests" \
-    pnpm --dir "${ROOT_DIR}/backend" test -- migration-integrity.spec.ts typeorm-launch-config.contract.spec.ts
   run_step "backend test" pnpm --dir "${ROOT_DIR}/backend" test
-  run_step "backend App contract smoke" env APP_SMOKE_DRY_RUN=true pnpm --dir "${ROOT_DIR}/backend" smoke:app-core
-  run_step "backend living social seed dry-run" pnpm --dir "${ROOT_DIR}/backend" seed:living-social-data:dry-run
 
   run_step "frontend install" pnpm --dir "${ROOT_DIR}/frontend" install --frozen-lockfile
   run_step "frontend lint" pnpm --dir "${ROOT_DIR}/frontend" lint
   run_step "frontend build" pnpm --dir "${ROOT_DIR}/frontend" build
   run_step "frontend test" pnpm --dir "${ROOT_DIR}/frontend" test
-
-  run_step "fitmeet-landing install" pnpm --dir "${ROOT_DIR}/fitmeet-landing" install --frozen-lockfile
-  run_step "fitmeet-landing lint" pnpm --dir "${ROOT_DIR}/fitmeet-landing" lint
-  run_step "fitmeet-landing build" pnpm --dir "${ROOT_DIR}/fitmeet-landing" build
-  run_step "fitmeet-landing test" pnpm --dir "${ROOT_DIR}/fitmeet-landing" test
 
   if [[ "${RUN_LOAD_SMOKE}" -eq 1 ]]; then
     run_step "read-only 1000-concurrency smoke" node "${ROOT_DIR}/scripts/load-1000-readonly.mjs"

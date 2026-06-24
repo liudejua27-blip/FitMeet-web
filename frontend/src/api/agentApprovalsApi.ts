@@ -56,7 +56,6 @@ export type AgentApprovalResumePlan = {
   };
   idempotencyKey: string;
   interrupt: Record<string, unknown> | null;
-  traceId: string | null;
   runId: string | null;
 } | null;
 

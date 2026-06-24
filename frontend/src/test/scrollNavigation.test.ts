@@ -8,23 +8,23 @@ import {
 } from '../lib/scrollNavigation';
 
 describe('scrollNavigation', () => {
-  it('keeps discover alias routes in a single canonical target', () => {
-    expect(resolveNavigationAlias('/human')).toBe('/discover');
-    expect(resolveNavigationAlias('/nearby')).toBe('/discover');
-    expect(resolveNavigationAlias('/meet')).toBe('/discover');
-    expect(resolveNavigationAlias('/hall')).toBe('/discover');
-    expect(resolveNavigationAlias('/social-hall')).toBe('/discover');
-    expect(resolveNavigationAlias('/agent-connect/social-hall')).toBe('/discover');
+  it('leaves retired route aliases untouched so AppRoutes can 404 them', () => {
+    expect(resolveNavigationAlias('/human')).toBe('/human');
+    expect(resolveNavigationAlias('/nearby')).toBe('/nearby');
+    expect(resolveNavigationAlias('/meet')).toBe('/meet');
+    expect(resolveNavigationAlias('/hall')).toBe('/hall');
+    expect(resolveNavigationAlias('/social-hall')).toBe('/social-hall');
+    expect(resolveNavigationAlias('/agent-connect/social-hall')).toBe('/agent-connect/social-hall');
   });
 
-  it('preserves discover query and hash while normalizing alias routes', () => {
-    expect(resolveNavigationAlias('/human?focusScene=run#top')).toBe('/discover?focusScene=run#top');
-    expect(resolveNavigationAlias('/hall?tab=match#section')).toBe('/discover?tab=match#section');
+  it('preserves retired route query and hash without normalizing them', () => {
+    expect(resolveNavigationAlias('/human?focusScene=run#top')).toBe('/human?focusScene=run#top');
+    expect(resolveNavigationAlias('/hall?tab=match#section')).toBe('/hall?tab=match#section');
   });
 
   it('builds discover share URLs through canonical route helpers', () => {
     expect(buildDiscoverPath({ filters: { id: 42 } })).toBe('/discover?id=42');
-    expect(buildAbsoluteRouteUrl('https://www.ourfitmeet.cn/', '/meet?id=42')).toBe(
+    expect(buildAbsoluteRouteUrl('https://www.ourfitmeet.cn/', '/discover?id=42')).toBe(
       'https://www.ourfitmeet.cn/discover?id=42',
     );
   });
@@ -32,8 +32,8 @@ describe('scrollNavigation', () => {
   it('identifies discover routes for scroll-reset path decisioning', () => {
     expect(isInternalDiscoverRoute('/discover')).toBe(true);
     expect(isInternalDiscoverRoute('/discover?city=beijing')).toBe(true);
-    expect(isInternalDiscoverRoute('/human')).toBe(true);
-    expect(isInternalDiscoverRoute('/social-hall')).toBe(true);
+    expect(isInternalDiscoverRoute('/human')).toBe(false);
+    expect(isInternalDiscoverRoute('/social-hall')).toBe(false);
     expect(isInternalDiscoverRoute('/download')).toBe(false);
   });
 
@@ -48,7 +48,7 @@ describe('scrollNavigation', () => {
 
     const state = { custom: 'value' };
 
-    navigateToRouteWithScrollReset(navigate, '/human', {
+    navigateToRouteWithScrollReset(navigate, '/discover', {
       state,
       search: '?city=beijing',
       replace: true,

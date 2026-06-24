@@ -131,7 +131,7 @@ function completedSlotSummary(key: string, raw: unknown) {
 }
 
 function record(value: unknown): Record<string, unknown> | null {
-  return Boolean(value && typeof value === 'object' && !Array.isArray(value))
+  return value && typeof value === 'object' && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : null;
 }

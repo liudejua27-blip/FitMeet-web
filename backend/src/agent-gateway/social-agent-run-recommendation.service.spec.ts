@@ -143,7 +143,7 @@ describe('SocialAgentRunRecommendationService', () => {
       }),
     };
     const draftSearch = {
-      generateDraftWithTool: jest.fn().mockResolvedValue({
+      generateDeterministicDraftFromTask: jest.fn().mockReturnValue({
         draft: {
           type: SocialRequestType.RunningPartner,
           rawText: '今晚青岛轻松跑步',
@@ -504,21 +504,21 @@ describe('SocialAgentRunRecommendationService', () => {
         }),
       }),
     );
-    expect(draftSearch.generateDraftWithTool).toHaveBeenCalledWith(
+    expect(draftSearch.generateDeterministicDraftFromTask).toHaveBeenCalledWith(
       task,
       expect.stringContaining('用户最新输入：可以，帮我找人'),
     );
-    expect(draftSearch.generateDraftWithTool).toHaveBeenCalledWith(
+    expect(draftSearch.generateDeterministicDraftFromTask).toHaveBeenCalledWith(
       task,
       expect.stringContaining('当前任务目标：今晚青岛大学附近散步'),
     );
-    expect(draftSearch.generateDraftWithTool).toHaveBeenCalledWith(
+    expect(draftSearch.generateDeterministicDraftFromTask).toHaveBeenCalledWith(
       task,
       expect.stringContaining(
         '已确认信息：活动=散步；时间=今晚；地点=青岛大学附近；候选偏好=公开资料里有舞蹈相关标签的人优先',
       ),
     );
-    expect(draftSearch.generateDraftWithTool).toHaveBeenCalledWith(
+    expect(draftSearch.generateDeterministicDraftFromTask).toHaveBeenCalledWith(
       task,
       expect.stringContaining('不要重复追问已确认字段'),
     );
@@ -529,10 +529,7 @@ describe('SocialAgentRunRecommendationService', () => {
         status: UserSocialRequestStatus.Draft,
       }),
     );
-    expect(draftSearch.searchCandidates).toHaveBeenCalledWith(
-      task,
-      expect.objectContaining({ socialRequestId: 301 }),
-    );
+    expect(draftSearch.searchCandidates).not.toHaveBeenCalled();
     expect(draftSearch.autoPublishDraftIfAllowed).toHaveBeenCalledWith(
       task,
       expect.objectContaining({ socialRequestId: 301 }),
@@ -540,7 +537,7 @@ describe('SocialAgentRunRecommendationService', () => {
     expect(result.result).toMatchObject({
       taskId: 101,
       status: AgentTaskStatus.AwaitingConfirmation,
-      candidates: [expect.objectContaining({ userId: 22 })],
+      candidates: [],
       agentLoop: expect.objectContaining({
         status: 'completed',
         toolBudget: expect.objectContaining({
@@ -567,10 +564,10 @@ describe('SocialAgentRunRecommendationService', () => {
         status: FitMeetAgentToolStatus.WaitingConfirmation,
       }),
     );
-    expect(realtime.emitAgentEvent).toHaveBeenCalledWith(
+    expect(realtime.emitAgentEvent).not.toHaveBeenCalledWith(
       7,
       'agent:candidates',
-      expect.objectContaining({ candidateCount: 1 }),
+      expect.anything(),
     );
     expect(
       recommendationResults.completeRecommendationResult,
@@ -653,7 +650,7 @@ describe('SocialAgentRunRecommendationService', () => {
       }),
     };
     const draftSearch = {
-      generateDraftWithTool: jest.fn(),
+      generateDeterministicDraftFromTask: jest.fn(),
       createPrivateDraftRequest: jest.fn(),
       autoPublishDraftIfAllowed: jest.fn(),
       searchCandidates: jest.fn(),
@@ -744,7 +741,9 @@ describe('SocialAgentRunRecommendationService', () => {
     expect(longTermMemory.readSnapshot).toHaveBeenCalledWith(7);
     expect(planner.planExistingTask).not.toHaveBeenCalled();
     expect(socialProfiles.get).not.toHaveBeenCalled();
-    expect(draftSearch.generateDraftWithTool).not.toHaveBeenCalled();
+    expect(
+      draftSearch.generateDeterministicDraftFromTask,
+    ).not.toHaveBeenCalled();
     expect(draftSearch.createPrivateDraftRequest).not.toHaveBeenCalled();
     expect(draftSearch.autoPublishDraftIfAllowed).not.toHaveBeenCalled();
     expect(draftSearch.searchCandidates).not.toHaveBeenCalled();
@@ -781,7 +780,7 @@ describe('SocialAgentRunRecommendationService', () => {
       safetyRequirement: SocialRequestSafety.LowRiskOnly,
     };
     const draftSearch = {
-      generateDraftWithTool: jest.fn().mockResolvedValue({
+      generateDeterministicDraftFromTask: jest.fn().mockReturnValue({
         draft,
         card: { title: '今晚青岛大学附近散步' },
         profileUsed: { city: '青岛' },
@@ -908,7 +907,9 @@ describe('SocialAgentRunRecommendationService', () => {
     };
     const service = new SocialAgentRunRecommendationService(
       eventRepo as never,
-      { planExistingTask: jest.fn().mockResolvedValue({ source: 'fallback' }) } as never,
+      {
+        planExistingTask: jest.fn().mockResolvedValue({ source: 'fallback' }),
+      } as never,
       { get: jest.fn().mockResolvedValue({}) } as never,
       draftSearch as never,
       recommendationResults as never,
@@ -1010,34 +1011,7 @@ describe('SocialAgentRunRecommendationService', () => {
       }),
       expect.any(Object),
     );
-    expect(draftSearch.searchCandidates).toHaveBeenCalledWith(
-      expect.objectContaining({
-        memory: expect.objectContaining({
-          taskSlots: expect.objectContaining({
-            activity: expect.objectContaining({ value: '散步' }),
-            time_window: expect.objectContaining({ value: '今晚' }),
-            location_text: expect.objectContaining({ value: '青岛大学附近' }),
-            geo_area: expect.objectContaining({
-              value: '崂山区',
-              state: 'inferred',
-            }),
-            intensity: expect.objectContaining({
-              value: '低强度',
-              state: 'inferred',
-            }),
-            candidate_preference: expect.objectContaining({
-              value: '公开资料里有舞蹈相关标签的人优先',
-            }),
-          }),
-          knownTaskSlotConstraints: expect.objectContaining({
-            candidatePreferencePolicy: expect.stringContaining(
-              '公开可发现资料',
-            ),
-          }),
-        }),
-      }),
-      expect.objectContaining({ socialRequestId: 301 }),
-    );
+    expect(draftSearch.searchCandidates).not.toHaveBeenCalled();
     expect(task.memory).toMatchObject({
       knownTaskSlotConstraints: expect.objectContaining({
         treatAsHardConstraints: true,
@@ -1080,7 +1054,7 @@ describe('SocialAgentRunRecommendationService', () => {
       get: jest.fn(),
     };
     const draftSearch = {
-      generateDraftWithTool: jest.fn(),
+      generateDeterministicDraftFromTask: jest.fn(),
       createPrivateDraftRequest: jest.fn(),
       autoPublishDraftIfAllowed: jest.fn(),
       searchCandidates: jest.fn(),
@@ -1221,7 +1195,7 @@ describe('SocialAgentRunRecommendationService', () => {
       }),
     };
     const draftSearch = {
-      generateDraftWithTool: jest.fn().mockResolvedValue({
+      generateDeterministicDraftFromTask: jest.fn().mockReturnValue({
         draft: {
           type: SocialRequestType.RunningPartner,
           rawText: '周末青岛羽毛球',
@@ -1241,7 +1215,7 @@ describe('SocialAgentRunRecommendationService', () => {
         autoPublished: true,
         synced: true,
         publicIntentId: 'intent_302',
-        discoverHref: '/public-intent/intent_302',
+        discoverHref: '/discover?publicIntentId=intent_302',
         publishPolicy: 'auto_after_first_public_authorization',
         blockedReason: null,
       }),
@@ -1325,7 +1299,7 @@ describe('SocialAgentRunRecommendationService', () => {
       socialRequestId: 302,
       autoPublished: true,
       publicIntentId: 'intent_302',
-      discoverHref: '/public-intent/intent_302',
+      discoverHref: '/discover?publicIntentId=intent_302',
       publishPolicy: 'auto_after_first_public_authorization',
     });
     expect(

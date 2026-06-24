@@ -20,7 +20,7 @@ function route(
 }
 
 describe('FitMeetSubagentRuntimeService', () => {
-  it('creates an independent Social Match handoff with observation and critique', () => {
+  it('creates an independent Match Agent handoff with observation and critique', () => {
     const loopService = new AgentLoopService();
     const service = new FitMeetSubagentRuntimeService(loopService);
     const loop = loopService.start({
@@ -37,9 +37,9 @@ describe('FitMeetSubagentRuntimeService', () => {
 
     expect(result.handoff).toEqual(
       expect.objectContaining({
-        agent: 'Social Match Agent',
+        agent: 'Match Agent',
         memoryScope: 'matching.candidate_memory',
-        critique: expect.stringContaining('Social Match Agent'),
+        critique: expect.stringContaining('Match Agent'),
         handoffOutput: expect.objectContaining({
           nextAgent: 'FitMeet Main Agent',
         }),
@@ -64,7 +64,7 @@ describe('FitMeetSubagentRuntimeService', () => {
     );
     expect(result.handoff.evalHints).toEqual(
       expect.objectContaining({
-        critiqueEvaluator: 'social_match_ranking_explanation_v1',
+        critiqueEvaluator: 'match_agent_ranking_and_meet_loop_v1',
         needsRankingExperiment: true,
         needsRecallFailureReview: true,
       }),
@@ -77,7 +77,7 @@ describe('FitMeetSubagentRuntimeService', () => {
     ]);
   });
 
-  it('keeps Math Agent deterministic with one-tool budget and privacy boundary', () => {
+  it('keeps Agent Brain deterministic with one-tool budget and privacy boundary', () => {
     const loopService = new AgentLoopService();
     const service = new FitMeetSubagentRuntimeService(loopService);
     const loop = loopService.start({
@@ -106,7 +106,7 @@ describe('FitMeetSubagentRuntimeService', () => {
       observation: { branch: 'math', handled: true },
     });
 
-    expect(result.handoff.agent).toBe('Math Agent');
+    expect(result.handoff.agent).toBe('Agent Brain');
     expect(result.handoff.toolCalls).toEqual([
       expect.objectContaining({
         toolName: 'fitness_math_calculator',
@@ -122,6 +122,73 @@ describe('FitMeetSubagentRuntimeService', () => {
         deterministicOnly: true,
         forbidsPrivacyReadWrite: true,
         needsUnitConversionTests: true,
+      }),
+    );
+  });
+
+  it('keeps Life Graph Agent on a small confirmed-profile budget', () => {
+    const loopService = new AgentLoopService();
+    const service = new FitMeetSubagentRuntimeService(loopService);
+    const loop = loopService.start({
+      taskId: 9,
+      goal: '完善我的个人信息',
+    });
+
+    const result = service.run({
+      loop,
+      message: '帮我完善画像',
+      route: route({
+        intent: 'profile_update',
+        shouldSearch: false,
+        shouldUpdateProfile: true,
+        replyStrategy: 'append_context',
+      }),
+      brainDecision: {
+        conversationMode: 'profile_enrichment',
+        plannerSource: 'rules',
+        reason: 'profile completion',
+        tools: [
+          { name: 'get_user_profile', arguments: {} },
+          {
+            name: 'update_profile_from_agent_context',
+            arguments: { fields: ['city', 'interestTags'] },
+          },
+          { name: 'search_real_candidates', arguments: {} },
+        ],
+        needUserConfirmation: true,
+      } as never,
+      observation: { branch: 'profile', previewReady: true },
+    });
+
+    expect(result.handoff.agent).toBe('Life Graph Agent');
+    expect(result.handoff.memoryScope).toBe('life_graph.profile_memory');
+    expect(result.handoff.toolCalls).toEqual([
+      expect.objectContaining({
+        toolName: 'get_user_profile',
+        status: 'observed',
+      }),
+      expect.objectContaining({
+        toolName: 'update_profile_from_agent_context',
+        status: 'observed',
+      }),
+      expect.objectContaining({
+        toolName: 'search_real_candidates',
+        status: 'skipped',
+      }),
+    ]);
+    expect(result.handoff.plannerInput).toEqual(
+      expect.objectContaining({
+        toolBudget: expect.objectContaining({
+          maxToolCalls: 2,
+          maxRetries: 1,
+        }),
+      }),
+    );
+    expect(result.handoff.evalHints).toEqual(
+      expect.objectContaining({
+        needsUserConfirmedMerge: true,
+        sensitiveInfoClassification: true,
+        skippedToolCount: 1,
       }),
     );
   });

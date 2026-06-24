@@ -1,8 +1,6 @@
 import { Module, forwardRef } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ActivitiesService } from './activities.service';
-import { ActivitiesController } from './activities.controller';
-import { AgentActivitiesController } from './agent-activities.controller';
 import { ActivityTemplate } from './entities/activity-template.entity';
 import { SocialActivity } from './entities/activity.entity';
 import { ActivityProof } from './entities/activity-proof.entity';
@@ -30,7 +28,7 @@ import { RealtimeModule } from '../realtime/realtime.module';
     RealtimeModule,
   ],
   providers: [ActivitiesService],
-  controllers: [ActivitiesController, AgentActivitiesController],
+  controllers: [],
   exports: [ActivitiesService],
 })
 export class ActivitiesModule {}

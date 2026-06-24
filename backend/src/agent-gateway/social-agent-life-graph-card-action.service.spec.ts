@@ -125,7 +125,7 @@ describe('SocialAgentLifeGraphCardActionService', () => {
       action: 'reply',
       profileUpdated: true,
       cards: [],
-      assistantMessage: expect.stringContaining('已保存 1 条 Life Graph 信息'),
+      assistantMessage: expect.stringContaining('已保存 1 条 个人信息'),
     });
     expect(harness.task.memory).toMatchObject({
       taskMemory: {
@@ -414,7 +414,7 @@ describe('SocialAgentLifeGraphCardActionService', () => {
     expect(result).toMatchObject({
       action: 'reply',
       profileUpdated: false,
-      assistantMessage: expect.stringContaining('不会作为长期画像偏好信号'),
+      assistantMessage: expect.stringContaining('不会作为长期偏好信号'),
     });
     expect(harness.task.result).toMatchObject({
       lifeGraphDecision: {

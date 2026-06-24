@@ -70,7 +70,7 @@ describe('SocialAgentRouteTurnService', () => {
           runId: 'loop_candidate',
           traceId: 'trace_candidate',
           taskId: task.id,
-          agent: 'Social Match Agent',
+          agent: 'Match Agent',
           toolName: 'candidate_confirmation_check',
           input: { taskId: task.id },
           attempt: 1,
@@ -216,7 +216,7 @@ describe('SocialAgentRouteTurnService', () => {
         plan: expect.objectContaining({
           tools: [
             expect.objectContaining({
-              agent: 'Social Match Agent',
+              agent: 'Match Agent',
               toolName: 'candidate_confirmation_check',
               input: expect.objectContaining({ taskId: 101 }),
             }),
@@ -298,7 +298,7 @@ describe('SocialAgentRouteTurnService', () => {
             assistantMessage: 'Search queued.',
             pendingApproval: null,
           },
-          subagentHandoffs: [{ agent: 'Social Match Agent' }],
+          subagentHandoffs: [{ agent: 'Match Agent' }],
         }),
       },
     });
@@ -328,7 +328,7 @@ describe('SocialAgentRouteTurnService', () => {
         runMode: 'initial',
         savedContext: true,
         activityResults: [{ type: 'search', status: 'queued' }],
-        subagentHandoffs: [{ agent: 'Social Match Agent' }],
+        subagentHandoffs: [{ agent: 'Match Agent' }],
         startedAt: '2026-06-07T01:00:00.000Z',
       }),
     );

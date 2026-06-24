@@ -52,7 +52,7 @@ export class PersonalizationService {
 
   lifeGraphUpdatePreview(activityType?: unknown): string {
     const activity = cleanDisplayText(activityType, '轻运动社交');
-    return `这次完成后，我会把你的 Life Graph 更新为：近期更适合低压力的${activity}，并观察完成率、取消情况和你对同校或同区域搭子的反馈。你之后可以查看、撤回或纠正这些更新。`;
+    return `这次完成后，我会把你的长期偏好更新为：近期更适合低压力的${activity}，并观察完成率、取消情况和你对同校或同区域搭子的反馈。你之后可以查看、撤回或纠正这些更新。`;
   }
 
   private readSignals(signals: Record<string, unknown>): string[] {

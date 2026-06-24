@@ -167,6 +167,36 @@ describe('SocialCodexEventPipelineService', () => {
     );
   });
 
+  it('does not emit safety process for ordinary chat opt-out boundary notes', async () => {
+    const writes: Array<{ event: string; data: unknown }> = [];
+    const pipeline = new SocialCodexEventPipelineService(
+      new SocialAgentEventV2Service(),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      new SocialCodexApprovalSchemaService(),
+    );
+    const writer = makePipeline(writes);
+    const response: UserFacingAgentResponse = {
+      assistantMessage: '可以，我们先安静聊聊，不会推荐人或进入约练流程。',
+      lightStatus: '正在理解你的需求',
+      cards: [],
+      safeStatus: {
+        blocked: false,
+        level: 'low',
+        boundaryNotes: ['用户明确说不要推荐人，也不要约练。'],
+        requiredConfirmations: [],
+      },
+      pendingConfirmations: [],
+      permissionMode: AgentTaskPermissionMode.Confirm,
+    };
+
+    await pipeline.writeResultEvents(writer, response);
+
+    expect(writes.map((item) => item.event)).not.toContain('safety_check.done');
+  });
+
   it('does not emit early slot events for ordinary chat with time and place but no social execution intent', async () => {
     const writes: Array<{ event: string; data: unknown }> = [];
     const { pipeline, writer } = makePipelineWithSlots(writes);
@@ -330,9 +360,9 @@ describe('SocialCodexEventPipelineService', () => {
           '正在理解你的需求',
       ),
     ).toHaveLength(1);
-    expect(writes.filter((item) => item.event === 'approval.required')).toHaveLength(
-      2,
-    );
+    expect(
+      writes.filter((item) => item.event === 'approval.required'),
+    ).toHaveLength(2);
   });
 
   it('starts with neutral GPT-style process copy for ordinary chat', async () => {
@@ -352,9 +382,13 @@ describe('SocialCodexEventPipelineService', () => {
 
     const serialized = JSON.stringify(writes.map((item) => item.data));
     expect(serialized).toContain('正在理解你的需求');
-    expect(serialized).toContain('会结合最近对话和已确认偏好，整理成自然回复。');
+    expect(serialized).toContain(
+      '会结合最近对话和已确认偏好，整理成自然回复。',
+    );
     expect(serialized).toContain('会结合最近对话、当前任务和已确认偏好');
-    expect(serialized).not.toMatch(/进入约练\/社交流程|约练流程|Life Graph 摘要/);
+    expect(serialized).not.toMatch(
+      /进入约练\/社交流程|约练流程|Life Graph 摘要/,
+    );
   });
 
   it('completes ordinary chat with neutral conversation copy instead of generic tool copy', async () => {
@@ -505,6 +539,86 @@ describe('SocialCodexEventPipelineService', () => {
     });
   });
 
+  it('scopes legacy numeric assistant message ids by run so reruns do not merge into old replies', async () => {
+    const writes: Array<{ event: string; data: unknown }> = [];
+    const writer = makePipeline(writes);
+
+    await writer('assistant.delta', 'detect_social_intent', '正在回复', {
+      state: 'running',
+      messageId: 'agent-message:42',
+      payload: {
+        delta: '第一段',
+        messageId: 'agent-message:42',
+        source: 'llm',
+      },
+    });
+
+    const assistant = writes.find((item) => item.event === 'assistant.delta')
+      ?.data as {
+      messageId?: string;
+      payload?: Record<string, unknown>;
+    };
+    expect(assistant).toMatchObject({
+      messageId: 'agent-message:42:run:test',
+      payload: {
+        messageId: 'agent-message:42:run:test',
+      },
+    });
+  });
+
+  it('uses current-message slots for profile gate before hydrated context catches up', async () => {
+    const writes: Array<{ event: string; data: unknown }> = [];
+    const profileGate = {
+      getMinimumProfileStatusWithTaskSlots: jest.fn().mockResolvedValue({
+        passed: true,
+        missing: [],
+        assistantMessage: '',
+        profileCompleteness: 40,
+        readinessLevel: null,
+        canEnterMatchPool: true,
+        nextActions: [],
+      }),
+    };
+    const pipeline = new SocialCodexEventPipelineService(
+      new SocialAgentEventV2Service(),
+      undefined,
+      new SocialAgentTaskMemoryStateMachineService(),
+      {
+        hydrateContext: jest.fn().mockResolvedValue({ taskSlots: {} }),
+      } as never,
+      profileGate as never,
+      new SocialCodexApprovalSchemaService(),
+    );
+    const writer = pipeline.createWriter({
+      write: (event, data) => writes.push({ event, data }),
+      userId: 7,
+      taskId: 42,
+      threadId: 'agent-task:42',
+      runId: 'run:test',
+    });
+
+    await pipeline.writeProfileGateIfNeeded(writer, 7, {
+      text: '我想在青岛大学附近，今天晚上，散步，找女生，最好喜欢编程',
+      taskId: 42,
+      threadId: 'agent-task:42',
+    });
+
+    expect(
+      profileGate.getMinimumProfileStatusWithTaskSlots,
+    ).toHaveBeenCalledWith(
+      7,
+      expect.objectContaining({
+        activity: expect.objectContaining({ value: '散步' }),
+        time_window: expect.objectContaining({ value: '今天晚上' }),
+        location_text: expect.objectContaining({ value: '青岛大学附近' }),
+        candidate_preference: expect.objectContaining({
+          value: expect.stringContaining('女生'),
+        }),
+      }),
+    );
+    expect(writes.map((item) => item.event)).toContain('tool.done');
+  });
+
   it('emits product-language process display text even when callers pass internal labels', async () => {
     const writes: Array<{ event: string; data: unknown }> = [];
     const writer = makePipeline(writes);
@@ -594,27 +708,34 @@ describe('SocialCodexEventPipelineService', () => {
       runId: 'run:test',
     });
 
-    await writer('candidate_search.done', 'rank_candidates', '找到 3 个公开可发现的人', {
-      state: 'done',
-      payload: {
-        candidateCount: 3,
-        safeSummary: '公开资料显示都偏好周末下午散步。',
-        traceId: 'hidden-trace',
-        planner: { rawJson: true },
-        rawJson: { debug: true },
-        payload: { toolInput: 'internal' },
-        messages: [{ role: 'system', content: 'hidden prompt' }],
-        phone: '15253005312',
-        latitude: 36.123456,
-        nested: {
-          summary: '只使用公开可发现资料。',
-          toolCalls: [{ name: 'search_public_candidates' }],
-          preciseLocation: '青岛大学某宿舍楼 3 单元 401',
+    await writer(
+      'candidate_search.done',
+      'rank_candidates',
+      '找到 3 个公开可发现的人',
+      {
+        state: 'done',
+        payload: {
+          candidateCount: 3,
+          safeSummary: '公开资料显示都偏好周末下午散步。',
+          traceId: 'hidden-trace',
+          planner: { rawJson: true },
+          rawJson: { debug: true },
+          payload: { toolInput: 'internal' },
+          messages: [{ role: 'system', content: 'hidden prompt' }],
+          phone: '15253005312',
+          latitude: 36.123456,
+          nested: {
+            summary: '只使用公开可发现资料。',
+            toolCalls: [{ name: 'search_public_candidates' }],
+            preciseLocation: '青岛大学某宿舍楼 3 单元 401',
+          },
         },
       },
-    });
+    );
 
-    const streamedEvent = writes[0]?.data as { payload?: Record<string, unknown> };
+    const streamedEvent = writes[0]?.data as {
+      payload?: Record<string, unknown>;
+    };
     expect(streamedEvent.payload).toMatchObject({
       candidateCount: 3,
       safeSummary: '公开资料显示都偏好周末下午散步。',
@@ -742,6 +863,37 @@ describe('SocialCodexEventPipelineService', () => {
     );
     expect(
       writes.map((item) => item.data as { taskId?: number | null }),
-    ).toEqual(expect.arrayContaining([expect.objectContaining({ taskId: 42 })]));
+    ).toEqual(
+      expect.arrayContaining([expect.objectContaining({ taskId: 42 })]),
+    );
+  });
+
+  it('uses lightweight recovery copy instead of backend-style saved-conversation copy', async () => {
+    const writes: Array<{ event: string; data: unknown }> = [];
+    const pipeline = new SocialCodexEventPipelineService(
+      new SocialAgentEventV2Service(),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      new SocialCodexApprovalSchemaService(),
+    );
+    const writer = pipeline.createWriter({
+      write: (event, data) => writes.push({ event, data }),
+      userId: 7,
+      taskId: 42,
+      threadId: 'agent-task:42',
+      runId: 'run:test',
+    });
+
+    await pipeline.writeRunFailed(writer);
+    await pipeline.writeRunCompleted(writer, 'error_recovery');
+
+    const serialized = JSON.stringify(writes);
+    expect(serialized).toContain('连接中断了，可以继续');
+    expect(serialized).toContain('这段需求还在，可以直接继续');
+    expect(serialized).not.toContain('已保留当前对话');
+    expect(serialized).not.toContain('我已经保留当前对话');
+    expect(serialized).not.toContain('刚才的处理没有继续执行高风险动作');
   });
 });

@@ -16,6 +16,13 @@ export function buildSocialAgentOpenerDraftApprovalInput(input: {
   idempotencyKey?: string | null;
   safetyBoundary?: string | null;
 }) {
+  const candidateRecordId =
+    input.relatedCandidateId ??
+    positiveNumber(
+      input.candidate.candidateRecordId ??
+        input.candidate.socialRequestCandidateId,
+    );
+  const socialRequestId = positiveNumber(input.candidate.socialRequestId);
   return {
     userId: input.ownerUserId,
     agentConnectionId: null,
@@ -26,9 +33,17 @@ export function buildSocialAgentOpenerDraftApprovalInput(input: {
     payload: {
       source: 'agent_card_action',
       schemaAction: input.action,
+      taskId: input.taskId,
       agentTaskId: input.taskId,
       candidateUserId: input.targetUserId,
       targetUserId: input.targetUserId,
+      ...(candidateRecordId
+        ? {
+            candidateRecordId,
+            socialRequestCandidateId: candidateRecordId,
+          }
+        : {}),
+      ...(socialRequestId ? { socialRequestId } : {}),
       candidate: input.candidate,
       message: input.draft,
       suggestedOpener: input.draft,
@@ -42,18 +57,16 @@ export function buildSocialAgentOpenerDraftApprovalInput(input: {
         cleanDisplayText(input.idempotencyKey, '') ||
         `opener-send:${input.taskId}:${input.targetUserId ?? 'candidate'}`,
       riskReasons: [
-        '这一步会向真实用户发送消息',
+        '这个动作会向真实用户发送消息',
         '发送前需要你确认语气和内容',
         '不会自动交换联系方式或精确位置',
       ],
     },
-    summary: input.targetUserId
-      ? `发送开场白给候选人 #${input.targetUserId}`
-      : '发送开场白给候选人',
-    riskLevel: ApprovalRiskLevel.Medium,
+    summary: input.targetUserId ? '发送开场白给这位用户' : '发送开场白给对方',
+    riskLevel: ApprovalRiskLevel.High,
     reason: 'FitMeet Agent 已生成开场白草稿，等待用户确认后再发送。',
     createdBy: 'agent' as const,
-    relatedCandidateId: input.relatedCandidateId,
+    relatedCandidateId: candidateRecordId,
   };
 }
 
@@ -62,25 +75,28 @@ export function buildSocialAgentOpenerDraftState(input: {
   targetUserId: number | null;
   candidate: Record<string, unknown>;
   draft: string;
-  approvalId: number;
-  pendingApproval: SocialAgentPendingApprovalSnapshot;
-  at: string;
+  approvalId?: number | null;
+  pendingApproval?: SocialAgentPendingApprovalSnapshot | null;
+  at?: string;
 }) {
+  const pendingAction = input.pendingApproval
+    ? {
+        id: input.pendingApproval.id,
+        type: input.pendingApproval.type,
+        actionType: input.pendingApproval.actionType,
+        summary: input.pendingApproval.summary,
+        riskLevel: input.pendingApproval.riskLevel,
+        at: input.at ?? new Date().toISOString(),
+      }
+    : null;
   return {
-    pendingAction: {
-      id: input.pendingApproval.id,
-      type: input.pendingApproval.type,
-      actionType: input.pendingApproval.actionType,
-      summary: input.pendingApproval.summary,
-      riskLevel: input.pendingApproval.riskLevel,
-      at: input.at,
-    },
+    pendingAction,
     cardActionDraft: {
       action: input.action,
       targetUserId: input.targetUserId,
       candidate: input.candidate,
       message: input.draft,
-      approvalId: input.approvalId,
+      ...(input.approvalId ? { approvalId: input.approvalId } : {}),
     },
     transitionPatch: {
       objective: 'candidate_messaging',
@@ -98,4 +114,9 @@ export function buildSocialAgentOpenerDraftState(input: {
     assistantMessage:
       '我先帮你写了一条低压力的开场白。你确认前，我不会替你发送。',
   };
+}
+
+function positiveNumber(value: unknown): number | null {
+  const num = Number(value);
+  return Number.isFinite(num) && num > 0 ? num : null;
 }

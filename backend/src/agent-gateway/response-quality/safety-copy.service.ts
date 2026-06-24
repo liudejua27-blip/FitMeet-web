@@ -18,7 +18,7 @@ export class SafetyCopyService {
   }
 
   boundaryIntro(): string {
-    return '我可以帮你筛选、解释和准备开场，但发消息、加好友、创建线下活动、共享位置或保存敏感画像前，都需要你确认。';
+    return '我可以帮你筛选、解释和准备开场，但发消息、加好友、创建线下活动、共享位置或保存私密资料前，都需要你确认。';
   }
 
   boundaryNotes(safety?: FitMeetAgentSafety): string[] {

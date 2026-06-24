@@ -1,35 +1,16 @@
 import {
-  AlertCircle,
   CalendarClock,
-  CheckCircle2,
-  ChevronDown,
-  History,
+  Clock3,
+  Footprints,
   MapPin,
   ShieldCheck,
   Sparkles,
-  Users,
+  UserCheck,
 } from 'lucide-react';
 
-import {
-  CardActionSummary,
-  visibleCardActions,
-} from './tool-card-actions';
-import {
-  MetaChip,
-  ProductCardDetails,
-  ReasonList,
-} from './tool-card-shared';
-import { OpportunityActionPath } from './tool-opportunity-action-path';
-import {
-  OpportunityGuardrailStrip,
-  candidatePrivacyGuardrail,
-  candidateSourceGuardrail,
-} from './tool-opportunity-guardrails';
-import {
-  ConfirmedContextChips,
-  PrimaryReason,
-  safeImageSrc,
-} from './tool-opportunity-shared';
+import { CardActionSummary } from './tool-card-actions';
+import { ProductCardDetails } from './tool-card-shared';
+import { normalizeInlineProductText, safeImageSrc } from './tool-card-text';
 import {
   normalizeCandidateOpportunityView,
   type SchemaDrivenAssistantCard,
@@ -37,407 +18,202 @@ import {
 
 export function CandidateResultCard({ card }: { card: SchemaDrivenAssistantCard }) {
   const opportunity = normalizeCandidateOpportunityView(card);
-  const name = opportunity.name;
-  const score = opportunity.score != null ? `${Math.round(opportunity.score)} 分` : null;
+  const name = opportunity.name || opportunity.title;
+  const score = opportunity.score != null ? matchLevelLabel(opportunity.score) : null;
   const avatarUrl = safeImageSrc(opportunity.avatarUrl);
   const initials = name.slice(0, 1).toUpperCase();
-  const hasDistance = Boolean(opportunity.distanceLabel);
-  const hasOpener = Boolean(opportunity.suggestedOpener);
-  const hasInterests = opportunity.interests.length > 0;
+  const primaryActivity = opportunity.interests[0] ?? '约练';
+  const headline = candidateHeadline(name, opportunity.title, primaryActivity);
+  const statusLabel = opportunity.trustSignals.length > 0 ? '资料可信' : '推荐中';
+  const facts = compactFacts([
+    { icon: MapPin, label: opportunity.area ?? '地点待确认' },
+    { icon: CalendarClock, label: opportunity.time ?? '时间待确认' },
+    {
+      icon: Clock3,
+      label:
+        textField(card.data, ['durationLabel', 'duration', 'expectedDuration', 'timeCost']) ??
+        '节奏可协商',
+    },
+    { icon: Footprints, label: primaryActivity },
+  ]).slice(0, 4);
+  const tags = compactUnique([
+    ...opportunity.interests,
+    ...opportunity.safetyBadges,
+    ...opportunity.confirmedContext,
+  ]).slice(0, 6);
+  const recommendationReasons = compactUnique(opportunity.reasons).slice(0, 3);
+  const safetyLine =
+    opportunity.safetyBoundary ??
+    opportunity.invitePolicy ??
+    '建议先站内沟通，确认前不会发送邀请或公开联系方式。';
+  const details = compactUnique([
+    opportunity.whyNow,
+    opportunity.openerStrategy,
+    ...opportunity.discoverySafetySignals,
+    ...opportunity.recommendationProtocol.map((item) => item.detail),
+  ]).slice(0, 4);
 
   return (
     <article
-      className="rounded-2xl bg-white p-3 ring-1 ring-black/5 transition hover:-translate-y-px hover:shadow-sm hover:ring-black/10"
+      className="w-full overflow-hidden rounded-[22px] border border-slate-200/80 bg-white text-slate-900 shadow-[0_10px_30px_rgba(15,23,42,0.07)]"
       data-testid="opportunity-card"
       data-card-model="assistant-ui-opportunity-card"
+      data-layout-model="structured-recommendation-card"
       data-product-component="CandidateCards"
+      data-product-renderer="CandidateCards"
       data-opportunity-type="person"
+      data-action-placement="bottom-grid"
       data-reasoning-degraded={String(opportunity.reasoningQuality.degraded)}
       data-reasoning-retryable={String(opportunity.reasoningQuality.retryable)}
       data-has-avatar={String(Boolean(avatarUrl || initials))}
-      data-has-distance={String(hasDistance)}
-      data-has-interests={String(hasInterests)}
-      data-has-opener={String(hasOpener)}
+      data-has-distance={String(Boolean(opportunity.distanceLabel))}
+      data-has-interests={String(opportunity.interests.length > 0)}
+      data-has-opener={String(Boolean(opportunity.suggestedOpener))}
       data-action-path="safe-sequenced"
     >
-      <div className="flex items-start gap-3">
-        {avatarUrl ? (
-          <img
-            src={avatarUrl}
-            alt={`${name} 的头像`}
-            className="h-11 w-11 shrink-0 rounded-full object-cover ring-1 ring-black/10"
-            loading="lazy"
-          />
-        ) : (
-          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-[#18181b] text-sm font-semibold text-white">
-            {initials}
-          </div>
-        )}
-        <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-start justify-between gap-2">
-            <div className="min-w-0">
-              <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-[#8a8f98]">
-                推荐对象
-              </p>
-              <p className="font-medium leading-5 text-[#27272a]">{opportunity.title}</p>
-              {opportunity.subtitle ? (
-                <p className="mt-0.5 text-xs leading-5 text-[#71717a]">{opportunity.subtitle}</p>
+      <span className="sr-only">推荐对象</span>
+      <div className="p-4 sm:p-5">
+        <div className="flex min-w-0 items-start gap-4 sm:gap-5">
+          {avatarUrl ? (
+            <img
+              src={avatarUrl}
+              alt={`${name} 的头像`}
+              className="h-[76px] w-[76px] shrink-0 rounded-[26px] object-cover ring-1 ring-slate-200 sm:h-[88px] sm:w-[88px]"
+              loading="lazy"
+            />
+          ) : (
+            <div className="flex h-[76px] w-[76px] shrink-0 items-center justify-center rounded-[26px] bg-slate-950 text-2xl font-semibold text-white sm:h-[88px] sm:w-[88px]">
+              {initials}
+            </div>
+          )}
+
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <p className="text-sm font-semibold text-slate-950 sm:text-base">{name}</p>
+              <span className="inline-flex items-center gap-1 rounded-full bg-teal-50 px-2.5 py-1 text-xs font-semibold text-teal-700 ring-1 ring-teal-100">
+                <UserCheck className="h-3.5 w-3.5" aria-hidden="true" />
+                {statusLabel}
+              </span>
+              {score ? (
+                <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700 ring-1 ring-emerald-100">
+                  {score}
+                </span>
               ) : null}
             </div>
-            {score ? (
-              <span className="rounded-full bg-[#f7f7f8] px-2 py-0.5 text-[11px] font-medium text-[#52525b] ring-1 ring-black/5">
-                {score}
+            <h3 className="mt-2 text-[1.45rem] font-semibold leading-tight tracking-normal text-slate-950 sm:text-[1.7rem]">
+              {headline}
+            </h3>
+          </div>
+        </div>
+
+        <dl className="mt-5 grid gap-3 text-sm font-medium text-slate-700 sm:grid-cols-2 lg:grid-cols-4">
+          {facts.map((fact) => {
+            const Icon = fact.icon;
+            return (
+              <div key={`${fact.label}-${fact.icon.displayName ?? fact.label}`} className="flex items-center gap-2">
+                <Icon className="h-4.5 w-4.5 shrink-0 text-teal-600" aria-hidden="true" />
+                <dd className="min-w-0 truncate">{fact.label}</dd>
+              </div>
+            );
+          })}
+        </dl>
+
+        <section className="mt-5 rounded-2xl border border-teal-100 bg-teal-50/55 px-4 py-3">
+          <p className="flex items-center gap-2 text-sm font-semibold text-teal-900">
+            <Sparkles className="h-4 w-4 shrink-0 text-teal-600" aria-hidden="true" />
+            推荐理由
+          </p>
+          <p className="mt-1 text-sm leading-6 text-slate-700">{opportunity.summary}</p>
+          {recommendationReasons.length > 0 ? (
+            <ul className="mt-2 space-y-1 text-sm leading-6 text-slate-700">
+              {recommendationReasons.map((reason) => (
+                <li key={reason}>{reason}</li>
+              ))}
+            </ul>
+          ) : null}
+        </section>
+
+        {tags.length > 0 ? (
+          <div className="mt-4 flex flex-wrap gap-2">
+            {tags.map((tag) => (
+              <span
+                key={tag}
+                className="rounded-full bg-teal-50 px-3.5 py-1.5 text-sm font-semibold text-teal-700 ring-1 ring-teal-100"
+              >
+                {tag}
               </span>
-            ) : null}
-          </div>
-          <p className="mt-1 leading-6 text-[#52525b]">{opportunity.summary}</p>
-          <CandidateReasoningQualityNotice quality={opportunity.reasoningQuality} />
-          <CandidateIntentChips opportunity={opportunity} />
-          <ConfirmedContextChips
-            items={opportunity.confirmedContext}
-            schemaType={card.schemaType}
-          />
-          <div className="mt-2 flex flex-wrap gap-1.5">
-            {opportunity.area ? (
-              <MetaChip icon={<MapPin className="h-3 w-3" />} label={opportunity.area} />
-            ) : null}
-            {opportunity.time ? (
-              <MetaChip icon={<CalendarClock className="h-3 w-3" />} label={opportunity.time} />
-            ) : null}
-            {opportunity.distanceLabel ? (
-              <MetaChip icon={<MapPin className="h-3 w-3" />} label={opportunity.distanceLabel} />
-            ) : null}
-            {opportunity.safetyBadges.map((badge) => (
-              <MetaChip key={badge} icon={<ShieldCheck className="h-3 w-3" />} label={badge} />
-            ))}
-            {opportunity.interests.map((interest) => (
-              <MetaChip key={interest} icon={<Users className="h-3 w-3" />} label={interest} />
             ))}
           </div>
-          <PrimaryReason
-            reason={opportunity.reasons[0]}
-            fallback={opportunity.recommendedNextAction}
-            label="推荐理由"
-          />
-          <ProductCardDetails title="查看推荐依据和安全边界">
-            <OpportunityGuardrailStrip
-              schemaType={card.schemaType}
-              actions={visibleCardActions(card, card.actions)}
-              items={[
-                {
-                  id: 'source',
-                  label: '来源',
-                  value: candidateSourceGuardrail(opportunity),
-                },
-                {
-                  id: 'privacy',
-                  label: '资料',
-                  value: candidatePrivacyGuardrail(opportunity),
-                },
-                {
-                  id: 'touch',
-                  label: '触达',
-                  value: opportunity.invitePolicy ?? '发送邀请、加好友或连接前必须由你确认',
-                },
-                {
-                  id: 'recover',
-                  label: '恢复',
-                  value: '可跳过、重试开场白，或从确认点继续',
-                },
-              ]}
-            />
-            <CandidateRankingBreakdown items={opportunity.rankingBreakdown} />
-            {opportunity.reasons.length > 1 ? (
-              <ReasonList title="更多推荐理由" reasons={opportunity.reasons.slice(1)} />
-            ) : null}
-            {opportunity.discoverySafetySignals.length > 0 ? (
-              <div
-                className="mt-3 rounded-xl bg-emerald-50/70 px-3 py-2 ring-1 ring-emerald-100"
-                data-testid="assistant-ui-candidate-discovery-safety"
-                aria-label="可发现门槛"
-              >
-                <p className="flex items-center gap-1.5 text-xs font-medium leading-5 text-emerald-950">
-                  <ShieldCheck className="h-3.5 w-3.5" aria-hidden="true" />
-                  可发现门槛
-                </p>
-                <ul className="mt-1 grid gap-1 text-xs leading-5 text-emerald-900 sm:grid-cols-2">
-                  {opportunity.discoverySafetySignals.map((signal) => (
-                    <li key={signal} className="flex gap-1.5">
-                      <CheckCircle2 className="mt-1 h-3 w-3 shrink-0" aria-hidden="true" />
-                      <span>{signal}</span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            ) : null}
-            {opportunity.recommendationProtocol.length > 0 ? (
-              <div
-                className="mt-3 rounded-xl bg-white px-3 py-2 ring-1 ring-black/5"
-                data-testid="assistant-ui-recommendation-protocol"
-                aria-label="推荐协议"
-              >
-                <p className="flex items-center gap-1.5 text-xs font-medium leading-5 text-[#3f3f46]">
-                  <ShieldCheck className="h-3.5 w-3.5" aria-hidden="true" />
-                  推荐协议
-                </p>
-                <dl className="mt-1 grid gap-1.5 text-xs leading-5 text-[#71717a] sm:grid-cols-2">
-                  {opportunity.recommendationProtocol.map((item) => (
-                    <div key={item.key}>
-                      <dt className="font-medium text-[#3f3f46]">{item.label}</dt>
-                      <dd>{item.detail}</dd>
-                    </div>
-                  ))}
-                </dl>
-              </div>
-            ) : null}
-            {opportunity.trustSignals.length > 0 || opportunity.coldStartSignals.length > 0 ? (
-              <div
-                className="mt-3 rounded-xl bg-white px-3 py-2 ring-1 ring-black/5"
-                data-testid="assistant-ui-candidate-trust-signals"
-              >
-                <p className="flex items-center gap-1.5 text-xs font-medium leading-5 text-[#3f3f46]">
-                  <ShieldCheck className="h-3.5 w-3.5" aria-hidden="true" />
-                  推荐边界
-                </p>
-                <div className="mt-1 flex flex-wrap gap-1.5">
-                  {[...opportunity.trustSignals, ...opportunity.coldStartSignals].map((signal) => (
-                    <span
-                      key={signal}
-                      className="rounded-full bg-[#f7f7f8] px-2 py-0.5 text-[11px] leading-5 text-[#52525b] ring-1 ring-black/5"
-                    >
-                      {signal}
-                    </span>
-                  ))}
-                </div>
-              </div>
-            ) : null}
-            {opportunity.recentPublicActivity.length > 0 ? (
-              <div
-                className="mt-3 rounded-xl bg-white px-3 py-2 ring-1 ring-black/5"
-                data-testid="assistant-ui-candidate-recent-public-activity"
-                aria-label="最近公开动态"
-              >
-                <p className="flex items-center gap-1.5 text-xs font-medium leading-5 text-[#3f3f46]">
-                  <History className="h-3.5 w-3.5" aria-hidden="true" />
-                  最近公开动态
-                </p>
-                <ul className="mt-1 space-y-1 text-xs leading-5 text-[#71717a]">
-                  {opportunity.recentPublicActivity.map((signal) => (
-                    <li key={signal}>• {signal}</li>
-                  ))}
-                </ul>
-              </div>
-            ) : null}
-            {opportunity.preferenceHistorySignals.length > 0 ? (
-              <div
-                className="mt-3 rounded-xl bg-[#f7f7f8] px-3 py-2 ring-1 ring-black/5"
-                data-testid="assistant-ui-candidate-preference-history"
-                aria-label="最近确认偏好"
-              >
-                <p className="flex items-center gap-1.5 text-xs font-medium leading-5 text-[#3f3f46]">
-                  <History className="h-3.5 w-3.5" aria-hidden="true" />
-                  最近确认偏好
-                </p>
-                <ul className="mt-1 space-y-1 text-xs leading-5 text-[#71717a]">
-                  {opportunity.preferenceHistorySignals.map((signal) => (
-                    <li key={signal}>• {signal}</li>
-                  ))}
-                </ul>
-              </div>
-            ) : null}
-            <CandidateActionRhythm opportunity={opportunity} />
-            {opportunity.explanationSteps.length > 0 ? (
-              <CandidateExplanationTrace steps={opportunity.explanationSteps} />
-            ) : null}
-            <OpportunityActionPath
-              actions={visibleCardActions(card, card.actions)}
-              schemaType={card.schemaType}
-            />
-          </ProductCardDetails>
+        ) : null}
+
+        <div className="mt-4 rounded-2xl border border-slate-200 bg-white px-4 py-3">
+          <div className="flex items-start gap-2 text-sm leading-6 text-slate-700">
+            <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-slate-500" aria-hidden="true" />
+            <p>{safetyLine}</p>
+          </div>
           {opportunity.suggestedOpener ? (
-            <p className="mt-2 rounded-xl bg-[#f7f7f8] px-3 py-2 text-xs leading-5 text-[#3f3f46] ring-1 ring-black/5">
-              开场白预览：{opportunity.suggestedOpener}
+            <p className="mt-3 rounded-xl bg-slate-50 px-3 py-2 text-sm leading-6 text-slate-600">
+              开场白草稿：{opportunity.suggestedOpener}
             </p>
           ) : null}
-          <ProductCardDetails title="查看下一步和安全边界">
-            {opportunity.recommendedNextAction ? (
-              <p className="rounded-xl bg-[#f7f7f8] px-3 py-2 text-xs leading-5 text-[#52525b] ring-1 ring-black/5">
-                下一步：{opportunity.recommendedNextAction}
-              </p>
-            ) : null}
-            {opportunity.safetyBoundary ? (
-              <p className="mt-2 rounded-xl bg-[#f7f7f8] px-3 py-2 text-xs leading-5 text-[#71717a] ring-1 ring-black/5">
-                安全边界：{opportunity.safetyBoundary}
-              </p>
-            ) : null}
-          </ProductCardDetails>
-          <CardActionSummary card={card} actions={card.actions} />
         </div>
+
+        {details.length > 0 ? (
+          <ProductCardDetails title="查看更多推荐依据">
+            <ul className="space-y-1 text-xs leading-5 text-slate-600">
+              {details.map((item) => (
+                <li key={item}>• {item}</li>
+              ))}
+            </ul>
+          </ProductCardDetails>
+        ) : null}
+
+        <CardActionSummary card={card} actions={card.actions} />
       </div>
     </article>
   );
 }
 
-function CandidateReasoningQualityNotice({
-  quality,
-}: {
-  quality: ReturnType<typeof normalizeCandidateOpportunityView>['reasoningQuality'];
-}) {
-  if (!quality.degraded || !quality.label) return null;
+function matchLevelLabel(score: number) {
+  if (score >= 85) return '匹配度：很高';
+  if (score >= 68) return '匹配度：较高';
+  return '匹配度：中等';
+}
 
-  return (
-    <div
-      className="mt-2 rounded-xl bg-amber-50/80 px-3 py-2 text-xs leading-5 text-amber-950 ring-1 ring-amber-100"
-      data-testid="assistant-ui-candidate-reasoning-quality"
-      data-reasoning-source={quality.source ?? 'unknown'}
-      data-retryable={quality.retryable ? 'true' : 'false'}
-      aria-label="候选推荐解释状态"
-    >
-      <p className="flex items-center gap-1.5 font-medium">
-        <AlertCircle className="h-3.5 w-3.5" aria-hidden="true" />
-        {quality.label}
-      </p>
-      {quality.detail ? <p className="mt-0.5 text-amber-900">{quality.detail}</p> : null}
-      {quality.actionLabel ? (
-        <p className="mt-1 text-[11px] font-medium text-amber-800">{quality.actionLabel}</p>
-      ) : null}
-    </div>
+function compactUnique(items: Array<string | null | undefined>) {
+  return Array.from(
+    new Set(items.map((item) => item?.trim()).filter((item): item is string => Boolean(item))),
   );
 }
 
-function CandidateActionRhythm({
-  opportunity,
-}: {
-  opportunity: ReturnType<typeof normalizeCandidateOpportunityView>;
-}) {
-  const openerStrategy =
-    opportunity.openerStrategy ??
-    (opportunity.suggestedOpener
-      ? '先用开场白轻量试探，确认对方有兴趣后再推进到邀请。'
-      : '先围绕共同时间、地点或兴趣轻量开口，确认对方有兴趣后再推进。');
-  const items = [
-    opportunity.whyNow ? { id: 'why-now', label: '为什么现在', value: opportunity.whyNow } : null,
-    { id: 'opener-strategy', label: '怎么开口', value: openerStrategy },
-  ].filter(Boolean) as Array<{ id: string; label: string; value: string }>;
-  if (items.length === 0) return null;
-
-  return (
-    <div
-      className="mt-3 grid gap-1.5 rounded-xl bg-[#f7f7f8] px-3 py-2 ring-1 ring-black/5 sm:grid-cols-2"
-      data-testid="assistant-ui-candidate-action-rhythm"
-      aria-label="推荐行动节奏"
-    >
-      {items.map((item) => (
-        <div key={item.id} className="text-xs leading-5" data-candidate-rhythm={item.id}>
-          <span className="block font-medium text-[#3f3f46]">{item.label}</span>
-          <span className="mt-0.5 block text-[#71717a]">{item.value}</span>
-        </div>
-      ))}
-    </div>
-  );
+function candidateHeadline(name: string, title: string, activity: string) {
+  if (title && title !== name) return title;
+  const normalizedActivity = activity.trim();
+  if (!normalizedActivity) return `${name}，适合先轻松认识`;
+  const friendlyActivity =
+    /轻松|慢|聊天|休闲|低强度/u.test(normalizedActivity)
+      ? normalizedActivity
+      : `轻松${normalizedActivity}`;
+  return `${name}，适合从一次${friendlyActivity}开始`;
 }
 
-function CandidateRankingBreakdown({
-  items,
-}: {
-  items: ReturnType<typeof normalizeCandidateOpportunityView>['rankingBreakdown'];
-}) {
-  if (items.length === 0) return null;
-
-  return (
-    <div
-      className="mt-3 rounded-xl bg-white px-3 py-2 ring-1 ring-black/5"
-      data-testid="assistant-ui-candidate-ranking-breakdown"
-      aria-label="候选排序依据"
-    >
-      <p className="flex items-center gap-1.5 text-xs font-medium leading-5 text-[#3f3f46]">
-        <Sparkles className="h-3.5 w-3.5" aria-hidden="true" />
-        匹配依据
-      </p>
-      <div className="mt-1.5 space-y-1.5">
-        {items.map((item) => (
-          <div
-            key={item.key}
-            className="grid gap-1 rounded-lg bg-[#f7f7f8] px-2.5 py-2 text-xs leading-5 text-[#52525b] sm:grid-cols-[92px_1fr]"
-            data-ranking-key={item.key}
-          >
-            <span className="font-medium text-[#3f3f46]">
-              {item.label}
-              {item.score != null ? (
-                <span className="ml-1 font-normal text-[#8a8f98]">{item.score}</span>
-              ) : null}
-            </span>
-            <span className="text-[#71717a]">{item.reason}</span>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
+function textField(data: Record<string, unknown>, keys: string[]) {
+  for (const key of keys) {
+    const value = data[key];
+    if (typeof value === 'string') {
+      const text = normalizeInlineProductText(value);
+      if (text) return text;
+    }
+  }
+  return null;
 }
 
-function CandidateIntentChips({
-  opportunity,
-}: {
-  opportunity: ReturnType<typeof normalizeCandidateOpportunityView>;
-}) {
-  const items = [
-    opportunity.relationshipGoal
-      ? { id: 'relationship-goal', label: '关系目标', value: opportunity.relationshipGoal }
-      : null,
-    opportunity.idealType ? { id: 'ideal-type', label: '理想型', value: opportunity.idealType } : null,
-    opportunity.invitePolicy
-      ? { id: 'invite-policy', label: '邀请边界', value: opportunity.invitePolicy }
-      : null,
-  ].filter(Boolean) as Array<{ id: string; label: string; value: string }>;
-  if (items.length === 0) return null;
-
-  return (
-    <div
-      className="mt-2 grid gap-1.5 sm:grid-cols-3"
-      data-testid="assistant-ui-candidate-intent-chips"
-      aria-label="候选机会意图摘要"
-    >
-      {items.map((item) => (
-        <div
-          key={item.id}
-          className="rounded-xl bg-[#f7f7f8] px-2.5 py-2 text-xs leading-5 ring-1 ring-black/5"
-          data-candidate-intent={item.id}
-        >
-          <span className="block text-[11px] text-[#8a8f98]">{item.label}</span>
-          <span className="mt-0.5 block text-[#3f3f46]">{item.value}</span>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function CandidateExplanationTrace({ steps }: { steps: string[] }) {
-  return (
-    <details
-      className="group/trace mt-3 rounded-xl bg-white px-3 py-2 ring-1 ring-black/5"
-      data-testid="candidate-explanation-trace"
-      data-schema-type="social_match.candidate"
-    >
-      <summary className="flex cursor-pointer list-none items-center justify-between gap-2 text-xs font-medium leading-5 text-[#3f3f46] marker:hidden">
-        <span className="flex items-center gap-1.5">
-          <Sparkles className="h-3.5 w-3.5" aria-hidden="true" />
-          推荐依据
-        </span>
-        <ChevronDown
-          className="h-3.5 w-3.5 text-[#a1a1aa] transition-transform group-open/trace:rotate-180"
-          aria-hidden="true"
-        />
-      </summary>
-      <ol className="mt-1 grid gap-1.5 text-xs leading-5 text-[#71717a] sm:grid-cols-3">
-        {steps.slice(0, 3).map((step, index) => (
-          <li
-            key={`${step}-${index}`}
-            className="rounded-lg bg-[#f7f7f8] px-2 py-1.5 ring-1 ring-black/[0.04]"
-          >
-            {step}
-          </li>
-        ))}
-      </ol>
-    </details>
-  );
+function compactFacts<T extends { label: string | null | undefined }>(items: T[]) {
+  const seen = new Set<string>();
+  return items.filter((item): item is T & { label: string } => {
+    const label = item.label?.trim();
+    if (!label || seen.has(label)) return false;
+    seen.add(label);
+    return true;
+  });
 }

@@ -23,6 +23,7 @@ describe('SocialAgentModelRouterService', () => {
     'casual_chat',
     'final_response',
     'planner',
+    'brain',
     'profile_extraction',
     'card_generation',
     'candidate_summary',
@@ -50,6 +51,7 @@ describe('SocialAgentModelRouterService', () => {
     );
 
     expect(service.getModel('planner')).toBe('deepseek-v4-pro');
+    expect(service.getModel('brain')).toBe('deepseek-v4-pro');
     expect(service.getModel('profile_extraction')).toBe('deepseek-v4-pro');
     expect(service.getModel('card_generation')).toBe('deepseek-v4-pro');
     expect(service.getModel('candidate_summary')).toBe('deepseek-v4-pro');
@@ -63,6 +65,7 @@ describe('SocialAgentModelRouterService', () => {
         AGENT_CASUAL_CHAT_MODEL: 'deepseek-v4-flash',
         AGENT_FINAL_RESPONSE_MODEL: 'deepseek-v4-flash',
         AGENT_PLANNER_MODEL: 'deepseek-v4-flash',
+        AGENT_BRAIN_MODEL: 'deepseek-v4-flash',
         AGENT_EXTRACTOR_MODEL: 'deepseek-v4-flash',
         AGENT_CARD_MODEL: 'deepseek-v4-flash',
         AGENT_SAFETY_MODEL: 'deepseek-v4-flash',
@@ -74,6 +77,7 @@ describe('SocialAgentModelRouterService', () => {
     expect(service.getModel('casual_chat')).toBe('deepseek-v4-pro');
     expect(service.getModel('final_response')).toBe('deepseek-v4-pro');
     expect(service.getModel('planner')).toBe('deepseek-v4-pro');
+    expect(service.getModel('brain')).toBe('deepseek-v4-pro');
     expect(service.getModel('profile_extraction')).toBe('deepseek-v4-pro');
     expect(service.getModel('card_generation')).toBe('deepseek-v4-pro');
     expect(service.getModel('candidate_summary')).toBe('deepseek-v4-pro');
@@ -90,10 +94,17 @@ describe('SocialAgentModelRouterService', () => {
     );
 
     expect(service.getModel('planner')).toBe('deepseek-v4-pro');
+    expect(service.getModel('brain')).toBe('deepseek-v4-pro');
     expect(service.getTimeout('planner')).toBe(
       SOCIAL_AGENT_QUALITY_PLANNER_TIMEOUT_MS,
     );
+    expect(service.getTimeout('brain')).toBe(
+      SOCIAL_AGENT_QUALITY_PLANNER_TIMEOUT_MS,
+    );
     expect(service.getFirstChunkTimeout('planner')).toBe(
+      SOCIAL_AGENT_QUALITY_PLANNER_FIRST_CHUNK_TIMEOUT_MS,
+    );
+    expect(service.getFirstChunkTimeout('brain')).toBe(
       SOCIAL_AGENT_QUALITY_PLANNER_FIRST_CHUNK_TIMEOUT_MS,
     );
     expect(service.getFirstChunkTimeout('casual_chat')).toBe(
@@ -112,7 +123,13 @@ describe('SocialAgentModelRouterService', () => {
     expect(service.getTimeout('planner')).toBe(
       SOCIAL_AGENT_QUALITY_PLANNER_TIMEOUT_MS,
     );
+    expect(service.getTimeout('brain')).toBe(
+      SOCIAL_AGENT_QUALITY_PLANNER_TIMEOUT_MS,
+    );
     expect(service.getFirstChunkTimeout('planner')).toBe(
+      SOCIAL_AGENT_QUALITY_PLANNER_FIRST_CHUNK_TIMEOUT_MS,
+    );
+    expect(service.getFirstChunkTimeout('brain')).toBe(
       SOCIAL_AGENT_QUALITY_PLANNER_FIRST_CHUNK_TIMEOUT_MS,
     );
   });
@@ -156,6 +173,7 @@ describe('SocialAgentModelRouterService', () => {
     );
 
     expect(service.getModel('planner')).toBe('deepseek-v4-pro');
+    expect(service.getModel('brain')).toBe('deepseek-v4-pro');
     expect(service.getModel('profile_extraction')).toBe('deepseek-v4-pro');
     expect(service.getModel('card_generation')).toBe('deepseek-v4-pro');
     expect(service.getModel('candidate_summary')).toBe('deepseek-v4-pro');
@@ -186,6 +204,7 @@ describe('SocialAgentModelRouterService', () => {
     expect(service.getModel('casual_chat')).toBe('deepseek-v4-pro');
     expect(service.getModel('final_response')).toBe('deepseek-v4-pro');
     expect(service.getModel('planner')).toBe('deepseek-v4-pro');
+    expect(service.getModel('brain')).toBe('deepseek-v4-pro');
     expect(service.getModel('profile_extraction')).toBe('deepseek-v4-pro');
     expect(service.getModel('card_generation')).toBe('deepseek-v4-pro');
     expect(service.getModel('candidate_summary')).toBe('deepseek-v4-pro');
@@ -210,6 +229,7 @@ describe('SocialAgentModelRouterService', () => {
         DEEPSEEK_CHAT_MODEL: 'deepseek-chat',
         DEEPSEEK_MODEL: 'deepseek-chat',
         AGENT_PLANNER_MODEL: 'deepseek-chat',
+        AGENT_BRAIN_MODEL: 'deepseek-chat',
         AGENT_CARD_MODEL: 'deepseek-chat',
         AGENT_SAFETY_MODEL: 'deepseek-chat',
       }),
@@ -218,6 +238,7 @@ describe('SocialAgentModelRouterService', () => {
     expect(service.getModel('casual_chat')).toBe('deepseek-v4-pro');
     expect(service.getModel('final_response')).toBe('deepseek-v4-pro');
     expect(service.getModel('planner')).toBe('deepseek-v4-pro');
+    expect(service.getModel('brain')).toBe('deepseek-v4-pro');
     expect(service.getModel('profile_extraction')).toBe('deepseek-v4-pro');
     expect(service.getModel('card_generation')).toBe('deepseek-v4-pro');
     expect(service.getModel('candidate_summary')).toBe('deepseek-v4-pro');
@@ -233,6 +254,7 @@ describe('SocialAgentModelRouterService', () => {
         AGENT_FINAL_RESPONSE_MODEL: 'final-specific',
         AGENT_CASUAL_CHAT_MODEL: 'casual-specific',
         AGENT_PLANNER_MODEL: 'planner-specific',
+        AGENT_BRAIN_MODEL: 'brain-specific',
         AGENT_EXTRACTOR_MODEL: 'extractor-specific',
         AGENT_CARD_MODEL: 'card-specific',
         AGENT_SAFETY_MODEL: 'safety-specific',
@@ -242,6 +264,7 @@ describe('SocialAgentModelRouterService', () => {
     expect(service.getModel('casual_chat')).toBe('casual-specific');
     expect(service.getModel('final_response')).toBe('final-specific');
     expect(service.getModel('planner')).toBe('planner-specific');
+    expect(service.getModel('brain')).toBe('brain-specific');
     expect(service.getModel('profile_extraction')).toBe('extractor-specific');
     expect(service.getModel('card_generation')).toBe('card-specific');
     expect(service.getModel('candidate_summary')).toBe('card-specific');
@@ -275,6 +298,7 @@ describe('SocialAgentModelRouterService', () => {
     expect(service.getModel('casual_chat')).toBe('deepseek-v4-pro');
     expect(service.getModel('final_response')).toBe('deepseek-v4-pro');
     expect(service.getModel('planner')).toBe('deepseek-v4-pro');
+    expect(service.getModel('brain')).toBe('deepseek-v4-pro');
   });
 
   it('does not let explicit fast routing downgrade user-facing chat lanes', () => {
@@ -323,6 +347,8 @@ describe('SocialAgentModelRouterService', () => {
           SOCIAL_AGENT_FINAL_RESPONSE_FIRST_CHUNK_TIMEOUT_MS: '3500',
           SOCIAL_AGENT_PLANNER_TIMEOUT_MS: '2500',
           SOCIAL_AGENT_PLANNER_FIRST_CHUNK_TIMEOUT_MS: '3500',
+          SOCIAL_AGENT_BRAIN_TIMEOUT_MS: '2500',
+          SOCIAL_AGENT_BRAIN_FIRST_CHUNK_TIMEOUT_MS: '3500',
           SOCIAL_AGENT_EXTRACTOR_TIMEOUT_MS: '2500',
           SOCIAL_AGENT_EXTRACTOR_FIRST_CHUNK_TIMEOUT_MS: '3500',
           SOCIAL_AGENT_CARD_TIMEOUT_MS: '2500',
@@ -337,13 +363,13 @@ describe('SocialAgentModelRouterService', () => {
       const minimumTimeout =
         useCase === 'casual_chat' || useCase === 'final_response'
           ? SOCIAL_AGENT_QUALITY_CHAT_TIMEOUT_MS
-          : useCase === 'planner'
+          : useCase === 'planner' || useCase === 'brain'
             ? SOCIAL_AGENT_QUALITY_PLANNER_TIMEOUT_MS
             : SOCIAL_AGENT_QUALITY_TOOL_TIMEOUT_MS;
       const minimumFirstChunkTimeout =
         useCase === 'casual_chat' || useCase === 'final_response'
           ? SOCIAL_AGENT_QUALITY_CHAT_FIRST_CHUNK_TIMEOUT_MS
-          : useCase === 'planner'
+          : useCase === 'planner' || useCase === 'brain'
             ? SOCIAL_AGENT_QUALITY_PLANNER_FIRST_CHUNK_TIMEOUT_MS
             : SOCIAL_AGENT_QUALITY_TOOL_FIRST_CHUNK_TIMEOUT_MS;
 

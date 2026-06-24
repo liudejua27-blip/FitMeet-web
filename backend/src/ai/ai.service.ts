@@ -538,7 +538,7 @@ export class AIService {
 
   /**
    * Generate a structured AI persona card from interview answers. This powers
-   * both the in-app AI Profile Builder and OpenClaw social-skills profile fill.
+   * the in-app personal information assistant and profile fill flows.
    */
   async generateProfileBuilderCard(
     input: {
@@ -556,7 +556,7 @@ export class AIService {
     const systemPrompt = [
       '你是 FitMeet 的 AI 人物画像生成器。',
       '根据用户在访谈中的回答，生成适合社交匹配的人物画像。',
-      '画像用于匹配、推荐和 OpenClaw/social-skills 代理理解用户偏好。',
+      '画像用于匹配、推荐和 FitMeet Agent 理解用户偏好。',
       '',
       '必须遵守：',
       '1. 只输出 JSON，不要 markdown，不要解释。',

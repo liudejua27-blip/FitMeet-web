@@ -55,7 +55,9 @@ describe('Social Agent fallback source boundary', () => {
 
   it('does not duplicate fallback stream chunks through SocialAgentEventV2 assistant.delta', () => {
     const controller = readGatewayFile('social-agent-chat.controller.ts');
-    const helperStart = controller.indexOf('private async writeFallbackAssistantText');
+    const helperStart = controller.indexOf(
+      'private async writeFallbackAssistantText',
+    );
     expect(helperStart).toBeGreaterThan(-1);
     const helperEnd = controller.indexOf(
       'private async writeLlmAssistantTextForResult',
@@ -83,8 +85,6 @@ describe('Social Agent fallback source boundary', () => {
 
     expect(helperBody).toContain("input.source === 'fallback'");
     expect(helperBody).toContain("'llm'");
-    expect(
-      [...controller.matchAll(/\.writeAssistantDelta\(/g)].length,
-    ).toBe(1);
+    expect([...controller.matchAll(/\.writeAssistantDelta\(/g)].length).toBe(1);
   });
 });

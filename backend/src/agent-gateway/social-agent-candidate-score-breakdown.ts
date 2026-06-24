@@ -19,6 +19,7 @@ import {
 } from './social-agent-candidate-scoring';
 import {
   candidateLifeRhythmScore,
+  candidatePreferenceFitScore,
   candidateProfileTimeMatches,
   candidateRelationshipGoalScore,
   candidateSafetyRiskScore,
@@ -86,6 +87,30 @@ export function buildProfileCandidateScoreBreakdown(input: {
       candidateRelationshipGoalScore(input.query, input.tags) +
         lifeGraphGoalBoost(input.query, input.tags, input.lifeGraphSignals),
     ),
+    preferenceFit: candidatePreferenceFitScore({
+      query: input.query,
+      candidateSignals: [
+        input.city,
+        input.user.city,
+        input.user.gender,
+        ...genderPublicSignals(input.profile?.gender ?? input.user.gender),
+        input.profile?.nearbyArea,
+        input.profile?.ageRange,
+        input.profile?.socialStyle,
+        input.profile?.communicationStyle,
+        ...(input.profile?.availableTimes ?? []),
+        ...(input.profile?.traits ?? []),
+        ...(input.profile?.socialScenes ?? []),
+        ...(input.profile?.lifestyleTags ?? []),
+        ...(input.profile?.wantToMeet ?? []),
+        ...(input.profile?.relationshipGoals ?? []),
+        input.delegate?.city,
+        input.delegate?.interests,
+        input.delegate?.trainingGoals,
+        input.delegate?.availability,
+        ...input.tags,
+      ],
+    }),
     lifeGraphBehaviorFit: lifeGraphBehaviorFit(
       {
         query: input.query,
@@ -116,6 +141,7 @@ export function buildPublicIntentCandidateScoreBreakdown(input: {
   commonTags: string[];
   completeness: number;
   updatedAt: Date;
+  candidateSignals?: unknown[];
   lifeGraphSignals?: LifeGraphUnifiedMatchSignalsDto | null;
   sceneRisk: CandidateScoreSceneRisk;
 }): Record<string, number> {
@@ -149,6 +175,14 @@ export function buildPublicIntentCandidateScoreBreakdown(input: {
       candidateRelationshipGoalScore(input.query, input.tags) +
         lifeGraphGoalBoost(input.query, input.tags, input.lifeGraphSignals),
     ),
+    preferenceFit: candidatePreferenceFitScore({
+      query: input.query,
+      candidateSignals: [
+        input.city,
+        ...input.tags,
+        ...(input.candidateSignals ?? []),
+      ],
+    }),
     lifeGraphBehaviorFit: lifeGraphBehaviorFit(
       {
         query: input.query,
@@ -167,4 +201,18 @@ export function buildPublicIntentCandidateScoreBreakdown(input: {
     ),
     safetyRisk: candidateSafetyRiskScore(policy.riskLevel),
   };
+}
+
+function genderPublicSignals(value: string | null | undefined): string[] {
+  const text = String(value ?? '')
+    .trim()
+    .toLowerCase();
+  if (!text) return [];
+  if (['female', 'f', '女', '女性', '女生'].includes(text)) {
+    return ['女生', '女性', 'female'];
+  }
+  if (['male', 'm', '男', '男性', '男生'].includes(text)) {
+    return ['男生', '男性', 'male'];
+  }
+  return [text];
 }

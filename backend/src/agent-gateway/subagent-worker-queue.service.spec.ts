@@ -195,8 +195,8 @@ describe('SubagentWorkerQueueService', () => {
   it('retries failures and records final failure after max attempts', async () => {
     const { service, failures } = createService();
     const job = await service.enqueue({
-      agentName: 'Social Match Agent',
-      queueName: 'fitmeet.subagent.social-match-agent',
+      agentName: 'Match Agent',
+      queueName: 'fitmeet.subagent.match-agent',
       payload: {},
       maxAttempts: 2,
     });
@@ -232,8 +232,8 @@ describe('SubagentWorkerQueueService', () => {
   it('does not requeue non-retryable worker failures', async () => {
     const { service, failures } = createService();
     const job = await service.enqueue({
-      agentName: 'Social Match Agent',
-      queueName: 'fitmeet.subagent.social-match-agent',
+      agentName: 'Match Agent',
+      queueName: 'fitmeet.subagent.match-agent',
       payload: { malformed: true },
       maxAttempts: 3,
     });
@@ -265,8 +265,8 @@ describe('SubagentWorkerQueueService', () => {
   it('reclaims timed-out running jobs and cancels aborted waiters', async () => {
     const { service, jobs } = createService();
     const job = await service.enqueue({
-      agentName: 'Meet Loop Agent',
-      queueName: 'fitmeet.subagent.meet-loop-agent',
+      agentName: 'Match Agent',
+      queueName: 'fitmeet.subagent.match-agent',
       payload: {},
     });
     await service.markRunning({
@@ -294,8 +294,8 @@ describe('SubagentWorkerQueueService', () => {
   it('cancels jobs when result waiting times out', async () => {
     const { service, jobs } = createService();
     const job = await service.enqueue({
-      agentName: 'Social Match Agent',
-      queueName: 'fitmeet.subagent.social-match-agent',
+      agentName: 'Match Agent',
+      queueName: 'fitmeet.subagent.match-agent',
       payload: {},
     });
 
@@ -313,8 +313,8 @@ describe('SubagentWorkerQueueService', () => {
   it('does not let late worker complete or fail override a cancelled job', async () => {
     const { service, jobs, failures } = createService();
     const job = await service.enqueue({
-      agentName: 'Meet Loop Agent',
-      queueName: 'fitmeet.subagent.meet-loop-agent',
+      agentName: 'Match Agent',
+      queueName: 'fitmeet.subagent.match-agent',
       payload: {},
     });
     await service.markRunning({

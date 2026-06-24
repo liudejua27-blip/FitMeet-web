@@ -219,7 +219,7 @@ describe('SocialAgentRouteAgentLoopRunnerService', () => {
       execute: jest.fn(async (input) => {
         forcedObservations.push(
           await input.runner({
-            agent: 'Social Match Agent',
+            agent: 'Match Agent',
             toolName: 'route_search_turn',
             input: {},
             attempt: 0,
@@ -227,7 +227,7 @@ describe('SocialAgentRouteAgentLoopRunnerService', () => {
         );
         forcedObservations.push(
           await input.runner({
-            agent: 'Meet Loop Agent',
+            agent: 'Match Agent',
             toolName: 'route_action_turn',
             input: {},
             attempt: 0,
@@ -569,7 +569,7 @@ describe('SocialAgentRouteAgentLoopRunnerService', () => {
       '正在准备需要你确认的动作',
     );
     expect(labelFor('tool', 'route_conversation_turn')).toBe('正在组织回复');
-    expect(labelFor('tool', 'unknown_internal_tool')).toBe('正在处理这一步');
+    expect(labelFor('tool', 'unknown_internal_tool')).toBe('正在整理当前信息');
     expect(labelFor('tool', 'route_search_turn')).not.toContain('route_');
   });
 
@@ -722,6 +722,82 @@ describe('SocialAgentRouteAgentLoopRunnerService', () => {
     expect(deps.subagentWorker.run).not.toHaveBeenCalled();
   });
 
+  it('plans publish action branch when a publish request has completed task slots', async () => {
+    const { service, deps } = makeService({
+      agentLoop: makeAgentLoop({ runTools: false }),
+    });
+
+    await service.run({
+      ownerUserId: 7,
+      task: deps.task as never,
+      state: createSocialAgentRouteTurnState('我先生成发布确认卡。'),
+      message: '那你帮我发布到发现',
+      decision: {
+        task: deps.task,
+        taskContext: {
+          hasCandidates: false,
+          hasSearchContext: false,
+          taskSlots: {
+            activity: { value: '健身', state: 'completed' },
+            time_window: { value: '今晚', state: 'completed' },
+            location_text: { value: '青岛大学附近', state: 'completed' },
+          },
+        },
+        route: makeRoute({
+          intent: 'action_request',
+          replyStrategy: 'execute_action',
+          shouldExecuteAction: true,
+        }),
+        profile: null,
+        longTermSnapshot: null,
+        brainToolResults: [],
+      } as never,
+      replanAndRefresh: jest.fn(),
+      queueInitialSearchForTask: jest.fn(),
+    });
+
+    const plan = deps.agentLoop.execute.mock.calls[0][0].plan.tools;
+    expect(plan).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ toolName: 'route_action_turn' }),
+      ]),
+    );
+  });
+
+  it('plans publish action branch for a fresh publish request so missing fields can be asked', async () => {
+    const { service, deps } = makeService({
+      agentLoop: makeAgentLoop({ runTools: false }),
+    });
+
+    await service.run({
+      ownerUserId: 7,
+      task: deps.task as never,
+      state: createSocialAgentRouteTurnState('我先确认发布信息。'),
+      message: '帮我发布约练卡片',
+      decision: {
+        task: deps.task,
+        taskContext: null,
+        route: makeRoute({
+          intent: 'action_request',
+          replyStrategy: 'execute_action',
+          shouldExecuteAction: true,
+        }),
+        profile: null,
+        longTermSnapshot: null,
+        brainToolResults: [],
+      } as never,
+      replanAndRefresh: jest.fn(),
+      queueInitialSearchForTask: jest.fn(),
+    });
+
+    const plan = deps.agentLoop.execute.mock.calls[0][0].plan.tools;
+    expect(plan).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ toolName: 'route_action_turn' }),
+      ]),
+    );
+  });
+
   it('does not plan candidate follow-up search without existing candidate context', async () => {
     const { service, deps } = makeService({
       agentLoop: makeAgentLoop({ runTools: false }),
@@ -791,7 +867,7 @@ describe('SocialAgentRouteAgentLoopRunnerService', () => {
     );
   });
 
-  it('executes Social Match search through the subagent worker by default', async () => {
+  it('executes Match Agent search through the subagent worker by default', async () => {
     const { service, deps } = makeService();
     const taskContext = {
       currentTask: {
@@ -832,7 +908,7 @@ describe('SocialAgentRouteAgentLoopRunnerService', () => {
 
     expect(deps.subagentWorker.run).toHaveBeenCalledWith(
       expect.objectContaining({
-        agent: 'Social Match Agent',
+        agent: 'Match Agent',
         memoryScope: 'matching.worker_search_turn',
         plannerInput: expect.objectContaining({
           taskContext,
@@ -844,9 +920,8 @@ describe('SocialAgentRouteAgentLoopRunnerService', () => {
                 'activity',
                 'candidate_preference',
               ]),
-              candidatePreferencePolicy: expect.stringContaining(
-                '公开可发现资料',
-              ),
+              candidatePreferencePolicy:
+                expect.stringContaining('公开可发现资料'),
               knownSlots: expect.arrayContaining([
                 expect.objectContaining({
                   key: 'geo_area',
@@ -908,11 +983,69 @@ describe('SocialAgentRouteAgentLoopRunnerService', () => {
     expect(result.subagentHandoffs).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          agent: 'Social Match Agent',
+          agent: 'Match Agent',
           evalHints: expect.objectContaining({ independentWorker: true }),
         }),
       ]),
     );
+  });
+
+  it('falls back to the main search branch when the worker queue fails', async () => {
+    const failingWorker = {
+      run: jest.fn().mockRejectedValue(new Error('queue unavailable')),
+    };
+    const { service, deps } = makeService({ subagentWorker: failingWorker });
+    const taskContext = {
+      currentTask: {
+        state: 'slot_filling',
+      },
+      taskSlots: {
+        time_window: { value: '今天晚上', state: 'completed' },
+        location_text: { value: '青岛大学附近', state: 'completed' },
+        activity: { value: '散步', state: 'completed' },
+        candidate_preference: {
+          value: '公开资料带舞蹈相关标签的女生优先',
+          state: 'answered',
+        },
+      },
+      hasSearchContext: true,
+      hasCandidates: false,
+    };
+
+    const result = await service.run({
+      ownerUserId: 7,
+      task: deps.task as never,
+      state: createSocialAgentRouteTurnState('先帮你筛选合适的人。'),
+      message: '今晚找跑步搭子',
+      decision: {
+        task: deps.task,
+        taskContext,
+        route: makeRoute({ intent: 'social_search' }),
+        profile: null,
+        longTermSnapshot: null,
+        brainToolResults: [],
+      } as never,
+      replanAndRefresh: jest.fn(),
+      queueInitialSearchForTask: jest.fn(),
+    });
+
+    expect(failingWorker.run).toHaveBeenCalledWith(
+      expect.objectContaining({
+        agent: 'Match Agent',
+        memoryScope: 'matching.worker_search_turn',
+      }),
+    );
+    expect(deps.searchTurns.handle).toHaveBeenCalledTimes(1);
+    expect(result.loop.finalObservation).toEqual(
+      expect.objectContaining({
+        branch: 'search',
+        handled: true,
+        subagentWorker: true,
+        workerFallback: true,
+        workerFailure: 'queue unavailable',
+      }),
+    );
+    expect(result.subagentHandoffs).toEqual([]);
   });
 
   it('propagates checkpoint resume context into AgentLoop tools and worker handoff', async () => {
@@ -994,7 +1127,7 @@ describe('SocialAgentRouteAgentLoopRunnerService', () => {
     expect(result.subagentHandoffs).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          agent: 'Social Match Agent',
+          agent: 'Match Agent',
           observation: expect.objectContaining({ resumeContext }),
         }),
       ]),
@@ -1194,7 +1327,7 @@ describe('SocialAgentRouteAgentLoopRunnerService', () => {
 
     expect(deps.subagentWorker.run).toHaveBeenCalledWith(
       expect.objectContaining({
-        agent: 'Meet Loop Agent',
+        agent: 'Match Agent',
         memoryScope: 'meet_loop.worker_action_turn',
         signal: controller.signal,
         plannerInput: expect.objectContaining({

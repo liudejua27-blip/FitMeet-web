@@ -12,6 +12,7 @@ import {
   ApprovalStatus,
   ApprovalType,
 } from './entities/agent-approval-request.entity';
+import { AgentTask, AgentTaskStatus } from './entities/agent-task.entity';
 import { AgentConnection } from './entities/agent-connection.entity';
 import {
   AgentActivityLog,
@@ -46,6 +47,7 @@ import { SendMessageDto } from './dto/agent-gateway.dto';
 import { User } from '../users/user.entity';
 import { Follow } from '../friends/follow.entity';
 import { AgentL5RuntimeService } from './agent-l5-runtime.service';
+import { AgentSideEffectLedgerService } from './agent-side-effect-ledger.service';
 
 /**
  * Replays the underlying real action of an approved AgentApprovalRequest.
@@ -116,6 +118,11 @@ export class AgentApprovalDispatcherService {
     private readonly socialRequests?: SocialRequestsService,
     @Optional()
     private readonly l5Runtime?: AgentL5RuntimeService,
+    @Optional()
+    @InjectRepository(AgentTask)
+    private readonly taskRepo?: Repository<AgentTask>,
+    @Optional()
+    private readonly sideEffectLedger?: AgentSideEffectLedgerService,
   ) {}
 
   /**
@@ -174,7 +181,24 @@ export class AgentApprovalDispatcherService {
               payload: { toUserId: dto.toUserId },
             },
           );
-          return { ok: true, result };
+          const conversationId = this.text(
+            (result as { conversationId?: unknown } | null)?.conversationId,
+          );
+          return {
+            ok: true,
+            result: {
+              ...(typeof result === 'object' && result !== null ? result : {}),
+              messagesHref: this.messagesHref(conversationId),
+              publicLoop: {
+                stage: 'messages_handoff',
+                publicIntentId: null,
+                discoverHref: null,
+                publicIntentHref: null,
+                messagesHref: this.messagesHref(conversationId),
+                requiredConfirmation: false,
+              },
+            },
+          };
         }
 
         case ApprovalType.ContactRequest:
@@ -191,6 +215,12 @@ export class AgentApprovalDispatcherService {
             const friend = await this.ensureFollowing(
               approval.userId,
               targetUserId,
+              {
+                approvalId: approval.id,
+                agentTaskId: approval.agentTaskId,
+                actionType: approval.actionType,
+                idempotencyKey: this.text(p.idempotencyKey),
+              },
             );
             const friendRequestId = this.friendRequestId(friend);
             const conversation = await this.openApprovedCandidateConversation(
@@ -237,10 +267,19 @@ export class AgentApprovalDispatcherService {
                 targetUserId,
                 friendRequestId,
                 conversationId: conversation.conversationId,
+                messagesHref: this.messagesHref(conversation.conversationId),
                 openedConversation: conversation.opened,
                 socialRequestId: approval.relatedSocialRequestId,
                 candidateRecordId: approval.relatedCandidateId,
                 idempotencyKey: this.text(p.idempotencyKey),
+                publicLoop: {
+                  stage: 'messages_handoff',
+                  publicIntentId: null,
+                  discoverHref: null,
+                  publicIntentHref: null,
+                  messagesHref: this.messagesHref(conversation.conversationId),
+                  requiredConfirmation: false,
+                },
               },
             };
           }
@@ -346,7 +385,9 @@ export class AgentApprovalDispatcherService {
 
         case ApprovalType.PostPublish: {
           if (!this.socialRequests) {
-            throw new Error('SocialRequestsService unavailable for PostPublish');
+            throw new Error(
+              'SocialRequestsService unavailable for PostPublish',
+            );
           }
           const p = approval.payload;
           const socialRequestId = this.number(
@@ -358,6 +399,11 @@ export class AgentApprovalDispatcherService {
           const intent = await this.socialRequests.syncPublicIntentById(
             socialRequestId,
             approval.userId,
+          );
+          await this.markTaskPublishDispatched(
+            approval,
+            socialRequestId,
+            intent,
           );
           await this.writeLog(
             approval,
@@ -383,7 +429,32 @@ export class AgentApprovalDispatcherService {
               },
             },
           );
-          return { ok: true, result: intent };
+          const publicIntentId = this.text(intent?.id);
+          if (!publicIntentId) {
+            throw new Error('PostPublish did not return publicIntentId');
+          }
+          const discoverHref = `/discover?publicIntentId=${encodeURIComponent(publicIntentId)}`;
+          const publicIntentHref = `/public-intent/${encodeURIComponent(publicIntentId)}`;
+          return {
+            ok: true,
+            result: {
+              ...(typeof intent === 'object' && intent !== null ? intent : {}),
+              socialRequestId,
+              publicIntentId,
+              discoverHref,
+              publicIntentHref,
+              publicLoop: {
+                stage: 'discover_visible',
+                publicIntentId,
+                discoverHref,
+                publicIntentHref,
+                messagesHref: null,
+                requiredConfirmation: false,
+              },
+              status: 'published',
+              synced: true,
+            },
+          };
         }
 
         case ApprovalType.SubmitCompletionProof:
@@ -516,6 +587,60 @@ export class AgentApprovalDispatcherService {
     }
   }
 
+  private async markTaskPublishDispatched(
+    approval: AgentApprovalRequest,
+    socialRequestId: number,
+    intent: unknown,
+  ): Promise<void> {
+    if (!approval.agentTaskId || !this.taskRepo) return;
+    const task = await this.taskRepo.findOne({
+      where: { id: approval.agentTaskId, ownerUserId: approval.userId },
+    });
+    if (!task) return;
+    const publicIntentId = this.text((intent as { id?: unknown } | null)?.id);
+    task.status = AgentTaskStatus.Succeeded;
+    task.statusReason = 'social_request_published_and_synced';
+    task.completedAt = new Date();
+    task.result = {
+      ...(task.result ?? {}),
+      publishSocialRequest: {
+        approvalId: approval.id,
+        socialRequestId,
+        publicIntentId,
+        discoverHref: publicIntentId
+          ? `/discover?publicIntentId=${encodeURIComponent(publicIntentId)}`
+          : `/discover?socialRequestId=${encodeURIComponent(String(socialRequestId))}`,
+        publicIntentHref: publicIntentId
+          ? `/public-intent/${encodeURIComponent(publicIntentId)}`
+          : `/discover?socialRequestId=${encodeURIComponent(String(socialRequestId))}`,
+        status: 'published',
+        synced: true,
+      },
+    };
+    const memory =
+      typeof task.memory === 'object' && task.memory !== null
+        ? { ...(task.memory as Record<string, unknown>) }
+        : {};
+    const shortTerm =
+      typeof memory.shortTerm === 'object' && memory.shortTerm !== null
+        ? { ...(memory.shortTerm as Record<string, unknown>) }
+        : {};
+    memory.shortTerm = {
+      ...shortTerm,
+      publishedSocialRequestId: socialRequestId,
+      publicIntentId,
+      discoverHref: publicIntentId
+        ? `/discover?publicIntentId=${encodeURIComponent(publicIntentId)}`
+        : `/discover?socialRequestId=${encodeURIComponent(String(socialRequestId))}`,
+      publicIntentHref: publicIntentId
+        ? `/public-intent/${encodeURIComponent(publicIntentId)}`
+        : `/discover?socialRequestId=${encodeURIComponent(String(socialRequestId))}`,
+      publishStatus: 'published',
+    };
+    task.memory = memory;
+    await this.taskRepo.save(task);
+  }
+
   private async sendOwnerMessageDirectly(
     approval: AgentApprovalRequest,
     dto: SendMessageDto,
@@ -531,6 +656,19 @@ export class AgentApprovalDispatcherService {
     const { conversationId } = await this.messages.startConversation(
       approval.userId,
       toUserId,
+      {
+        agentConnectionId: approval.agentConnectionId ?? undefined,
+        ownerUserId: approval.userId,
+        actorUserId: approval.userId,
+        agentTaskId: approval.agentTaskId,
+        idempotencyKey: `approval:${approval.id}:start_conversation:${toUserId}`,
+        metadata: {
+          approvalRequestId: approval.id,
+          agentTaskId: approval.agentTaskId,
+          targetUserId: toUserId,
+          source: 'approval_dispatch',
+        },
+      },
     );
     const message = await this.messages.sendMessage(
       conversationId,
@@ -548,6 +686,7 @@ export class AgentApprovalDispatcherService {
           approvalRequestId: approval.id,
           agentTaskId: approval.agentTaskId,
           socialRequestId: dto.socialRequestId,
+          idempotencyKey: `approval:${approval.id}:send_message:${toUserId}`,
         },
       },
     );
@@ -586,14 +725,59 @@ export class AgentApprovalDispatcherService {
     });
   }
 
-  private async ensureFollowing(followerId: number, followingId: number) {
-    const existing = await this.followRepo.findOne({
-      where: { followerId, followingId },
-    });
-    if (existing) return existing;
-    return this.followRepo.save(
-      this.followRepo.create({ followerId, followingId }),
+  private async ensureFollowing(
+    followerId: number,
+    followingId: number,
+    options: {
+      approvalId?: number | null;
+      agentTaskId?: number | null;
+      actionType?: string | null;
+      idempotencyKey?: string | null;
+    } = {},
+  ) {
+    const idempotencyKey =
+      this.text(options.idempotencyKey) ||
+      `approval:${options.approvalId ?? 'none'}:ensure_following:${followerId}:${followingId}`;
+    const run = async () => {
+      const existing = await this.followRepo.findOne({
+        where: { followerId, followingId },
+      });
+      if (existing) return this.followResult(existing);
+      const saved = await this.followRepo.save(
+        this.followRepo.create({ followerId, followingId }),
+      );
+      return this.followResult(saved);
+    };
+    if (!this.sideEffectLedger) return run();
+    const { result } = await this.sideEffectLedger.run(
+      {
+        ownerUserId: followerId,
+        agentTaskId: options.agentTaskId ?? null,
+        actionType: 'ensure_following',
+        idempotencyKey,
+        resourceType: 'follow',
+        resourceId: `${followerId}:${followingId}`,
+        metadata: {
+          approvalId: options.approvalId ?? null,
+          approvalActionType: options.actionType ?? null,
+          followerId,
+          followingId,
+          source: 'approval_dispatch',
+        },
+      },
+      run,
     );
+    return result;
+  }
+
+  private followResult(follow: Follow): Record<string, unknown> {
+    return {
+      id: follow.id,
+      followId: follow.id,
+      followerId: follow.followerId,
+      followingId: follow.followingId,
+      createdAt: follow.createdAt ?? null,
+    };
   }
 
   private async openApprovedCandidateConversation(
@@ -641,6 +825,12 @@ export class AgentApprovalDispatcherService {
       return String(value);
     }
     return this.text(value);
+  }
+
+  private messagesHref(conversationId: string | null): string | null {
+    return conversationId
+      ? `/messages?conversationId=${encodeURIComponent(conversationId)}`
+      : null;
   }
 
   private async advanceSocialRequestAfterMessage(
@@ -696,9 +886,7 @@ export class AgentApprovalDispatcherService {
 
   private number(value: unknown): number | null {
     const numberValue = Number(value);
-    return Number.isFinite(numberValue) && numberValue > 0
-      ? numberValue
-      : null;
+    return Number.isFinite(numberValue) && numberValue > 0 ? numberValue : null;
   }
 
   private async transitionApprovedActivityMeetLoop(

@@ -395,33 +395,36 @@ describe('SocialAgentSessionRestoreService', () => {
 
   it('keeps assistant message source metadata on restored latest result messages', async () => {
     const task = makeTask();
-    task.result = withSocialAgentStoredRun({}, {
-      taskId: task.id,
-      runId: 'sar_restore_fallback',
-      status: 'completed',
-      phase: 'completed',
-      message: '已完成',
-      visibleSteps: [],
-      queuedAt: '2026-06-05T00:00:00.000Z',
-      startedAt: '2026-06-05T00:01:00.000Z',
-      updatedAt: '2026-06-05T00:03:00.000Z',
-      completedAt: '2026-06-05T00:03:00.000Z',
-      failedAt: null,
-      pollAfterMs: 1500,
-      error: null,
-      replan: null,
-      result: {
+    task.result = withSocialAgentStoredRun(
+      {},
+      {
         taskId: task.id,
-        status: task.status,
+        runId: 'sar_restore_fallback',
+        status: 'completed',
+        phase: 'completed',
+        message: '已完成',
         visibleSteps: [],
-        assistantMessage: '我会先保守保留这次处理结果。',
-        assistantMessageSource: 'fallback',
-        socialRequestDraft: null,
-        candidates: [],
-        approvalRequiredActions: [],
-        events: [],
+        queuedAt: '2026-06-05T00:00:00.000Z',
+        startedAt: '2026-06-05T00:01:00.000Z',
+        updatedAt: '2026-06-05T00:03:00.000Z',
+        completedAt: '2026-06-05T00:03:00.000Z',
+        failedAt: null,
+        pollAfterMs: 1500,
+        error: null,
+        replan: null,
+        result: {
+          taskId: task.id,
+          status: task.status,
+          visibleSteps: [],
+          assistantMessage: '我会先保守保留这次处理结果。',
+          assistantMessageSource: 'fallback',
+          socialRequestDraft: null,
+          candidates: [],
+          approvalRequiredActions: [],
+          events: [],
+        },
       },
-    });
+    );
     const { service } = makeHarness({ approvals: [], events: [], task });
 
     const snapshot = await service.buildSessionSnapshot({

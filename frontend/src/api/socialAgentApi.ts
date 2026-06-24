@@ -15,14 +15,19 @@ export type UserFacingAgentLightStatus =
   | '正在理解你的需求'
   | '正在整理回复'
   | '已整理回复'
-  | '正在结合你的 Life Graph'
+  | '正在结合你的长期偏好'
+  | '正在读取你的偏好'
   | '正在筛选合适的人'
+  | '正在筛选公开可发现的人'
   | '正在排除时间不合适的人'
+  | '正在整理合适机会'
   | '正在检查安全边界'
   | '正在生成开场白'
   | '正在等待你确认'
   | '正在创建约练计划'
-  | '正在更新你的 Life Graph';
+  | '正在整理约练方案'
+  | '正在整理资料更新'
+  | '正在整理资料变化建议';
 
 export interface UserFacingAgentSafeStatus {
   blocked: boolean;
@@ -37,10 +42,15 @@ export interface UserFacingAgentPendingConfirmation {
   actionType: string;
   summary: string;
   riskLevel: string;
+  payload?: Record<string, unknown>;
   expiresAt: string | null;
 }
 
-export type UserFacingAgentAssistantMessageSource = 'llm' | 'fallback';
+export type UserFacingAgentAssistantMessageSource =
+  | 'llm'
+  | 'fallback'
+  | 'deterministic_route'
+  | 'deterministic_action';
 
 export interface UserFacingAgentRecoveryNotice {
   kind: 'failed' | 'timeout' | 'interrupted' | 'checkpoint';
@@ -48,6 +58,45 @@ export interface UserFacingAgentRecoveryNotice {
   message: string;
   retryable: boolean;
   source: 'fallback_suppressed' | 'checkpoint_recovery' | 'stream_error';
+}
+
+export type UserFacingAgentPublicLoopStage =
+  | 'profile_completion'
+  | 'opportunity_card_generated'
+  | 'publish_confirmation_required'
+  | 'discover_visible'
+  | 'candidates_recommended'
+  | 'contact_confirmation_required'
+  | 'messages_handoff'
+  | 'dismissed';
+
+export interface UserFacingAgentPublicLoop {
+  stage: UserFacingAgentPublicLoopStage;
+  publicIntentId: string | null;
+  discoverHref: string | null;
+  publicIntentHref: string | null;
+  messagesHref: string | null;
+  requiredConfirmation: boolean;
+}
+
+export type UserFacingAgentWorkflowState =
+  | 'PROFILE_REQUIRED'
+  | 'INTENT_DRAFT'
+  | 'PUBLISH_CONFIRMATION_REQUIRED'
+  | 'DISCOVER_VISIBLE'
+  | 'CANDIDATES_READY'
+  | 'CONTACT_CONFIRMATION_REQUIRED'
+  | 'CONVERSATION_ACTIVE'
+  | 'DISMISSED'
+  | 'RECOVERY'
+  | 'IDLE';
+
+export interface UserFacingAgentWorkflow {
+  workflowId: string | null;
+  state: UserFacingAgentWorkflowState;
+  requiredAction: string | null;
+  retryable: boolean;
+  recoveryMessage: string | null;
 }
 
 export type FitMeetAgentLoopStage =
@@ -75,7 +124,12 @@ export type FitMeetAgentSchemaAction =
   | 'opener.confirm_send'
   | 'opener.regenerate'
   | 'opener.reject'
+  | 'publish_to_discover'
+  | 'social_intent.decline_publish'
+  | 'social_intent.dismiss'
+  | 'social_intent.retry_publish'
   | 'activity.confirm_create'
+  | 'activity.skip_publish'
   | 'activity.modify_time'
   | 'activity.modify_location'
   | 'activity.check_in'
@@ -100,12 +154,12 @@ export interface UserFacingAgentCheckpointRecoveryAction {
   requiresApprovalDecision?: boolean;
 }
 
-export interface UserFacingAgentCheckpointStepAction
-  extends UserFacingAgentCheckpointRecoveryAction {
+export interface UserFacingAgentCheckpointStepAction extends UserFacingAgentCheckpointRecoveryAction {
   stepId: string;
 }
 
 export interface UserFacingAgentResponse {
+  taskId?: number | null;
   assistantMessage: string;
   assistantMessageSource?: UserFacingAgentAssistantMessageSource;
   recoveryNotice?: UserFacingAgentRecoveryNotice;
@@ -113,51 +167,10 @@ export interface UserFacingAgentResponse {
   cards: FitMeetAlphaCard[];
   safeStatus: UserFacingAgentSafeStatus;
   pendingConfirmations: UserFacingAgentPendingConfirmation[];
+  publicLoop?: UserFacingAgentPublicLoop;
+  workflow?: UserFacingAgentWorkflow;
   permissionMode: SocialAgentPermissionMode;
   lifeGraphWritebackProposal?: Record<string, unknown>;
-  runtime?: {
-    checkpointId?: number | null;
-    checkpointType?: string | null;
-    canResume?: boolean;
-    canReplay?: boolean;
-    canFork?: boolean;
-    parentCheckpointId?: number | null;
-    threadId?: string | null;
-    idempotencyKey?: string | null;
-    checkpointAction?: UserFacingAgentCheckpointAction | null;
-    interrupt?: {
-      kind?: string | null;
-      threadId?: string | null;
-      idempotencyKey?: string | null;
-      resumeAction?: UserFacingAgentCheckpointAction | null;
-      recoveryActions?: UserFacingAgentCheckpointRecoveryAction[];
-      stepActions?: UserFacingAgentCheckpointStepAction[];
-      approvalEndpoint?: string | null;
-      rejectionEndpoint?: string | null;
-    } | null;
-    resumeCursor?: {
-      threadId?: string | null;
-      checkpointId?: number | string | null;
-      parentCheckpointId?: number | string | null;
-      action?: 'resume' | 'retry' | 'replay' | 'fork' | null;
-      stepId?: string | null;
-    } | null;
-    sourceStep?: {
-      stepId: string;
-      label: string | null;
-      toolName: string | null;
-    } | null;
-    stepScope?: {
-      mode: 'full_checkpoint' | 'through_step';
-      stepCount: number;
-      sourceCheckpointId: number | null;
-    } | null;
-    sideEffectPolicy?: {
-      idempotencyKey: string;
-      sideEffectsBeforeResume: 'idempotent_only';
-      duplicatePolicy: 'reuse_idempotency_key';
-    } | null;
-  };
 }
 
 export interface SocialAgentRunNextResponse {
@@ -194,9 +207,7 @@ export interface UserFacingAgentSessionSnapshot {
 
 export interface SocialAgentProfileGateStatus {
   passed: boolean;
-  missing: Array<
-    'city' | 'activity' | 'availability' | 'boundary' | 'publicAuthorization'
-  >;
+  missing: Array<'city' | 'activity' | 'availability' | 'boundary' | 'publicAuthorization'>;
   assistantMessage: string;
   profileCompleteness: number | null;
   readinessLevel: string | null;
@@ -233,13 +244,10 @@ export interface FitMeetAgentThreadDetail {
   session: UserFacingAgentSessionSnapshot;
 }
 
-export type SocialAgentReminderTopic =
-  | 'friendship'
-  | 'fitness_partner'
-  | 'activity'
-  | 'life_graph';
+export type SocialAgentReminderTopic = 'friendship' | 'fitness_partner' | 'activity' | 'life_graph';
 
 export type SocialAgentReminderScene =
+  | 'new_match'
   | 'weekend_opportunities'
   | 'past_social_goal'
   | 'activity_follow_up'
@@ -250,7 +258,7 @@ export interface SocialAgentReminderPreference {
   userId: number;
   enabled: boolean;
   topics: SocialAgentReminderTopic[];
-  frequency: 'daily' | 'weekly' | 'manual';
+  frequency: 'realtime' | 'daily' | 'weekly' | 'manual';
   quietStart: string;
   quietEnd: string;
   tone: 'gentle' | 'direct' | 'quiet';
@@ -310,9 +318,12 @@ export type FitMeetAlphaCardType =
   | 'activity_plan'
   | 'activity_status'
   | 'checkin_card'
+  | 'meet_loop_timeline'
   | 'review_card'
   | 'audit_update'
-  | 'safety_boundary';
+  | 'safety_boundary'
+  | 'profile_completion'
+  | 'candidate_empty_state';
 
 export interface FitMeetAlphaCardAction {
   id: string;
@@ -349,6 +360,8 @@ export interface FitMeetAlphaCard {
   schemaType?:
     | 'social_match.candidate'
     | 'social_match.activity'
+    | 'social_match.empty'
+    | 'profile.completion'
     | 'life_graph.diff'
     | 'meet_loop.timeline'
     | 'safety.approval'
@@ -373,6 +386,9 @@ export type UserFacingAgentStreamEvent =
   | {
       type: 'assistant_delta';
       lifecycle?: string;
+      runId?: string;
+      taskId?: number | null;
+      threadId?: string | number | null;
       messageId?: string;
       delta: string;
       source?: 'llm' | 'fallback';
@@ -380,6 +396,9 @@ export type UserFacingAgentStreamEvent =
   | {
       type: 'assistant_done';
       lifecycle?: string;
+      runId?: string;
+      taskId?: number | null;
+      threadId?: string | number | null;
       messageId?: string;
       source?: 'llm' | 'fallback';
     }
@@ -597,8 +616,40 @@ type MessageFeedbackInput = {
   reason?: string | null;
   taskId?: number | null;
   runId?: string | null;
-  traceId?: string | null;
   source?: string | null;
+  metadata?: Record<string, unknown>;
+};
+
+export type SocialAgentUserInterestEventType =
+  | 'view_profile'
+  | 'save_candidate'
+  | 'skip_candidate'
+  | 'more_like_this'
+  | 'generate_opener'
+  | 'send_invite'
+  | 'invite_accepted'
+  | 'connect_candidate'
+  | 'discover_click'
+  | 'activity_complete'
+  | 'review_positive'
+  | 'review_negative'
+  | 'chat_topic';
+
+export type SocialAgentUserInterestEventInput = {
+  eventType: SocialAgentUserInterestEventType;
+  taskId?: number | null;
+  targetUserId?: number | null;
+  candidateRecordId?: number | null;
+  socialRequestId?: number | null;
+  activityId?: number | null;
+  weight?: number | null;
+  activityTags?: string[] | null;
+  candidatePreferenceTags?: string[] | null;
+  city?: string | null;
+  locationText?: string | null;
+  timeWindow?: string | null;
+  source?: string | null;
+  dedupeKey?: string | null;
   metadata?: Record<string, unknown>;
 };
 
@@ -770,6 +821,17 @@ export const socialAgentApi = {
       })
       .then(sanitizeSocialAgentResponse),
 
+  recordInterestEvent: (data: SocialAgentUserInterestEventInput) =>
+    api
+      .requestProtected<{ ok: true; recorded: boolean; eventId: number | null }>(
+        fitMeetCoreEndpoints.socialAgentChat.interestEvents,
+        {
+          method: 'POST',
+          body: JSON.stringify(data),
+        },
+      )
+      .then(sanitizeSocialAgentResponse),
+
   getReminderPreference: () =>
     api
       .requestProtected<SocialAgentReminderPreference>(
@@ -790,9 +852,9 @@ export const socialAgentApi = {
 
   listReminders: (limit = 20) =>
     api
-      .requestProtected<SocialAgentReminder[]>(
-        `${fitMeetCoreEndpoints.socialAgentReminders.list}?limit=${encodeURIComponent(String(limit))}`,
-      )
+      .requestProtected<
+        SocialAgentReminder[]
+      >(`${fitMeetCoreEndpoints.socialAgentReminders.list}?limit=${encodeURIComponent(String(limit))}`)
       .then(sanitizeSocialAgentResponse),
 
   runReminderOnce: (force = false) =>
@@ -819,10 +881,10 @@ export const socialAgentApi = {
 
   openReminder: (id: number | string) =>
     api
-      .requestProtected<{ ok: boolean; reminder: SocialAgentReminder | null }>(
-        fitMeetCoreEndpoints.socialAgentReminders.open(id),
-        { method: 'POST' },
-      )
+      .requestProtected<{
+        ok: boolean;
+        reminder: SocialAgentReminder | null;
+      }>(fitMeetCoreEndpoints.socialAgentReminders.open(id), { method: 'POST' })
       .then(sanitizeSocialAgentResponse),
 
   dismissReminder: (id: number | string) =>
@@ -831,10 +893,7 @@ export const socialAgentApi = {
         ok: boolean;
         reminder: SocialAgentReminder | null;
         preference?: SocialAgentReminderPreference;
-      }>(
-        fitMeetCoreEndpoints.socialAgentReminders.dismiss(id),
-        { method: 'POST' },
-      )
+      }>(fitMeetCoreEndpoints.socialAgentReminders.dismiss(id), { method: 'POST' })
       .then(sanitizeSocialAgentResponse),
 
   runTaskNext: (taskId: number) =>
@@ -854,9 +913,7 @@ export const socialAgentApi = {
     } = {},
   ) =>
     api
-      .requestProtected<SocialCodexReplayPackage>(
-        socialAgentTaskReplayPath(taskId, input),
-      )
+      .requestProtected<SocialCodexReplayPackage>(socialAgentTaskReplayPath(taskId, input))
       .then(sanitizeSocialAgentResponse),
 
   getTaskEventEval: (taskId: number) =>
@@ -897,8 +954,7 @@ async function runCheckpointStreamWithPrepare(
 }
 
 function checkpointStreamEndpoint(data: CheckpointStreamInput): string {
-  const stepId =
-    typeof data.stepId === 'string' && data.stepId.trim() ? data.stepId.trim() : null;
+  const stepId = typeof data.stepId === 'string' && data.stepId.trim() ? data.stepId.trim() : null;
   return stepId
     ? data.action === 'fork'
       ? fitMeetCoreEndpoints.socialAgentChat.checkpointStepForkStream(data.checkpointId, stepId)
@@ -977,6 +1033,7 @@ async function runUserFacingAgentStreamAt(
   const decoder = new TextDecoder();
   let buffer = '';
   let finalResult: UserFacingAgentResponse | null = null;
+  let completedEvent: (SocialAgentEventV2 & { type: 'run.completed' }) | null = null;
   try {
     while (true) {
       const { done, value } = await reader.read();
@@ -991,6 +1048,7 @@ async function runUserFacingAgentStreamAt(
         const sanitized = sanitizeSocialAgentResponse(event);
         onEvent(sanitized);
         if (sanitized.type === 'result') finalResult = sanitized.result;
+        if (isSocialAgentV2RunCompleted(sanitized)) completedEvent = sanitized;
         if (sanitized.type === 'error') throw streamEventError(sanitized);
         if (isSocialAgentV2RunFailed(sanitized)) throw socialAgentV2RunFailedError(sanitized);
       }
@@ -1002,13 +1060,17 @@ async function runUserFacingAgentStreamAt(
         const sanitized = sanitizeSocialAgentResponse(event);
         onEvent(sanitized);
         if (sanitized.type === 'result') finalResult = sanitized.result;
+        if (isSocialAgentV2RunCompleted(sanitized)) completedEvent = sanitized;
         if (sanitized.type === 'error') throw streamEventError(sanitized);
         if (isSocialAgentV2RunFailed(sanitized)) throw socialAgentV2RunFailedError(sanitized);
       }
     }
 
+    if (!finalResult && completedEvent) {
+      finalResult = userFacingResponseFromRunCompletedEvent(completedEvent);
+    }
     if (!finalResult) {
-      throw new Error('FitMeet Agent 没有返回最终结果，请稍后再试。');
+      throw missingFinalResultError();
     }
     return finalResult;
   } finally {
@@ -1018,6 +1080,26 @@ async function runUserFacingAgentStreamAt(
       // The stream may already be closed or aborted.
     }
   }
+}
+
+function missingFinalResultError() {
+  const recoveryNotice: UserFacingAgentRecoveryNotice = {
+    kind: 'interrupted',
+    title: '这段需求还在',
+    message: '可以继续处理，我会从这里接着处理；也可以补充新的要求。',
+    retryable: true,
+    source: 'stream_error',
+  };
+  const error = new Error(recoveryNotice.message) as Error & {
+    code?: string;
+    retryable?: boolean;
+    recoveryNotice?: UserFacingAgentRecoveryNotice;
+  };
+  error.name = 'AGENT_STREAM_INCOMPLETE';
+  error.code = 'AGENT_STREAM_INCOMPLETE';
+  error.retryable = true;
+  error.recoveryNotice = recoveryNotice;
+  return error;
 }
 
 function streamEventError(event: Extract<UserFacingAgentStreamEvent, { type: 'error' }>) {
@@ -1033,6 +1115,16 @@ function streamEventError(event: Extract<UserFacingAgentStreamEvent, { type: 'er
   return error;
 }
 
+function isSocialAgentV2RunCompleted(
+  event: UserFacingAgentStreamEvent,
+): event is SocialAgentEventV2 & { type: 'run.completed' } {
+  return (
+    event.type === 'run.completed' &&
+    typeof event.eventId === 'string' &&
+    typeof event.seq === 'number'
+  );
+}
+
 function isSocialAgentV2RunFailed(
   event: UserFacingAgentStreamEvent,
 ): event is SocialAgentEventV2 & { type: 'run.failed' } {
@@ -1043,12 +1135,53 @@ function isSocialAgentV2RunFailed(
   );
 }
 
-function socialAgentV2RunFailedError(event: SocialAgentEventV2 & { type: 'run.failed' }) {
-  const title = textFromUnknown(event.display?.title) ?? '这次处理没有完成';
-  const message =
+function userFacingResponseFromRunCompletedEvent(
+  event: SocialAgentEventV2 & { type: 'run.completed' },
+): UserFacingAgentResponse {
+  const summary = recordFromUnknown(event.payload?.summary);
+  const assistantMessage =
+    textFromUnknown(event.payload?.assistantMessage) ??
+    textFromUnknown(summary?.detail) ??
     textFromUnknown(event.display?.detail) ??
-    textFromUnknown(event.payload?.message) ??
-    '刚才连接中断了。当前需求还在，可以重试或继续补充。';
+    textFromUnknown(summary?.title) ??
+    textFromUnknown(event.display?.title) ??
+    '我整理好了，可以继续追问或让我接着处理下一步。';
+  const lightStatus = event.display?.state === 'waiting' ? '正在等待你确认' : '已整理回复';
+  return {
+    assistantMessage,
+    assistantMessageSource: 'llm',
+    lightStatus,
+    cards: [],
+    safeStatus: {
+      blocked: false,
+      level: 'low',
+      boundaryNotes: [],
+      requiredConfirmations: [],
+    },
+    pendingConfirmations: [],
+    permissionMode: 'assist',
+    workflow: {
+      workflowId:
+        textFromUnknown(event.threadId) ??
+        textFromUnknown(event.runId) ??
+        textFromUnknown(event.messageId) ??
+        null,
+      state: event.display?.state === 'waiting' ? 'PUBLISH_CONFIRMATION_REQUIRED' : 'IDLE',
+      requiredAction: null,
+      retryable: false,
+      recoveryMessage: null,
+    },
+  };
+}
+
+function socialAgentV2RunFailedError(event: SocialAgentEventV2 & { type: 'run.failed' }) {
+  const title = recoveryTitleFromRunFailedEvent(event);
+  const explicitMessage =
+    textFromUnknown(event.display?.detail) ?? textFromUnknown(event.payload?.message);
+  const message =
+    explicitMessage && !isGenericRunFailedMessage(explicitMessage)
+      ? explicitMessage
+      : '刚才连接中断了。当前需求还在，可以重试或继续补充。';
   const code = textFromUnknown(event.payload?.code) ?? 'AGENT_RUN_FAILED';
   const recoveryNotice = recoveryNoticeFromRunFailedEvent(event, title, message);
   const error = new Error(message) as Error & {
@@ -1063,6 +1196,55 @@ function socialAgentV2RunFailedError(event: SocialAgentEventV2 & { type: 'run.fa
   return error;
 }
 
+function recoveryTitleFromRunFailedEvent(
+  event: SocialAgentEventV2 & { type: 'run.failed' },
+): string {
+  const rawNotice = recordFromUnknown(event.payload?.recoveryNotice);
+  const explicit = [
+    textFromUnknown(event.payload?.recoveryTitle),
+    textFromUnknown(rawNotice?.title),
+    textFromUnknown(event.display?.title),
+  ].find((value): value is string => Boolean(value && !isGenericRunFailedTitle(value)));
+  if (explicit) {
+    return explicit;
+  }
+  return event.display?.state === 'failed' ? '这段需求还在' : '当前进度可以继续';
+}
+
+function isGenericRunFailedTitle(value: string): boolean {
+  return genericRunFailedTitlePattern().test(value.trim());
+}
+
+function isGenericRunFailedMessage(value: string): boolean {
+  return genericRunFailedMessagePattern().test(value.trim());
+}
+
+function genericRunFailedTitlePattern() {
+  const phrases = [
+    ['这次', '处理', '没有', '完成'],
+    ['这一步', '没有', '完成'],
+    ['这次', '没有', '顺利', '完成'],
+    ['暂时', '没有', '顺利', '完成'],
+    ['run failed'],
+    ['处理', '失败'],
+  ].map((parts) => parts.join(''));
+  return new RegExp(phrases.join('|'), 'i');
+}
+
+function genericRunFailedMessagePattern() {
+  const phrases = [
+    ['这次', '处理', '没有', '完成'],
+    ['这一步', '没有', '完成'],
+    ['暂时', '没有', '顺利', '完成'],
+    ['保留', '当前', '对话'],
+    ['稍后', '再试'],
+    ['可以', '稍后', '再试'],
+    ['服务', '暂时', '不可用'],
+    ['FitMeet Agent'],
+  ].map((parts) => parts.join(''));
+  return new RegExp(phrases.join('|'), 'i');
+}
+
 function recoveryNoticeFromRunFailedEvent(
   event: SocialAgentEventV2 & { type: 'run.failed' },
   fallbackTitle: string,
@@ -1070,8 +1252,14 @@ function recoveryNoticeFromRunFailedEvent(
 ): UserFacingAgentRecoveryNotice {
   const rawNotice = recordFromUnknown(event.payload?.recoveryNotice);
   const kind = recoveryKindFromUnknown(rawNotice?.kind ?? event.payload?.kind);
-  const title = textFromUnknown(rawNotice?.title) ?? fallbackTitle;
-  const message = textFromUnknown(rawNotice?.message) ?? fallbackMessage;
+  const explicitTitle = textFromUnknown(rawNotice?.title);
+  const explicitMessage = textFromUnknown(rawNotice?.message);
+  const title =
+    explicitTitle && !isGenericRunFailedTitle(explicitTitle) ? explicitTitle : fallbackTitle;
+  const message =
+    explicitMessage && !isGenericRunFailedMessage(explicitMessage)
+      ? explicitMessage
+      : fallbackMessage;
   return {
     kind,
     title,

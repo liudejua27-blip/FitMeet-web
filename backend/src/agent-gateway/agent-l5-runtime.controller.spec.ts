@@ -16,6 +16,16 @@ describe('AgentL5RuntimeController', () => {
       }),
       messageFeedback: [],
       workerJobs: [],
+      socialAgentMetrics: expect.objectContaining({
+        cacheEfficiencySummary: expect.objectContaining({
+          combined: expect.objectContaining({
+            hitRate: 0,
+            savedApproxPromptChars: 0,
+          }),
+        }),
+        llmOutputCacheSummary: {},
+        toolResultCacheSummary: {},
+      }),
     });
   });
 });
@@ -37,5 +47,34 @@ function makeController() {
       applyRetentionPolicy: jest.fn().mockResolvedValue({}),
     } as never,
     { listRecent: jest.fn().mockResolvedValue([]) } as never,
+    {
+      snapshot: jest.fn().mockReturnValue({
+        cacheEfficiencySummary: {
+          toolResult: {
+            hits: 0,
+            misses: 0,
+            total: 0,
+            hitRate: 0,
+            savedApproxPromptChars: 0,
+          },
+          llmOutput: {
+            hits: 0,
+            misses: 0,
+            total: 0,
+            hitRate: 0,
+            savedApproxPromptChars: 0,
+          },
+          combined: {
+            hits: 0,
+            misses: 0,
+            total: 0,
+            hitRate: 0,
+            savedApproxPromptChars: 0,
+          },
+        },
+        llmOutputCacheSummary: {},
+        toolResultCacheSummary: {},
+      }),
+    } as never,
   );
 }

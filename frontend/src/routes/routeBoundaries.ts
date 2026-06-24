@@ -1,52 +1,40 @@
 export const publicWebsiteRoutes = [
   '/',
-  '/legacy-home',
   '/discover',
   '/features',
-  '/ecosystem',
   '/download',
-  '/download-app',
-  '/app',
   '/demo',
-  '/developers',
-  '/developers/social-skills',
   '/safety',
   '/about',
-  '/contact',
-  '/life-graph',
-  '/profile/life-graph',
+  '/admin/safety',
   '/admin/waitlist',
   '/admin/agent-l5',
   '/login',
 ] as const;
 
-export const agentWorkspaceRoutePrefixes = ['/agent'] as const;
-export const agentOnboardingRoutePrefixes = ['/agent-connect'] as const;
+export const agentWorkspaceRoutes = ['/agent', '/agent/profile'] as const;
+export const agentWorkspaceRoutePrefixes = ['/agent/chat'] as const;
+export const agentOnboardingRoutePrefixes = [] as const;
 
-export const socialFeedRoutePrefixes = [
-  '/activity',
-  '/social-requests',
-  '/messages',
-  '/notifications',
-  '/profile',
-  '/user',
-  '/topic',
-] as const;
+export const socialInteractionRoutePrefixes = ['/messages', '/user', '/public-intent'] as const;
 
 export function isPublicWebsiteRoute(pathname: string): boolean {
   return publicWebsiteRoutes.includes(pathname as (typeof publicWebsiteRoutes)[number]);
 }
 
 export function isAgentWorkspaceRoute(pathname: string): boolean {
-  return pathMatchesPrefixes(pathname, agentWorkspaceRoutePrefixes);
+  return (
+    agentWorkspaceRoutes.includes(pathname as (typeof agentWorkspaceRoutes)[number]) ||
+    pathMatchesPrefixes(pathname, agentWorkspaceRoutePrefixes)
+  );
 }
 
 export function isAgentOnboardingRoute(pathname: string): boolean {
   return pathMatchesPrefixes(pathname, agentOnboardingRoutePrefixes);
 }
 
-export function isSocialFeedRoute(pathname: string): boolean {
-  return pathMatchesPrefixes(pathname, socialFeedRoutePrefixes);
+export function isSocialInteractionRoute(pathname: string): boolean {
+  return pathMatchesPrefixes(pathname, socialInteractionRoutePrefixes);
 }
 
 export function usesFullBleedExperience(pathname: string): boolean {

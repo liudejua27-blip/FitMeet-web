@@ -11,10 +11,10 @@ describe('AgentQualityEvaluatorService', () => {
   it('passes a natural recommendation result with explanation, safety and confirmation gates', () => {
     const report = service.evaluate({
       assistantMessage:
-        '我先结合你的 Life Graph 看了时间、地点和运动强度。小林比较适合从一次轻松慢跑开始。',
+        '我先结合你的长期偏好看了时间、地点和运动强度。小林比较适合从一次轻松慢跑开始。',
       visibleSteps: [
         { id: 'understand', label: '正在理解你的需求', status: 'done' },
-        { id: 'match', label: '正在筛选合适的人', status: 'done' },
+        { id: 'match', label: '正在筛选公开可发现的人', status: 'done' },
         { id: 'confirm', label: '正在等待你确认', status: 'running' },
       ],
       structuredIntent: {

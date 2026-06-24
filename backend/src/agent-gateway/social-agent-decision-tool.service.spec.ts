@@ -69,7 +69,7 @@ function makeService() {
 }
 
 describe('SocialAgentDecisionToolService', () => {
-  it('normalizes model decisions into memory, short-term, and inbox patches', async () => {
+  it('normalizes model decisions into memory, short-term, and message event patches', async () => {
     const { service, toolJsonModel, l5Runtime } = makeService();
     toolJsonModel.callJson.mockResolvedValue({
       nextAction: 'reply_message',
@@ -143,7 +143,7 @@ describe('SocialAgentDecisionToolService', () => {
         status: 'done',
       },
     });
-    expect(result.inboxEvent).toMatchObject({
+    expect(result.messageEvent).toMatchObject({
       eventType: 'social_agent.next_action.decided',
       input: {
         conversationId: 'conv_1',
@@ -212,7 +212,7 @@ describe('SocialAgentDecisionToolService', () => {
         targetUserId: 2,
       },
     });
-    expect(result.inboxEvent.input.metadata).toMatchObject({
+    expect(result.messageEvent.input.metadata).toMatchObject({
       summary: {
         source: 'fallback',
         intent: 'ask_question',
@@ -221,7 +221,9 @@ describe('SocialAgentDecisionToolService', () => {
       lifeGraphWritebackProposal: result.output.lifeGraphWritebackProposal,
     });
     expect(
-      JSON.stringify(result.inboxEvent.input.metadata?.lifeGraphWritebackProposal),
+      JSON.stringify(
+        result.messageEvent.input.metadata?.lifeGraphWritebackProposal,
+      ),
     ).not.toContain('Where should we meet?');
     expect(l5Runtime.transitionMeetLoop).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -289,7 +291,7 @@ describe('SocialAgentDecisionToolService', () => {
         }),
       ]),
     });
-    expect(result.inboxEvent.input.metadata).toMatchObject({
+    expect(result.messageEvent.input.metadata).toMatchObject({
       summary: {
         intent: 'decline',
         summary: '对方拒绝。',

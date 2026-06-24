@@ -1,6 +1,7 @@
 import {
   buildPublicSocialCandidates,
   parsePublicSocialTimeWindow,
+  serializePublicSocialCandidates,
 } from './public-social-candidate.presenter';
 import { CreateSocialRequestDto } from './dto/agent-gateway.dto';
 import { UserPreference } from './entities/user-preference.entity';
@@ -48,7 +49,6 @@ function user(overrides: Partial<User> = {}) {
     trainingCount: 0,
     caloriesBurned: 0,
     bestRecords: [],
-    isCoach: false,
     trustScore: 0,
     socialTrustCount: 0,
     createdAt: new Date('2026-01-01T00:00:00.000Z'),
@@ -135,6 +135,40 @@ describe('public social candidate presenter', () => {
     ]);
   });
 
+  it('filters internal fixture candidates before they reach public APIs', () => {
+    const candidates = buildPublicSocialCandidates({
+      users: [
+        user({
+          id: 1,
+          email: 'agent-smoke-owner@ourfitmeet.cn',
+          name: 'Agent Smoke Owner',
+          bio: 'agent_api_smoke account',
+        }),
+        user({
+          id: 2,
+          name: 'Mock Candidate',
+          interestTags: ['running', 'mock'],
+        }),
+        user({
+          id: 3,
+          name: '林一舟',
+          bio: '周末跑步，也喜欢轻松聊天',
+          interestTags: ['running', 'fitness'],
+        }),
+      ],
+      preferencesByUserId: new Map(),
+      dto: request({ limit: 5 }),
+      ownerLat: 36.06,
+      ownerLng: 120.38,
+      radiusKm: 5,
+      city: '青岛',
+      nowMs,
+    });
+
+    expect(candidates.map((candidate) => candidate.profile.id)).toEqual([3]);
+    expect(JSON.stringify(candidates)).not.toMatch(/smoke|mock|fixture|seed/i);
+  });
+
   it('uses city fallback and stale-location penalty consistently', () => {
     const candidates = buildPublicSocialCandidates({
       users: [
@@ -196,5 +230,37 @@ describe('public social candidate presenter', () => {
       'evening',
       'weekday',
     ]);
+  });
+
+  it('serializes public candidates without raw scores, reason tags, or action ids', () => {
+    const candidates = buildPublicSocialCandidates({
+      users: [
+        user({
+          id: 1,
+          name: '林一舟',
+          bio: '周末跑步，也喜欢轻松聊天',
+          interestTags: ['running', 'fitness'],
+        }),
+      ],
+      preferencesByUserId: new Map(),
+      dto: request({ timePreference: '周末上午', limit: 1 }),
+      ownerLat: 36.06,
+      ownerLng: 120.38,
+      radiusKm: 5,
+      city: '青岛',
+      nowMs,
+    });
+
+    const publicCandidates = serializePublicSocialCandidates(candidates);
+
+    expect(publicCandidates).toHaveLength(1);
+    expect(publicCandidates[0]).toMatchObject({
+      profile: expect.objectContaining({ id: 1, name: '林一舟' }),
+      matchLevel: '匹配度：很高',
+      reasonText: expect.any(String),
+    });
+    expect(publicCandidates[0]).not.toHaveProperty('score');
+    expect(publicCandidates[0]).not.toHaveProperty('reasonTags');
+    expect(publicCandidates[0]).not.toHaveProperty('nextAction');
   });
 });

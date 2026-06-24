@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/require-await */
 import { LifeGraphController } from './life-graph.controller';
 import {
   LifeGraphAuditAction,

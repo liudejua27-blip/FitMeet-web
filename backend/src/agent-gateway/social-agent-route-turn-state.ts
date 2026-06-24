@@ -5,6 +5,7 @@ import type {
   SocialAgentAsyncRunSnapshot,
   SocialAgentIntentRouteResult,
 } from './social-agent-chat.types';
+import type { FitMeetAlphaCard } from './fitmeet-alpha-agent.types';
 import type { AgentLoopRun, SubagentHandoffResult } from './agent-loop.types';
 
 export type SocialAgentRouteTurnState = {
@@ -15,6 +16,7 @@ export type SocialAgentRouteTurnState = {
   assistantMessage: string;
   assistantMessageSource?: SocialAgentAssistantMessageSource;
   activityResults: SocialAgentActivityResult[];
+  cards: FitMeetAlphaCard[];
   profileUpdateProposal: LifeGraphProposalDto | null;
   assistantStreamed: boolean;
   agentLoop: AgentLoopRun | null;
@@ -27,13 +29,16 @@ type ConversationTurnPatch = {
   savedContext: boolean;
   profileUpdated: boolean;
   profileUpdateProposal: LifeGraphProposalDto | null;
+  cards?: FitMeetAlphaCard[];
   assistantStreamed?: boolean;
 };
 
 type SearchTurnPatch = {
   assistantMessage?: string;
+  assistantMessageSource?: SocialAgentAssistantMessageSource;
   savedContext: boolean;
   activityResults: SocialAgentActivityResult[];
+  cards?: FitMeetAlphaCard[];
   queuedRun: SocialAgentAsyncRunSnapshot | null;
   runMode: SocialAgentIntentRouteResult['runMode'];
 };
@@ -49,6 +54,7 @@ export function createSocialAgentRouteTurnState(
     assistantMessage,
     assistantMessageSource: 'fallback',
     activityResults: [],
+    cards: [],
     profileUpdateProposal: null,
     assistantStreamed: false,
     agentLoop: null,
@@ -68,6 +74,7 @@ export function applyConversationTurnState(
     savedContext: patch.savedContext || state.savedContext,
     profileUpdated: patch.profileUpdated,
     profileUpdateProposal: patch.profileUpdateProposal,
+    cards: patch.cards ?? state.cards,
     assistantStreamed: patch.assistantStreamed ?? state.assistantStreamed,
   };
 }
@@ -81,8 +88,11 @@ export function applySearchTurnState(
   return {
     ...state,
     assistantMessage: patch.assistantMessage ?? state.assistantMessage,
+    assistantMessageSource:
+      patch.assistantMessageSource ?? state.assistantMessageSource,
     savedContext: patch.savedContext || state.savedContext,
     activityResults: patch.activityResults,
+    cards: patch.cards ?? state.cards,
     queuedRun: patch.queuedRun,
     runMode: patch.runMode,
   };

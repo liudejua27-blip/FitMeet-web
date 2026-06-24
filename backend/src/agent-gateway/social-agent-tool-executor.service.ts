@@ -61,7 +61,7 @@ import { SocialAgentToolInputParserService } from './social-agent-tool-input-par
 import { SocialAgentPaymentIntentToolService } from './social-agent-payment-intent-tool.service';
 import { SocialAgentMessageToolService } from './social-agent-message-tool.service';
 import { SocialAgentActivityToolService } from './social-agent-activity-tool.service';
-import { SocialAgentInboxToolService } from './social-agent-inbox-tool.service';
+import { SocialAgentMessageEventToolService } from './social-agent-message-event-tool.service';
 import {
   SocialAgentConversationToolService,
   type SocialAgentConversationToolResult,
@@ -71,14 +71,15 @@ import {
   type SocialAgentDecisionToolResult,
 } from './social-agent-decision-tool.service';
 import { SocialAgentTaskMemoryService } from './social-agent-task-memory.service';
+import { AgentSideEffectLedgerService } from './agent-side-effect-ledger.service';
 import { summarizeSocialAgentToolCalls } from './social-agent-tool-execution-summary';
 import { buildSocialAgentProfileContextPatch } from './social-agent-profile-context-patch';
 import { buildSocialAgentSocialRequestToolInput } from './social-agent-social-request-tool-input';
 import { buildSocialAgentRunNextResult } from './social-agent-run-next-result';
 import {
-  buildSocialAgentInboxEventPayload,
-  type SocialAgentInboxEventInput,
-} from './social-agent-inbox-event-payload';
+  buildSocialAgentMessageEventPayload,
+  type SocialAgentMessageEventInput,
+} from './social-agent-message-event-payload';
 import { buildSocialAgentFriendActionResult } from './social-agent-friend-action-result';
 import {
   buildSocialAgentStepCompletedEvent,
@@ -210,7 +211,7 @@ export class SocialAgentToolExecutorService {
     private readonly paymentIntentTools: SocialAgentPaymentIntentToolService,
     private readonly messageTools: SocialAgentMessageToolService,
     private readonly activityTools: SocialAgentActivityToolService,
-    private readonly inboxTools: SocialAgentInboxToolService,
+    private readonly messageEventTools: SocialAgentMessageEventToolService,
     private readonly conversationTools: SocialAgentConversationToolService,
     private readonly decisionTools: SocialAgentDecisionToolService,
     private readonly taskMemory: SocialAgentTaskMemoryService,
@@ -220,6 +221,8 @@ export class SocialAgentToolExecutorService {
     private readonly l5Runtime?: AgentL5RuntimeService,
     @Optional()
     private readonly config?: ConfigService,
+    @Optional()
+    private readonly sideEffectLedger?: AgentSideEffectLedgerService,
   ) {}
 
   async executeTask(
@@ -328,7 +331,7 @@ export class SocialAgentToolExecutorService {
         reason: 'run-next must pass through the unified AgentLoop.',
         tools: [
           {
-            agent: 'Meet Loop Agent',
+            agent: 'Match Agent',
             toolName: 'run_next_execute',
             input: { ownerUserId: ownerUserId ?? null },
           },
@@ -737,6 +740,11 @@ export class SocialAgentToolExecutorService {
     if (!normalizedToolName) {
       throw new BadRequestException(`Unknown tool ${String(toolName)}`);
     }
+    if (this.isAdminDebugTool(normalizedToolName)) {
+      throw new ForbiddenException(
+        'Admin/debug tools cannot be executed from user-facing Agent task actions.',
+      );
+    }
 
     let didRun = false;
     let actionResult: SocialAgentToolCallRecord | null = null;
@@ -884,7 +892,7 @@ export class SocialAgentToolExecutorService {
         SocialAgentToolName.GetCandidatePoolDebug,
       ].includes(toolName)
     ) {
-      return 'Social Match Agent';
+      return 'Match Agent';
     }
     if (
       [
@@ -907,9 +915,13 @@ export class SocialAgentToolExecutorService {
         SocialAgentToolName.RejectAction,
       ].includes(toolName)
     ) {
-      return 'Meet Loop Agent';
+      return 'Match Agent';
     }
     return 'FitMeet Main Agent';
+  }
+
+  private isAdminDebugTool(toolName: SocialAgentToolName): boolean {
+    return toolName === SocialAgentToolName.GetCandidatePoolDebug;
   }
 
   private toolActionLoopInput(
@@ -1153,7 +1165,7 @@ export class SocialAgentToolExecutorService {
   ): string {
     const message = this.toolInput.string(payload.message) ?? '';
     if (/approval|confirm|确认|APPROVAL_REQUIRED/i.test(message)) {
-      return '这一步需要你确认后才能继续，我没有执行会影响他人的动作。';
+      return '这个动作需要你确认后才能继续，我没有执行会影响他人的动作。';
     }
     if (/timeout|timed? out|tool_timeout/i.test(message)) {
       return reliability.highRisk
@@ -1163,7 +1175,7 @@ export class SocialAgentToolExecutorService {
     if (reliability.highRisk) {
       return '这个高风险动作没有完成，我没有继续自动重试。请先确认状态，再决定是否重新执行或撤回。';
     }
-    return '这一步没成功，但上下文已经保留。你可以让我重试，或换一种方式继续。';
+    return '刚才连接不稳，但上下文已经保留。你可以让我继续处理，或换一种方式继续。';
   }
 
   private readIdempotencyKey(input: Record<string, unknown>): string | null {
@@ -1567,7 +1579,7 @@ export class SocialAgentToolExecutorService {
         message,
         retryable: false,
         userMessage:
-          '这一步涉及联系方式、精确位置或社交安全边界，我没有执行。请先修改内容或通过安全确认流程继续。',
+          '这个动作涉及联系方式、精确位置或社交安全边界，我没有执行。请先修改内容或通过安全确认流程继续。',
         reasons,
         executionContract,
         socialCodexMode: mode,
@@ -1638,13 +1650,13 @@ export class SocialAgentToolExecutorService {
       case SocialAgentToolName.SaveCandidate:
         return this.saveCandidate(task, input);
       case SocialAgentToolName.GetConversations:
-        return this.inboxTools.getConversations(task, input);
-      case SocialAgentToolName.GetAgentInbox:
-        return this.inboxTools.getAgentInbox(task, input);
-      case SocialAgentToolName.WriteInbox:
-        return this.inboxTools.writeInbox(task, input, stepId);
-      case SocialAgentToolName.ReadInbox:
-        return this.inboxTools.readInbox(task, input);
+        return this.messageEventTools.getConversations(task, input);
+      case SocialAgentToolName.GetAgentMessageEvents:
+        return this.messageEventTools.getAgentMessageEvents(task, input);
+      case SocialAgentToolName.WriteMessageEvent:
+        return this.messageEventTools.writeMessageEvent(task, input, stepId);
+      case SocialAgentToolName.ReadMessageEvents:
+        return this.messageEventTools.readMessageEvents(task, input);
       case SocialAgentToolName.GetPendingApprovals:
         return this.getPendingApprovals(task, input);
       case SocialAgentToolName.ApproveAction:
@@ -1721,6 +1733,10 @@ export class SocialAgentToolExecutorService {
     toolName: SocialAgentToolName,
     input: Record<string, unknown>,
   ): Promise<boolean> {
+    if (this.hasInlineConfirmedPublishCredential(toolName, input)) {
+      return true;
+    }
+
     const approvalId = this.toolInput.number(
       input.approvalId ?? input.approvalRequestId,
     );
@@ -1736,6 +1752,25 @@ export class SocialAgentToolExecutorService {
     if (approval.agentTaskId && approval.agentTaskId !== task.id) return false;
     if (!this.approvalMatchesTool(approval, toolName)) return false;
     return this.approvalPayloadMatchesInput(approval.payload ?? {}, input);
+  }
+
+  private hasInlineConfirmedPublishCredential(
+    toolName: SocialAgentToolName,
+    input: Record<string, unknown>,
+  ): boolean {
+    if (toolName !== SocialAgentToolName.CreateSocialRequest) return false;
+    if (this.toolInput.bool(input.confirmedPublish) !== true) return false;
+
+    const mode = this.toolInput.string(input.mode ?? input.intent);
+    const publishesToDiscover =
+      mode === 'publish' ||
+      this.toolInput.bool(input.publish) === true ||
+      this.toolInput.bool(input.syncPublicIntent) === true;
+    if (!publishesToDiscover) return false;
+
+    const metadata = this.toolInput.asRecord(input.metadata);
+    const publishSource = this.toolInput.string(metadata.publishSource);
+    return publishSource === 'agent_card_action';
   }
 
   private approvalMatchesTool(
@@ -1883,15 +1918,29 @@ export class SocialAgentToolExecutorService {
     input: Record<string, unknown>,
   ): Promise<unknown> {
     const answers = Array.isArray(input.answers) ? input.answers : [];
-    let latest: unknown = null;
+    const normalizedAnswers: Array<{
+      key: string;
+      question?: string;
+      answer: string;
+    }> = [];
     for (const raw of answers) {
       if (!this.toolInput.isRecord(raw)) continue;
       const key = this.toolInput.string(raw.key);
       const answer = this.toolInput.string(raw.answer ?? raw.value);
       if (!key || !answer) continue;
-      latest = await this.socialProfiles.saveAnswer(ownerUserId, key, answer);
+      normalizedAnswers.push({
+        key,
+        question: this.toolInput.string(raw.question) || undefined,
+        answer,
+      });
     }
-    if (latest) return latest;
+    if (normalizedAnswers.length > 0) {
+      return this.socialProfiles.generateAiDraft(ownerUserId, {
+        answers: normalizedAnswers,
+        rawText: this.toolInput.string(input.rawText),
+        source: 'agent_tool_update_ai_profile',
+      });
+    }
 
     if (this.toolInput.isRecord(input.profile)) {
       return this.socialProfiles.saveAiDraft(ownerUserId, {
@@ -2028,26 +2077,87 @@ export class SocialAgentToolExecutorService {
     const socialRequestId = this.toolInput.number(
       input.socialRequestId ?? input.requestId,
     );
-    return this.candidatePool.searchSocial({
-      ownerUserId: task.ownerUserId,
-      taskId: task.id,
-      socialRequestId,
-      city: sanitizeCity(input.city),
-      activityType: this.toolInput.string(input.activityType),
-      interestTags: this.toolInput.stringArray(
-        input.interestTags ?? input.tags,
-      ),
-      candidatePreference: this.toolInput.string(input.candidatePreference),
-      candidatePreferencePolicy: this.toolInput.string(
-        input.candidatePreferencePolicy,
-      ),
-      timePreference: this.toolInput.string(input.timePreference),
-      locationPreference: this.toolInput.string(input.locationPreference),
-      rawText: this.toolInput.string(
-        input.rawText ?? input.goal ?? input.message,
-      ),
-      limit: this.toolInput.number(input.limit) ?? undefined,
-    });
+    const limit = this.toolInput.number(input.limit) ?? undefined;
+    const runSearch = () =>
+      this.candidatePool.searchSocial({
+        ownerUserId: task.ownerUserId,
+        taskId: task.id,
+        socialRequestId,
+        city: sanitizeCity(input.city),
+        activityType: this.toolInput.string(input.activityType),
+        interestTags: this.toolInput.stringArray(
+          input.interestTags ?? input.tags,
+        ),
+        candidatePreference: this.toolInput.string(input.candidatePreference),
+        candidatePreferencePolicy: this.toolInput.string(
+          input.candidatePreferencePolicy,
+        ),
+        timePreference: this.toolInput.string(input.timePreference),
+        locationPreference: this.toolInput.string(input.locationPreference),
+        rawText: this.toolInput.string(
+          input.rawText ?? input.goal ?? input.message,
+        ),
+        limit,
+      });
+    const idempotencyKey = this.searchMatchesIdempotencyKey(
+      task,
+      input,
+      socialRequestId ?? null,
+      limit,
+    );
+    if (!this.sideEffectLedger || !idempotencyKey) return runSearch();
+    const { result } = await this.sideEffectLedger.run(
+      {
+        ownerUserId: task.ownerUserId,
+        agentTaskId: task.id,
+        actionType: 'search_candidates',
+        idempotencyKey,
+        resourceType: socialRequestId ? 'social_request' : 'candidate_query',
+        resourceId: socialRequestId ?? task.id,
+        metadata: {
+          socialRequestId,
+          limit: limit ?? null,
+          city: sanitizeCity(input.city) || null,
+          activityType: this.toolInput.string(input.activityType) || null,
+        },
+      },
+      runSearch,
+    );
+    return result;
+  }
+
+  private searchMatchesIdempotencyKey(
+    task: AgentTask,
+    input: Record<string, unknown>,
+    socialRequestId: number | null,
+    limit?: number,
+  ): string {
+    const explicit = this.text(input.idempotencyKey);
+    if (explicit) return explicit.slice(0, 180);
+    if (socialRequestId) {
+      return `search_candidates:${task.id}:request:${socialRequestId}:limit:${limit ?? 10}`;
+    }
+    const fingerprint = [
+      sanitizeCity(input.city),
+      this.toolInput.string(input.activityType),
+      this.toolInput.string(input.timePreference),
+      this.toolInput.string(input.locationPreference),
+      this.toolInput.string(input.rawText ?? input.goal ?? input.message),
+      this.toolInput.stringArray(input.interestTags ?? input.tags).join(','),
+      limit ?? 10,
+    ]
+      .filter(Boolean)
+      .join(':')
+      .replace(/[^A-Za-z0-9\u4e00-\u9fa5:,_-]+/g, '_')
+      .slice(0, 120);
+    return `search_candidates:${task.id}:query:${fingerprint || 'empty'}`.slice(
+      0,
+      180,
+    );
+  }
+
+  private text(value: unknown): string {
+    return typeof value === 'string' ? value.replace(/\s+/g, ' ').trim() : '';
   }
 
   private async searchPublicIntents(
@@ -2225,9 +2335,26 @@ export class SocialAgentToolExecutorService {
       input,
       task.ownerUserId,
     );
+    const idempotencyKey =
+      this.text(input.idempotencyKey) ||
+      `ensure_following:${task.id}:${targetUserId}`;
     const friend = await this.friends.ensureFollowing(
       task.ownerUserId,
       targetUserId,
+      {
+        agentTaskId: task.id,
+        idempotencyKey,
+        metadata: {
+          source: 'social_agent_tool_executor',
+          toolName: SocialAgentToolName.AddFriend,
+          stepId,
+          targetUserId,
+          candidateRecordId: this.toolInput.number(input.candidateRecordId),
+          socialRequestId: this.toolInput.number(
+            input.socialRequestId ?? input.requestId,
+          ),
+        },
+      },
     );
     const friendRecord = this.toolInput.asRecord(friend);
     const rawFriendRequestId =
@@ -2252,6 +2379,7 @@ export class SocialAgentToolExecutorService {
       this.messageConversationOptions(task, stepId, {
         ...(this.toolInput.isRecord(input.metadata) ? input.metadata : {}),
         toolName: SocialAgentToolName.AddFriend,
+        idempotencyKey: `${idempotencyKey}:conversation`,
         targetUserId,
         candidateRecordId: this.toolInput.number(input.candidateRecordId),
         socialRequestId: this.toolInput.number(
@@ -2443,11 +2571,11 @@ export class SocialAgentToolExecutorService {
       this.taskMemory.rememberConversation(task, result.loopUpdates);
     if (result.sentMessage)
       this.taskMemory.rememberSentMessage(task, result.sentMessage);
-    if (result.inboxEvent) {
-      await this.writeSocialAgentInboxEvent(
+    if (result.messageEvent) {
+      await this.writeSocialAgentMessageEvent(
         task,
-        result.inboxEvent.eventType,
-        result.inboxEvent.input,
+        result.messageEvent.eventType,
+        result.messageEvent.input,
       );
     }
     return result.output;
@@ -2459,10 +2587,10 @@ export class SocialAgentToolExecutorService {
   ): Promise<unknown> {
     this.taskMemory.rememberConversation(task, result.loopUpdates);
     rememberSocialAgentShortTerm(task, result.shortTermUpdates);
-    await this.writeSocialAgentInboxEvent(
+    await this.writeSocialAgentMessageEvent(
       task,
-      result.inboxEvent.eventType,
-      result.inboxEvent.input,
+      result.messageEvent.eventType,
+      result.messageEvent.input,
     );
     return result.output;
   }
@@ -2491,11 +2619,11 @@ export class SocialAgentToolExecutorService {
         result.taskEvent.input,
       );
     }
-    if (result.inboxEvent) {
-      await this.writeSocialAgentInboxEvent(
+    if (result.messageEvent) {
+      await this.writeSocialAgentMessageEvent(
         task,
-        result.inboxEvent.eventType,
-        result.inboxEvent.input,
+        result.messageEvent.eventType,
+        result.messageEvent.input,
       );
     }
     return result.output;
@@ -2787,19 +2915,19 @@ export class SocialAgentToolExecutorService {
     }
   }
 
-  private async writeSocialAgentInboxEvent(
+  private async writeSocialAgentMessageEvent(
     task: AgentTask,
     eventType: string,
-    input: SocialAgentInboxEventInput,
+    input: SocialAgentMessageEventInput,
   ): Promise<void> {
-    const payload = buildSocialAgentInboxEventPayload({
+    const payload = buildSocialAgentMessageEventPayload({
       task,
       eventType,
-      inboxEvent: input,
+      messageEvent: input,
       preview: (value) => this.taskMemory.preview(value),
     });
     if (!payload) return;
-    await this.messages.createAgentInboxEvent(payload);
+    await this.messages.createAgentMessageEvent(payload);
   }
 
   private async recordActionSideEffects(

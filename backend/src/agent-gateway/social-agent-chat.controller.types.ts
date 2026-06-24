@@ -127,6 +127,24 @@ export type SocialAgentMessageFeedbackBody = {
   metadata?: Record<string, unknown> | null;
 };
 
+export type SocialAgentUserInterestEventBody = {
+  eventType?: string | null;
+  taskId?: number | null;
+  targetUserId?: number | null;
+  candidateRecordId?: number | null;
+  socialRequestId?: number | null;
+  activityId?: number | null;
+  weight?: number | null;
+  activityTags?: string[] | null;
+  candidatePreferenceTags?: string[] | null;
+  city?: string | null;
+  locationText?: string | null;
+  timeWindow?: string | null;
+  source?: string | null;
+  dedupeKey?: string | null;
+  metadata?: Record<string, unknown> | null;
+};
+
 export type SocialAgentCheckpointActionBody = {
   decision?: 'approved' | 'rejected' | null;
   reason?: string | null;

@@ -9,6 +9,7 @@ export type SocialCodexActionType =
   | 'publish_social_request'
   | 'search_public_candidates'
   | 'rank_candidates'
+  | 'save_candidate'
   | 'generate_opener'
   | 'send_invite'
   | 'send_message'
@@ -59,7 +60,6 @@ export type SocialCodexPolicyDecision = {
 };
 
 const HIGH_RISK_ACTIONS = new Set<SocialCodexActionType>([
-  'publish_social_request',
   'send_invite',
   'send_message',
   'exchange_contact',
@@ -71,8 +71,11 @@ const HIGH_RISK_ACTIONS = new Set<SocialCodexActionType>([
   'payment',
 ]);
 
+const MEDIUM_APPROVAL_ACTIONS = new Set<SocialCodexActionType>([
+  'publish_social_request',
+]);
+
 const MEDIUM_RISK_ACTIONS = new Set<SocialCodexActionType>([
-  'generate_opener',
   'life_graph_writeback',
 ]);
 
@@ -85,6 +88,7 @@ const ACTION_BY_TOOL: Partial<
   [SocialAgentToolName.SearchActivities]: 'search_public_candidates',
   [SocialAgentToolName.SearchMatches]: 'search_public_candidates',
   [SocialAgentToolName.ExplainMatches]: 'rank_candidates',
+  [SocialAgentToolName.SaveCandidate]: 'save_candidate',
   [SocialAgentToolName.DraftOpener]: 'generate_opener',
   [SocialAgentToolName.SendMessageToCandidate]: 'send_invite',
   [SocialAgentToolName.SendMessage]: 'send_message',
@@ -142,7 +146,8 @@ export class SocialCodexRuntimePolicyService {
 
     if (
       ((containsContact && actionType !== 'exchange_contact') ||
-        (containsPreciseLocation && actionType !== 'reveal_precise_location')) &&
+        (containsPreciseLocation &&
+          actionType !== 'reveal_precise_location')) &&
       input.userConfirmed !== true
     ) {
       return this.decision(actionType, 'blocked', 'blocked', [
@@ -172,11 +177,19 @@ export class SocialCodexRuntimePolicyService {
       ]);
     }
 
+    if (MEDIUM_APPROVAL_ACTIONS.has(actionType)) {
+      return this.decision(actionType, 'approval_required', 'medium', [
+        ...reasons,
+        '这是会公开到发现页的约练内容。',
+        '发布前需要先预览内容，并由你确认后再继续。',
+      ]);
+    }
+
     if (HIGH_RISK_ACTIONS.has(actionType)) {
       return this.decision(actionType, 'approval_required', 'high', [
         ...reasons,
         '这是会影响真实用户、公开内容或隐私边界的动作。',
-        '执行前需要 dry-run、审批和审计记录。',
+        '执行前需要先预览影响，并由你确认后再继续。',
       ]);
     }
 
@@ -291,6 +304,7 @@ export class SocialCodexRuntimePolicyService {
 
   private previewTitle(actionType: SocialCodexActionType): string {
     if (actionType === 'publish_social_request') return '约练发布草稿';
+    if (actionType === 'save_candidate') return '候选收藏记录';
     if (actionType === 'send_invite') return '邀请发送草稿';
     if (actionType === 'send_message') return '消息发送草稿';
     if (actionType === 'connect_candidate') return '加好友请求草稿';
@@ -298,8 +312,8 @@ export class SocialCodexRuntimePolicyService {
     if (actionType === 'offline_meeting') return '线下见面确认预览';
     if (actionType === 'exchange_contact') return '联系方式交换预览';
     if (actionType === 'reveal_precise_location') return '位置公开预览';
-    if (actionType === 'update_sensitive_profile') return '画像更新预览';
-    if (actionType === 'life_graph_writeback') return 'Life Graph 写入预览';
+    if (actionType === 'update_sensitive_profile') return '资料更新预览';
+    if (actionType === 'life_graph_writeback') return '资料更新预览';
     if (actionType === 'payment') return '支付动作预览';
     return '工具执行预览';
   }
@@ -328,6 +342,8 @@ export class SocialCodexRuntimePolicyService {
     if (/contact|phone|wechat|联系方式/.test(text)) return 'exchange_contact';
     if (/location|位置|地址/.test(text)) return 'reveal_precise_location';
     if (/profile|画像/.test(text)) return 'update_sensitive_profile';
+    if (/save|favorite|bookmark|collect|收藏|保存|喜欢/.test(text))
+      return 'save_candidate';
     if (/candidate|match|search|候选|匹配/.test(text))
       return 'search_public_candidates';
     return 'summarize_intent';
@@ -370,6 +386,7 @@ export class SocialCodexRuntimePolicyService {
         'publish_social_request',
         'search_public_candidates',
         'rank_candidates',
+        'save_candidate',
         'generate_opener',
         'send_invite',
         'send_message',
@@ -398,12 +415,14 @@ export class SocialCodexRuntimePolicyService {
       typeof value === 'string' && value.trim()
         ? value.trim().toLowerCase()
         : '';
-    return text === 'true' || text === '1' || text === 'yes' || text === 'public';
+    return (
+      text === 'true' || text === '1' || text === 'yes' || text === 'public'
+    );
   }
 
   private containsContact(payload: Record<string, unknown>): boolean {
     return Object.entries(payload).some(([key, value]) => {
-      if (this.isContactKey(key)) return true;
+      if (this.contactKeyContainsContact(key, value)) return true;
       if (typeof value === 'string') return this.stringContainsContact(value);
       if (Array.isArray(value)) {
         return value.some((item) => this.valueContainsContact(item));
@@ -448,7 +467,9 @@ export class SocialCodexRuntimePolicyService {
     );
   }
 
-  private hasPublicCandidateBoundary(payload: Record<string, unknown>): boolean {
+  private hasPublicCandidateBoundary(
+    payload: Record<string, unknown>,
+  ): boolean {
     if (
       this.hasScalar(payload.connectionId) ||
       this.hasScalar(payload.conversationId) ||
@@ -460,24 +481,38 @@ export class SocialCodexRuntimePolicyService {
     ) {
       return true;
     }
-    const relationship = cleanDisplayText(payload.relationship, '').toLowerCase();
+    const relationship = cleanDisplayText(
+      payload.relationship,
+      '',
+    ).toLowerCase();
     if (/(friend|connected|好友|已连接)/.test(relationship)) return true;
-    if (payload.publiclyDiscoverable === true || payload.isPublicCandidate === true)
+    if (
+      payload.publiclyDiscoverable === true ||
+      payload.isPublicCandidate === true
+    )
       return true;
     const visibility = cleanDisplayText(
       payload.candidateVisibility ?? payload.visibility,
       '',
     ).toLowerCase();
     if (/(public|discoverable|公开|可发现)/.test(visibility)) return true;
-    const source = cleanDisplayText(payload.source ?? payload.candidateSource, '').toLowerCase();
-    if (/(public|discover|公开|发现|activity_signup|public_intent)/.test(source))
+    const source = cleanDisplayText(
+      payload.source ?? payload.candidateSource,
+      '',
+    ).toLowerCase();
+    if (
+      /(public|discover|公开|发现|activity_signup|public_intent)/.test(source)
+    )
       return true;
     const candidate = payload.candidate;
-    if (this.isRecord(candidate)) return this.hasPublicCandidateBoundary(candidate);
+    if (this.isRecord(candidate))
+      return this.hasPublicCandidateBoundary(candidate);
     return false;
   }
 
-  private hasPrivateCandidateBoundary(payload: Record<string, unknown>): boolean {
+  private hasPrivateCandidateBoundary(
+    payload: Record<string, unknown>,
+  ): boolean {
     const visibility = cleanDisplayText(
       payload.candidateVisibility ?? payload.visibility,
       '',
@@ -529,7 +564,7 @@ export class SocialCodexRuntimePolicyService {
   }
 
   private sanitizeValue(key: string, value: unknown): unknown {
-    if (this.isSensitiveKey(key)) return '[redacted]';
+    if (this.isSensitiveKey(key, value)) return '[redacted]';
     if (this.isRecord(value)) return this.sanitizePayload(value);
     if (Array.isArray(value)) {
       return value.map((item) => this.sanitizeValue('', item));
@@ -562,26 +597,119 @@ export class SocialCodexRuntimePolicyService {
   }
 
   private stringContainsContact(value: string): boolean {
-    return /(\b1[3-9]\d{9}\b|微信|wechat|vx[:：]?)/i.test(value);
+    const text = this.normalizePolicyText(value);
+    if (!text) return false;
+    if (/\b1[3-9]\d{9}\b/.test(text)) return true;
+    if (
+      /(?:微信|wechat|weixin|vx|qq)\s*(?:号|id|是|为|=|:|：)?\s*[a-z0-9_-]{5,}/i.test(
+        text,
+      )
+    ) {
+      return true;
+    }
+    if (this.isContactSafetyBoundaryText(text)) return false;
+    return /(?:微信|wechat|weixin|vx[:：]?|加我|联系我|私聊我)/i.test(text);
   }
 
   private stringContainsPreciseLocation(value: string): boolean {
-    return /(门牌|单元|楼栋|宿舍|经度|纬度|\d+\.\d{4,})/.test(value);
+    const text = this.normalizePolicyText(value);
+    if (!text) return false;
+    if (/\d+\.\d{4,}/.test(text)) return true;
+    if (this.isPreciseLocationSafetyBoundaryText(text)) return false;
+    return /(门牌|单元|楼栋|宿舍|经度|纬度)/.test(text);
   }
 
-  private isSensitiveKey(key: string): boolean {
+  private isSensitiveKey(key: string, value: unknown): boolean {
     return (
-      this.isContactKey(key) ||
+      this.contactKeyContainsContact(key, value) ||
       /(address|exactLocation|preciseLocation|privateMessage|conversationText)/i.test(
         key,
       )
     );
   }
 
+  private contactKeyContainsContact(key: string, value: unknown): boolean {
+    if (this.isStrictContactKey(key)) return true;
+    if (!this.isContactKey(key)) return false;
+    return !this.isSafeContactBoundaryValue(value);
+  }
+
+  private isStrictContactKey(key: string): boolean {
+    return /^(phone|mobile|wechat|weChat)$/i.test(key);
+  }
+
   private isContactKey(key: string): boolean {
     return /^(phone|mobile|wechat|weChat|contact|contactInfo|contactMethod)$/i.test(
       key,
     );
+  }
+
+  private isSafeContactBoundaryValue(value: unknown): boolean {
+    if (typeof value === 'string')
+      return this.isContactSafetyBoundaryText(value);
+    if (Array.isArray(value)) {
+      return (
+        value.length > 0 &&
+        value.every((item) => this.isSafeContactBoundaryValue(item))
+      );
+    }
+    if (this.isRecord(value)) {
+      const entries = Object.entries(value);
+      return (
+        entries.length > 0 &&
+        entries.every(([key, item]) => {
+          if (this.isStrictContactKey(key)) return false;
+          if (this.isContactKey(key)) {
+            return this.isSafeContactBoundaryValue(item);
+          }
+          if (typeof item === 'string') {
+            return !this.stringContainsContact(item);
+          }
+          if (Array.isArray(item)) {
+            return item.every((child) => !this.valueContainsContact(child));
+          }
+          return this.isRecord(item) ? !this.containsContact(item) : true;
+        })
+      );
+    }
+    return false;
+  }
+
+  private isContactSafetyBoundaryText(value: string): boolean {
+    const text = this.normalizePolicyText(value);
+    if (!text) return false;
+    if (/\b1[3-9]\d{9}\b/.test(text)) return false;
+    if (
+      /(?:微信|wechat|weixin|vx|qq)\s*(?:号|id|是|为|=|:|：)\s*[a-z0-9_-]{5,}/i.test(
+        text,
+      )
+    ) {
+      return false;
+    }
+    return (
+      /(站内|平台内|FitMeet).{0,12}(聊|沟通|消息|联系)/i.test(text) ||
+      /(先|只|仅|建议|优先|确认后).{0,12}(站内|平台内).{0,12}(聊|沟通|消息|联系)/i.test(
+        text,
+      ) ||
+      /(不|不要|不会|禁止|避免|暂不|无需).{0,16}(手机号|电话|微信|wechat|weixin|vx|联系方式|交换|公开|展示|共享|提供|私聊|加我)/i.test(
+        text,
+      )
+    );
+  }
+
+  private isPreciseLocationSafetyBoundaryText(value: string): boolean {
+    const text = this.normalizePolicyText(value);
+    if (!text) return false;
+    if (/\d+\.\d{4,}/.test(text)) return false;
+    return (
+      /(不|不要|不会|禁止|避免|暂不|无需|请勿).{0,16}(精确位置|实时位置|具体地址|门牌|门牌号|单元|楼栋|宿舍|住址|地址|定位)/i.test(
+        text,
+      ) || /(模糊|大致|公共|附近).{0,12}(位置|区域|地点|场所|路线)/i.test(text)
+    );
+  }
+
+  private normalizePolicyText(value: string): string {
+    return value.replace(/\s+/g, ' ').trim();
   }
 
   private isRecord(value: unknown): value is Record<string, unknown> {

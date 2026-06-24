@@ -8,7 +8,7 @@ import {
   type ThreadMessageLike,
   type ThreadUserMessagePart,
 } from '@assistant-ui/react';
-import { type FormEvent, type ReactNode, useMemo } from 'react';
+import { type FormEvent, type ReactNode, useCallback, useMemo } from 'react';
 
 import type {
   FitMeetAlphaCard,
@@ -19,6 +19,7 @@ import type {
   UserFacingAgentResponse,
 } from '../../api/socialAgentApi';
 import { AssistantShell } from '../assistant-ui/assistant-shell';
+import { requestAssistantComposerFocus } from '../assistant-ui/composer-focus';
 import {
   FitMeetToolUIActionsProvider,
   type FitMeetToolActionInput,
@@ -30,6 +31,7 @@ import type {
   FitMeetAssistantRecovery,
   FitMeetAssistantStep,
 } from './FitMeetAssistantUI.types';
+import { agentCardIdentityHints } from './agentCardIdentity';
 
 if (typeof HTMLElement !== 'undefined' && !HTMLElement.prototype.scrollTo) {
   HTMLElement.prototype.scrollTo = function scrollToPolyfill() {
@@ -75,13 +77,27 @@ export type FitMeetAssistantUIProps = {
   onUpdateReminderPreference?: (
     nextSettings: SocialAgentReminderPreferenceInput,
   ) => Promise<void> | void;
-  onApproveApproval?: (approvalId: number) => Promise<void> | void;
-  onRejectApproval?: (approvalId: number) => Promise<void> | void;
+  onApproveApproval?: (
+    approvalId: number,
+    context?: {
+      messageId?: string | null;
+      cardId?: string | null;
+      inline?: boolean;
+    },
+  ) => Promise<UserFacingAgentResponse | void> | UserFacingAgentResponse | void;
+  onRejectApproval?: (
+    approvalId: number,
+    context?: {
+      inline?: boolean;
+    },
+  ) => Promise<void> | void;
   onResumeState?: (input?: FitMeetToolActionInput) => Promise<void> | void;
   onRetryTool?: (input?: FitMeetToolActionInput) => Promise<void> | void;
   onReplayState?: (input?: FitMeetToolActionInput) => Promise<void> | void;
   onForkState?: (input?: FitMeetToolActionInput) => Promise<void> | void;
-  onCardAction?: (input?: FitMeetToolActionInput) => Promise<void> | void;
+  onCardAction?: (
+    input?: FitMeetToolActionInput,
+  ) => Promise<UserFacingAgentResponse | void> | UserFacingAgentResponse | void;
 };
 
 type FitMeetAssistantRuntimeProviderProps = {
@@ -221,6 +237,7 @@ function FitMeetAssistantRuntimeProvider({
 }
 
 export function FitMeetAssistantUI(props: FitMeetAssistantUIProps) {
+  const { onNewConversation } = props;
   const {
     onApproveApproval,
     onForkState,
@@ -234,11 +251,22 @@ export function FitMeetAssistantUI(props: FitMeetAssistantUIProps) {
     () => ({
       onApproveApproval: async (input: FitMeetToolActionInput) => {
         const approvalId = numberFromUnknown(input.approvalId);
-        if (approvalId && onApproveApproval) await onApproveApproval(approvalId);
+        if (approvalId && onApproveApproval) {
+          return await onApproveApproval(approvalId, {
+            messageId: input.messageId ?? null,
+            cardId: input.cardId ?? null,
+            inline: Boolean(input.messageId || input.cardId),
+          });
+        }
+        return undefined;
       },
       onRejectApproval: async (input: FitMeetToolActionInput) => {
         const approvalId = numberFromUnknown(input.approvalId);
-        if (approvalId && onRejectApproval) await onRejectApproval(approvalId);
+        if (approvalId && onRejectApproval) {
+          await onRejectApproval(approvalId, {
+            inline: Boolean(input.messageId || input.cardId),
+          });
+        }
       },
       onResumeState,
       onRetryTool,
@@ -263,6 +291,13 @@ export function FitMeetAssistantUI(props: FitMeetAssistantUIProps) {
     if (!lastMessage) return false;
     return shouldRenderProcessPart(lastMessage, lastIndex, props.messages, props.steps);
   }, [props.messages, props.steps]);
+  const focusComposerInputAfterNewConversation = useCallback(() => {
+    requestAssistantComposerFocus();
+  }, []);
+  const handleNewConversation = useCallback(() => {
+    onNewConversation();
+    focusComposerInputAfterNewConversation();
+  }, [focusComposerInputAfterNewConversation, onNewConversation]);
 
   return (
     <FitMeetAssistantRuntimeProvider
@@ -276,7 +311,7 @@ export function FitMeetAssistantUI(props: FitMeetAssistantUIProps) {
       onStop={props.onStop}
       onReloadLast={props.onReloadLast}
       onFeedback={props.onFeedback}
-      onNewConversation={props.onNewConversation}
+      onNewConversation={handleNewConversation}
       onThreadSelect={props.onThreadSelect}
       onThreadRename={props.onThreadRename}
       onThreadDelete={props.onThreadDelete}
@@ -296,7 +331,7 @@ export function FitMeetAssistantUI(props: FitMeetAssistantUIProps) {
           requiresAuth={props.requiresAuth}
           onBranchSwitch={props.onBranchSwitch}
           onFeedback={props.onFeedback}
-          onNewConversation={props.onNewConversation}
+          onNewConversation={handleNewConversation}
           onThreadRename={props.onThreadRename}
           onThreadDelete={props.onThreadDelete}
           onLogin={props.onLogin}
@@ -390,11 +425,26 @@ function convertFitMeetMessage(
     message.result && message.showSocialResult === true
       ? assistantCardsForResult(message.result)
       : [];
+  const pendingConfirmations = message.result?.pendingConfirmations ?? [];
+  const { cards: assistantCardsWithInlineApprovals, standaloneConfirmations } =
+    attachPendingConfirmationsToAssistantCards(assistantCards, pendingConfirmations);
   const visibleProcessSteps = compactAssistantProcessSteps(steps);
-  const processHistorySteps = compactAssistantProcessHistorySteps(steps);
+  const checkpointRuntimeSteps: FitMeetAssistantStep[] = [];
+  const resultProcessSteps = processStepsFromResult(message.result);
+  const runtimeProcessSteps =
+    checkpointRuntimeSteps.length > 0 && !hasActionableProcessSteps(visibleProcessSteps)
+      ? checkpointRuntimeSteps
+      : visibleProcessSteps.length > 0
+        ? visibleProcessSteps
+        : checkpointRuntimeSteps.length > 0
+          ? checkpointRuntimeSteps
+          : resultProcessSteps;
+  const processHistorySteps = steps.some((step) => step.status !== 'pending')
+    ? compactAssistantProcessHistorySteps(steps)
+    : runtimeProcessSteps;
   const visibleProcessSummary = visibleProcessSummaryForMessage(
     message,
-    visibleSummaryFromProcessStep(primaryVisibleProcessStep(visibleProcessSteps)),
+    visibleSummaryFromProcessStep(primaryVisibleProcessStep(runtimeProcessSteps)),
   );
   if (hasVisibleText) {
     content.push({ type: 'text', text: message.content });
@@ -408,10 +458,10 @@ function convertFitMeetMessage(
       data: {
         schemaVersion: FITMEET_ASSISTANT_TOOL_SCHEMA_VERSION,
         schemaType: 'agent.process',
-        title: '正在处理',
-        runtime: message.result?.runtime ?? null,
+        title: '正在整理当前信息',
+        runtime: null,
         visibleSummary: visibleProcessSummary,
-        steps: visibleProcessSteps.map((step) => ({
+        steps: runtimeProcessSteps.map((step) => ({
           id: step.id,
           label: step.label,
           status: step.status,
@@ -436,11 +486,7 @@ function convertFitMeetMessage(
       },
     });
   }
-  if (
-    message.role === 'assistant' &&
-    message.result &&
-    message.result.pendingConfirmations.length > 0
-  ) {
+  if (message.role === 'assistant' && message.result && standaloneConfirmations.length > 0) {
     content.push({
       type: 'data',
       name: 'fitmeet-approval',
@@ -448,8 +494,8 @@ function convertFitMeetMessage(
         schemaVersion: FITMEET_ASSISTANT_TOOL_SCHEMA_VERSION,
         schemaType: 'safety.approval',
         title: '需要确认',
-        runtime: message.result.runtime ?? null,
-        pendingConfirmations: message.result.pendingConfirmations,
+        runtime: null,
+        pendingConfirmations: standaloneConfirmations,
         resolvedApproval: message.resolvedApproval ?? null,
         safeStatus: message.result.safeStatus,
       },
@@ -459,7 +505,7 @@ function convertFitMeetMessage(
     message.role === 'assistant' &&
     message.result &&
     message.showSocialResult === true &&
-    assistantCards.length > 0
+    assistantCardsWithInlineApprovals.length > 0
   ) {
     content.push({
       type: 'data',
@@ -468,8 +514,8 @@ function convertFitMeetMessage(
         schemaVersion: FITMEET_ASSISTANT_TOOL_SCHEMA_VERSION,
         schemaType: 'agent.result_cards',
         title: '整理出的可用结果',
-        runtime: message.result.runtime ?? null,
-        cards: assistantCards,
+        runtime: null,
+        cards: assistantCardsWithInlineApprovals,
       },
     });
   }
@@ -500,9 +546,15 @@ function convertFitMeetMessage(
       custom: {
         fitmeetMessageId: message.id,
         fitmeetTaskId: message.taskId,
-        fitmeetTraceId: message.traceId,
+        taskId: message.taskId,
+        fitmeetThreadId: message.taskId ? `agent-task:${message.taskId}` : null,
+        threadId: message.taskId ? `agent-task:${message.taskId}` : null,
+        fitmeetRunId: message.runId ?? stringFromUnknown(message.result?.workflow?.workflowId),
+        runId: message.runId ?? stringFromUnknown(message.result?.workflow?.workflowId),
+        fitmeetAssistantRunMessageId: message.messageId ?? null,
         fitmeetAssistantMessageSource: message.assistantMessageSource,
         fitmeetBranch: message.branch,
+        fitmeetCreatesBranch: message.createsBranch === true,
         fitmeetFeedback: message.feedback,
         fitmeetReminderId: message.reminderId,
         fitmeetReminderContext: message.reminderContext,
@@ -524,10 +576,55 @@ function shouldRenderProcessPart(
   if (message.role !== 'assistant') return false;
   if (index !== messages.length - 1) return false;
   if (isInitialConversationThinking(message, steps)) return false;
-  if (!steps.some((step) => step.status !== 'pending')) return false;
+  if (
+    !steps.some((step) => step.status !== 'pending') &&
+    message.result?.workflow?.state !== 'RECOVERY' &&
+    !message.result?.cards.some(isAssistantVisibleResultCard) &&
+    !message.result?.pendingConfirmations.length
+  ) {
+    return false;
+  }
+  if (
+    message.status !== 'streaming' &&
+    hasFinalAssistantSurface(message) &&
+    !hasActionableProcessSurface(message, steps) &&
+    !message.result?.cards.some(isAssistantVisibleResultCard)
+  ) {
+    return false;
+  }
   if (hasUserVisibleSocialCodexTrace(steps)) return true;
   if (message.conversationIntent !== 'conversation') return true;
-  return hasResumableRuntime(message.result?.runtime);
+  return message.result?.workflow?.state === 'RECOVERY';
+}
+
+function hasFinalAssistantSurface(message: FitMeetAssistantMessage) {
+  if (message.content.trim().length > 0 && message.content !== ASSISTANT_STREAMING_PLACEHOLDER) {
+    return true;
+  }
+  if (message.result?.cards.length) return true;
+  return false;
+}
+
+function hasActionableProcessSurface(
+  message: FitMeetAssistantMessage,
+  steps: FitMeetAssistantStep[],
+) {
+  if (message.result?.pendingConfirmations.length) return true;
+  if (message.result?.workflow?.state === 'RECOVERY') return true;
+  return steps.some((step) => {
+    if (step.status === 'waiting' || step.status === 'error') return true;
+    const processType =
+      typeof step.metadata?.processType === 'string' ? step.metadata.processType : step.processType;
+    return (
+      processType === 'approval' ||
+      step.metadata?.pendingApproval === true ||
+      step.metadata?.checkpointAction === 'retry'
+    );
+  });
+}
+
+function hasActionableProcessSteps(steps: FitMeetAssistantStep[]) {
+  return steps.some((step) => step.status === 'waiting' || step.status === 'error');
 }
 
 function compactAssistantProcessSteps(steps: FitMeetAssistantStep[]) {
@@ -553,7 +650,9 @@ function compactAssistantProcessSteps(steps: FitMeetAssistantStep[]) {
 }
 
 function compactAssistantProcessHistorySteps(steps: FitMeetAssistantStep[]) {
-  const visible = steps.filter((step) => step.status !== 'pending');
+  const visible = dedupeAssistantProcessHistorySteps(
+    steps.filter((step) => step.status !== 'pending'),
+  );
   const latestRunSummary = [...visible].reverse().find(isRunSummaryFitMeetStep) ?? null;
   const latestApproval =
     [...visible]
@@ -587,6 +686,14 @@ function compactAssistantProcessHistorySteps(steps: FitMeetAssistantStep[]) {
   }
 
   return Array.from(deduped.values());
+}
+
+function dedupeAssistantProcessHistorySteps(steps: FitMeetAssistantStep[]) {
+  const byKey = new Map<string, FitMeetAssistantStep>();
+  for (const step of steps) {
+    byKey.set(processStepKey(step), step);
+  }
+  return Array.from(byKey.values());
 }
 
 function processStepKey(step: FitMeetAssistantStep) {
@@ -677,7 +784,7 @@ function visibleProcessSummaryForMessage(
     return {
       ...summary,
       source: summary?.source ?? 'result.pending_approval',
-      title: summary?.state === 'waiting' ? summary.title : '需要你确认这一步',
+      title: summary?.state === 'waiting' ? summary.title : '需要你确认后继续',
       detail: summary?.detail ?? '我会等你选择后再继续，不会自动执行高风险动作。',
       state: 'waiting' as const,
       pendingApproval: true,
@@ -685,20 +792,16 @@ function visibleProcessSummaryForMessage(
     };
   }
 
-  const runtime = message.result?.runtime;
-  const checkpointAction =
-    runtime && typeof runtime === 'object' && 'checkpointAction' in runtime
-      ? runtime.checkpointAction
-      : null;
-  if (checkpointAction === 'retry') {
+  if (message.result?.workflow?.state === 'RECOVERY') {
     return {
       ...summary,
-      source: summary?.source ?? 'result.checkpoint',
-      title: '这一步没有完成',
+      source: summary?.source ?? 'result.recovery',
+      title: '刚才连接不稳',
       detail:
         summary?.detail ??
         summary?.title ??
-        '可以从保存点重试，不会重复执行已确认的高风险动作。',
+        message.result.workflow.recoveryMessage ??
+        '我保留了这段需求，可以继续处理，不会重复执行已确认的高风险动作。',
       state: 'failed' as const,
       historyVisibility: null,
     };
@@ -717,10 +820,10 @@ function inlineVisibleProcessStatus(steps: FitMeetAssistantStep[]) {
   const state = summary?.state;
 
   if (state === 'waiting') {
-    return title || detail || '需要你确认这一步';
+    return title || detail || '需要你确认后继续';
   }
   if (state === 'failed') {
-    return title || detail || '这一步没有处理好，可以重试';
+    return title || detail || '刚才连接不稳，可以继续';
   }
   if (title) return title;
   return detail;
@@ -734,9 +837,74 @@ function hasUserVisibleSocialCodexTrace(steps: FitMeetAssistantStep[]) {
   });
 }
 
-function hasResumableRuntime(runtime: UserFacingAgentResponse['runtime'] | undefined | null) {
-  if (!runtime) return false;
-  return Boolean(runtime.checkpointId || runtime.canResume || runtime.canReplay || runtime.canFork);
+function processStepsFromResult(
+  result: UserFacingAgentResponse | undefined | null,
+): FitMeetAssistantStep[] {
+  if (!result) return [];
+  if (result.pendingConfirmations.length > 0 || result.safeStatus.blocked) {
+    return [
+      {
+        id: 'approval',
+        label: '需要你确认后继续',
+        detail: '确认前不会执行真实动作。',
+        status: 'waiting',
+        kind: 'status',
+        processType: 'approval',
+        metadata: {
+          processType: 'approval',
+          displayMode: 'covering_status',
+          updateModel: 'latest_state',
+          historyVisibility: 'collapsed',
+          pendingApproval: true,
+          defaultVisibleCount: 1,
+        },
+      },
+    ];
+  }
+  if (result.cards.some(isAssistantVisibleResultCard)) {
+    const hasProfileCompletionCard = result.cards.some(
+      (card) => card.type === 'profile_completion' || card.schemaType === 'profile.completion',
+    );
+    return [
+      {
+        id: 'result-ready',
+        label: hasProfileCompletionCard ? '已生成资料补全卡' : '已整理合适机会',
+        detail: hasProfileCompletionCard
+          ? '你可以先回答几个问题，确认后再保存到个人信息。'
+          : '你可以先看结论，细节已放在卡片里。',
+        status: 'success',
+        kind: 'status',
+        processType: 'run_summary',
+        metadata: {
+          processType: 'run_summary',
+          displayMode: 'covering_status',
+          updateModel: 'latest_state',
+          historyVisibility: 'collapsed',
+          defaultVisibleCount: 1,
+          hasOpportunityCard: result.cards.some((card) => card.type === 'activity_plan'),
+          candidateCount: result.cards.filter((card) => card.type === 'candidate_card').length,
+        },
+      },
+    ];
+  }
+  return [];
+}
+
+function isAssistantVisibleResultCard(card: FitMeetAlphaCard) {
+  return (
+    card.type === 'candidate_card' ||
+    card.type === 'activity_plan' ||
+    card.type === 'activity_status' ||
+    card.type === 'checkin_card' ||
+    card.type === 'review_card' ||
+    card.type === 'profile_completion' ||
+    card.schemaType === 'social_match.candidate' ||
+    card.schemaType === 'social_match.activity' ||
+    card.schemaType === 'profile.completion' ||
+    card.schemaType === 'meet_loop.timeline' ||
+    card.schemaType === 'life_graph.diff' ||
+    card.schemaType === 'safety.approval'
+  );
 }
 
 function isInitialConversationThinking(
@@ -773,6 +941,358 @@ function assistantCardsForResult(result: UserFacingAgentResponse): Record<string
   return lifeGraphCard ? [...cards, lifeGraphCard] : cards;
 }
 
+type PendingConfirmation = UserFacingAgentResponse['pendingConfirmations'][number];
+
+// eslint-disable-next-line react-refresh/only-export-components
+export function attachPendingConfirmationsToAssistantCards(
+  cards: Record<string, unknown>[],
+  confirmations: PendingConfirmation[],
+) {
+  const userVisibleConfirmations = dedupePendingCardConfirmations(
+    confirmations.filter((confirmation) => !isLowRiskCardConfirmation(confirmation)),
+  );
+  if (cards.length === 0 || userVisibleConfirmations.length === 0) {
+    return { cards, standaloneConfirmations: userVisibleConfirmations };
+  }
+
+  const used = new Set<number>();
+  const cardsWithInlineApprovals = cards.map((card) => {
+    const matches = userVisibleConfirmations
+      .map((confirmation, index) => ({ confirmation, index }))
+      .filter(
+        ({ confirmation, index }) =>
+          !used.has(index) && confirmationCanLiveInsideCard(card, confirmation, cards),
+      );
+    if (matches.length === 0) return card;
+
+    matches.forEach(({ index }) => used.add(index));
+    const data = isRecord(card.data) ? card.data : {};
+    const inlineApprovalConfirmations = matches.reduce<Record<string, unknown>>(
+      (out, { confirmation }) => {
+        const actionKey = inlineApprovalActionKeyForCard(card, confirmation);
+        out[actionKey] = chooseInlineCardConfirmation(out[actionKey], {
+          ...confirmation,
+          actionKey,
+        });
+        return out;
+      },
+      isRecord(data.inlineApprovalConfirmations) ? { ...data.inlineApprovalConfirmations } : {},
+    );
+    const firstInlineApproval = Object.values(inlineApprovalConfirmations)[0];
+    return {
+      ...card,
+      data: {
+        ...data,
+        inlineApprovalConfirmation: firstInlineApproval,
+        inlineApprovalConfirmations,
+      },
+    };
+  });
+
+  const standaloneConfirmations = userVisibleConfirmations.filter((_, index) => {
+    if (used.has(index)) return false;
+    return true;
+  });
+
+  return { cards: cardsWithInlineApprovals, standaloneConfirmations };
+}
+
+function chooseInlineCardConfirmation(
+  current: unknown,
+  next: Record<string, unknown>,
+): Record<string, unknown> {
+  if (!isRecord(current)) return next;
+  const currentId = primitiveStringFromUnknown(current.id);
+  const nextId = primitiveStringFromUnknown(next.id);
+  if (!currentId && nextId) return next;
+  if (currentId && !nextId) return current;
+  const currentRisk = riskPriority(current.riskLevel);
+  const nextRisk = riskPriority(next.riskLevel);
+  return nextRisk >= currentRisk ? next : current;
+}
+
+function riskPriority(value: unknown) {
+  const risk = primitiveStringFromUnknown(value)?.toLowerCase();
+  if (risk === 'critical') return 4;
+  if (risk === 'high') return 3;
+  if (risk === 'medium') return 2;
+  if (risk === 'low') return 1;
+  return 0;
+}
+
+function dedupePendingCardConfirmations(confirmations: PendingConfirmation[]) {
+  const seen = new Set<string>();
+  const result: PendingConfirmation[] = [];
+  for (const confirmation of confirmations) {
+    const key = pendingCardConfirmationKey(confirmation);
+    if (key && seen.has(key)) continue;
+    if (key) seen.add(key);
+    result.push(confirmation);
+  }
+  return result;
+}
+
+function pendingCardConfirmationKey(confirmation: PendingConfirmation) {
+  const id = primitiveStringFromUnknown(confirmation.id);
+  if (id) return `approval:${id}`;
+  const actionType =
+    primitiveStringFromUnknown(confirmation.actionType) ??
+    primitiveStringFromUnknown(confirmation.type) ??
+    inlineApprovalActionKeyFromConfirmation(confirmation);
+  const targetKey = pendingCardConfirmationTargetKey(confirmation);
+  if (actionType || targetKey) {
+    return ['pending', actionType, targetKey].filter(Boolean).join(':');
+  }
+  const summary = stringFromUnknown(confirmation.summary)
+    ?.normalize('NFKC')
+    .toLowerCase()
+    .replace(/\s+/g, '')
+    .slice(0, 120);
+  return summary ? `summary:${summary}` : null;
+}
+
+function pendingCardConfirmationTargetKey(confirmation: PendingConfirmation) {
+  const record = confirmation as unknown as Record<string, unknown>;
+  const payload = isRecord(record.payload) ? record.payload : {};
+  const candidateId = firstPrimitiveString(
+    record.candidateRecordId,
+    record.socialRequestCandidateId,
+    record.targetUserId,
+    record.candidateUserId,
+    record.userId,
+    payload.candidateRecordId,
+    payload.socialRequestCandidateId,
+    payload.targetUserId,
+    payload.candidateUserId,
+    payload.userId,
+  );
+  if (candidateId) return `candidate:${candidateId}`;
+  const opportunityId = firstPrimitiveString(
+    record.opportunityId,
+    record.activityId,
+    record.publicIntentId,
+    record.socialRequestId,
+    payload.opportunityId,
+    payload.activityId,
+    payload.publicIntentId,
+    payload.socialRequestId,
+  );
+  if (opportunityId) {
+    const taskId = firstPrimitiveString(record.taskId, payload.taskId);
+    return taskId ? `opportunity:${taskId}:${opportunityId}` : `opportunity:${opportunityId}`;
+  }
+  const taskId = firstPrimitiveString(record.taskId, payload.taskId);
+  return taskId ? `task:${taskId}` : null;
+}
+
+function inlineApprovalActionKeyFromConfirmation(confirmation: PendingConfirmation) {
+  const actionType = stringFromUnknown(confirmation.actionType)?.toLowerCase() ?? '';
+  if (/connect|friend|candidate/.test(actionType)) return 'candidate.connect';
+  if (/send|message|invite|opener/.test(actionType)) return 'opener.confirm_send';
+  if (/publish|social_request/.test(actionType)) return 'publish_to_discover';
+  if (/activity|meet/.test(actionType)) return 'activity.confirm_create';
+  const text = confirmationSearchText(confirmation);
+  if (/opener|send|message|invite|发送|邀请/.test(text)) return 'opener.confirm_send';
+  if (/connect|friend|candidate|好友|连接|候选/.test(text)) return 'candidate.connect';
+  if (/publish|social_request|发现|发布/.test(text)) return 'publish_to_discover';
+  if (/约练|活动/.test(text)) return 'activity.confirm_create';
+  return null;
+}
+
+function confirmationCanLiveInsideCard(
+  card: Record<string, unknown>,
+  confirmation: PendingConfirmation,
+  allCards: Record<string, unknown>[],
+) {
+  const schemaType = schemaTypeFromToolCard(card);
+  const text = confirmationSearchText(confirmation);
+  if (!isHighRiskCardConfirmation(confirmation)) return false;
+  if (schemaType === 'social_match.candidate') {
+    if (
+      !/candidate|connect|friend|invite|message|send|contact|候选|好友|邀请|发送|私信|联系/.test(
+        text,
+      )
+    ) {
+      return false;
+    }
+    if (cardSharesConfirmationIdentity(card, confirmation)) return true;
+    if (cardTextHints(card).some((hint) => text.includes(hint))) return true;
+    return (
+      allCards.filter((item) => schemaTypeFromToolCard(item) === 'social_match.candidate')
+        .length === 1
+    );
+  }
+  if (schemaType === 'social_match.activity') {
+    if (
+      !/publish|social_request|activity|meet|create|location|发现|发布|约练|活动|位置/.test(text)
+    ) {
+      return false;
+    }
+    if (cardSharesConfirmationIdentity(card, confirmation)) return true;
+    if (cardTextHints(card).some((hint) => text.includes(hint))) return true;
+    return (
+      allCards.filter((item) => schemaTypeFromToolCard(item) === 'social_match.activity').length ===
+      1
+    );
+  }
+  if (schemaType === 'meet_loop.timeline') {
+    return /invite|message|connect|activity|meet|邀请|发送|连接|约练|改期/.test(text);
+  }
+  if (schemaType === 'safety.approval') return true;
+  return false;
+}
+
+function cardSharesConfirmationIdentity(
+  card: Record<string, unknown>,
+  confirmation: PendingConfirmation,
+) {
+  const cardKeys = new Set(agentCardIdentityHints(card as unknown as FitMeetAlphaCard));
+  if (cardKeys.size === 0) return false;
+  return confirmationIdentityHints(confirmation).some((key) => cardKeys.has(key));
+}
+
+function confirmationIdentityHints(confirmation: PendingConfirmation): string[] {
+  const record = confirmation as unknown as Record<string, unknown>;
+  const payload = isRecord(record.payload) ? record.payload : {};
+  const values = [
+    record.candidateRecordId,
+    record.socialRequestCandidateId,
+    record.targetUserId,
+    record.candidateUserId,
+    record.userId,
+    record.opportunityId,
+    record.activityId,
+    record.publicIntentId,
+    record.socialRequestId,
+    payload.candidateRecordId,
+    payload.socialRequestCandidateId,
+    payload.targetUserId,
+    payload.candidateUserId,
+    payload.userId,
+    payload.opportunityId,
+    payload.activityId,
+    payload.publicIntentId,
+    payload.socialRequestId,
+  ];
+  return Array.from(
+    new Set(
+      values
+        .map((value) => primitiveStringFromUnknown(value))
+        .filter((value): value is string => Boolean(value)),
+    ),
+  );
+}
+
+function cardTextHints(card: Record<string, unknown>): string[] {
+  const data = isRecord(card.data) ? card.data : {};
+  const opportunity = isRecord(data.opportunity) ? data.opportunity : {};
+  const candidate = isRecord(data.candidate) ? data.candidate : {};
+  const values = [
+    card.title,
+    data.displayName,
+    data.name,
+    data.nickname,
+    opportunity.title,
+    opportunity.name,
+    opportunity.displayName,
+    opportunity.nickname,
+    candidate.title,
+    candidate.name,
+    candidate.displayName,
+    candidate.nickname,
+  ];
+  return Array.from(
+    new Set(
+      values
+        .map((value) => stringFromUnknown(value)?.toLowerCase())
+        .filter((value): value is string => Boolean(value && value.length >= 2)),
+    ),
+  );
+}
+
+function inlineApprovalActionKeyForCard(
+  card: Record<string, unknown>,
+  confirmation: PendingConfirmation,
+) {
+  const schemaType = schemaTypeFromToolCard(card);
+  const actionType = stringFromUnknown(confirmation.actionType)?.toLowerCase() ?? '';
+  if (/connect|friend|candidate/.test(actionType)) return 'candidate.connect';
+  if (/send|message|invite|opener/.test(actionType)) return 'opener.confirm_send';
+  if (/publish|social_request/.test(actionType)) return 'publish_to_discover';
+  if (/activity|meet/.test(actionType)) return 'activity.confirm_create';
+  const text = confirmationSearchText(confirmation);
+  if (schemaType === 'social_match.activity' && /publish|social_request|发现|发布/.test(text)) {
+    return 'publish_to_discover';
+  }
+  if (schemaType === 'social_match.activity') return 'activity.confirm_create';
+  if (/opener|send|message|invite|发送|邀请/.test(text)) return 'opener.confirm_send';
+  if (/connect|friend|candidate|好友|连接|候选/.test(text)) return 'candidate.connect';
+  if (/publish|social_request|发现|发布/.test(text)) return 'publish_to_discover';
+  return 'candidate.connect';
+}
+
+function schemaTypeFromToolCard(card: Record<string, unknown>) {
+  const data = isRecord(card.data) ? card.data : {};
+  return stringFromUnknown(card.schemaType) ?? stringFromUnknown(data.schemaType);
+}
+
+function isLowRiskCardConfirmation(confirmation: PendingConfirmation) {
+  const text = confirmationSearchText(confirmation);
+  if (isHighRiskCardConfirmation(confirmation)) return false;
+  if (/save|like|favorite|collect|bookmark|收藏|喜欢|保存/.test(text)) return true;
+  return (
+    /generate_opener|draft|草稿/.test(text) ||
+    (/opener|开场白/.test(text) &&
+      !/confirm|send|message|invite|connect|publish|contact|location|确认|发送|私信|邀请|连接|好友|发布|联系|位置/.test(
+        text,
+      ))
+  );
+}
+
+function isHighRiskCardConfirmation(confirmation: PendingConfirmation) {
+  const actionType = stringFromUnknown(confirmation.actionType)?.trim().toLowerCase();
+  if (
+    actionType &&
+    /^(candidate\.like|candidate\.generate_opener|candidate\.view_detail|candidate\.skip|candidate\.more_like_this|save_candidate|generate_opener|draft_opener)$/i.test(
+      actionType,
+    )
+  ) {
+    return false;
+  }
+  const text = confirmationSearchText(confirmation);
+  return /publish|social_request|connect_candidate|candidate\.connect|friend|send_invite|opener\.confirm_send|send|message|invite|contact|location|precise|exchange|create|公开|发布|加好友|好友|连接|发送|私信|邀请|联系方式|精确位置|创建/.test(
+    text,
+  );
+}
+
+function confirmationSearchText(confirmation: PendingConfirmation) {
+  const record = confirmation as unknown as Record<string, unknown>;
+  const payload = isRecord(record.payload) ? record.payload : {};
+  return [
+    stringFromUnknown(record.title),
+    stringFromUnknown(record.label),
+    stringFromUnknown(record.goal),
+    stringFromUnknown(confirmation.type),
+    stringFromUnknown(confirmation.actionType),
+    stringFromUnknown(confirmation.summary),
+    stringFromUnknown(confirmation.riskLevel),
+    stringFromUnknown(payload.title),
+    stringFromUnknown(payload.label),
+    stringFromUnknown(payload.name),
+    stringFromUnknown(payload.displayName),
+    stringFromUnknown(payload.nickname),
+    stringFromUnknown(payload.candidateName),
+    stringFromUnknown(payload.candidateDisplayName),
+    stringFromUnknown(payload.targetName),
+    stringFromUnknown(payload.targetDisplayName),
+    stringFromUnknown(payload.summary),
+    stringFromUnknown(payload.actionType),
+    stringFromUnknown(payload.action),
+  ]
+    .join(' ')
+    .toLowerCase();
+}
+
 function lifeGraphWritebackProposalToCard(
   proposal: Record<string, unknown> | undefined,
 ): Record<string, unknown> | null {
@@ -801,7 +1321,7 @@ function lifeGraphWritebackProposalToCard(
     type: 'profile_proposal',
     schemaVersion: FITMEET_ASSISTANT_TOOL_SCHEMA_VERSION,
     schemaType: 'life_graph.diff',
-    title: '画像更新建议',
+    title: '资料更新建议',
     body: stringFromUnknown(summarySignal?.value) ?? '我整理出一条可确认的互动信号。',
     status: 'waiting_confirmation',
     data: {
@@ -814,7 +1334,7 @@ function lifeGraphWritebackProposalToCard(
       messageId: proposal.messageId,
       candidateUserId: proposal.candidateUserId,
       source: stringFromUnknown(proposal.source) ?? 'counterpart_reply',
-      before: '等待你确认后再查看长期画像影响',
+      before: '等待你确认后再查看长期偏好影响',
       after: stringFromUnknown(summarySignal?.value) ?? '保存这次脱敏互动信号',
       proposedFields: fieldLabels,
       sensitivityLevel: stringFromUnknown(proposal.sensitivityLevel) ?? 'medium',
@@ -870,6 +1390,16 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function stringFromUnknown(value: unknown): string | null {
   return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
+function primitiveStringFromUnknown(value: unknown): string | null {
+  if (typeof value === 'string' && value.trim()) return value.trim();
+  if (typeof value === 'number' && Number.isFinite(value)) return String(value);
+  return null;
+}
+
+function firstPrimitiveString(...values: unknown[]) {
+  return values.map((value) => primitiveStringFromUnknown(value)).find(Boolean) ?? null;
 }
 
 function appendMessageText(message: AppendMessage): string {

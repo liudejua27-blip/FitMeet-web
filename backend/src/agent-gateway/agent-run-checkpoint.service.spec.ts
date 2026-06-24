@@ -140,7 +140,7 @@ describe('AgentRunCheckpointService', () => {
         recoveryActions: expect.arrayContaining([
           {
             action: 'resume',
-            label: '继续执行',
+            label: '继续处理',
             method: 'POST',
             endpoint: '/api/social-agent/chat/checkpoints/1/resume/stream',
             idempotencyKey:
@@ -149,7 +149,7 @@ describe('AgentRunCheckpointService', () => {
           },
           {
             action: 'retry',
-            label: '重试这一步',
+            label: '继续处理',
             method: 'POST',
             endpoint: '/api/social-agent/chat/checkpoints/1/retry/stream',
             idempotencyKey:
@@ -157,7 +157,7 @@ describe('AgentRunCheckpointService', () => {
           },
           {
             action: 'replay',
-            label: '回放过程',
+            label: '重新整理',
             method: 'POST',
             endpoint: '/api/social-agent/chat/checkpoints/1/replay/stream',
             idempotencyKey:
@@ -165,7 +165,7 @@ describe('AgentRunCheckpointService', () => {
           },
           {
             action: 'fork',
-            label: '创建分支',
+            label: '换一种方案',
             method: 'POST',
             endpoint: '/api/social-agent/chat/checkpoints/1/fork/stream',
             idempotencyKey:
@@ -176,7 +176,7 @@ describe('AgentRunCheckpointService', () => {
           {
             stepId: 'approval',
             action: 'retry',
-            label: '重试这一步',
+            label: '继续处理',
             method: 'POST',
             endpoint:
               '/api/social-agent/chat/checkpoints/1/steps/approval/retry/stream',
@@ -186,7 +186,7 @@ describe('AgentRunCheckpointService', () => {
           {
             stepId: 'approval',
             action: 'replay',
-            label: '回放过程',
+            label: '重新整理',
             method: 'POST',
             endpoint:
               '/api/social-agent/chat/checkpoints/1/steps/approval/replay/stream',
@@ -196,7 +196,7 @@ describe('AgentRunCheckpointService', () => {
           {
             stepId: 'approval',
             action: 'fork',
-            label: '创建分支',
+            label: '换一种方案',
             method: 'POST',
             endpoint:
               '/api/social-agent/chat/checkpoints/1/steps/approval/fork/stream',
@@ -280,7 +280,7 @@ describe('AgentRunCheckpointService', () => {
             runId: 'run-1',
             stage: 'approval',
             display: expect.objectContaining({
-              title: '已确认这一步',
+              title: '已确认',
               state: 'done',
             }),
             payload: expect.objectContaining({

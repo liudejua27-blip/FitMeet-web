@@ -13,12 +13,12 @@ describe('AgentLoopService', () => {
       plan: { intent: 'social_search' },
     });
     loop = service.tool(loop, {
-      agent: 'Social Match Agent',
+      agent: 'Match Agent',
       toolName: 'search_real_candidates',
       toolInput: { city: '青岛' },
     });
     loop = service.observe(loop, {
-      agent: 'Social Match Agent',
+      agent: 'Match Agent',
       toolName: 'search_real_candidates',
       observation: { candidateCount: 2 },
     });
@@ -56,7 +56,7 @@ describe('AgentLoopService', () => {
         reason: 'need candidates',
         tools: [
           {
-            agent: 'Social Match Agent',
+            agent: 'Match Agent',
             toolName: 'search_real_candidates',
             input: { city: '青岛' },
           },
@@ -103,6 +103,95 @@ describe('AgentLoopService', () => {
     );
   });
 
+  it('does not approval-block low-risk worker turns that mention confirmation boundaries', async () => {
+    const observability = new AgentObservabilityService();
+    const service = new AgentLoopService(observability);
+    const runner = jest.fn().mockResolvedValue({
+      candidateCount: 3,
+      source: 'social_match_search_turn',
+    });
+    const events: string[] = [];
+
+    const result = await service.execute({
+      taskId: 95,
+      goal: '青岛今天晚上轻松跑步',
+      plan: {
+        reason: 'search worker should remain read-only',
+        tools: [
+          {
+            agent: 'Match Agent',
+            toolName: 'social_match_search_turn',
+            input: {
+              message:
+                '青岛今天晚上，轻松跑步，只在公共场所，先站内聊，发送前确认',
+            },
+            requiresApproval: false,
+          },
+        ],
+      },
+      runner,
+      maxToolCalls: 1,
+      maxRetries: 0,
+      emit: (event) => events.push(event.type),
+    });
+
+    expect(runner).toHaveBeenCalledTimes(1);
+    expect(result.answerBoundary).toEqual(
+      expect.objectContaining({
+        requiresApproval: false,
+        status: 'ready',
+      }),
+    );
+    expect(events).not.toContain('approval_required');
+    expect(observability.snapshot().counters).not.toHaveProperty(
+      'approval_blocked',
+    );
+  });
+
+  it('does not approval-block main agent preparation when the user states confirmation preferences', async () => {
+    const observability = new AgentObservabilityService();
+    const service = new AgentLoopService(observability);
+    const runner = jest.fn().mockResolvedValue({
+      route: 'social_search',
+      source: 'main_agent_prepare_turn',
+    });
+
+    const result = await service.execute({
+      taskId: 96,
+      goal: '青岛今天晚上轻松跑步',
+      plan: {
+        reason: 'main agent preparation is an internal read-only routing step',
+        tools: [
+          {
+            agent: 'Agent Brain',
+            toolName: 'main_agent_prepare_turn',
+            input: {
+              context: {
+                message:
+                  '青岛今天晚上，轻松跑步，只在公共场所，先站内聊，发送前确认',
+              },
+            },
+            requiresApproval: false,
+          },
+        ],
+      },
+      runner,
+      maxToolCalls: 1,
+      maxRetries: 0,
+    });
+
+    expect(runner).toHaveBeenCalledTimes(1);
+    expect(result.answerBoundary).toEqual(
+      expect.objectContaining({
+        requiresApproval: false,
+        status: 'ready',
+      }),
+    );
+    expect(observability.snapshot().counters).not.toHaveProperty(
+      'approval_blocked',
+    );
+  });
+
   it('blocks approval-required tools before calling the runner', async () => {
     const observability = new AgentObservabilityService();
     const service = new AgentLoopService(observability);
@@ -114,7 +203,7 @@ describe('AgentLoopService', () => {
       plan: {
         tools: [
           {
-            agent: 'Meet Loop Agent',
+            agent: 'Match Agent',
             toolName: 'send_message_to_candidate',
             input: { candidateUserId: 2 },
             requiresApproval: true,
@@ -159,7 +248,7 @@ describe('AgentLoopService', () => {
       plan: {
         tools: [
           {
-            agent: 'Meet Loop Agent',
+            agent: 'Match Agent',
             toolName: 'send_message_to_candidate',
             input: { candidateUserId: 2, body: '今晚一起跑步吗' },
           },
@@ -199,7 +288,7 @@ describe('AgentLoopService', () => {
       plan: {
         tools: [
           {
-            agent: 'Social Match Agent',
+            agent: 'Match Agent',
             toolName: 'search_real_candidates',
             input: { city: '青岛' },
           },

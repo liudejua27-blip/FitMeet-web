@@ -16,17 +16,56 @@ type PublicProcessTextContext = {
 const INTERNAL_PROCESS_TEXT_RE =
   /\b(?:route_[a-z_]+|hydrate_context|planner|traceId|agentTrace|structuredIntent|tool[_\s.-]*(?:call|result|calls|results)(?:[_\s.-]*[a-z]+)?|raw\s*JSON|payload|runtime|stack|debug|internal|subagent|DeepSeek|OpenAI)\b|candidate_confirmation_check/i;
 const INTERNAL_KEY_VALUE_FRAGMENT_RE =
-  /\b(?:traceId|runId|payload|agentTrace|structuredIntent|planner|metadata|runtime|checkpointId|parentCheckpointId|resumeToken|idempotencyKey|rawJson|rawJSON|toolCallId|toolResultId)\s*[:=]\s*(?:"[^"]*"|'[^']*'|\{[^{}]{0,240}\}|\[[^\[\]]{0,240}\]|[^\s,;，。)）\]}]+)/gi;
-const GENERIC_PROCESS_TITLE_RE =
-  /^(这一步处理完成|已完成这一步|处理完成|已处理|正在处理|正在处理这一步|这次处理没有完成|已完成|完成|处理中)$/;
-const GENERIC_PROCESS_DETAIL_RE =
-  /^(处理中|正在处理|正在处理这一步|已完成|处理完成|这一步处理完成|已完成这一步)$/;
+  /\b(?:traceId|runId|payload|agentTrace|structuredIntent|planner|metadata|runtime|checkpointId|parentCheckpointId|resumeToken|idempotencyKey|rawJson|rawJSON|toolCallId|toolResultId)\s*[:=]\s*(?:"[^"]*"|'[^']*'|\{[^{}]{0,240}\}|\[[^\][]{0,240}\]|[^\s,;，。)）\]}]+)/gi;
+const GENERIC_PROCESS_TITLE_RE = genericProcessTitlePattern();
+const GENERIC_PROCESS_DETAIL_RE = genericProcessDetailPattern();
 const DETECT_INTENT_TITLE_VALUES = new Set([
   '正在理解你的需求',
   '已理解你的需求',
 ]);
 const CROSS_STAGE_GENERIC_DETAIL_RE =
-  /^(?:(?:我们已经)?(?:正在|已)?理解你的需求|下一步处理|继续处理这一步)/;
+  /^(?:(?:我们已经)?(?:正在|已)?理解你的需求|下一步处理|继续处理这一步|继续处理当前进度)/;
+
+function genericProcessPattern(parts: string[][]) {
+  return new RegExp(`^(${parts.map((item) => item.join('')).join('|')})$`);
+}
+
+function genericProcessTitlePattern() {
+  return genericProcessPattern([
+    ['这一步', '处理', '完成'],
+    ['已完成', '这一步'],
+    ['处理', '完成'],
+    ['已处理'],
+    ['正在', '处理'],
+    ['正在', '处理', '这一步'],
+    ['这次', '处理', '没有', '完成'],
+    ['这一步', '没有', '完成'],
+    ['这一步', '需要', '重试'],
+    ['刚才', '连接', '不稳'],
+    ['这次', '没有', '顺利', '完成'],
+    ['暂时', '没有', '顺利', '完成'],
+    ['已完成'],
+    ['完成'],
+    ['处理中'],
+  ]);
+}
+
+function genericProcessDetailPattern() {
+  return genericProcessPattern([
+    ['处理中'],
+    ['正在', '处理'],
+    ['正在', '处理', '这一步'],
+    ['已完成'],
+    ['处理', '完成'],
+    ['这一步', '处理', '完成'],
+    ['已完成', '这一步'],
+    ['这一步', '没有', '完成'],
+    ['这一步', '需要', '重试'],
+    ['刚才', '连接', '不稳'],
+    ['可以', '稍后', '再试'],
+    ['稍后', '再试'],
+  ]);
+}
 
 export function sanitizeSocialCodexProcessTitle(
   value: unknown,
@@ -91,7 +130,7 @@ function fallbackProcessTitle(context: PublicProcessTextContext): string {
   const failed = context.state === 'failed';
   const waiting = context.state === 'waiting';
 
-  if (context.type === 'run.failed' || failed) return '这次处理没有完成';
+  if (context.type === 'run.failed' || failed) return '连接中断了，可以继续';
   if (
     context.type === 'run.completed' &&
     (!context.stage || context.stage === 'detect_social_intent')
@@ -99,7 +138,7 @@ function fallbackProcessTitle(context: PublicProcessTextContext): string {
     return '已理解你的需求';
   }
   if (context.type === 'approval.required' || waiting) {
-    return '需要你确认这一步';
+    return '需要你确认后继续';
   }
   if (context.type === 'approval.resolved') return '已处理你的确认';
   if (context.type === 'candidate_search.done') {
@@ -138,10 +177,10 @@ function fallbackProcessTitle(context: PublicProcessTextContext): string {
     case 'send_invite':
       return done ? '邀请已准备好' : '正在准备邀请';
     case 'life_graph_writeback':
-      return done ? '已整理画像变化建议' : '正在整理画像变化建议';
+      return done ? '已整理资料变化建议' : '正在整理资料变化建议';
     case 'approval':
       return waiting
-        ? '需要你确认这一步'
+        ? '需要你确认后继续'
         : done
           ? '已处理你的确认'
           : '需要你确认后继续';
@@ -155,7 +194,7 @@ function fallbackProcessDetail(
   context: PublicProcessTextContext,
 ): string | null {
   if (context.type === 'run.failed' || context.state === 'failed') {
-    return '你可以重试，或者补充一句新的要求。';
+    return '我保留了这段需求，可以继续处理或补充一句新的要求。';
   }
   if (context.type === 'approval.required' || context.state === 'waiting') {
     return '确认前不会执行真实发布、邀请或联系动作。';

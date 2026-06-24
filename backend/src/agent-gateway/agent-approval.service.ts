@@ -311,7 +311,12 @@ export class AgentApprovalService {
       summary: this.buildSummary(type, input.payload),
       reasons: needs
         ? [...new Set(['approval_required_by_permission_engine', ...reasons])]
-        : [...new Set([`auto_execute_allowed_by_${settings.mode}`, ...reasons])],
+        : [
+            ...new Set([
+              `auto_execute_allowed_by_${settings.mode}`,
+              ...reasons,
+            ]),
+          ],
     };
   }
 
@@ -394,7 +399,9 @@ export class AgentApprovalService {
         reason: 'privacy_change_requires_explicit_approval',
       };
     }
-    if (/\b(update_sensitive_profile|sensitive_profile|sensitive_tag)\b/.test(raw)) {
+    if (
+      /\b(update_sensitive_profile|sensitive_profile|sensitive_tag)\b/.test(raw)
+    ) {
       return {
         riskLevel: ApprovalRiskLevel.High,
         reason: 'sensitive_profile_write_requires_explicit_approval',
@@ -564,7 +571,7 @@ export class AgentApprovalService {
       case ApprovalType.Payment:
         return `${agentName} 想代表你完成一次支付。`;
       case ApprovalType.UnknownRisk:
-        return `${agentName} 想对一个风险等级未知的目标执行动作。`;
+        return `${agentName} 想代表你执行一步需要确认的操作。`;
       case ApprovalType.PostPublish:
         return `${agentName} 想代表你发布一条动态。`;
       default:
@@ -733,7 +740,9 @@ export class AgentApprovalService {
       sideEffectBoundary: '确认前不会执行、不会触达对方、不会公开内容。',
       dataBoundary: this.dataBoundary(input.type, input.actionType),
       idempotencyKey: input.idempotencyKey,
-      ...(visibleContent ? { contentPreview: visibleContent.slice(0, 300) } : {}),
+      ...(visibleContent
+        ? { contentPreview: visibleContent.slice(0, 300) }
+        : {}),
     };
   }
 
@@ -748,8 +757,11 @@ export class AgentApprovalService {
     ) {
       return '发送前预览';
     }
-    if (type === ApprovalType.ContactRequest || /connect|friend/i.test(actionType)) {
-      return '连接候选人前预览';
+    if (
+      type === ApprovalType.ContactRequest ||
+      /connect|friend/i.test(actionType)
+    ) {
+      return '加好友并聊天前预览';
     }
     if (type === ApprovalType.ShareLocation) return '公开位置前预览';
     if (type === ApprovalType.Payment) return '支付前预览';
@@ -770,7 +782,7 @@ export class AgentApprovalService {
       case ApprovalType.ShareLocation:
         return '确认后会公开你允许展示的位置范围。';
       default:
-        return '确认后才会执行这一步。';
+        return '确认后才会执行这个动作。';
     }
   }
 
@@ -785,9 +797,9 @@ export class AgentApprovalService {
       return '不会在确认前交换手机号、微信或外部联系方式。';
     }
     if (type === ApprovalType.PostPublish || /publish/i.test(actionType)) {
-      return '会过滤联系方式、精确住址和敏感画像字段。';
+      return '会过滤联系方式、精确住址和私密资料字段。';
     }
-    return '只使用当前任务必要信息，并写入审计日志。';
+    return '只使用当前任务必要信息；确认记录会保留，方便你之后追踪和撤回。';
   }
 
   private approvalIdempotencyKey(

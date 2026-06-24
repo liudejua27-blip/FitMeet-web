@@ -215,11 +215,11 @@ export class AgentDiscoveryService {
           conversationId,
           messageId: message.id,
           preview: text.slice(0, 80),
-          deliveredTo: 'agent_inbox',
+          deliveredTo: 'agent_message_events',
         },
       });
 
-      this.emitInboxMessageWebhooks(target.agentConnectionId, {
+      this.emitMessageEventWebhooks(target.agentConnectionId, {
         conversationId,
         messageId: message.id,
         targetAgentId: target.id,
@@ -290,7 +290,7 @@ export class AgentDiscoveryService {
       },
     });
 
-    this.emitInboxMessageWebhooks(target.agentConnectionId, {
+    this.emitMessageEventWebhooks(target.agentConnectionId, {
       conversationId,
       messageId: message.id,
       targetAgentId: target.id,
@@ -307,7 +307,7 @@ export class AgentDiscoveryService {
     };
   }
 
-  private emitInboxMessageWebhooks(
+  private emitMessageEventWebhooks(
     agentConnectionId: number | null | undefined,
     payload: Record<string, unknown>,
   ) {
@@ -323,7 +323,7 @@ export class AgentDiscoveryService {
     );
     void this.webhooks.emitToConnection(
       agentConnectionId,
-      'agent.inbox.updated',
+      'agent.message.updated',
       payload,
     );
   }
@@ -367,38 +367,40 @@ export class AgentDiscoveryService {
     });
   }
 
-  async listInboxForConnection(
+  async listMessageCenterForConnection(
     conn: AgentConnection,
     opts: { limit?: number; unreadOnly?: boolean; eventType?: string } = {},
   ) {
     const [conversations, events] = await Promise.all([
-      this.messages.getAgentInboxConversations(conn.id, opts),
-      this.messages.getAgentInboxEvents(conn.id, opts),
+      this.messages.getAgentMessageConversations(conn.id, opts),
+      this.messages.getAgentMessageEvents(conn.id, opts),
     ]);
     return {
       agentProfileId: conn.id,
       agentConnectionId: conn.id,
-      agentName: conn.agentDisplayName || String(conn.agentName || 'OpenClaw'),
+      agentName:
+        conn.agentDisplayName || String(conn.agentName || 'FitMeetAgent'),
       conversations,
       events,
     };
   }
 
-  async listInboxEventsForConnection(
+  async listMessageEventsForConnection(
     conn: AgentConnection,
     opts: { limit?: number; unreadOnly?: boolean; eventType?: string } = {},
   ) {
-    const events = await this.messages.getAgentInboxEvents(conn.id, opts);
+    const events = await this.messages.getAgentMessageEvents(conn.id, opts);
     return {
       agentProfileId: conn.id,
       agentConnectionId: conn.id,
-      agentName: conn.agentDisplayName || String(conn.agentName || 'OpenClaw'),
+      agentName:
+        conn.agentDisplayName || String(conn.agentName || 'FitMeetAgent'),
       events,
       total: events.length,
     };
   }
 
-  async recordInboxHeartbeat(
+  async recordMessageEventHeartbeat(
     conn: AgentConnection,
     opts: { limit?: number; unreadOnly?: boolean; eventType?: string } = {},
   ) {
@@ -420,10 +422,10 @@ export class AgentDiscoveryService {
         relatedSocialRequestId: null,
         relatedCandidateId: null,
         relatedActivityId: null,
-        inputSummary: 'OpenClaw inbox heartbeat poll',
+        inputSummary: 'FitMeetAgent message event heartbeat poll',
         outputSummary: 'heartbeat recorded',
         payload: {
-          source: 'agent_inbox_events',
+          source: 'agent_message_events_events',
           limit: opts.limit ?? null,
           unreadOnly: opts.unreadOnly ?? false,
           eventType: opts.eventType ?? null,
@@ -433,19 +435,19 @@ export class AgentDiscoveryService {
     );
   }
 
-  async ackInboxEventsForConnection(
+  async ackMessageEventsForConnection(
     conn: AgentConnection,
     dto: { eventIds?: string[] },
   ) {
-    return this.messages.ackAgentInboxEvents(conn.id, dto.eventIds ?? []);
+    return this.messages.ackAgentMessageEvents(conn.id, dto.eventIds ?? []);
   }
 
-  async listInboxMessagesForConnection(
+  async listMessageCenterMessagesForConnection(
     conn: AgentConnection,
     conversationId: string,
     opts: { limit?: number } = {},
   ) {
-    const messages = await this.messages.getAgentInboxMessages(
+    const messages = await this.messages.getAgentConversationMessages(
       conversationId,
       conn.id,
       opts,
@@ -453,13 +455,14 @@ export class AgentDiscoveryService {
     return {
       agentProfileId: conn.id,
       agentConnectionId: conn.id,
-      agentName: conn.agentDisplayName || String(conn.agentName || 'OpenClaw'),
+      agentName:
+        conn.agentDisplayName || String(conn.agentName || 'FitMeetAgent'),
       conversationId,
       messages,
     };
   }
 
-  async replyToInboxForConnection(
+  async replyToMessageCenterForConnection(
     conn: AgentConnection,
     conversationId: string,
     dto: { content?: string; text?: string },
@@ -473,7 +476,10 @@ export class AgentDiscoveryService {
       {
         ownerUserId: conn.userId,
         metadata: {
-          source: String(conn.agentName) === 'openclaw' ? 'openclaw' : 'agent',
+          source:
+            String(conn.agentName) === 'fitmeet_agent'
+              ? 'fitmeet_agent'
+              : 'agent',
           sourceAgentConnectionId: conn.id,
           agentConnectionId: conn.id,
           ownerUserId: conn.userId,
@@ -500,21 +506,22 @@ export class AgentDiscoveryService {
         socketPushed,
         preview: content.slice(0, 80),
       },
-      reason: 'agent_inbox_reply',
+      reason: 'agent_message_events_reply',
     });
 
     return {
       status: 'sent' as const,
       agentProfileId: conn.id,
       agentConnectionId: conn.id,
-      agentName: conn.agentDisplayName || String(conn.agentName || 'OpenClaw'),
+      agentName:
+        conn.agentDisplayName || String(conn.agentName || 'FitMeetAgent'),
       conversationId,
       socketPushed,
       message,
     };
   }
 
-  async listInboxForOwner(
+  async listMessageCenterForOwner(
     ownerUserId: number,
     opts: {
       agentProfileId?: number;
@@ -527,13 +534,13 @@ export class AgentDiscoveryService {
       const conn = await this.connectionRepo.findOne({
         where: {
           userId: ownerUserId,
-          agentName: KnownAgent.OpenClaw,
+          agentName: KnownAgent.FitMeetAgent,
           status: ConnectionStatus.Active,
         },
         order: { updatedAt: 'DESC' },
       });
       if (!conn) {
-        const events = await this.messages.getAgentInboxEventsForOwner(
+        const events = await this.messages.getAgentMessageEventsForOwner(
           ownerUserId,
           {
             limit: opts.limit,
@@ -554,11 +561,11 @@ export class AgentDiscoveryService {
         };
       }
       const [conversations, events] = await Promise.all([
-        this.messages.getAgentInboxConversations(conn.id, {
+        this.messages.getAgentMessageConversations(conn.id, {
           limit: opts.limit,
           unreadOnly: opts.unreadOnly,
         }),
-        this.messages.getAgentInboxEvents(conn.id, {
+        this.messages.getAgentMessageEvents(conn.id, {
           limit: opts.limit,
           unreadOnly: opts.unreadOnly,
           eventType: opts.eventType,
@@ -569,7 +576,7 @@ export class AgentDiscoveryService {
         agentProfileId: conn.id,
         agentConnectionId: conn.id,
         agentName:
-          conn.agentDisplayName || String(conn.agentName || 'OpenClaw'),
+          conn.agentDisplayName || String(conn.agentName || 'FitMeetAgent'),
         conversations: safe,
         events,
         total: safe.length,
@@ -577,10 +584,13 @@ export class AgentDiscoveryService {
     }
     let profile: AgentProfile;
     try {
-      profile = await this.getOwnedInboxAgent(ownerUserId, opts.agentProfileId);
+      profile = await this.getOwnedMessageAgent(
+        ownerUserId,
+        opts.agentProfileId,
+      );
     } catch (err) {
       this.logger.warn(
-        `inbox: no agent profile for owner=${ownerUserId}: ${
+        `message center: no agent profile for owner=${ownerUserId}: ${
           err instanceof Error ? err.message : String(err)
         }`,
       );
@@ -595,11 +605,11 @@ export class AgentDiscoveryService {
     }
     try {
       const [conversations, events] = await Promise.all([
-        this.messages.getAgentInboxConversations(profile.id, {
+        this.messages.getAgentMessageConversations(profile.id, {
           limit: opts.limit,
           unreadOnly: opts.unreadOnly,
         }),
-        this.messages.getAgentInboxEvents(profile.id, {
+        this.messages.getAgentMessageEvents(profile.id, {
           limit: opts.limit,
           unreadOnly: opts.unreadOnly,
           eventType: opts.eventType,
@@ -615,7 +625,7 @@ export class AgentDiscoveryService {
       };
     } catch (err) {
       this.logger.error(
-        `inbox: getAgentInboxConversations failed agent=${profile.id}: ${
+        `message center: getAgentMessageConversations failed agent=${profile.id}: ${
           err instanceof Error ? err.stack || err.message : String(err)
         }`,
       );
@@ -625,12 +635,12 @@ export class AgentDiscoveryService {
         conversations: [],
         events: [],
         total: 0,
-        reason: 'inbox_unavailable',
+        reason: 'message_center_unavailable',
       };
     }
   }
 
-  async listInboxEventsForOwner(
+  async listMessageEventsForOwner(
     ownerUserId: number,
     opts: {
       agentProfileId?: number;
@@ -638,49 +648,57 @@ export class AgentDiscoveryService {
       unreadOnly?: boolean;
     } = {},
   ) {
-    const inbox = await this.listInboxForOwner(ownerUserId, opts);
+    const messageCenter = await this.listMessageCenterForOwner(
+      ownerUserId,
+      opts,
+    );
     return {
-      agentProfileId: inbox.agentProfileId,
+      agentProfileId: messageCenter.agentProfileId,
       agentConnectionId:
-        'agentConnectionId' in inbox
-          ? inbox.agentConnectionId
-          : inbox.agentProfileId,
-      agentName: inbox.agentName,
-      events: inbox.events ?? [],
-      total: Array.isArray(inbox.events) ? inbox.events.length : 0,
-      reason: 'reason' in inbox ? inbox.reason : undefined,
+        'agentConnectionId' in messageCenter
+          ? messageCenter.agentConnectionId
+          : messageCenter.agentProfileId,
+      agentName: messageCenter.agentName,
+      events: messageCenter.events ?? [],
+      total: Array.isArray(messageCenter.events)
+        ? messageCenter.events.length
+        : 0,
+      reason: 'reason' in messageCenter ? messageCenter.reason : undefined,
     };
   }
 
-  async ackInboxEventsForOwner(
+  async ackMessageEventsForOwner(
     ownerUserId: number,
     dto: { agentProfileId?: number; eventIds?: string[] },
   ) {
     if (dto.agentProfileId) {
-      const profile = await this.getOwnedInboxAgent(
+      const profile = await this.getOwnedMessageAgent(
         ownerUserId,
         dto.agentProfileId,
       );
-      return this.messages.ackAgentInboxEvents(profile.id, dto.eventIds ?? []);
+      return this.messages.ackAgentMessageEvents(
+        profile.id,
+        dto.eventIds ?? [],
+      );
     }
     const conn = await this.connectionRepo.findOne({
       where: {
         userId: ownerUserId,
-        agentName: KnownAgent.OpenClaw,
+        agentName: KnownAgent.FitMeetAgent,
         status: ConnectionStatus.Active,
       },
       order: { updatedAt: 'DESC' },
     });
     if (!conn) {
-      return this.messages.ackAgentInboxEventsForOwner(
+      return this.messages.ackAgentMessageEventsForOwner(
         ownerUserId,
         dto.eventIds ?? [],
       );
     }
-    return this.messages.ackAgentInboxEvents(conn.id, dto.eventIds ?? []);
+    return this.messages.ackAgentMessageEvents(conn.id, dto.eventIds ?? []);
   }
 
-  async listInboxMessagesForOwner(
+  async listMessageCenterMessagesForOwner(
     ownerUserId: number,
     conversationId: string,
     opts: { agentProfileId?: number; limit?: number } = {},
@@ -689,7 +707,7 @@ export class AgentDiscoveryService {
       const conn = await this.connectionRepo.findOne({
         where: {
           userId: ownerUserId,
-          agentName: KnownAgent.OpenClaw,
+          agentName: KnownAgent.FitMeetAgent,
           status: ConnectionStatus.Active,
         },
         order: { updatedAt: 'DESC' },
@@ -704,7 +722,7 @@ export class AgentDiscoveryService {
           reason: 'no_active_agent_connection',
         };
       }
-      const messages = await this.messages.getAgentInboxMessages(
+      const messages = await this.messages.getAgentConversationMessages(
         conversationId,
         conn.id,
         { limit: opts.limit },
@@ -713,16 +731,16 @@ export class AgentDiscoveryService {
         agentProfileId: conn.id,
         agentConnectionId: conn.id,
         agentName:
-          conn.agentDisplayName || String(conn.agentName || 'OpenClaw'),
+          conn.agentDisplayName || String(conn.agentName || 'FitMeetAgent'),
         conversationId,
         messages,
       };
     }
-    const profile = await this.getOwnedInboxAgent(
+    const profile = await this.getOwnedMessageAgent(
       ownerUserId,
       opts.agentProfileId,
     );
-    const messages = await this.messages.getAgentInboxMessages(
+    const messages = await this.messages.getAgentConversationMessages(
       conversationId,
       profile.id,
       { limit: opts.limit },
@@ -735,7 +753,7 @@ export class AgentDiscoveryService {
     };
   }
 
-  async replyToInboxForOwner(
+  async replyToMessageCenterForOwner(
     ownerUserId: number,
     conversationId: string,
     dto: { agentProfileId?: number; content?: string; text?: string },
@@ -746,7 +764,7 @@ export class AgentDiscoveryService {
       const conn = await this.connectionRepo.findOne({
         where: {
           userId: ownerUserId,
-          agentName: KnownAgent.OpenClaw,
+          agentName: KnownAgent.FitMeetAgent,
           status: ConnectionStatus.Active,
         },
         order: { updatedAt: 'DESC' },
@@ -761,7 +779,9 @@ export class AgentDiscoveryService {
           ownerUserId,
           metadata: {
             source:
-              String(conn.agentName) === 'openclaw' ? 'openclaw' : 'agent',
+              String(conn.agentName) === 'fitmeet_agent'
+                ? 'fitmeet_agent'
+                : 'agent',
             ownerConsoleReply: true,
             sourceAgentConnectionId: conn.id,
             agentConnectionId: conn.id,
@@ -789,7 +809,7 @@ export class AgentDiscoveryService {
           socketPushed,
           preview: content.slice(0, 80),
         },
-        reason: 'owner_agent_inbox_reply',
+        reason: 'owner_agent_message_events_reply',
       });
 
       return {
@@ -797,13 +817,13 @@ export class AgentDiscoveryService {
         agentProfileId: conn.id,
         agentConnectionId: conn.id,
         agentName:
-          conn.agentDisplayName || String(conn.agentName || 'OpenClaw'),
+          conn.agentDisplayName || String(conn.agentName || 'FitMeetAgent'),
         conversationId,
         socketPushed,
         message,
       };
     }
-    const profile = await this.getOwnedInboxAgent(
+    const profile = await this.getOwnedMessageAgent(
       ownerUserId,
       dto.agentProfileId,
     );
@@ -835,7 +855,7 @@ export class AgentDiscoveryService {
         socketPushed,
         preview: content.slice(0, 80),
       },
-      reason: 'owner_agent_inbox_reply',
+      reason: 'owner_agent_message_events_reply',
     });
 
     return {
@@ -884,7 +904,9 @@ export class AgentDiscoveryService {
       const approval = await this.approvals.create({
         userId: requestUserId,
         agentConnectionId: source.agentConnectionId ?? null,
-        type: dto.activityId ? ApprovalType.Custom : ApprovalType.ContactRequest,
+        type: dto.activityId
+          ? ApprovalType.Custom
+          : ApprovalType.ContactRequest,
         actionType: action,
         skillName: 'agent_discovery.invite_agent',
         payload: {
@@ -898,8 +920,7 @@ export class AgentDiscoveryService {
           ? `邀请 ${target.agentName ?? `Agent #${targetAgentId}`} 参加活动`
           : `连接 ${target.agentName ?? `Agent #${targetAgentId}`}`,
         riskLevel: ApprovalRiskLevel.Medium,
-        reason:
-          'Agent 代发邀请或连接候选属于高风险社交动作，必须由用户确认。',
+        reason: 'Agent 代发邀请或连接候选属于高风险社交动作，必须由用户确认。',
         createdBy: 'agent',
         relatedActivityId: dto.activityId ?? null,
       });
@@ -1018,8 +1039,8 @@ export class AgentDiscoveryService {
 
   private providerFromConnection(conn: AgentConnection): AgentProvider {
     switch (conn.agentName) {
-      case 'openclaw':
-        return AgentProvider.OpenClaw;
+      case 'fitmeet_agent':
+        return AgentProvider.FitMeetAgent;
       case 'codex':
         return AgentProvider.Codex;
       case 'qclaw':
@@ -1029,7 +1050,7 @@ export class AgentDiscoveryService {
     }
   }
 
-  private async getOwnedInboxAgent(
+  private async getOwnedMessageAgent(
     ownerUserId: number,
     agentProfileId?: number,
   ) {
@@ -1044,7 +1065,7 @@ export class AgentDiscoveryService {
       const conn = await this.connectionRepo.findOne({
         where: {
           userId: ownerUserId,
-          agentName: KnownAgent.OpenClaw,
+          agentName: KnownAgent.FitMeetAgent,
           status: ConnectionStatus.Active,
         },
         order: { updatedAt: 'DESC' },
@@ -1072,5 +1093,4 @@ export class AgentDiscoveryService {
     }
     return source;
   }
-
 }

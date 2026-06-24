@@ -2,20 +2,21 @@ export type FitMeetAlphaAgentName =
   | 'FitMeet Main Agent'
   | 'Agent Brain'
   | 'Life Graph Agent'
-  | 'Social Match Agent'
-  | 'Meet Loop Agent'
-  | 'Math Agent';
+  | 'Match Agent';
 
 export type FitMeetAlphaCardType =
+  | 'profile_completion'
   | 'profile_proposal'
   | 'candidate_card'
   | 'opener_approval'
   | 'activity_plan'
   | 'activity_status'
   | 'checkin_card'
+  | 'meet_loop_timeline'
   | 'review_card'
   | 'audit_update'
-  | 'safety_boundary';
+  | 'safety_boundary'
+  | 'candidate_empty_state';
 
 export type FitMeetAgentLoopStage =
   | 'social_search'
@@ -42,7 +43,12 @@ export type FitMeetAgentSchemaAction =
   | 'opener.confirm_send'
   | 'opener.regenerate'
   | 'opener.reject'
+  | 'publish_to_discover'
+  | 'social_intent.decline_publish'
+  | 'social_intent.dismiss'
+  | 'social_intent.retry_publish'
   | 'activity.confirm_create'
+  | 'activity.skip_publish'
   | 'activity.modify_time'
   | 'activity.modify_location'
   | 'activity.check_in'
@@ -64,6 +70,8 @@ export interface FitMeetAlphaCardAction {
     | 'send_message'
     | 'connect_candidate'
     | 'save_candidate'
+    | 'publish_social_request'
+    | 'publish_to_discover'
     | 'create_activity'
     | 'generate_opener'
     | 'reject_opener'
@@ -91,6 +99,8 @@ export interface FitMeetAlphaCard {
   schemaType?:
     | 'social_match.candidate'
     | 'social_match.activity'
+    | 'social_match.empty'
+    | 'profile.completion'
     | 'life_graph.diff'
     | 'meet_loop.timeline'
     | 'safety.approval'

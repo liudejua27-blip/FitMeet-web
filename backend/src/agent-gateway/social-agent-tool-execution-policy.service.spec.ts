@@ -346,10 +346,18 @@ describe('SocialAgentToolExecutionPolicyService', () => {
       socialCodex: expect.objectContaining({
         actionType: 'publish_social_request',
         mode: 'approval_required',
-        riskLevel: 'high',
+        riskLevel: 'medium',
         requiresApproval: true,
         dryRunRequired: true,
         auditRequired: true,
+        dryRunPreview: expect.objectContaining({
+          required: true,
+          sideEffectAllowedBeforeApproval: false,
+        }),
+        sandbox: expect.objectContaining({
+          externalSideEffectAllowed: false,
+          preciseLocationAllowed: false,
+        }),
         idempotencyKeyScope: 'social_codex:publish_social_request',
         idempotencyKey: expect.stringMatching(
           /^social_codex:publish_social_request:task:100:tool:create_social_request:/,
@@ -369,7 +377,10 @@ describe('SocialAgentToolExecutionPolicyService', () => {
   it('builds stable idempotency keys for the same Social Codex action', () => {
     const service = makePolicyService();
     const task = makeTask();
-    const input = { message: '周末下午一起散步吗？', publiclyDiscoverable: true };
+    const input = {
+      message: '周末下午一起散步吗？',
+      publiclyDiscoverable: true,
+    };
 
     const first = service.buildPolicyMetadata(
       task,
@@ -443,7 +454,9 @@ describe('SocialAgentToolExecutionPolicyService', () => {
         },
       }),
     });
-    expect(JSON.stringify(policy.socialCodexAudit)).not.toContain('fitmeet-test');
+    expect(JSON.stringify(policy.socialCodexAudit)).not.toContain(
+      'fitmeet-test',
+    );
   });
 
   it('redacts sensitive fields from Social Codex audit metadata', () => {

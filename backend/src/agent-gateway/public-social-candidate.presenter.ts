@@ -36,6 +36,31 @@ export type PublicSocialCandidateCard = {
   nextAction: 'draft_invitation';
 };
 
+export type PublicSocialCandidatePublicCard = {
+  profile: PublicSocialCandidateCard['profile'];
+  matchLevel: '匹配度：中等' | '匹配度：较高' | '匹配度：很高';
+  reasonText: string;
+};
+
+export function serializePublicSocialCandidate(
+  candidate: PublicSocialCandidateCard,
+): PublicSocialCandidatePublicCard {
+  return {
+    profile: candidate.profile,
+    matchLevel: publicMatchLevel(candidate.score),
+    reasonText: publicProfileText(
+      candidate.reasonText,
+      '你们的活动偏好、时间或城市比较接近，适合先轻松聊聊。',
+    ),
+  };
+}
+
+export function serializePublicSocialCandidates(
+  candidates: PublicSocialCandidateCard[],
+): PublicSocialCandidatePublicCard[] {
+  return candidates.map(serializePublicSocialCandidate);
+}
+
 export function buildPublicSocialCandidates({
   users,
   preferencesByUserId,
@@ -62,6 +87,8 @@ export function buildPublicSocialCandidates({
 
   return users
     .map((user) => {
+      if (isInternalFixtureUser(user)) return null;
+
       const pref = preferencesByUserId.get(user.id);
       if (pref && pref.acceptAgentMessages === false) return null;
 
@@ -125,14 +152,19 @@ export function buildPublicSocialCandidates({
       return {
         profile: {
           id: user.id,
-          name: user.name,
-          avatar: user.avatar,
+          name: publicProfileText(user.name, 'FitMeet 用户'),
+          avatar: publicProfileText(user.avatar, ''),
           color: user.color,
           age: user.age,
-          city: user.city,
-          bio: user.bio,
+          city: publicProfileText(user.city, ''),
+          bio: publicProfileText(
+            user.bio,
+            '这位用户正在寻找同频的运动社交伙伴。',
+          ),
           verified: user.verified,
-          interestTags: user.interestTags ?? [],
+          interestTags: (user.interestTags ?? [])
+            .map((tag) => publicProfileText(tag, ''))
+            .filter(Boolean),
           distanceKm:
             distanceKm != null ? Math.round(distanceKm * 100) / 100 : null,
         },
@@ -152,6 +184,14 @@ export function buildPublicSocialCandidates({
     })
     .sort((a, b) => b.score - a.score)
     .slice(0, dto.limit ?? 10);
+}
+
+function publicMatchLevel(
+  score: number,
+): PublicSocialCandidatePublicCard['matchLevel'] {
+  if (score >= 85) return '匹配度：很高';
+  if (score >= 68) return '匹配度：较高';
+  return '匹配度：中等';
 }
 
 export function parsePublicSocialTimeWindow(text?: string): string[] {
@@ -185,4 +225,29 @@ function haversineKm(
     Math.sin(dLat / 2) ** 2 +
     Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
   return 2 * radius * Math.asin(Math.sqrt(a));
+}
+
+function publicProfileText(value: string | null | undefined, fallback: string) {
+  const text = `${value ?? ''}`.trim();
+  if (!text || /^unknown$/i.test(text) || isInternalFixtureText(text)) {
+    return fallback;
+  }
+  return text;
+}
+
+function isInternalFixtureText(text: string) {
+  const normalized = text.replace(/[_-]+/g, ' ');
+  return /\b(agent\s*smoke|smoke\s*account|api\s*smoke|smoke|fixture|seed|test\s*account|mock)\b/i.test(
+    normalized,
+  );
+}
+
+function isInternalFixtureUser(user: User) {
+  return [
+    user.email,
+    user.name,
+    user.bio,
+    user.gym,
+    ...(user.interestTags ?? []),
+  ].some((value) => isInternalFixtureText(`${value ?? ''}`));
 }

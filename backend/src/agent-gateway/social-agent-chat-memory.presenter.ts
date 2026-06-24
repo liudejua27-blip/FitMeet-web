@@ -190,7 +190,9 @@ function legacyMemoryValue(
   return null;
 }
 
-function recordMemoryValue(...values: unknown[]): Record<string, unknown> | null {
+function recordMemoryValue(
+  ...values: unknown[]
+): Record<string, unknown> | null {
   for (const value of values) {
     if (isRecord(value)) return value;
   }
@@ -199,7 +201,7 @@ function recordMemoryValue(...values: unknown[]): Record<string, unknown> | null
 
 function arrayMemoryValue(...values: unknown[]): unknown[] | null {
   for (const value of values) {
-    if (Array.isArray(value)) return value;
+    if (Array.isArray(value)) return Array.from<unknown>(value);
   }
   return null;
 }

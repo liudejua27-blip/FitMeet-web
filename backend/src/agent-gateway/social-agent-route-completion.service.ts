@@ -2,6 +2,7 @@ import { Injectable, Optional } from '@nestjs/common';
 
 import type { LifeGraphProposalDto } from '../life-graph/dto/life-graph.dto';
 import type { AgentTask } from './entities/agent-task.entity';
+import { cleanDisplayText } from '../common/display-text.util';
 import type {
   FitMeetAlphaCard,
   FitMeetAlphaCardAction,
@@ -42,6 +43,7 @@ type CompleteRouteTurnInput = {
   runMode: SocialAgentIntentRouteResult['runMode'];
   pendingApproval: SocialAgentPendingApprovalSnapshot | null;
   activityResults: SocialAgentActivityResult[];
+  cards?: FitMeetAlphaCard[];
   profileUpdateProposal: LifeGraphProposalDto | null;
   assistantStreamed?: boolean;
   agentLoop?: AgentLoopRun | null;
@@ -86,7 +88,10 @@ export class SocialAgentRouteCompletionService {
       queuedRun: input.queuedRun,
       pendingApproval: input.pendingApproval,
       activityResults: input.activityResults,
-      cards: this.cardsForActivityResults(input.task.id, input.activityResults),
+      cards: this.uniqueCards([
+        ...(input.cards ?? []),
+        ...this.cardsForActivityResults(input.task.id, input.activityResults),
+      ]),
       profileUpdateProposal: input.profileUpdateProposal,
       permissionMode: input.task.permissionMode,
       assistantStreamed: input.assistantStreamed ?? false,
@@ -220,7 +225,7 @@ export class SocialAgentRouteCompletionService {
       await append(
         'approval.required',
         'approval',
-        '这一步需要你确认',
+        '需要你确认后继续',
         'waiting',
         {
           ...pendingPayload,
@@ -230,10 +235,9 @@ export class SocialAgentRouteCompletionService {
           actionType: input.pendingApproval.actionType,
           riskLevel: input.pendingApproval.riskLevel,
           resumePolicy: 'confirm_then_resume_same_run',
-          sideEffectPolicy:
-            input.runtime?.sideEffectPolicy ?? {
-              sideEffectsBeforeResume: 'idempotent_only',
-            },
+          sideEffectPolicy: input.runtime?.sideEffectPolicy ?? {
+            sideEffectsBeforeResume: 'idempotent_only',
+          },
         },
       );
     }
@@ -248,7 +252,7 @@ export class SocialAgentRouteCompletionService {
         ? '发送邀请前需要你确认'
         : input.queuedRun
           ? '已接上候选搜索任务'
-          : '这一步处理完成',
+          : '已整理当前进度',
       completedState,
       {
         action: result.action,
@@ -328,6 +332,17 @@ export class SocialAgentRouteCompletionService {
     return activityResults
       .slice(0, 3)
       .map((activity) => this.activityOpportunityCard(taskId, activity));
+  }
+
+  private uniqueCards(cards: FitMeetAlphaCard[]): FitMeetAlphaCard[] {
+    const seen = new Set<string>();
+    return cards.filter((card) => {
+      const key =
+        cleanDisplayText(card.id, '') || JSON.stringify(card.data ?? {});
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
   }
 
   private activityOpportunityCard(
@@ -460,7 +475,7 @@ export class SocialAgentRouteCompletionService {
           resumeMode: 'resume_after_approval',
           riskLevel: 'medium',
           riskReasons: [
-            '这一步会发起真实约练或联系活动发起人',
+            '这个动作会发起真实约练或联系活动发起人',
             '确认前不会创建、公开发布或通知其他用户',
           ],
         },

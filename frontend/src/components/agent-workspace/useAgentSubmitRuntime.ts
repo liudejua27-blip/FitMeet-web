@@ -1,20 +1,12 @@
 import { useCallback, type FormEvent, type MutableRefObject } from 'react';
 import type { NavigateFunction } from 'react-router-dom';
 
-import type {
-  SocialAgentPermissionMode,
-  UserFacingAgentResponse,
-} from '../../api/socialAgentApi';
+import type { SocialAgentPermissionMode, UserFacingAgentResponse } from '../../api/socialAgentApi';
 import type {
   FitMeetAssistantAttachment,
   FitMeetAssistantRecovery,
 } from './FitMeetAssistantUI.types';
-import {
-  type AgentError,
-  type AgentAdapter,
-  type AgentStreamEvent,
-  mapAgentError,
-} from './api';
+import { type AgentError, type AgentAdapter, type AgentStreamEvent, mapAgentError } from './api';
 import {
   cancelsOpportunityClarification,
   continuesOpportunityClarification,
@@ -24,14 +16,8 @@ import {
   isAbortError,
   threadIdFromResponse,
 } from './agentWorkspaceRuntime';
-import type {
-  AgentConversationIntent,
-  AgentThreadMessage,
-  Step,
-} from './socialAgentThreadStore';
-import {
-  socialCodexThreadIdForTask,
-} from './socialCodexThreadId';
+import type { AgentConversationIntent, AgentThreadMessage, Step } from './socialAgentThreadStore';
+import { socialCodexThreadIdForTask } from './socialCodexThreadId';
 
 type SetState<T> = (value: T | ((current: T) => T)) => void;
 
@@ -39,6 +25,7 @@ const LOCAL_COVERING_STATUS_ID = 'local-covering-status';
 const LOCAL_COVERING_STATUS_SOURCE = 'local.covering_status';
 const SOFT_COVERING_STATUS_DELAY_MS = 1000;
 const SLOW_COVERING_STATUS_DELAY_MS = 8000;
+export const NON_BRANCH_RELOAD_PREFIX = 'non-branch-reload:';
 
 type UseAgentSubmitRuntimeInput = {
   isRunning: boolean;
@@ -110,11 +97,7 @@ export function useAgentSubmitRuntime({
   nextId,
 }: UseAgentSubmitRuntimeInput) {
   const submit = useCallback(
-    async (
-      event?: FormEvent,
-      prompt?: string,
-      attachments: FitMeetAssistantAttachment[] = [],
-    ) => {
+    async (event?: FormEvent, prompt?: string, attachments: FitMeetAssistantAttachment[] = []) => {
       event?.preventDefault();
       const goal = (prompt ?? '').trim();
       if (!goal) {
@@ -123,14 +106,15 @@ export function useAgentSubmitRuntime({
       }
       if (isRunning) return;
       const shouldContinueOpportunityClarification =
-        pendingOpportunityClarificationRef.current &&
-        continuesOpportunityClarification(goal);
+        pendingOpportunityClarificationRef.current && continuesOpportunityClarification(goal);
       if (pendingOpportunityClarificationRef.current && cancelsOpportunityClarification(goal)) {
         pendingOpportunityClarificationRef.current = false;
       }
       const conversationIntent = shouldContinueOpportunityClarification
         ? 'social'
         : intentForPrompt(goal);
+      const taskIdForRun = conversationIntent === 'conversation' ? null : activeTaskId;
+      const threadIdForRun = conversationIntent === 'conversation' ? null : canonicalActiveThreadId;
       runConversationIntentRef.current = conversationIntent;
       if (isRealAgent && !isLoggedIn) {
         setMessages((current) => [
@@ -140,7 +124,7 @@ export function useAgentSubmitRuntime({
             role: 'user',
             content: goal,
             attachments,
-            taskId: activeTaskId,
+            taskId: taskIdForRun,
             conversationIntent,
           },
         ]);
@@ -148,8 +132,13 @@ export function useAgentSubmitRuntime({
         return;
       }
 
-      const branchUserId = branchReloadUserIdRef.current;
-      createBranchForNextAssistantRef.current = Boolean(branchUserId);
+      const reloadUserId = branchReloadUserIdRef.current;
+      const shouldCreateBranch =
+        Boolean(reloadUserId) && !reloadUserId?.startsWith(NON_BRANCH_RELOAD_PREFIX);
+      const branchUserId = reloadUserId?.startsWith(NON_BRANCH_RELOAD_PREFIX)
+        ? reloadUserId.slice(NON_BRANCH_RELOAD_PREFIX.length)
+        : reloadUserId;
+      createBranchForNextAssistantRef.current = shouldCreateBranch;
       setMessages((current) =>
         branchUserId
           ? current
@@ -160,7 +149,7 @@ export function useAgentSubmitRuntime({
                 role: 'user',
                 content: goal,
                 attachments,
-                taskId: activeTaskId,
+                taskId: taskIdForRun,
                 conversationIntent,
               },
             ],
@@ -169,11 +158,11 @@ export function useAgentSubmitRuntime({
       setUserResult(null);
       setRecovery(null);
       setIsRunning(true);
-      appendStreamingAssistant(activeTaskId, conversationIntent);
+      appendStreamingAssistant(taskIdForRun, conversationIntent);
       setSteps(createInitialCoveringStatus(conversationIntent));
 
       const controller = new AbortController();
-      beginAbortableRun(controller, canonicalActiveThreadId);
+      beginAbortableRun(controller, threadIdForRun);
       let sawVisibleStreamEvent = false;
       const removeLocalCoveringStatus = () => {
         setSteps(removeLocalCoveringStatusSteps);
@@ -187,15 +176,11 @@ export function useAgentSubmitRuntime({
       };
       const softStatusTimer = window.setTimeout(() => {
         if (sawVisibleStreamEvent || finishedRef.current || controller.signal.aborted) return;
-        setSteps((current) =>
-          applyLocalCoveringStatus(current, conversationIntent, 'soft'),
-        );
+        setSteps((current) => applyLocalCoveringStatus(current, conversationIntent, 'soft'));
       }, SOFT_COVERING_STATUS_DELAY_MS);
       const slowStatusTimer = window.setTimeout(() => {
         if (sawVisibleStreamEvent || finishedRef.current || controller.signal.aborted) return;
-        setSteps((current) =>
-          applyLocalCoveringStatus(current, conversationIntent, 'slow'),
-        );
+        setSteps((current) => applyLocalCoveringStatus(current, conversationIntent, 'slow'));
       }, SLOW_COVERING_STATUS_DELAY_MS);
       try {
         const finalResult = await agentAdapter.run(
@@ -203,13 +188,13 @@ export function useAgentSubmitRuntime({
             goal,
             permissionMode: mode,
             conversationIntent,
-            taskId: activeTaskId,
+            taskId: taskIdForRun,
             idempotencyKey: `agent-run-${Date.now()}`,
             clientContext: {
               source: 'web',
               timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
               locale: navigator.language,
-              threadId: canonicalActiveThreadId,
+              threadId: threadIdForRun,
             },
           },
           {
@@ -217,7 +202,9 @@ export function useAgentSubmitRuntime({
             signal: controller.signal,
           },
         );
-        setActiveTaskId(finalResult.taskId ?? activeTaskId);
+        if (conversationIntent !== 'conversation' || finalResult.taskId) {
+          setActiveTaskId(finalResult.taskId ?? taskIdForRun);
+        }
         const nextThreadId =
           threadIdFromResponse(finalResult.response) ??
           observedRunThreadIdRef.current ??
@@ -233,6 +220,10 @@ export function useAgentSubmitRuntime({
           navigate('/agent/chat', { replace: false });
         }
       } catch (error) {
+        if (finishedRef.current) {
+          settleStreamingAssistantAfterInterruption();
+          return;
+        }
         const stopped = stopRequestedRef.current || isAbortError(error);
         const agentError = stopped
           ? mapAgentError(new DOMException('Aborted', 'AbortError'))
@@ -302,10 +293,7 @@ export function applyLocalCoveringStatus(
   phase: 'soft' | 'slow',
 ): Step[] {
   const nextStep = localCoveringStatusStep(intent, phase);
-  return [
-    ...removeLocalCoveringStatusSteps(steps),
-    nextStep,
-  ];
+  return [...removeLocalCoveringStatusSteps(steps), nextStep];
 }
 
 export function createInitialCoveringStatus(intent: AgentConversationIntent): Step[] {
@@ -327,9 +315,9 @@ export function streamEventReplacesLocalCoveringStatus(event: AgentStreamEvent):
   if (event.type === 'approval_required') return true;
   if (event.type === 'result') return true;
   if (event.type === 'error') return true;
-  if (event.type === 'agent_loop_step') return true;
-  if (event.type === 'tool_call') return true;
-  if (event.type === 'tool_result') return true;
+  if (event.type === 'agent_loop_step') return false;
+  if (event.type === 'tool_call') return false;
+  if (event.type === 'tool_result') return false;
   if ('eventId' in event && typeof event.eventId === 'string') {
     if (event.visibility !== 'user_visible') return false;
     return event.type !== 'run.started';
@@ -339,24 +327,20 @@ export function streamEventReplacesLocalCoveringStatus(event: AgentStreamEvent):
 
 function isLocalCoveringStatusStep(step: Step) {
   return (
-    step.id === LOCAL_COVERING_STATUS_ID ||
-    step.metadata?.source === LOCAL_COVERING_STATUS_SOURCE
+    step.id === LOCAL_COVERING_STATUS_ID || step.metadata?.source === LOCAL_COVERING_STATUS_SOURCE
   );
 }
 
-function localCoveringStatusStep(
-  intent: AgentConversationIntent,
-  phase: 'soft' | 'slow',
-): Step {
+function localCoveringStatusStep(intent: AgentConversationIntent, phase: 'soft' | 'slow'): Step {
   const social = intent === 'social' || intent === 'approval';
   const title =
     phase === 'slow'
       ? social
         ? '还在整理你的约练需求…'
-        : '还在思考…'
+        : '还在理解你的需求…'
       : social
         ? '正在整理你的约练需求…'
-        : '正在思考…';
+        : '正在理解你的需求…';
   const detail =
     phase === 'slow'
       ? '可以继续等待，也可以随时停止后重试。'

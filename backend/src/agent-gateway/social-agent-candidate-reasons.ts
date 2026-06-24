@@ -13,15 +13,19 @@ export function buildProfileCandidateReasons(input: {
   commonTags: string[];
   completeness: number;
   verified: boolean;
+  preferenceFit?: number;
 }): string[] {
   const reasons: string[] = ['来自真实注册用户和社交画像。'];
   if (candidateCityMatches(input.query.city, input.city))
     reasons.push(`城市匹配：${input.city}。`);
   if (input.commonTags.length)
     reasons.push(`共同兴趣：${input.commonTags.slice(0, 3).join('、')}。`);
-  const candidatePreference = cleanDisplayText(input.query.candidatePreference, '');
-  if (candidatePreference && input.commonTags.length) {
-    reasons.push(`已按公开资料里的偏好线索参考：${candidatePreference}。`);
+  const candidatePreference = cleanDisplayText(
+    input.query.candidatePreference,
+    '',
+  );
+  if (candidatePreference && (input.preferenceFit ?? 0) > 0) {
+    reasons.push(`符合你提到的候选偏好：${candidatePreference}。`);
   }
   if (input.completeness >= 0.7) reasons.push('画像信息较完整。');
   if (input.verified) reasons.push('用户已认证。');
@@ -35,6 +39,7 @@ export function buildPublicIntentCandidateReasons(input: {
   query: CandidateReasonQuery;
   city: string;
   commonTags: string[];
+  preferenceFit?: number;
 }): string[] {
   const title = cleanDisplayText(input.intent.title, '公开约练卡片');
   const reasons = [`来自真实公开约练卡片：${title}。`];
@@ -42,9 +47,12 @@ export function buildPublicIntentCandidateReasons(input: {
     reasons.push(`卡片城市匹配：${input.city}。`);
   if (input.commonTags.length)
     reasons.push(`卡片标签匹配：${input.commonTags.slice(0, 3).join('、')}。`);
-  const candidatePreference = cleanDisplayText(input.query.candidatePreference, '');
-  if (candidatePreference && input.commonTags.length) {
-    reasons.push(`已按公开卡片标签参考你的偏好：${candidatePreference}。`);
+  const candidatePreference = cleanDisplayText(
+    input.query.candidatePreference,
+    '',
+  );
+  if (candidatePreference && (input.preferenceFit ?? 0) > 0) {
+    reasons.push(`公开卡片符合你的候选偏好：${candidatePreference}。`);
   }
   const timePreference = cleanDisplayText(input.intent.timePreference, '');
   if (timePreference) reasons.push(`时间偏好：${timePreference}。`);

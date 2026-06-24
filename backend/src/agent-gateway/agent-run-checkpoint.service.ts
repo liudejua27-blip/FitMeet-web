@@ -559,7 +559,7 @@ export class AgentRunCheckpointService {
       stage: 'approval',
       visibility: 'user_visible',
       display: {
-        title: decision === 'approved' ? '已确认这一步' : '已取消这一步',
+        title: decision === 'approved' ? '已确认' : '已取消',
         detail:
           decision === 'approved'
             ? '我会从同一个任务继续处理，不会重新询问已确认的信息。'
@@ -721,10 +721,10 @@ export class AgentRunCheckpointService {
   }
 
   private recoveryActionLabel(action: AgentRunCheckpointAction) {
-    if (action === 'resume') return '继续执行';
-    if (action === 'retry') return '重试这一步';
-    if (action === 'replay') return '回放过程';
-    return '创建分支';
+    if (action === 'resume') return '继续处理';
+    if (action === 'retry') return '继续处理';
+    if (action === 'replay') return '重新整理';
+    return '换一种方案';
   }
 
   private resumeStateForChild(
@@ -802,7 +802,9 @@ export class AgentRunCheckpointService {
     return {
       mode,
       stepCount: Array.isArray(checkpoint.steps) ? checkpoint.steps.length : 0,
-      sourceCheckpointId: this.numberOrNull(checkpoint.state.sourceCheckpointId),
+      sourceCheckpointId: this.numberOrNull(
+        checkpoint.state.sourceCheckpointId,
+      ),
     };
   }
 
@@ -879,7 +881,8 @@ export class AgentRunCheckpointService {
   }
 
   private buildApprovalRejectedResumePrompt(goal: string): string {
-    return '用户已经拒绝刚才中断的高风险步骤。请从同一个任务的已保存中断点继续，但不要执行被拒绝的动作，不要发送消息、连接候选人或创建活动。请自然说明已取消，并给出低风险替代方案。';
+    const goalContext = goal ? `原任务目标：${goal}。` : '';
+    return `${goalContext}用户已经拒绝刚才中断的高风险步骤。请从同一个任务的已保存中断点继续，但不要执行被拒绝的动作，不要发送消息、连接候选人或创建活动。请自然说明已取消，并给出低风险替代方案。`;
   }
 
   private toolNameFromStep(step: SocialAgentVisibleStep): string | null {
@@ -921,9 +924,7 @@ export class AgentRunCheckpointService {
     return typeof value === 'string' && value.trim() ? value.trim() : null;
   }
 
-  private toolNameFromStoredStep(
-    step: Record<string, unknown>,
-  ): string | null {
+  private toolNameFromStoredStep(step: Record<string, unknown>): string | null {
     const normalized = {
       id: this.stringOrNull(step.id) ?? '',
       label: this.stringOrNull(step.label) ?? '',

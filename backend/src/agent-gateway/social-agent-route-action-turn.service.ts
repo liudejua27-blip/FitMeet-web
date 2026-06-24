@@ -1,12 +1,21 @@
 import { Injectable } from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
 
-import type { AgentTask } from './entities/agent-task.entity';
+import { AgentTask } from './entities/agent-task.entity';
+import type { FitMeetAlphaCard } from './fitmeet-alpha-agent.types';
 import type { SocialAgentPendingApprovalSnapshot } from './social-agent-chat.types';
 import type { SocialAgentIntentRouterResult } from './social-agent-intent-router.service';
 import { recordSocialAgentPendingAction } from './social-agent-memory.util';
 import { SocialAgentCandidateActionService } from './social-agent-candidate-action.service';
 import { SocialAgentMetricsService } from './social-agent-metrics.service';
 import type { SocialAgentActionApprovalRuntimeContext } from './social-agent-candidate-action-approval.presenter';
+import { hasExplicitPublishSideEffectIntent } from './social-agent-social-intent-gate';
+import {
+  buildSocialAgentOpportunityDraftFromTask,
+  buildSocialAgentPublishConfirmationCard,
+} from './social-agent-opportunity-card-draft';
+import { rememberSocialAgentOpportunityDraft } from './social-agent-opportunity-draft-memory';
 
 type HandleRouteActionTurnInput = {
   ownerUserId: number;
@@ -22,11 +31,14 @@ type HandleRouteActionTurnResult = {
   handled: boolean;
   assistantMessage: string;
   pendingApproval: SocialAgentPendingApprovalSnapshot | null;
+  cards?: FitMeetAlphaCard[];
 };
 
 @Injectable()
 export class SocialAgentRouteActionTurnService {
   constructor(
+    @InjectRepository(AgentTask)
+    private readonly taskRepo: Repository<AgentTask>,
     private readonly candidateActions: SocialAgentCandidateActionService,
     private readonly metrics: SocialAgentMetricsService,
   ) {}
@@ -40,6 +52,35 @@ export class SocialAgentRouteActionTurnService {
         handled: false,
         assistantMessage: input.assistantMessage,
         pendingApproval: null,
+      };
+    }
+
+    if (this.isPublishToDiscoverIntent(input.message)) {
+      const publishDraft = buildSocialAgentOpportunityDraftFromTask(
+        input.task,
+        input.message,
+      );
+      if (!publishDraft.ready) {
+        return {
+          handled: true,
+          assistantMessage: publishDraft.assistantMessage,
+          pendingApproval: null,
+          cards: [],
+        };
+      }
+      rememberSocialAgentOpportunityDraft(input.task, publishDraft.draft);
+      await this.taskRepo.save(input.task);
+      return {
+        handled: true,
+        assistantMessage:
+          '我已经把这次约练整理成发布确认卡。你点确认前不会公开到发现页。',
+        pendingApproval: null,
+        cards: [
+          buildSocialAgentPublishConfirmationCard({
+            task: input.task,
+            draft: publishDraft.draft,
+          }),
+        ],
       };
     }
 
@@ -88,6 +129,10 @@ export class SocialAgentRouteActionTurnService {
     if (signal?.aborted) throw new Error('Subagent worker job cancelled.');
   }
 
+  private isPublishToDiscoverIntent(message: string): boolean {
+    return hasExplicitPublishSideEffectIntent(message);
+  }
+
   private withApprovalCopy(input: {
     task: AgentTask;
     assistantMessage: string;
@@ -95,8 +140,8 @@ export class SocialAgentRouteActionTurnService {
   }): string {
     const draft = this.candidateActions.candidateMessageDraft(input.task);
     return draft
-      ? `${input.assistantMessage}\n我先给你拟一条开场白：${draft}\n这一步已经放进确认卡片。你确认前我不会发送，取消也不会联系对方。`
-      : `${input.assistantMessage}\n这一步需要你确认。我已经放进确认卡片；你确认前不会执行。`;
+      ? `${input.assistantMessage}\n我先给你拟一条开场白：${draft}\n已放进确认卡片。你确认前我不会发送，取消也不会联系对方。`
+      : `${input.assistantMessage}\n这个动作需要你确认。我已经放进确认卡片；你确认前不会执行。`;
   }
 
   private runtimeContextTelemetry(

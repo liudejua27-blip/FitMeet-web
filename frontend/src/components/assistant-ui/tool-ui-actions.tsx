@@ -1,6 +1,7 @@
 /* eslint-disable react-refresh/only-export-components */
 import { createContext, useContext, type ReactNode } from 'react';
 
+import type { UserFacingAgentResponse } from '../../api/socialAgentApi';
 import type { ToolUISchemaAction } from './tool-ui-schema';
 
 export type FitMeetToolActionInput = {
@@ -20,13 +21,15 @@ export type FitMeetToolActionInput = {
 };
 
 export type FitMeetToolUIActions = {
-  onApproveApproval?: (input: FitMeetToolActionInput) => Promise<void> | void;
+  onApproveApproval?: (
+    input: FitMeetToolActionInput,
+  ) => Promise<UserFacingAgentResponse | void> | UserFacingAgentResponse | void;
   onRejectApproval?: (input: FitMeetToolActionInput) => Promise<void> | void;
   onResumeState?: (input: FitMeetToolActionInput) => Promise<void> | void;
   onRetryTool?: (input: FitMeetToolActionInput) => Promise<void> | void;
   onReplayState?: (input: FitMeetToolActionInput) => Promise<void> | void;
   onForkState?: (input: FitMeetToolActionInput) => Promise<void> | void;
-  onCardAction?: (input: FitMeetToolActionInput) => Promise<void> | void;
+  onCardAction?: (input: FitMeetToolActionInput) => Promise<UserFacingAgentResponse | void> | UserFacingAgentResponse | void;
 };
 
 const FitMeetToolUIActionsContext = createContext<FitMeetToolUIActions>({});

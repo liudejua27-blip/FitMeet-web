@@ -1,4 +1,4 @@
-import { AgentInboxEventSchema } from './agent-inbox-event.schema';
+import { AgentMessageEventSchema } from './agent-message-event.schema';
 import { ConversationSchema } from './conversation.schema';
 import { MessageSchema } from './message.schema';
 
@@ -12,11 +12,14 @@ describe('message Mongo schema indexes', () => {
         'agentConnectionId,lastMessageTime',
         'participantAgentIds,lastMessageTime',
         'ownerUserId,lastMessageTime',
+        'source,status,lastMessageTime',
+        'relatedPublicIntentId,lastMessageTime',
+        'relatedSocialRequestId,lastMessageTime',
       ]),
     );
   });
 
-  it('keeps release-critical message history and agent inbox signal indexes', () => {
+  it('keeps release-critical message history and agent message event signal indexes', () => {
     expect(schemaIndexKeys(MessageSchema)).toEqual(
       expect.arrayContaining([
         'agentConnectionId',
@@ -30,8 +33,8 @@ describe('message Mongo schema indexes', () => {
     );
   });
 
-  it('keeps release-critical agent inbox event query indexes', () => {
-    expect(schemaIndexKeys(AgentInboxEventSchema)).toEqual(
+  it('keeps release-critical agent message event event query indexes', () => {
+    expect(schemaIndexKeys(AgentMessageEventSchema)).toEqual(
       expect.arrayContaining([
         'agentConnectionId',
         'ownerUserId',

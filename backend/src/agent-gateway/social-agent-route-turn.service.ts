@@ -24,6 +24,7 @@ type QueueInitialSearchForTask = (
   ownerUserId: number,
   task: AgentTask,
   goal: string,
+  options?: { signal?: AbortSignal | null; waitForCompletionMs?: number },
 ) => Promise<SocialAgentAsyncRunSnapshot>;
 
 type ReplanAndRefresh = (
@@ -106,7 +107,9 @@ export class SocialAgentRouteTurnService {
       message,
       decision,
       conversationIntent:
-        body.clientContext?.conversationIntent ?? body.conversationIntent ?? null,
+        body.clientContext?.conversationIntent ??
+        body.conversationIntent ??
+        null,
       clientContext: body.clientContext ?? null,
       emit: input.emit,
       signal: input.signal,
@@ -117,7 +120,9 @@ export class SocialAgentRouteTurnService {
     return this.completions.complete({
       task: branchRun.task,
       route,
-      assistantMessage: branchRun.actionTurn.assistantMessage,
+      assistantMessage: branchRun.actionTurn.handled
+        ? branchRun.actionTurn.assistantMessage
+        : branchRun.state.assistantMessage,
       assistantMessageSource:
         branchRun.state.assistantMessageSource ?? 'fallback',
       savedContext: branchRun.state.savedContext,
@@ -126,6 +131,7 @@ export class SocialAgentRouteTurnService {
       runMode: branchRun.state.runMode,
       pendingApproval: branchRun.actionTurn.pendingApproval,
       activityResults: branchRun.state.activityResults,
+      cards: branchRun.actionTurn.cards ?? branchRun.state.cards,
       profileUpdateProposal: branchRun.state.profileUpdateProposal,
       assistantStreamed: branchRun.state.assistantStreamed,
       agentLoop: branchRun.loop,
@@ -204,7 +210,7 @@ export class SocialAgentRouteTurnService {
         reason: 'Candidate confirmation checks execute through AgentLoop.',
         tools: [
           {
-            agent: 'Social Match Agent',
+            agent: 'Match Agent',
             toolName: 'candidate_confirmation_check',
             input: {
               taskId: input.task.id,

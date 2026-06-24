@@ -100,59 +100,6 @@ export function toSocialAgentPublishDto(
   };
 }
 
-export function buildApprovalActions(
-  taskId: number,
-  draft: SocialAgentRequestDraft | null | undefined,
-  candidates: SocialAgentChatCandidate[],
-): Array<Record<string, unknown>> {
-  const actions: Array<Record<string, unknown>> = [];
-  if (draft) {
-    actions.push({
-      type: 'publish_social_request',
-      label: '确认发布约练',
-      riskLevel: 'medium',
-      requiresConfirmation: true,
-      agentTaskId: taskId,
-      socialRequestId: draft.socialRequestId ?? null,
-    });
-  }
-  for (const candidate of candidates.slice(0, 3)) {
-    const targetUserId = candidate.candidateUserId ?? candidate.userId;
-    actions.push({
-      type: 'save_candidate',
-      label: `收藏 ${candidate.nickname}`,
-      riskLevel: 'medium',
-      requiresConfirmation: true,
-      agentTaskId: taskId,
-      socialRequestId: candidate.socialRequestId,
-      candidateRecordId: candidate.candidateRecordId,
-      targetUserId,
-    });
-    actions.push({
-      type: 'send_message',
-      actionType: 'send_invite',
-      label: `确认发送给 ${candidate.nickname}`,
-      riskLevel: 'medium',
-      requiresConfirmation: true,
-      agentTaskId: taskId,
-      socialRequestId: candidate.socialRequestId,
-      candidateRecordId: candidate.candidateRecordId,
-      targetUserId,
-    });
-    actions.push({
-      type: 'connect_candidate',
-      label: `加好友并聊天：${candidate.nickname}`,
-      riskLevel: 'medium',
-      requiresConfirmation: true,
-      agentTaskId: taskId,
-      socialRequestId: candidate.socialRequestId,
-      candidateRecordId: candidate.candidateRecordId,
-      targetUserId,
-    });
-  }
-  return actions;
-}
-
 export function buildRecommendationAssistantMessage(
   candidates: SocialAgentChatCandidate[],
 ): string {

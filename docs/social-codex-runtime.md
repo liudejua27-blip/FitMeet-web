@@ -190,7 +190,7 @@ daily contact counters cross the runtime threshold. Count fields such as
 `recentStrangerContactCount` are kept as audit metadata, while real contact
 fields such as phone numbers, WeChat IDs, and exact addresses are redacted.
 
-Action logs and inbox metadata must store sanitized `input`, `output`,
+Action logs and message event metadata must store sanitized `input`, `output`,
 `inputSummary`, and `outputSummary`. The runtime keeps ids, status, policy,
 approval id, and compensation metadata, but it must not persist raw phone
 numbers, WeChat IDs, private exact addresses, dorm/building details, emails, or

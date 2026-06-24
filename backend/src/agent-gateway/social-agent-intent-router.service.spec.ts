@@ -1,6 +1,6 @@
-/* eslint-disable @typescript-eslint/require-await */
 import { SocialAgentIntentRouterService } from './social-agent-intent-router.service';
 import { SOCIAL_AGENT_QUALITY_PLANNER_TIMEOUT_MS } from './social-agent-model-router.service';
+import { SocialAgentLlmOutputCacheService } from './social-agent-llm-output-cache.service';
 
 function makeRouter() {
   return new SocialAgentIntentRouterService({
@@ -44,6 +44,46 @@ describe('SocialAgentIntentRouterService', () => {
     },
   );
 
+  it('does not spend DeepSeek intent routing on low-cost deterministic messages even when the API key is configured', async () => {
+    const deepSeek = {
+      complete: jest.fn(),
+    };
+    const router = new SocialAgentIntentRouterService(
+      {
+        get: jest.fn((key: string) => {
+          if (key === 'DEEPSEEK_API_KEY') return 'test-key';
+          return undefined;
+        }),
+      } as never,
+      undefined,
+      undefined,
+      deepSeek as never,
+    );
+
+    await expect(router.route({ message: '你好' })).resolves.toMatchObject({
+      intent: 'casual_chat',
+      source: 'rules',
+    });
+    await expect(router.route({ message: '谢谢' })).resolves.toMatchObject({
+      intent: 'casual_chat',
+      source: 'rules',
+    });
+    await expect(
+      router.route({ message: '你有什么功能' }),
+    ).resolves.toMatchObject({
+      intent: 'product_help',
+      source: 'rules',
+    });
+    await expect(
+      router.route({ message: '5公里30分钟配速是多少？' }),
+    ).resolves.toMatchObject({
+      intent: 'fitness_math',
+      source: 'rules',
+    });
+
+    expect(deepSeek.complete).not.toHaveBeenCalled();
+  });
+
   it('routes profile-building help as profile enrichment request without writing preferences', async () => {
     const router = makeRouter();
 
@@ -55,6 +95,71 @@ describe('SocialAgentIntentRouterService', () => {
       intent: 'profile_enrichment_request',
       shouldSearch: false,
       shouldUpdateProfile: false,
+      replyStrategy: 'conversational_answer',
+      source: 'rules',
+    });
+  });
+
+  it.each(['可以保存', '本次使用，不保存', '先不保存'])(
+    'routes profile save decision "%s" back to profile enrichment while waiting for save confirmation',
+    async (message) => {
+      const router = makeRouter();
+
+      const result = await router.route({
+        message,
+        taskContext: {
+          currentTask: {
+            waitingFor: 'profile_save_or_more_profile_facts',
+          },
+        },
+      });
+
+      expect(result).toMatchObject({
+        intent: 'profile_enrichment',
+        shouldSearch: false,
+        shouldUpdateProfile: false,
+        shouldExecuteAction: false,
+        replyStrategy: 'conversational_answer',
+        source: 'rules',
+      });
+    },
+  );
+
+  it('routes profile match confirmation into social search only after the user confirms', async () => {
+    const router = makeRouter();
+
+    await expect(
+      router.route({
+        message: '可以开始',
+        taskContext: {
+          taskMemory: {
+            currentTask: {
+              waitingFor: 'profile_match_confirmation',
+            },
+          },
+        },
+      }),
+    ).resolves.toMatchObject({
+      intent: 'social_search',
+      shouldSearch: true,
+      shouldExecuteAction: false,
+      replyStrategy: 'search_candidates',
+      source: 'rules',
+    });
+
+    await expect(
+      router.route({
+        message: '先不匹配',
+        taskContext: {
+          currentTask: {
+            waitingFor: 'profile_match_confirmation',
+          },
+        },
+      }),
+    ).resolves.toMatchObject({
+      intent: 'casual_chat',
+      shouldSearch: false,
+      shouldExecuteAction: false,
       replyStrategy: 'conversational_answer',
       source: 'rules',
     });
@@ -381,6 +486,30 @@ describe('SocialAgentIntentRouterService', () => {
     });
   });
 
+  it('continues opportunity clarification when waiting state is nested in task memory', async () => {
+    const router = makeRouter();
+
+    const result = await router.route({
+      message: '市南区，周六下午，瑜伽，公共场所，先站内聊',
+      taskContext: {
+        taskMemory: {
+          currentTask: {
+            awaitingSearchConfirmation: true,
+            waitingFor: 'opportunity_clarification',
+          },
+        },
+      },
+    });
+
+    expect(result).toMatchObject({
+      intent: 'social_search',
+      shouldSearch: true,
+      shouldExecuteAction: false,
+      replyStrategy: 'search_candidates',
+      source: 'rules',
+    });
+  });
+
   it.each([
     '先不找了，今天有点焦虑，只想和你聊聊',
     '不需要推荐真实用户，先帮我分析一下怎么和人相处',
@@ -520,6 +649,31 @@ describe('SocialAgentIntentRouterService', () => {
     });
   });
 
+  it('routes short publish follow-up to Discover publish action', async () => {
+    const router = makeRouter();
+
+    const result = await router.route({
+      message: '发布吧',
+      taskContext: {
+        hasSearchContext: true,
+        taskSlots: {
+          activity: { value: '跑步', state: 'completed' },
+          time_window: { value: '今天晚上', state: 'completed' },
+          location_text: { value: '青岛大学附近', state: 'completed' },
+          safety_boundary: { value: '公共场所，先站内聊', state: 'completed' },
+        },
+      },
+    });
+
+    expect(result).toMatchObject({
+      intent: 'action_request',
+      shouldSearch: false,
+      shouldExecuteAction: true,
+      replyStrategy: 'execute_action',
+      source: 'rules',
+    });
+  });
+
   it('does not execute send or friend actions when no candidate context exists', async () => {
     const router = makeRouter();
 
@@ -622,7 +776,7 @@ describe('SocialAgentIntentRouterService', () => {
     }
   });
 
-  it('uses DeepSeek as the default primary intent router even when rules are confident', async () => {
+  it('skips DeepSeek for fixed product help routes even when the API key is configured', async () => {
     const router = new SocialAgentIntentRouterService({
       get: jest.fn((key: string) => {
         if (key === 'DEEPSEEK_API_KEY') return 'test-key';
@@ -656,12 +810,12 @@ describe('SocialAgentIntentRouterService', () => {
     try {
       const result = await router.route({ message: '你有什么功能' });
 
-      expect(global.fetch).toHaveBeenCalledTimes(1);
+      expect(global.fetch).not.toHaveBeenCalled();
       expect(result).toMatchObject({
         intent: 'product_help',
         shouldSearch: false,
         replyStrategy: 'conversational_answer',
-        source: 'deepseek',
+        source: 'rules',
       });
     } finally {
       global.fetch = originalFetch;
@@ -767,6 +921,159 @@ describe('SocialAgentIntentRouterService', () => {
     } finally {
       global.fetch = originalFetch;
     }
+  });
+
+  it('caches repeated DeepSeek intent routing for identical context', async () => {
+    const deepSeek = {
+      complete: jest.fn().mockResolvedValue(
+        JSON.stringify({
+          intent: 'social_search',
+          confidence: 0.94,
+          shouldSearch: true,
+          shouldReplan: false,
+          shouldUpdateProfile: false,
+          shouldExecuteAction: false,
+          replyStrategy: 'search_candidates',
+          entities: {
+            city: '青岛',
+            activityType: '散步',
+            targetGender: '女生',
+            timePreference: '今天晚上',
+            locationPreference: '青岛大学附近',
+          },
+        }),
+      ),
+    };
+    const metrics = {
+      recordLatency: jest.fn(),
+      recordFallback: jest.fn(),
+      recordError: jest.fn(),
+      recordLlmOutputCache: jest.fn(),
+    };
+    const cache = new SocialAgentLlmOutputCacheService();
+    const router = new SocialAgentIntentRouterService(
+      {
+        get: jest.fn((key: string) => {
+          if (key === 'DEEPSEEK_API_KEY') return 'test-key';
+          if (key === 'SOCIAL_AGENT_INTENT_ROUTER_CACHE_TTL_MS') return '60000';
+          return undefined;
+        }),
+      } as never,
+      metrics as never,
+      undefined,
+      deepSeek as never,
+      cache,
+    );
+    const routeInput = {
+      message: '我想在青岛大学，今天晚上，找个女生散步。',
+      taskContext: {
+        taskId: 88,
+        taskSlots: {
+          activity: { value: '散步', state: 'answered' },
+          time_window: { value: '今天晚上', state: 'answered' },
+          location_text: { value: '青岛大学附近', state: 'answered' },
+        },
+      },
+      conversationHistory: [
+        { role: 'user', content: '我想找搭子' },
+        { role: 'assistant', content: '可以，我会先确认公开安全边界。' },
+      ],
+    };
+
+    await expect(router.route(routeInput)).resolves.toMatchObject({
+      intent: 'social_search',
+      source: 'deepseek',
+      shouldSearch: true,
+    });
+    await expect(router.route(routeInput)).resolves.toMatchObject({
+      intent: 'social_search',
+      source: 'deepseek',
+      shouldSearch: true,
+    });
+
+    expect(deepSeek.complete).toHaveBeenCalledTimes(1);
+    expect(metrics.recordLlmOutputCache).toHaveBeenCalledWith(
+      expect.objectContaining({
+        cacheName: 'intent_router_exact',
+        hit: false,
+      }),
+    );
+    expect(metrics.recordLlmOutputCache).toHaveBeenCalledWith(
+      expect.objectContaining({
+        cacheName: 'intent_router_exact',
+        hit: true,
+        approxChars: expect.any(Number),
+      }),
+    );
+    expect(cache.stats()).toMatchObject({
+      hits: 1,
+      misses: 1,
+      writes: 1,
+    });
+  });
+
+  it('does not cache invalid DeepSeek intent JSON before retry succeeds', async () => {
+    const deepSeek = {
+      complete: jest
+        .fn()
+        .mockResolvedValueOnce('not-json')
+        .mockResolvedValueOnce(
+          JSON.stringify({
+            intent: 'social_search',
+            confidence: 0.94,
+            shouldSearch: true,
+            shouldReplan: false,
+            shouldUpdateProfile: false,
+            shouldExecuteAction: false,
+            replyStrategy: 'search_candidates',
+            entities: {
+              city: '青岛',
+              activityType: '散步',
+              targetGender: '女生',
+              timePreference: '今天晚上',
+              locationPreference: '青岛大学附近',
+            },
+          }),
+        ),
+    };
+    const cache = new SocialAgentLlmOutputCacheService();
+    const router = new SocialAgentIntentRouterService(
+      {
+        get: jest.fn((key: string) => {
+          if (key === 'DEEPSEEK_API_KEY') return 'test-key';
+          if (key === 'SOCIAL_AGENT_INTENT_RETRY_ATTEMPTS') return '2';
+          if (key === 'SOCIAL_AGENT_INTENT_ROUTER_CACHE_TTL_MS') return '60000';
+          return undefined;
+        }),
+      } as never,
+      undefined,
+      undefined,
+      deepSeek as never,
+      cache,
+    );
+    const routeInput = {
+      message: '我想在青岛大学，今天晚上，找个女生散步。',
+      conversationHistory: [{ role: 'user', content: '我想找搭子' }],
+    };
+
+    await expect(router.route(routeInput)).resolves.toMatchObject({
+      intent: 'social_search',
+      source: 'deepseek',
+      shouldSearch: true,
+    });
+    await expect(router.route(routeInput)).resolves.toMatchObject({
+      intent: 'social_search',
+      source: 'deepseek',
+      shouldSearch: true,
+    });
+
+    expect(deepSeek.complete).toHaveBeenCalledTimes(2);
+    expect(cache.stats()).toMatchObject({
+      hits: 1,
+      misses: 2,
+      writes: 1,
+      size: 1,
+    });
   });
 
   it('retries transient failures through the injected DeepSeek client before using rules fallback', async () => {
@@ -1032,7 +1339,7 @@ describe('SocialAgentIntentRouterService', () => {
     }
   });
 
-  it('does not let legacy hybrid mode short-circuit high-confidence rules before DeepSeek sees context', async () => {
+  it('lets legacy hybrid mode skip fixed product help routes while keeping complex turns eligible for DeepSeek', async () => {
     const router = new SocialAgentIntentRouterService({
       get: jest.fn((key: string) => {
         if (key === 'DEEPSEEK_API_KEY') return 'test-key';
@@ -1067,12 +1374,12 @@ describe('SocialAgentIntentRouterService', () => {
     try {
       const result = await router.route({ message: '你有什么功能' });
 
-      expect(global.fetch).toHaveBeenCalledTimes(1);
+      expect(global.fetch).not.toHaveBeenCalled();
       expect(result).toMatchObject({
         intent: 'product_help',
         shouldSearch: false,
         replyStrategy: 'conversational_answer',
-        source: 'deepseek',
+        source: 'rules',
       });
     } finally {
       global.fetch = originalFetch;
@@ -1638,10 +1945,7 @@ describe('SocialAgentIntentRouterService', () => {
       });
       expect(userPayload.routingConstraints).toMatchObject({
         treatKnownTaskSlotsAsAnswered: true,
-        knownContextSlots: expect.arrayContaining([
-          'geo_area',
-          'intensity',
-        ]),
+        knownContextSlots: expect.arrayContaining(['geo_area', 'intensity']),
         doNotRepeatQuestionsForSlots: expect.arrayContaining([
           'activity',
           'time_window',

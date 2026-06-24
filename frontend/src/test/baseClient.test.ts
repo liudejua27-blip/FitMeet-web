@@ -50,7 +50,10 @@ describe('baseClient ApiError', () => {
     );
 
     try {
-      await request('/feed', { method: 'POST', body: JSON.stringify({ text: ' ' }) });
+      await request('/public/social-intents', {
+        method: 'POST',
+        body: JSON.stringify({ text: ' ' }),
+      });
       throw new Error('Expected request to fail');
     } catch (error) {
       expect(error).toBeInstanceOf(ApiError);

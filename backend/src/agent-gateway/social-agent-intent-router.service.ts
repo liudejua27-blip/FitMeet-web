@@ -20,6 +20,7 @@ import {
   enforceSocialIntentGate,
   explicitlyRejectsSocialExecution,
   hasExistingSocialExecutionContext,
+  hasExplicitPublishSideEffectIntent,
   hasExplicitSocialExecutionIntent,
   isConversationOnlySocialMention,
   isSocialAdviceQuestion,
@@ -31,7 +32,14 @@ import {
   socialAgentDeepSeekRetryAttempts,
 } from './social-agent-deepseek-resilience';
 import { SocialAgentChatDeepSeekClientService } from './social-agent-chat-deepseek-client.service';
-import { callDeepSeekChatCompletion } from '../common/deepseek.util';
+import { callDeepSeekChatCompletionWithUsage } from '../common/deepseek.util';
+import { SocialAgentLlmOutputCacheService } from './social-agent-llm-output-cache.service';
+import {
+  buildSocialAgentExactCacheKey,
+  buildSocialAgentPromptFingerprint,
+  readSocialAgentExactCacheKeyFingerprint,
+} from './social-agent-prompt-fingerprint.util';
+import { AgentObservabilityService } from './agent-observability.service';
 
 export type SocialAgentIntentType =
   | 'casual_chat'
@@ -101,6 +109,10 @@ export class SocialAgentIntentRouterService {
     @Optional() private readonly modelRouter?: SocialAgentModelRouterService,
     @Optional()
     private readonly deepSeek?: SocialAgentChatDeepSeekClientService,
+    @Optional()
+    private readonly llmOutputCache?: SocialAgentLlmOutputCacheService,
+    @Optional()
+    private readonly observability?: AgentObservabilityService,
   ) {}
 
   async route(
@@ -110,7 +122,12 @@ export class SocialAgentIntentRouterService {
     const message = cleanDisplayText(input.message, '').trim();
     const normalizedInput = { ...input, message };
     const fallback = this.routeByRules(normalizedInput);
-    if (!this.shouldTryDeepSeek(message)) return fallback;
+    if (
+      !this.shouldTryDeepSeek(message) ||
+      this.shouldUseRulesWithoutDeepSeek(message, fallback)
+    ) {
+      return fallback;
+    }
 
     const startedAt = Date.now();
     try {
@@ -207,6 +224,7 @@ export class SocialAgentIntentRouterService {
       /(发消息|发送.*(给|第一个|第二个|第三个|这个|那个|他|她|候选)|加好友|邀请(第一个|第二个|第三个|这个|那个|他|她|候选)|约他|约她|联系(第一个|第二个|第三个|这个|那个|他|她|候选)|收藏(第一个|第二个|第三个|这个|那个|他|她|候选)|确认发布|帮我发|帮我加|帮我邀请)/i.test(
         text,
       );
+    const wantsPublishAction = hasExplicitPublishSideEffectIntent(message);
     const wantsImmediateSocialSearch =
       hasSocialAgentImmediateSearchRequest(message);
     const hasCandidateDiscoveryCue = this.hasCandidateDiscoveryCue(
@@ -222,6 +240,14 @@ export class SocialAgentIntentRouterService {
       this.isProfileEnrichmentRequest(message);
     const isCorrection = this.isCorrectionOrClarification(message);
     const asksFitnessMath = this.isFitnessMathQuestion(message);
+    const profileSaveDecision = this.profileSaveDecisionIntent(
+      input.taskContext,
+      message,
+    );
+    const profileMatchConfirmation = this.profileMatchConfirmationIntent(
+      input.taskContext,
+      message,
+    );
 
     if (
       isCorrection &&
@@ -241,6 +267,27 @@ export class SocialAgentIntentRouterService {
           replyStrategy: 'search_candidates',
         },
       );
+    }
+
+    if (profileSaveDecision === 'profile_enrichment') {
+      return this.result('profile_enrichment', 0.9, entities, {
+        shouldUpdateProfile: false,
+        replyStrategy: 'conversational_answer',
+      });
+    }
+
+    if (profileMatchConfirmation === 'start_match') {
+      return this.result('social_search', 0.9, entities, {
+        shouldSearch: true,
+        shouldReplan: hasTask,
+        replyStrategy: 'search_candidates',
+      });
+    }
+
+    if (profileMatchConfirmation === 'decline_match') {
+      return this.result('casual_chat', 0.9, entities, {
+        replyStrategy: 'conversational_answer',
+      });
     }
 
     if (isCorrection) {
@@ -301,14 +348,14 @@ export class SocialAgentIntentRouterService {
       });
     }
 
-    if (asksWorkflowHelp) {
-      return this.result('workflow_help', 0.9, entities, {
+    if (asksProfileEnrichmentRequest && !asksWorkflowHelp) {
+      return this.result('profile_enrichment_request', 0.9, entities, {
         replyStrategy: 'conversational_answer',
       });
     }
 
-    if (asksProfileEnrichmentRequest) {
-      return this.result('profile_enrichment_request', 0.9, entities, {
+    if (asksWorkflowHelp) {
+      return this.result('workflow_help', 0.9, entities, {
         replyStrategy: 'conversational_answer',
       });
     }
@@ -331,7 +378,18 @@ export class SocialAgentIntentRouterService {
     }
 
     if (
-      /(你好|hello|hi|嗨|你能做什么|你可以做什么|怎么找搭子|该怎么找|怎么聊天自然|聊天自然|你觉得怎么|建议|聊聊)/i.test(
+      !hasTask &&
+      !hasCandidates &&
+      !awaitingOpportunityClarification &&
+      this.isLowCostCasualMessage(message)
+    ) {
+      return this.result('casual_chat', 0.92, entities, {
+        replyStrategy: 'conversational_answer',
+      });
+    }
+
+    if (
+      /(你好|您好|hello|hi|hey|嗨|哈喽|在吗|在不在|你能做什么|你可以做什么|怎么找搭子|该怎么找|怎么聊天自然|聊天自然|你觉得怎么|建议|聊聊)/i.test(
         text,
       )
     ) {
@@ -358,6 +416,13 @@ export class SocialAgentIntentRouterService {
         shouldSearch: true,
         shouldReplan: hasTask,
         replyStrategy: 'search_candidates',
+      });
+    }
+
+    if (wantsPublishAction) {
+      return this.result('action_request', 0.92, entities, {
+        shouldExecuteAction: true,
+        replyStrategy: 'execute_action',
       });
     }
 
@@ -563,8 +628,90 @@ export class SocialAgentIntentRouterService {
     ) {
       return true;
     }
-    return /(帮我完善.*画像|完善.*ai画像|完善.*人物画像|上面.*画像.*完善|刚才.*画像.*完善|把刚才.*写入画像|保存到.*画像|调用工具.*画像|工具.*完善.*画像|写入.*画像|存到.*画像)/i.test(
+    return /((帮我|请|可以|想|需要|继续)?.{0,12}(完善|补充|补全|整理|更新).{0,16}(画像|资料|个人信息|信息|偏好))|((资料|个人信息|信息|画像).{0,12}(还缺|还差|缺什么|缺哪些|完善|补充|补全))|(问我.{0,8}(几个)?问题)|(把刚才.*写入画像|保存到.*画像|调用工具.*画像|工具.*完善.*画像|写入.*画像|存到.*画像)/i.test(
       text,
+    );
+  }
+
+  private profileSaveDecisionIntent(
+    taskContext: Record<string, unknown> | undefined,
+    message: string,
+  ): 'profile_enrichment' | null {
+    if (!this.isWaitingForProfileSaveDecision(taskContext)) return null;
+    const text = cleanDisplayText(message, '').trim();
+    if (!text) return null;
+    if (
+      /(可以保存|确认保存|保存|写入|存到|存入|本次使用，不保存|本次使用不保存|本次只用|这次只用|当前只用|先不保存|暂不保存|不用保存|不保存)/i.test(
+        text,
+      )
+    ) {
+      return 'profile_enrichment';
+    }
+    return null;
+  }
+
+  private profileMatchConfirmationIntent(
+    taskContext: Record<string, unknown> | undefined,
+    message: string,
+  ): 'start_match' | 'decline_match' | null {
+    if (!this.isWaitingForProfileMatchConfirmation(taskContext)) return null;
+    const text = cleanDisplayText(message, '').trim();
+    if (!text) return null;
+    if (
+      /(先不|暂时不|不用|不要|不需要|别).{0,10}(匹配|找人|推荐|搜索|候选|约练|搭子)/i.test(
+        text,
+      )
+    ) {
+      return 'decline_match';
+    }
+    if (
+      /^(可以|好|好的|行|继续|开始|可以开始|开始匹配|开始找|现在开始|就这样|按这个)$/i.test(
+        text,
+      ) ||
+      /(开始|继续|现在|马上|可以).{0,12}(匹配|找人|推荐|搜索|候选|搭子|约练)|匹配.{0,12}(人|用户|朋友|搭子|候选)/i.test(
+        text,
+      )
+    ) {
+      return 'start_match';
+    }
+    return null;
+  }
+
+  private isWaitingForProfileSaveDecision(
+    taskContext: Record<string, unknown> | undefined,
+  ): boolean {
+    const waitingFor = this.currentTaskWaitingFor(taskContext);
+    return [
+      'profile_save',
+      'profile_save_or_more_profile_facts',
+      'profile_save_or_search_confirmation',
+      'life_graph_profile_confirmation',
+    ].includes(waitingFor);
+  }
+
+  private isWaitingForProfileMatchConfirmation(
+    taskContext: Record<string, unknown> | undefined,
+  ): boolean {
+    return (
+      this.currentTaskWaitingFor(taskContext) === 'profile_match_confirmation'
+    );
+  }
+
+  private currentTaskWaitingFor(
+    taskContext: Record<string, unknown> | undefined,
+  ): string {
+    const currentTask = this.isRecord(taskContext?.currentTask)
+      ? taskContext?.currentTask
+      : {};
+    const taskMemory = this.isRecord(taskContext?.taskMemory)
+      ? taskContext?.taskMemory
+      : {};
+    const memoryCurrentTask = this.isRecord(taskMemory.currentTask)
+      ? taskMemory.currentTask
+      : {};
+    return cleanDisplayText(
+      currentTask.waitingFor ?? memoryCurrentTask.waitingFor,
+      '',
     );
   }
 
@@ -680,15 +827,14 @@ export class SocialAgentIntentRouterService {
     const locationMatch = message.match(
       /((?:崂山区|市南区|市北区|李沧区|黄岛区|西海岸|城阳区|青岛大学|五四广场|奥帆中心|大学城)(?:附近|周边)?|附近|同城|身边|周边|近一点|更近|市南|市北|崂山|黄岛|李沧|城阳)/,
     );
-    const targetGender = /(女生|女孩|女孩子|女性|小姐姐|女同学|女大学生|女舞蹈生)/.test(
-      message,
-    )
-      ? '女生'
-      : /(男生|男孩|男孩子|男性|小哥哥|男同学|男大学生|男舞蹈生)/.test(
-            message,
-          )
-        ? '男生'
-        : '';
+    const targetGender =
+      /(女生|女孩|女孩子|女性|小姐姐|女同学|女大学生|女舞蹈生)/.test(message)
+        ? '女生'
+        : /(男生|男孩|男孩子|男性|小哥哥|男同学|男大学生|男舞蹈生)/.test(
+              message,
+            )
+          ? '男生'
+          : '';
     return {
       city: sanitizeCity(cityMatch?.[1] ?? ''),
       activityType: cleanDisplayText(activityMatch?.[1], ''),
@@ -713,6 +859,44 @@ export class SocialAgentIntentRouterService {
     return true;
   }
 
+  private shouldUseRulesWithoutDeepSeek(
+    message: string,
+    fallback: SocialAgentIntentRouterResult,
+  ): boolean {
+    if (fallback.source !== 'rules') return false;
+    if (
+      fallback.shouldSearch ||
+      fallback.shouldReplan ||
+      fallback.shouldUpdateProfile ||
+      fallback.shouldExecuteAction
+    ) {
+      return false;
+    }
+    if (
+      fallback.intent === 'fitness_math' ||
+      fallback.intent === 'workflow_help' ||
+      fallback.intent === 'product_help'
+    ) {
+      return true;
+    }
+    return (
+      fallback.intent === 'casual_chat' && this.isLowCostCasualMessage(message)
+    );
+  }
+
+  private isLowCostCasualMessage(message: string): boolean {
+    const normalized = cleanDisplayText(message, '').trim();
+    if (!normalized) return false;
+    return (
+      /^(你好|您好|hi|hello|hey|在吗|在不在|哈喽|嗨)[!！。,.，\s]*$/i.test(
+        normalized,
+      ) ||
+      /^(谢谢|感谢|多谢|辛苦了|好的|好|行|可以|明白|知道了)[!！。,.，\s]*$/i.test(
+        normalized,
+      )
+    );
+  }
+
   private async callDeepSeekRouter(
     input: SocialAgentIntentRouterInput,
     fallback: SocialAgentIntentRouterResult,
@@ -721,6 +905,29 @@ export class SocialAgentIntentRouterService {
     if (!apiKey) return null;
     const useCase = 'planner' as const;
     const messages = this.deepSeekRouterMessages(input, fallback);
+    const model = this.modelFor(useCase);
+    const cacheKey = this.intentRouterCacheKey({
+      messages,
+      model,
+      useCase,
+    });
+    const cacheTtlMs = this.intentRouterCacheTtlMs();
+    const cached =
+      cacheTtlMs > 0
+        ? ((await this.llmOutputCache?.getAsync(cacheKey)) ?? null)
+        : null;
+    const cacheFingerprint = readSocialAgentExactCacheKeyFingerprint(cacheKey);
+    this.metrics?.recordLlmOutputCache?.({
+      cacheName: 'intent_router_exact',
+      hit: cached !== null,
+      approxChars: cached !== null ? this.approxChars(messages) : null,
+      promptPrefixHash: cacheFingerprint?.promptPrefixHash ?? null,
+      dynamicContextHash: cacheFingerprint?.dynamicContextHash ?? null,
+    });
+    if (cached !== null) {
+      const parsed = JSON.parse(cached) as Record<string, unknown>;
+      return normalizeDeepSeekIntentRouterResult(parsed, fallback);
+    }
     if (this.deepSeek) {
       const content = await this.deepSeek.complete({
         useCase,
@@ -736,12 +943,21 @@ export class SocialAgentIntentRouterService {
       });
       if (!content) return null;
       const parsed = JSON.parse(content) as Record<string, unknown>;
-      return normalizeDeepSeekIntentRouterResult(parsed, fallback);
+      const result = normalizeDeepSeekIntentRouterResult(parsed, fallback);
+      if (cacheTtlMs > 0) {
+        await this.llmOutputCache?.setAsync(cacheKey, content, {
+          ttlMs: cacheTtlMs,
+          approxPromptChars: this.approxChars(messages),
+        });
+      }
+      return result;
     }
-    const model = this.modelFor(useCase);
     const startedAt = Date.now();
+    let fallbackUsage:
+      | Awaited<ReturnType<typeof callDeepSeekChatCompletionWithUsage>>['usage']
+      | null = null;
     try {
-      const content = await callDeepSeekChatCompletion({
+      const completion = await callDeepSeekChatCompletionWithUsage({
         apiKey,
         baseUrl: this.config.get<string>('DEEPSEEK_BASE_URL'),
         model,
@@ -753,14 +969,37 @@ export class SocialAgentIntentRouterService {
         timeoutMs: this.deepSeekTimeoutMs(useCase),
         timeoutMessage: 'deepseek_timeout',
       });
+      fallbackUsage = completion.usage;
+      const content = completion.content;
       const parsed = JSON.parse(content) as Record<string, unknown>;
       const result = normalizeDeepSeekIntentRouterResult(parsed, fallback);
+      if (cacheTtlMs > 0) {
+        await this.llmOutputCache?.setAsync(cacheKey, content, {
+          ttlMs: cacheTtlMs,
+          approxPromptChars: this.approxChars(messages),
+        });
+      }
       this.logModelCall({
         useCase,
         model,
         intent: result.intent,
         latencyMs: Date.now() - startedAt,
         success: true,
+      });
+      this.observability?.recordLlmCall({
+        useCase,
+        model,
+        taskId: this.taskIdFromTaskContext(input.taskContext),
+        latencyMs: Date.now() - startedAt,
+        success: true,
+        promptTokens: fallbackUsage.promptTokens,
+        promptCacheHitTokens: fallbackUsage.promptCacheHitTokens,
+        promptCacheMissTokens: fallbackUsage.promptCacheMissTokens,
+        completionTokens: fallbackUsage.completionTokens,
+        reasoningTokens: fallbackUsage.reasoningTokens,
+        approxPromptChars: this.approxChars(messages),
+        promptPrefixHash: cacheFingerprint?.promptPrefixHash ?? null,
+        dynamicContextHash: cacheFingerprint?.dynamicContextHash ?? null,
       });
       return result;
     } catch (error) {
@@ -772,6 +1011,22 @@ export class SocialAgentIntentRouterService {
         latencyMs: Date.now() - startedAt,
         success: false,
         reason,
+      });
+      this.observability?.recordLlmCall({
+        useCase,
+        model,
+        taskId: this.taskIdFromTaskContext(input.taskContext),
+        latencyMs: Date.now() - startedAt,
+        success: false,
+        promptTokens: fallbackUsage?.promptTokens,
+        promptCacheHitTokens: fallbackUsage?.promptCacheHitTokens,
+        promptCacheMissTokens: fallbackUsage?.promptCacheMissTokens,
+        completionTokens: fallbackUsage?.completionTokens,
+        reasoningTokens: fallbackUsage?.reasoningTokens,
+        approxPromptChars: this.approxChars(messages),
+        promptPrefixHash: cacheFingerprint?.promptPrefixHash ?? null,
+        dynamicContextHash: cacheFingerprint?.dynamicContextHash ?? null,
+        failureReason: reason,
       });
       throw error;
     }
@@ -820,6 +1075,42 @@ export class SocialAgentIntentRouterService {
         }),
       },
     ];
+  }
+
+  private intentRouterCacheKey(input: {
+    messages: SocialAgentDeepSeekMessage[];
+    model: string;
+    useCase: 'planner';
+  }): string {
+    return buildSocialAgentExactCacheKey({
+      cacheName: 'intent_router_exact',
+      fingerprint: buildSocialAgentPromptFingerprint({
+        schema: 'social_agent_intent_router.v1',
+        model: input.model,
+        useCase: input.useCase,
+        messages: input.messages,
+      }),
+    });
+  }
+
+  private intentRouterCacheTtlMs(): number {
+    const raw = this.config.get<string>(
+      'SOCIAL_AGENT_INTENT_ROUTER_CACHE_TTL_MS',
+    );
+    if (raw === '0') return 0;
+    const parsed = Number(raw);
+    if (Number.isFinite(parsed) && parsed >= 0) {
+      return Math.floor(parsed);
+    }
+    return 30_000;
+  }
+
+  private approxChars(value: unknown): number {
+    try {
+      return JSON.stringify(value).length;
+    } catch {
+      return 0;
+    }
   }
 
   private knownTaskSlots(

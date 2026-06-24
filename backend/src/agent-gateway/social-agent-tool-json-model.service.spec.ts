@@ -1,5 +1,6 @@
 import { SocialAgentToolJsonModelService } from './social-agent-tool-json-model.service';
 import { SOCIAL_AGENT_QUALITY_TOOL_TIMEOUT_MS } from './social-agent-model-router.service';
+import { SocialAgentLlmOutputCacheService } from './social-agent-llm-output-cache.service';
 
 function makeConfig(values: Record<string, string | undefined>) {
   return {
@@ -120,6 +121,69 @@ describe('SocialAgentToolJsonModelService', () => {
     });
   });
 
+  it('records non-streaming fallback DeepSeek usage for token cost observability', async () => {
+    const config = makeConfig({
+      DEEPSEEK_API_KEY: 'test-key',
+      DEEPSEEK_BASE_URL: 'https://deepseek.test/',
+      AGENT_CARD_MODEL: 'card-model',
+    });
+    const observability = { recordLlmCall: jest.fn() };
+    const service = new SocialAgentToolJsonModelService(
+      config as never,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      observability as never,
+    );
+    const logger = (
+      service as unknown as { logger: { log: (message: string) => void } }
+    ).logger;
+    jest.spyOn(logger, 'log').mockImplementation(() => undefined);
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: () => ({
+        usage: {
+          prompt_tokens: 120,
+          prompt_cache_hit_tokens: 75,
+          prompt_cache_miss_tokens: 45,
+          completion_tokens: 18,
+          reasoning_tokens: 4,
+        },
+        choices: [{ message: { content: '{"summary":"observed"}' } }],
+      }),
+    }) as never;
+
+    await expect(
+      service.callJson({
+        purpose: 'social_request_card',
+        prompt: 'draft observed card',
+        fallback: () => ({ source: 'fallback' }),
+        taskId: 12,
+        traceId: 'trace-cost',
+      }),
+    ).resolves.toMatchObject({
+      summary: 'observed',
+      source: 'deepseek',
+    });
+
+    expect(observability.recordLlmCall).toHaveBeenCalledWith(
+      expect.objectContaining({
+        traceId: 'trace-cost',
+        useCase: 'card_generation',
+        model: 'card-model',
+        taskId: 12,
+        success: true,
+        promptTokens: 120,
+        promptCacheHitTokens: 75,
+        promptCacheMissTokens: 45,
+        completionTokens: 18,
+        reasoningTokens: 4,
+        approxPromptChars: expect.any(Number),
+      }),
+    );
+  });
+
   it('uses the shared DeepSeek client when injected so tool JSON follows the common runtime policy', async () => {
     const config = makeConfig({
       DEEPSEEK_API_KEY: 'test-key',
@@ -173,6 +237,107 @@ describe('SocialAgentToolJsonModelService', () => {
     });
   });
 
+  it('caches repeated tool JSON output for identical prompts', async () => {
+    const config = makeConfig({
+      DEEPSEEK_API_KEY: 'test-key',
+      DEEPSEEK_BASE_URL: 'https://deepseek.test/',
+      AGENT_CARD_MODEL: 'card-model',
+      SOCIAL_AGENT_TOOL_JSON_CACHE_TTL_MS: '60000',
+    });
+    const cache = new SocialAgentLlmOutputCacheService();
+    const service = new SocialAgentToolJsonModelService(
+      config as never,
+      undefined,
+      undefined,
+      cache,
+    );
+    const logger = (
+      service as unknown as { logger: { log: (message: string) => void } }
+    ).logger;
+    jest.spyOn(logger, 'log').mockImplementation(() => undefined);
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: () => ({
+        choices: [{ message: { content: '{"summary":"cached"}' } }],
+      }),
+    }) as never;
+
+    await expect(
+      service.callJson({
+        purpose: 'social_request_card',
+        prompt: 'draft stable card',
+        fallback: () => ({ source: 'fallback' }),
+        taskId: 12,
+      }),
+    ).resolves.toEqual({
+      summary: 'cached',
+      source: 'deepseek',
+      purpose: 'social_request_card',
+    });
+    await expect(
+      service.callJson({
+        purpose: 'social_request_card',
+        prompt: 'draft stable card',
+        fallback: () => ({ source: 'fallback' }),
+        taskId: 99,
+      }),
+    ).resolves.toEqual({
+      summary: 'cached',
+      source: 'deepseek',
+      purpose: 'social_request_card',
+    });
+
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+    expect(cache.stats()).toMatchObject({
+      hits: 1,
+      misses: 1,
+      writes: 1,
+      size: 1,
+    });
+  });
+
+  it('uses a local exact cache when no shared cache is injected', async () => {
+    const config = makeConfig({
+      DEEPSEEK_API_KEY: 'test-key',
+      DEEPSEEK_BASE_URL: 'https://deepseek.test/',
+      AGENT_CARD_MODEL: 'card-model',
+      SOCIAL_AGENT_TOOL_JSON_CACHE_TTL_MS: '60000',
+    });
+    const service = new SocialAgentToolJsonModelService(config as never);
+    const logger = (
+      service as unknown as { logger: { log: (message: string) => void } }
+    ).logger;
+    jest.spyOn(logger, 'log').mockImplementation(() => undefined);
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: () => ({
+        choices: [{ message: { content: '{"summary":"local cached"}' } }],
+      }),
+    }) as never;
+
+    const input = {
+      purpose: 'social_request_card',
+      prompt: 'draft stable card without injected cache',
+      fallback: () => ({ source: 'fallback' }),
+      taskId: 12,
+    };
+
+    await expect(service.callJson(input)).resolves.toMatchObject({
+      summary: 'local cached',
+      source: 'deepseek',
+      purpose: 'social_request_card',
+    });
+    await expect(
+      service.callJson({ ...input, taskId: 13 }),
+    ).resolves.toMatchObject({
+      summary: 'local cached',
+      source: 'deepseek',
+      purpose: 'social_request_card',
+    });
+
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+  });
+
   it('does not let stale short timeout config weaken DeepSeek tool JSON calls', async () => {
     jest.useFakeTimers();
     const config = makeConfig({
@@ -221,7 +386,9 @@ describe('SocialAgentToolJsonModelService', () => {
     expect(currentRequestSignal().aborted).toBe(false);
     expect(fallback).not.toHaveBeenCalled();
 
-    await jest.advanceTimersByTimeAsync(SOCIAL_AGENT_QUALITY_TOOL_TIMEOUT_MS - 2500);
+    await jest.advanceTimersByTimeAsync(
+      SOCIAL_AGENT_QUALITY_TOOL_TIMEOUT_MS - 2500,
+    );
     expect(currentRequestSignal().aborted).toBe(false);
     expect(fallback).not.toHaveBeenCalled();
 
@@ -275,7 +442,7 @@ describe('SocialAgentToolJsonModelService', () => {
 
     await expect(pending).rejects.toThrow('client_aborted');
     expect(fallback).not.toHaveBeenCalled();
-    expect(global.fetch).toHaveBeenCalledTimes(1);
+    expect(global.fetch).not.toHaveBeenCalled();
   });
 
   it('retries retryable DeepSeek HTTP failures before falling back', async () => {

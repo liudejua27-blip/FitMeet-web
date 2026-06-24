@@ -30,6 +30,27 @@ export class Conversation extends Document {
   @Prop({ type: Object, default: {} })
   metadata: Record<string, unknown>;
 
+  @Prop({ default: 'direct', index: true })
+  source: string;
+
+  @Prop({ default: 'open', enum: ['open', 'pending', 'archived', 'blocked'] })
+  status: 'open' | 'pending' | 'archived' | 'blocked';
+
+  @Prop({ type: [String], default: [], index: true })
+  labels: string[];
+
+  @Prop({ type: String, default: null, index: true })
+  relatedPublicIntentId: string | null;
+
+  @Prop({ type: Number, default: null, index: true })
+  relatedSocialRequestId: number | null;
+
+  @Prop({ type: Number, default: null, index: true })
+  relatedCandidateId: number | null;
+
+  @Prop({ type: Date, default: null })
+  lastActionAt: Date | null;
+
   @Prop({ default: '' })
   lastMessage: string;
 
@@ -49,3 +70,6 @@ ConversationSchema.index({ participantIds: 1, lastMessageTime: -1 });
 ConversationSchema.index({ agentConnectionId: 1, lastMessageTime: -1 });
 ConversationSchema.index({ participantAgentIds: 1, lastMessageTime: -1 });
 ConversationSchema.index({ ownerUserId: 1, lastMessageTime: -1 });
+ConversationSchema.index({ source: 1, status: 1, lastMessageTime: -1 });
+ConversationSchema.index({ relatedPublicIntentId: 1, lastMessageTime: -1 });
+ConversationSchema.index({ relatedSocialRequestId: 1, lastMessageTime: -1 });

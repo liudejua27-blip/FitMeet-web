@@ -51,8 +51,8 @@ Invoke-Check "Backend health" {
   Invoke-WebRequest -UseBasicParsing "$api/health" -TimeoutSec 20
 }
 
-Invoke-Check "Agent manifest without token should exist and reject auth" {
-  Invoke-WebRequest -UseBasicParsing "$api/agent/skills/manifest" -TimeoutSec 20
+Invoke-Check "Agent permissions without token should exist and reject auth" {
+  Invoke-WebRequest -UseBasicParsing "$api/agent/permissions" -TimeoutSec 20
 } @(401)
 
 $body = @{
@@ -102,13 +102,13 @@ if ($publicIntentId) {
 }
 
 if ($AgentToken) {
-  Invoke-Check "Agent manifest with token" {
+  Invoke-Check "Agent permissions with token" {
     Invoke-WebRequest `
       -UseBasicParsing `
-      "$api/agent/skills/manifest" `
+      "$api/agent/permissions" `
       -Headers @{ "X-Agent-Token" = $AgentToken } `
       -TimeoutSec 20
   }
 } else {
-  Write-Host "[SKIP] Agent manifest with token. Pass -AgentToken to verify authorized mode." -ForegroundColor Yellow
+  Write-Host "[SKIP] Agent permissions with token. Pass -AgentToken to verify authorized mode." -ForegroundColor Yellow
 }

@@ -28,6 +28,7 @@ import type { SocialAgentHydratedContext } from './social-agent-context-hydrator
 import { buildSocialAgentKnownTaskSlotConstraints } from './social-agent-task-slot-constraints.presenter';
 import {
   hasExistingSocialActionContext,
+  hasExplicitPublishSideEffectIntent,
   hasExplicitSocialSideEffectIntent,
   isSocialExecutionIntent,
   shouldAllowSocialExecution,
@@ -335,7 +336,7 @@ export class SocialAgentRouteAgentLoopRunnerService {
         return this.runSearchBranch(contextualInput);
       }
       return this.runWorkerBranch(contextualInput, {
-        agent: 'Social Match Agent',
+        agent: 'Match Agent',
         workerToolName: 'social_match_search_turn',
         memoryScope: 'matching.worker_search_turn',
         run: () => this.runSearchBranch(contextualInput),
@@ -346,7 +347,6 @@ export class SocialAgentRouteAgentLoopRunnerService {
         input.route,
         input.message,
         input.taskContext,
-        input.conversationIntent,
       )
     ) {
       return this.skippedBranch(contextualInput, {
@@ -366,14 +366,14 @@ export class SocialAgentRouteAgentLoopRunnerService {
       return this.runActionBranch(contextualInput);
     }
     return this.runWorkerBranch(contextualInput, {
-      agent: 'Meet Loop Agent',
+      agent: 'Match Agent',
       workerToolName: 'meet_loop_action_turn',
       memoryScope: 'meet_loop.worker_action_turn',
       run: () => this.runActionBranch(contextualInput),
     });
   }
 
-  private async skippedBranch(
+  private skippedBranch(
     input: {
       task: AgentTask;
       state: SocialAgentRouteTurnState;
@@ -382,11 +382,11 @@ export class SocialAgentRouteAgentLoopRunnerService {
       branch: 'search' | 'action';
       reason: string;
     },
-  ): Promise<{
+  ): {
     task: AgentTask;
     state: SocialAgentRouteTurnState;
     observation: Record<string, unknown>;
-  }> {
+  } {
     return {
       task: input.task,
       state: input.state,
@@ -565,6 +565,7 @@ export class SocialAgentRouteAgentLoopRunnerService {
       state: {
         ...input.state,
         assistantMessage: actionTurn.assistantMessage,
+        cards: actionTurn.cards ?? input.state.cards,
       },
       actionTurn,
       observation: {
@@ -605,53 +606,71 @@ export class SocialAgentRouteAgentLoopRunnerService {
   ): Promise<RouteBranchExecutionResult> {
     if (!this.subagentWorker) return options.run();
     let branchResult: RouteBranchExecutionResult | null = null;
-    const worker = await this.subagentWorker.run({
-      ownerUserId: input.ownerUserId,
-      taskId: input.task.id,
-      agent: options.agent,
-      goal: input.message,
-      plannerInput: {
-        message: input.message,
-        intent: input.route.intent,
-        routeSource: input.route.source,
-        route: input.route,
-        taskContext: input.taskContext ?? null,
-        hydratedContext: input.hydratedContext ?? null,
-        profile: input.profile ?? null,
-        longTermSnapshot: input.longTermSnapshot ?? null,
-        brainToolResults: input.brainToolResults ?? [],
-        resumeContext: input.resumeContext,
-        assistantMessage: input.state.assistantMessage,
-        branchToolName: options.workerToolName,
-      },
-      memoryScope: options.memoryScope,
-      maxToolCalls: 1,
-      maxRetries: options.agent === 'Meet Loop Agent' ? 1 : 0,
-      signal: input.signal,
-      tools: [
-        {
-          toolName: options.workerToolName,
-          input: {
-            taskId: input.task.id,
-            intent: input.route.intent,
-            message: input.message,
-            taskContext: input.taskContext ?? null,
-            hydratedContext: input.hydratedContext ?? null,
-            profile: input.profile ?? null,
-            longTermSnapshot: input.longTermSnapshot ?? null,
-            brainToolResults: input.brainToolResults ?? [],
-            resumeContext: input.resumeContext,
-          },
+    let worker: Awaited<ReturnType<FitMeetSubagentWorkerService['run']>>;
+    try {
+      worker = await this.subagentWorker.run({
+        ownerUserId: input.ownerUserId,
+        taskId: input.task.id,
+        agent: options.agent,
+        goal: input.message,
+        plannerInput: {
+          message: input.message,
+          intent: input.route.intent,
+          routeSource: input.route.source,
+          route: input.route,
+          taskContext: input.taskContext ?? null,
+          hydratedContext: input.hydratedContext ?? null,
+          profile: input.profile ?? null,
+          longTermSnapshot: input.longTermSnapshot ?? null,
+          brainToolResults: input.brainToolResults ?? [],
+          resumeContext: input.resumeContext,
+          assistantMessage: input.state.assistantMessage,
+          branchToolName: options.workerToolName,
         },
-      ],
-      runner: async () => {
-        branchResult = await options.run();
-        return {
-          ...branchResult.observation,
-          subagentWorker: true,
-        };
-      },
-    });
+        memoryScope: options.memoryScope,
+        maxToolCalls: 1,
+        maxRetries: options.agent === 'Match Agent' ? 1 : 0,
+        signal: input.signal,
+        tools: [
+          {
+            toolName: options.workerToolName,
+            requiresApproval: false,
+            input: {
+              taskId: input.task.id,
+              intent: input.route.intent,
+              message: input.message,
+              taskContext: input.taskContext ?? null,
+              hydratedContext: input.hydratedContext ?? null,
+              profile: input.profile ?? null,
+              longTermSnapshot: input.longTermSnapshot ?? null,
+              brainToolResults: input.brainToolResults ?? [],
+              resumeContext: input.resumeContext,
+            },
+          },
+        ],
+        runner: async () => {
+          branchResult = await options.run();
+          return {
+            ...branchResult.observation,
+            subagentWorker: true,
+          };
+        },
+      });
+    } catch (error) {
+      if (!branchResult) branchResult = await options.run();
+      const observation = {
+        ...branchResult.observation,
+        ...(input.resumeContext ? { resumeContext: input.resumeContext } : {}),
+        subagentWorker: true,
+        workerFallback: true,
+        workerFailure: this.workerFailureMessage(error),
+      };
+      return {
+        ...branchResult,
+        observation,
+        handoff: undefined,
+      };
+    }
     if (!branchResult) {
       branchResult = this.branchResultFromWorkerOutput(
         input.task,
@@ -679,6 +698,17 @@ export class SocialAgentRouteAgentLoopRunnerService {
     };
   }
 
+  private workerFailureMessage(error: unknown): string {
+    const message =
+      error instanceof Error
+        ? error.message
+        : typeof error === 'string'
+          ? error
+          : 'worker_failed';
+    const trimmed = message.trim();
+    return (trimmed || 'worker_failed').slice(0, 180);
+  }
+
   private branchResultFromWorkerOutput(
     task: AgentTask,
     workerOutput: Record<string, unknown> | undefined,
@@ -689,7 +719,7 @@ export class SocialAgentRouteAgentLoopRunnerService {
       task,
       state: this.isRecord(output.state)
         ? (output.state as unknown as SocialAgentRouteTurnState)
-        : createSocialAgentRouteTurnState('我已经完成这一步处理。'),
+        : createSocialAgentRouteTurnState('我已经整理好当前进度。'),
       actionTurn: this.isRecord(output.actionTurn)
         ? (output.actionTurn as RouteBranchActionTurn)
         : undefined,
@@ -774,7 +804,9 @@ export class SocialAgentRouteAgentLoopRunnerService {
       return (
         route.intent === 'action_request' &&
         hasExplicitSocialSideEffectIntent(message) &&
-        hasExistingSocialActionContext({ taskContext })
+        (hasExplicitPublishSideEffectIntent(message) ||
+          hasExistingSocialActionContext({ taskContext }) ||
+          this.hasExistingPublishContext(message, taskContext))
       );
     }
     return false;
@@ -795,9 +827,11 @@ export class SocialAgentRouteAgentLoopRunnerService {
       return (
         route.intent === 'action_request' &&
         hasExplicitSocialSideEffectIntent(message) &&
-        hasExistingSocialActionContext({
-          taskContext: decision.taskContext,
-        })
+        (hasExplicitPublishSideEffectIntent(message) ||
+          hasExistingSocialActionContext({
+            taskContext: decision.taskContext,
+          }) ||
+          this.hasExistingPublishContext(message, decision.taskContext))
       );
     }
     const allowed = shouldAllowSocialExecution({
@@ -838,13 +872,29 @@ export class SocialAgentRouteAgentLoopRunnerService {
     route: RouteDecision['route'],
     message: string,
     taskContext?: Record<string, unknown>,
-    _conversationIntent?: SocialAgentRouteMessageBody['conversationIntent'],
   ): boolean {
     return (
       route.intent === 'action_request' &&
       hasExplicitSocialSideEffectIntent(message) &&
-      hasExistingSocialActionContext({ taskContext })
+      (hasExplicitPublishSideEffectIntent(message) ||
+        hasExistingSocialActionContext({ taskContext }) ||
+        this.hasExistingPublishContext(message, taskContext))
     );
+  }
+
+  private hasExistingPublishContext(
+    message: string,
+    taskContext?: Record<string, unknown>,
+  ): boolean {
+    if (!hasExplicitPublishSideEffectIntent(message)) return false;
+    if (!taskContext) return true;
+    if (this.nonEmptyRecord(taskContext.taskSlots)) return true;
+    if (this.nonEmptyRecord(taskContext.taskSlotSummary)) return true;
+    const taskMemory = this.recordOrNull(taskContext.taskMemory);
+    if (this.nonEmptyRecord(taskMemory?.taskSlots)) return true;
+    if (this.nonEmptyRecord(taskMemory?.taskSlotSummary)) return true;
+    if (this.nonEmptyRecord(taskContext.shortTerm)) return true;
+    return false;
   }
 
   private branchTool(
@@ -852,16 +902,33 @@ export class SocialAgentRouteAgentLoopRunnerService {
     decision: RouteDecision,
     resumeContext: RouteResumeContext | null,
   ): AgentLoopToolPlan {
+    const input = this.jsonSafeWorkerToolInput({
+      intent: decision.route.intent,
+      taskContext: decision.taskContext ?? null,
+      ...(resumeContext ? { resumeContext } : {}),
+    });
     return {
       agent: this.agentForBranch(toolName, decision),
       toolName,
-      input: {
-        intent: decision.route.intent,
-        taskContext: decision.taskContext ?? null,
-        ...(resumeContext ? { resumeContext } : {}),
-      },
+      input,
       requiresApproval: false,
     };
+  }
+
+  private jsonSafeWorkerToolInput(
+    input: Record<string, unknown>,
+  ): Record<string, unknown> {
+    try {
+      return JSON.parse(JSON.stringify(input)) as Record<string, unknown>;
+    } catch {
+      return {
+        intent:
+          typeof input.intent === 'string' && input.intent.trim()
+            ? input.intent
+            : 'unknown',
+        taskContext: null,
+      };
+    }
   }
 
   private agentForBranch(
@@ -869,9 +936,9 @@ export class SocialAgentRouteAgentLoopRunnerService {
     decision: RouteDecision,
   ): AgentLoopToolPlan['agent'] {
     if (toolName === 'route_profile_turn') return 'Life Graph Agent';
-    if (toolName === 'route_search_turn') return 'Social Match Agent';
-    if (toolName === 'route_action_turn') return 'Meet Loop Agent';
-    if (decision.route.intent === 'fitness_math') return 'Math Agent';
+    if (toolName === 'route_search_turn') return 'Match Agent';
+    if (toolName === 'route_action_turn') return 'Match Agent';
+    if (decision.route.intent === 'fitness_math') return 'Agent Brain';
     return 'Agent Brain';
   }
 
@@ -983,7 +1050,7 @@ export class SocialAgentRouteAgentLoopRunnerService {
       return running ? '正在准备需要你确认的动作' : '已整理确认内容';
     if (toolName === 'candidate_confirmation_check')
       return running ? '正在确认候选动作' : '已确认候选动作状态';
-    return running ? '正在处理这一步' : '已完成这一步';
+    return running ? '正在整理当前信息' : '已整理当前信息';
   }
 
   private hydratedContextFromTaskContext(input: {
@@ -1028,24 +1095,22 @@ export class SocialAgentRouteAgentLoopRunnerService {
       lifeGraphFactDisplaySummaries: this.recordArray(
         context.lifeGraphFactDisplaySummaries,
       ) as SocialAgentHydratedContext['lifeGraphFactDisplaySummaries'],
-      lifeGraphGovernanceSummary:
-        (this.recordOrNull(context.lifeGraphGovernanceSummary) as
-          | SocialAgentHydratedContext['lifeGraphGovernanceSummary']
-          | null) ?? {
-          total: 0,
-          autoSaveCount: 0,
-          confirmationRequiredCount: 0,
-          blockedCount: 0,
-          sensitiveCount: 0,
-          expiringFactKeys: [],
-        },
+      lifeGraphGovernanceSummary: (this.recordOrNull(
+        context.lifeGraphGovernanceSummary,
+      ) as SocialAgentHydratedContext['lifeGraphGovernanceSummary'] | null) ?? {
+        total: 0,
+        autoSaveCount: 0,
+        confirmationRequiredCount: 0,
+        blockedCount: 0,
+        sensitiveCount: 0,
+        expiringFactKeys: [],
+      },
       lifeGraphSummary: this.recordOrNull(context.lifeGraphSummary),
       pendingApprovals:
         pendingApprovals as SocialAgentHydratedContext['pendingApprovals'],
-      candidateActions: (this.recordOrNull(context.candidateActions) ??
-        this.recordOrNull(context.candidateState)) as
-        | SocialAgentHydratedContext['candidateActions']
-        | null,
+      candidateActions:
+        this.recordOrNull(context.candidateActions) ??
+        this.recordOrNull(context.candidateState),
     };
   }
 
@@ -1055,6 +1120,10 @@ export class SocialAgentRouteAgentLoopRunnerService {
 
   private recordOrNull(value: unknown): Record<string, unknown> | null {
     return this.isRecord(value) ? value : null;
+  }
+
+  private nonEmptyRecord(value: unknown): boolean {
+    return this.isRecord(value) && Object.keys(value).length > 0;
   }
 
   private recordArray(value: unknown): Array<Record<string, unknown>> {

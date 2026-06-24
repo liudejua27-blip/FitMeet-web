@@ -75,6 +75,7 @@ function makeQueuedHarness() {
   };
   const taskLifecycle = {
     createOrReuseTask: jest.fn().mockResolvedValue(task),
+    assertTaskOwner: jest.fn().mockResolvedValue(task),
   };
   const service = new SocialAgentQueuedRunService(
     eventRepo as never,
@@ -180,5 +181,96 @@ describe('SocialAgentQueuedRunService', () => {
         taskId: 101,
       }),
     );
+  });
+
+  it('keeps queued search recoverable when run snapshot persistence is missing', async () => {
+    const { runState, service, task, taskLifecycle } = makeQueuedHarness();
+    runState.updateRunSnapshot.mockRejectedValue(new Error('run not found'));
+    taskLifecycle.assertTaskOwner.mockResolvedValue(task);
+
+    const queued = await service.runQueued({
+      ownerUserId: 7,
+      body: {
+        goal: '今晚青岛大学附近轻松跑步',
+        taskId: task.id,
+      },
+      waitForCompletionMs: 100,
+      executeRun: jest.fn().mockResolvedValue({
+        taskId: task.id,
+        assistantMessage: '已找到候选人。',
+        assistantMessageSource: 'deterministic_route',
+        visibleSteps: [],
+        candidates: [],
+        cards: [],
+      }),
+      visibleStepLabel: (_id, label) => label,
+    });
+
+    expect(queued).toMatchObject({
+      taskId: task.id,
+      status: 'completed',
+      result: expect.objectContaining({
+        assistantMessage: '已找到候选人。',
+      }),
+    });
+    expect(String(queued.runId)).toMatch(/^sar_/);
+    expect(taskLifecycle.assertTaskOwner).toHaveBeenCalledWith(task.id, 7);
+    expect(runState.markRunFailed).not.toHaveBeenCalled();
+  });
+
+  it('recovers cards from the latest completed stored chat run when the wrapper fails', async () => {
+    const { runState, service, task, taskLifecycle } = makeQueuedHarness();
+    task.result = {
+      latestRunId: 'sar_completed',
+      chatRuns: {
+        sar_completed: {
+          taskId: task.id,
+          runId: 'sar_completed',
+          status: 'completed',
+          phase: 'completed',
+          message: '已完成搜索并刷新候选人',
+          visibleSteps: [],
+          queuedAt: new Date(0).toISOString(),
+          updatedAt: new Date(0).toISOString(),
+          completedAt: new Date(0).toISOString(),
+          result: {
+            taskId: task.id,
+            assistantMessage: '已找到 3 个合适机会。',
+            visibleSteps: [],
+            candidates: [],
+            cards: [{ id: 'candidate_card:101:22' }],
+            approvalRequiredActions: [],
+            events: [],
+          },
+        },
+      },
+    };
+    taskLifecycle.assertTaskOwner.mockResolvedValue(task);
+
+    const queued = await service.runQueued({
+      ownerUserId: 7,
+      body: {
+        goal: '今晚青岛大学附近轻松跑步',
+        taskId: task.id,
+      },
+      waitForCompletionMs: 100,
+      executeRun: jest
+        .fn()
+        .mockRejectedValue(
+          new Error('Recommendation AgentLoop completed without final result.'),
+        ),
+      visibleStepLabel: (_id, label) => label,
+    });
+
+    expect(queued).toMatchObject({
+      taskId: task.id,
+      runId: 'sar_completed',
+      status: 'completed',
+      result: expect.objectContaining({
+        assistantMessage: '已找到 3 个合适机会。',
+        cards: [{ id: 'candidate_card:101:22' }],
+      }),
+    });
+    expect(runState.markRunFailed).not.toHaveBeenCalled();
   });
 });

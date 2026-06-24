@@ -17,9 +17,14 @@ export const TOOL_UI_SCHEMA_ACTIONS = [
   'opener.regenerate',
   'opener.reject',
   'activity.view_detail',
+  'publish_to_discover',
+  'social_intent.decline_publish',
+  'social_intent.dismiss',
+  'social_intent.retry_publish',
   'activity.confirm_create',
   'activity.modify_time',
   'activity.modify_location',
+  'activity.skip_publish',
   'activity.check_in',
   'activity.complete',
   'activity.upload_proof',
@@ -51,12 +56,12 @@ export const TOOL_UI_CARD_ACTION_COPY: Record<ToolUISchemaAction, ToolUICardActi
   'candidate.connect': {
     busy: '正在准备邀请',
     done: '已准备邀请',
-    result: '已准备邀请请求，真正触达前仍会经过确认。',
+    result: '已准备好友申请，确认前不会触达对方。',
   },
   'candidate.generate_opener': {
     busy: '正在生成开场白',
     done: '已生成开场白',
-    result: '已生成开场白，真正发送前仍会等你确认。',
+    result: '开场白草稿已准备好，不会自动发送给对方。',
   },
   'candidate.more_like_this': {
     busy: '正在找类似选项',
@@ -71,7 +76,7 @@ export const TOOL_UI_CARD_ACTION_COPY: Record<ToolUISchemaAction, ToolUICardActi
   'opener.regenerate': {
     busy: '正在重新生成',
     done: '已重新生成',
-    result: '已重新生成开场白，发送前仍会等你确认。',
+    result: '已重新生成开场白草稿，不会自动发送给对方。',
   },
   'opener.reject': {
     busy: '正在取消发送',
@@ -83,10 +88,15 @@ export const TOOL_UI_CARD_ACTION_COPY: Record<ToolUISchemaAction, ToolUICardActi
     done: '已打开详情',
     result: '已打开详情，我会把后续判断继续放在这段对话里。',
   },
+  publish_to_discover: {
+    busy: '正在发布',
+    done: '已发布',
+    result: '已发布到发现页，公开可发现用户可以看到这张约练卡。',
+  },
   'activity.confirm_create': {
-    busy: '正在准备发起',
-    done: '已准备发起',
-    result: '已准备活动发起流程，发布前仍会保留确认边界。',
+    busy: '正在准备发布',
+    done: '已准备发布',
+    result: '已准备发布到发现，确认前不会公开。',
   },
   'activity.modify_time': {
     busy: '正在准备改期',
@@ -97,6 +107,26 @@ export const TOOL_UI_CARD_ACTION_COPY: Record<ToolUISchemaAction, ToolUICardActi
     busy: '正在准备地点调整',
     done: '已准备地点调整',
     result: '已准备地点调整方案，真正改动前仍会等你确认。',
+  },
+  'activity.skip_publish': {
+    busy: '正在取消发布',
+    done: '已取消发布',
+    result: '已取消发布，不会出现在发现页，也不会继续匹配。',
+  },
+  'social_intent.decline_publish': {
+    busy: '正在取消发布',
+    done: '已取消发布',
+    result: '已取消发布，不会出现在发现页，也不会继续匹配。',
+  },
+  'social_intent.dismiss': {
+    busy: '正在隐藏卡片',
+    done: '已隐藏卡片',
+    result: '已隐藏这张约练卡，不会出现在发现页，也不会继续匹配。',
+  },
+  'social_intent.retry_publish': {
+    busy: '正在重试发布',
+    done: '已重试',
+    result: '已重新尝试发布约练卡。',
   },
   'activity.check_in': {
     busy: '正在记录到达',
@@ -121,7 +151,7 @@ export const TOOL_UI_CARD_ACTION_COPY: Record<ToolUISchemaAction, ToolUICardActi
   'life_graph.accept_update': {
     busy: '正在确认更新',
     done: '已确认更新',
-    result: '已确认这次画像更新，后续会按你的边界使用。',
+    result: '已确认这次资料更新，后续会按你的边界使用。',
   },
   'life_graph.reject_update': {
     busy: '正在跳过写入',
@@ -141,11 +171,11 @@ export const TOOL_UI_CARD_ACTION_COPY: Record<ToolUISchemaAction, ToolUICardActi
   'safety.approve': {
     busy: '正在确认安全边界',
     done: '已确认边界',
-    result: '已确认这一步的安全边界，后续执行仍会保留审计记录。',
+    result: '已确认安全边界，后续执行会保留确认记录。',
   },
   'safety.reject': {
-    busy: '正在拒绝这一步',
-    done: '已拒绝',
-    result: '已拒绝这一步，不会继续执行相关高风险动作。',
+    busy: '正在取消',
+    done: '已取消',
+    result: '已取消，不会继续执行相关高风险动作。',
   },
 };

@@ -1,20 +1,11 @@
 import { AuiIf, ComposerPrimitive, useAuiState } from '@assistant-ui/react';
-import {
-  ArrowUp,
-  LogIn,
-  Mic,
-  Plus,
-  Square,
-  X,
-} from 'lucide-react';
-import { useMemo } from 'react';
+import { ArrowUp, LogIn, Mic, Plus, Square, X } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
 
 import { cn } from '../../lib/utils';
 import { ChatGPTAttachment } from './attachment';
-import {
-  composerPrimaryActionMode,
-  type ComposerPrimaryActionMode,
-} from './composer-action-mode';
+import { composerPrimaryActionMode, type ComposerPrimaryActionMode } from './composer-action-mode';
+import { addAssistantComposerFocusListener, shouldFocusAssistantComposer } from './composer-focus';
 import { TooltipIconButton } from './tooltip-icon-button';
 import { type UploadProgressSummary, useUploadProgressSummary } from './upload-progress-store';
 
@@ -49,6 +40,7 @@ function composerSurfaceState({
 }
 
 export function ChatGPTComposer({ requiresAuth, onLogin }: ChatGPTComposerProps) {
+  const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const attachments = useAuiState((state) => state.composer.attachments);
   const attachmentIds = useMemo(
     () => attachments.map((attachment) => attachment.id),
@@ -76,6 +68,15 @@ export function ChatGPTComposer({ requiresAuth, onLogin }: ChatGPTComposerProps)
     surfaceState === 'generating' ||
     surfaceState === 'dictating' ||
     uploadSummary.status === 'uploading';
+  const focusIfRequested = useCallback(() => {
+    if (!shouldFocusAssistantComposer()) return;
+    inputRef.current?.focus({ preventScroll: true });
+  }, []);
+
+  useEffect(() => {
+    focusIfRequested();
+    return addAssistantComposerFocusListener(focusIfRequested);
+  }, [focusIfRequested]);
 
   return (
     <ComposerPrimitive.Root
@@ -116,12 +117,13 @@ export function ChatGPTComposer({ requiresAuth, onLogin }: ChatGPTComposerProps)
           </div>
         </AuiIf>
         <ComposerPrimitive.Input
+          ref={inputRef}
           rows={1}
-          autoFocus={!requiresAuth}
           placeholder={requiresAuth ? '登录后继续' : '询问任何问题'}
           aria-describedby={uploadStatusId}
           data-testid="assistant-ui-composer-input"
           data-input-model="single-composer"
+          data-auto-focus="disabled"
           className="max-h-40 min-h-8 w-full resize-none bg-transparent px-3 pt-0.5 text-[16px] leading-6 text-[#0d0d0d] outline-none placeholder:text-[#8e8e8e]"
         />
         <ComposerDictationPreview />
@@ -165,9 +167,7 @@ function ComposerQuotePreview() {
       data-testid="assistant-ui-composer-quote"
     >
       <div className="min-w-0 flex-1">
-        <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-[#8a8f98]">
-          引用
-        </p>
+        <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-[#8a8f98]">引用</p>
         <ComposerPrimitive.QuoteText className="mt-0.5 block max-h-12 overflow-hidden text-ellipsis text-xs leading-5 text-[#52525b]" />
       </div>
       <ComposerPrimitive.QuoteDismiss asChild>

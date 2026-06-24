@@ -1,13 +1,6 @@
 import * as api from './client';
 
-/**
- * User social profile.
- *
- * This is the single source of truth for both the AI Profile page and the AI
- * social-card generator. The backend table is `user_social_profiles`, one row
- * per user. If the user has never saved a profile, GET still returns an empty
- * placeholder object so the UI does not need a separate "not created" state.
- */
+/** User social profile used by personal info, Agent matching, and Discover eligibility. */
 export interface UserSocialProfile {
   userId: number;
   gender: string;
@@ -40,7 +33,7 @@ export interface UserSocialProfile {
   agentCanStartChatAfterApproval: boolean;
   aiSummary: string;
   aiProfileCard: Record<string, unknown>;
-  matchSignals: AiProfileMatchSignals;
+  matchSignals: SocialProfileMatchSignals;
   sensitiveTagDecisions?: Record<
     string,
     { status: string; category?: string; decidedAt?: string }
@@ -49,7 +42,7 @@ export interface UserSocialProfile {
   updatedAt?: string;
 }
 
-export interface AiProfileMatchSignals {
+export interface SocialProfileMatchSignals {
   publicTags: string[];
   privatePreferenceTags: string[];
   sensitivePrivateTags: string[];
@@ -58,7 +51,7 @@ export interface AiProfileMatchSignals {
   source: string;
 }
 
-export interface AiProfileBuilderCard {
+export interface SocialProfileBuilderCard {
   basic: {
     nickname: string;
     city: string;
@@ -95,11 +88,11 @@ export interface AiProfileBuilderCard {
     agentCanRecommendMe: boolean;
     agentCanStartChatAfterApproval: boolean;
   };
-  matchSignals: AiProfileMatchSignals;
+  matchSignals: SocialProfileMatchSignals;
   summary: string;
 }
 
-export interface AiProfileQuestion {
+export interface SocialProfileQuestion {
   key: string;
   question: string;
   type?: string;
@@ -135,7 +128,7 @@ export interface SocialProfileCompletion {
   nextActions?: string[];
 }
 
-export interface AiProfilePrivacyState {
+export interface SocialProfilePrivacyState {
   profileDiscoverable: boolean;
   agentCanRecommendMe: boolean;
   allowAgentRecommend?: boolean;
@@ -165,7 +158,7 @@ export const socialProfileApi = {
     }),
   questions: () =>
     api.request<{
-      questions: AiProfileQuestion[];
+      questions: SocialProfileQuestion[];
       completion: SocialProfileCompletion;
     }>('/users/me/social-profile/questions'),
   aiDraft: (data: {
@@ -175,7 +168,7 @@ export const socialProfileApi = {
   }) =>
     api.request<{
       mode: 'ai' | 'fallback';
-      draft: AiProfileBuilderCard;
+      draft: SocialProfileBuilderCard;
       profileUsed: UserSocialProfile;
       completion: SocialProfileCompletion;
     }>('/users/me/social-profile/ai-draft', {
@@ -183,7 +176,7 @@ export const socialProfileApi = {
       body: JSON.stringify(data),
     }),
   aiSave: (data: {
-    profile: AiProfileBuilderCard;
+    profile: SocialProfileBuilderCard;
     enableMatching?: boolean;
     ownerConfirmed?: boolean;
     matchingConsent?: boolean;
@@ -201,28 +194,34 @@ export const socialProfileApi = {
       method: 'POST',
       body: JSON.stringify(data),
     }),
-  privacy: () => api.request<AiProfilePrivacyState>('/ai-profile/privacy'),
-  updatePrivacy: (data: Partial<Pick<AiProfilePrivacyState, 'profileDiscoverable' | 'agentCanRecommendMe' | 'agentCanStartChatAfterApproval' | 'hideSensitiveTags'>> & {
+  privacy: () => api.request<SocialProfilePrivacyState>('/users/me/social-profile/privacy'),
+  updatePrivacy: (data: Partial<Pick<SocialProfilePrivacyState, 'profileDiscoverable' | 'agentCanRecommendMe' | 'agentCanStartChatAfterApproval' | 'hideSensitiveTags'>> & {
     ownerConfirmed?: boolean;
     matchingConsent?: boolean;
     profileVisibilityConsent?: boolean;
   }) =>
-    api.request<AiProfilePrivacyState>('/ai-profile/privacy', {
+    api.request<SocialProfilePrivacyState>('/users/me/social-profile/privacy', {
       method: 'PATCH',
       body: JSON.stringify(data),
     }),
   pendingSensitiveTags: () =>
     api.request<{ pending: PendingSensitiveTag[]; total: number }>(
-      '/ai-profile/sensitive-tags/pending',
+      '/users/me/social-profile/sensitive-tags/pending',
     ),
   confirmSensitiveTag: (tag: string) =>
-    api.request<{ ok: boolean; tag: string; status: string }>('/ai-profile/sensitive-tags/confirm', {
-      method: 'POST',
-      body: JSON.stringify({ tag }),
-    }),
+    api.request<{ ok: boolean; tag: string; status: string }>(
+      '/users/me/social-profile/sensitive-tags/confirm',
+      {
+        method: 'POST',
+        body: JSON.stringify({ tag }),
+      },
+    ),
   rejectSensitiveTag: (tag: string) =>
-    api.request<{ ok: boolean; tag: string; status: string }>('/ai-profile/sensitive-tags/reject', {
-      method: 'POST',
-      body: JSON.stringify({ tag }),
-    }),
+    api.request<{ ok: boolean; tag: string; status: string }>(
+      '/users/me/social-profile/sensitive-tags/reject',
+      {
+        method: 'POST',
+        body: JSON.stringify({ tag }),
+      },
+    ),
 };

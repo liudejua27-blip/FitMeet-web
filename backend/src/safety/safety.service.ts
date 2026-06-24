@@ -109,10 +109,7 @@ export class SafetyService {
     ]);
     const riskStatuses = new Set(['pending', 'reviewing', 'resolved']);
     for (const report of reportedUsers) {
-      if (
-        report.targetId !== userId &&
-        riskStatuses.has(report.status)
-      ) {
+      if (report.targetId !== userId && riskStatuses.has(report.status)) {
         blockedIds.add(report.targetId);
       }
     }
@@ -229,7 +226,6 @@ export class SafetyService {
     }
     if (request.type === 'coach') {
       update.singleCert = true;
-      update.isCoach = true;
     }
 
     if (Object.keys(update).length > 0) {

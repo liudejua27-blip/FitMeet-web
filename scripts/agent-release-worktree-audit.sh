@@ -81,6 +81,9 @@ cd "${ROOT_DIR}"
 
 stale_context_limit_entries=()
 stale_generic_model_entries=()
+forbidden_release_dirty_paths=(
+  "frontend/src/dev/agent/mockAgentAdapter.ts"
+)
 context_limit_files=(
   ".env.example"
   "backend/.env.example"
@@ -124,22 +127,268 @@ if ((${#stale_generic_model_entries[@]} > 0)); then
   fail 'DEEPSEEK_MODEL=deepseek-v4-flash downgrades shared DeepSeek fallback paths. Use deepseek-v4-pro; keep flash only in DEEPSEEK_FAST_MODEL.'
 fi
 
+deepseek_legacy_alias_entries=()
+for context_path in "${context_limit_files[@]}"; do
+  [[ -e "${context_path}" ]] || continue
+  while IFS= read -r match; do
+    [[ -z "${match}" ]] && continue
+    deepseek_legacy_alias_entries+=("${match}")
+  done < <(
+    grep -RIn --exclude-dir=node_modules --exclude-dir=dist \
+      --include='*.example' \
+      --include='*.env' \
+      --include='*.md' \
+      'DEEPSEEK_MODEL=deepseek-chat' "${context_path}" 2>/dev/null || true
+  )
+done
+if ((${#deepseek_legacy_alias_entries[@]} > 0)); then
+  printf '\nLegacy DeepSeek model aliases found:\n' >&2
+  printf '  %s\n' "${deepseek_legacy_alias_entries[@]}" >&2
+  fail 'DEEPSEEK_MODEL=deepseek-chat is a legacy alias. Production Agent routes must use explicit deepseek-v4-* models.'
+fi
+
+short_agent_timeout_config_entries=()
+for context_path in "${context_limit_files[@]}"; do
+  [[ -e "${context_path}" ]] || continue
+  while IFS= read -r match; do
+    [[ -z "${match}" ]] && continue
+    short_agent_timeout_config_entries+=("${match}")
+  done < <(
+    grep -RInE --exclude-dir=node_modules --exclude-dir=dist \
+      --include='*.example' \
+      --include='*.env' \
+      --include='*.md' \
+      'SOCIAL_AGENT_[A-Z_]*(TIMEOUT|FIRST_CHUNK)[A-Z_]*_?MS=(2500|3500|5000|8000|10000|12000|15000|18000)([^0-9]|$)' \
+      "${context_path}" 2>/dev/null || true
+  )
+done
+if ((${#short_agent_timeout_config_entries[@]} > 0)); then
+  printf '\nShort Agent timeout settings found in deploy docs/templates:\n' >&2
+  printf '  %s\n' "${short_agent_timeout_config_entries[@]}" >&2
+  fail 'Production Agent config must not fall back before DeepSeek can respond; use 20s+ first-chunk and 25s+ route/planner budgets.'
+fi
+
+short_subagent_timeout_config_entries=()
+for context_path in "${context_limit_files[@]}"; do
+  [[ -e "${context_path}" ]] || continue
+  while IFS= read -r match; do
+    [[ -z "${match}" ]] && continue
+    short_subagent_timeout_config_entries+=("${match}")
+  done < <(
+    grep -RInE --exclude-dir=node_modules --exclude-dir=dist \
+      --include='*.example' \
+      --include='*.env' \
+      --include='*.md' \
+      'FITMEET_SUBAGENT_WORKER_TIMEOUT_MS=(2500|3500|5000|8000|10000|12000|15000|18000|20000)([^0-9]|$)' \
+      "${context_path}" 2>/dev/null || true
+  )
+done
+if ((${#short_subagent_timeout_config_entries[@]} > 0)); then
+  printf '\nShort subagent worker timeout settings found in deploy docs/templates:\n' >&2
+  printf '  %s\n' "${short_subagent_timeout_config_entries[@]}" >&2
+  fail 'Subagent worker model/tool execution must not fall back before DeepSeek can respond; use 25s+ worker timeouts.'
+fi
+
+weak_agent_model_routing_entries=()
+for context_path in "${context_limit_files[@]}"; do
+  [[ -e "${context_path}" ]] || continue
+  while IFS= read -r match; do
+    [[ -z "${match}" ]] && continue
+    weak_agent_model_routing_entries+=("${match}")
+  done < <(
+    grep -RInE --exclude-dir=node_modules --exclude-dir=dist \
+      --include='*.example' \
+      --include='*.env' \
+      --include='*.md' \
+      '(SOCIAL_AGENT_MODEL_ROUTING_MODE=(fast|rules_only|rules-only)|SOCIAL_AGENT_INTENT_ROUTER_MODE=(rules_only|rules-only)|DEEPSEEK_CHAT_MODEL=deepseek-v4-flash|AGENT_(CASUAL_CHAT|FINAL_RESPONSE|PLANNER|EXTRACTOR|CARD|SAFETY)_MODEL=deepseek-v4-flash)' \
+      "${context_path}" 2>/dev/null || true
+  )
+done
+if ((${#weak_agent_model_routing_entries[@]} > 0)); then
+  printf '\nWeak Agent model routing settings found in deploy docs/templates:\n' >&2
+  printf '  %s\n' "${weak_agent_model_routing_entries[@]}" >&2
+  fail 'Production Agent config must stay quality/llm_first and keep user-facing lanes on deepseek-v4-pro.'
+fi
+
+forbidden_legacy_paths=(
+  "frontend/src/components/agent-workspace/CodexAntPet.tsx"
+  "frontend/src/components/agent/AgentConnectionCard.tsx"
+  "frontend/src/components/agent-loop/ActivityIcebreakerCard.tsx"
+  "frontend/src/components/agent-loop/ActivityProofUploader.tsx"
+  "frontend/src/components/agent-loop/AgentApprovalCard.tsx"
+  "frontend/src/components/agent/ant-guide"
+  "frontend/src/assets/agent/ant-guide"
+  "frontend/src/components/ai-elements"
+  "frontend/src/debug/agent-workbench"
+  "frontend/src/pages/SocialAgentConsolePage.tsx"
+  "frontend/src/pages/DemoAgentSocialLoopPage.tsx"
+  "frontend/src/pages/DemoInvestorPage.tsx"
+  "frontend/src/pages/HomePage.tsx"
+  "frontend/src/pages/HomePage.legacy.tsx"
+  "frontend/src/components/hero"
+  "frontend/src/components/sections/EcosystemGateways.tsx"
+  "frontend/src/components/sections/BrandPhilosophy.tsx"
+  "frontend/src/components/sections/SymbiosisNetwork.tsx"
+  "frontend/src/components/sections/VisionSection.tsx"
+  "frontend/src/components/sections/FinalCTA.tsx"
+  "frontend/src/components/showcase"
+  "frontend/src/components/three"
+  "frontend/src/components/ui/GatewayPortalCard.tsx"
+  "frontend/src/components/ui/SectionHeading.tsx"
+  "frontend/src/data/gateways.ts"
+  "frontend/src/data/heroCopy.ts"
+  "frontend/src/types/agent.ts"
+  "frontend/src/styles/agent-workspace.css"
+  "frontend/src/styles/agent-gpt-copy-shell.css"
+  "frontend/src/styles/fitmeet-assistant-ui.css"
+)
+existing_forbidden_paths=()
+for legacy_path in "${forbidden_legacy_paths[@]}"; do
+  if [[ -e "${legacy_path}" ]]; then
+    existing_forbidden_paths+=("${legacy_path}")
+  fi
+done
+if ((${#existing_forbidden_paths[@]} > 0)); then
+  printf '\nLegacy Agent files still exist in the source tree:\n' >&2
+  printf '  %s\n' "${existing_forbidden_paths[@]}" >&2
+  fail 'Legacy Agent workbench/pet/custom-shell artifacts must not ship with the assistant-ui Agent mainline.'
+fi
+
+frontend_legacy_source_entries=()
+if [[ -d frontend/src ]]; then
+  while IFS= read -r match; do
+    [[ -z "${match}" ]] && continue
+    frontend_legacy_source_entries+=("${match}")
+  done < <(
+    grep -RIn --exclude-dir=node_modules --exclude-dir=dist \
+      --exclude='*.test.ts' \
+      --exclude='*.test.tsx' \
+      --exclude='*.spec.ts' \
+      --exclude='*.spec.tsx' \
+      --include='*.ts' \
+      --include='*.tsx' \
+      --include='*.css' \
+      -E 'agent-gpt-copy-shell|agent-workspace--gpt|agent-gpt-result-block|fitmeet-assistant-ui\.css|CodexAntPet|agent-workbench|SocialAgentConsolePage|DemoAgentSocialLoopPage|DemoInvestorPage' \
+      frontend/src 2>/dev/null | grep -vE '/test/|\.test\.|\.spec\.' || true
+  )
+fi
+if ((${#frontend_legacy_source_entries[@]} > 0)); then
+  printf '\nLegacy Agent source references found outside tests:\n' >&2
+  printf '  %s\n' "${frontend_legacy_source_entries[@]}" >&2
+  fail 'Production /agent/chat must stay on the assistant-ui mainline without old shell, pet, or debug workbench references.'
+fi
+
+frontend_static_mock_import_entries=()
+if [[ -d frontend/src ]]; then
+  while IFS= read -r match; do
+    [[ -z "${match}" ]] && continue
+    frontend_static_mock_import_entries+=("${match}")
+  done < <(
+    grep -RIn --exclude-dir=node_modules --exclude-dir=dist \
+      --exclude='*.test.ts' \
+      --exclude='*.test.tsx' \
+      --exclude='*.spec.ts' \
+      --exclude='*.spec.tsx' \
+      --include='*.ts' \
+      --include='*.tsx' \
+      -E "from ['\"][^'\"]*mockAgentAdapter['\"]|import[[:space:]]+[^;]*mockAgentAdapter" \
+      frontend/src 2>/dev/null | grep -vE '/test/|\.test\.|\.spec\.' || true
+  )
+fi
+if ((${#frontend_static_mock_import_entries[@]} > 0)); then
+  printf '\nStatic mock Agent adapter imports found outside tests:\n' >&2
+  printf '  %s\n' "${frontend_static_mock_import_entries[@]}" >&2
+  fail 'Mock Agent adapter must not be imported by production source.'
+fi
+
+frontend_dev_import_entries=()
+if [[ -d frontend/src ]]; then
+  while IFS= read -r match; do
+    [[ -z "${match}" ]] && continue
+    frontend_dev_import_entries+=("${match}")
+  done < <(
+    grep -RIn --exclude-dir=node_modules --exclude-dir=dist \
+      --exclude='*.test.ts' \
+      --exclude='*.test.tsx' \
+      --exclude='*.spec.ts' \
+      --exclude='*.spec.tsx' \
+      --include='*.ts' \
+      --include='*.tsx' \
+      -E "from ['\"][^'\"]*(\.\./)+dev/|import[[:space:]]*\\([[:space:]]*['\"][^'\"]*(\.\./)+dev/|from ['\"]src/dev/|import[[:space:]]*\\([[:space:]]*['\"]src/dev/" \
+      frontend/src 2>/dev/null | grep -vE '/test/|\.test\.|\.spec\.' || true
+  )
+fi
+if ((${#frontend_dev_import_entries[@]} > 0)); then
+  printf '\nDev-only frontend imports found outside the guarded Agent mock loader:\n' >&2
+  printf '  %s\n' "${frontend_dev_import_entries[@]}" >&2
+  fail 'Production frontend source must not import frontend/src/dev.'
+fi
+
+critical_agent_context_files=(
+  "backend/src/agent-gateway/social-agent-intent-router.service.ts"
+  "backend/src/agent-gateway/social-agent-brain.service.ts"
+  "backend/src/agent-gateway/social-agent-planner.service.ts"
+  "backend/src/agent-gateway/social-agent-final-response.service.ts"
+  "backend/src/agent-gateway/social-agent-model-router.service.ts"
+  "backend/src/agent-gateway/social-agent-context-hydrator.service.ts"
+  "backend/src/agent-gateway/social-agent-memory-context.service.ts"
+  "backend/src/agent-gateway/social-agent-run-orchestrator.service.ts"
+  "backend/src/agent-gateway/social-agent-route-agent-loop-runner.service.ts"
+  "backend/src/agent-gateway/social-agent-context-window.ts"
+)
+critical_existing_files=()
+for critical_file in "${critical_agent_context_files[@]}"; do
+  [[ -f "${critical_file}" ]] && critical_existing_files+=("${critical_file}")
+done
+
+short_context_source_entries=()
+if ((${#critical_existing_files[@]} > 0)); then
+  while IFS= read -r match; do
+    [[ -z "${match}" ]] && continue
+    short_context_source_entries+=("${match}")
+  done < <(
+    grep -nE 'contextTurnLimit[[:space:]]*[:=][[:space:]]*(8|10|40)\b|slice[[:space:]]*\([[:space:]]*-[[:space:]]*(8|10|40)[[:space:]]*\)|recentMessages[[:space:]]*:[[:space:]]*(8|10|40)\b|conversationHistory[[:space:]]*:[[:space:]]*(8|10|40)\b' \
+      "${critical_existing_files[@]}" 2>/dev/null || true
+  )
+fi
+if ((${#short_context_source_entries[@]} > 0)); then
+  printf '\nShort Agent context windows found in critical DeepSeek routes:\n' >&2
+  printf '  %s\n' "${short_context_source_entries[@]}" >&2
+  fail 'Critical Agent model routes must keep long conversation context; do not regress to 8/10/40-turn windows.'
+fi
+
+short_timeout_source_entries=()
+if ((${#critical_existing_files[@]} > 0)); then
+  while IFS= read -r match; do
+    [[ -z "${match}" ]] && continue
+    short_timeout_source_entries+=("${match}")
+  done < <(
+    grep -nE 'SOCIAL_AGENT_[A-Z_]*TIMEOUT[A-Z_]*[[:space:]]*[:=][^0-9]*2500\b|timeoutMs[[:space:]]*[:=][^0-9]*2500\b|intentTimeoutMs[[:space:]]*[:=][^0-9]*2500\b|plannerTimeoutMs[[:space:]]*[:=][^0-9]*2500\b' \
+      "${critical_existing_files[@]}" 2>/dev/null || true
+  )
+fi
+if ((${#short_timeout_source_entries[@]} > 0)); then
+  printf '\nShort Agent model timeout budgets found in critical DeepSeek routes:\n' >&2
+  printf '  %s\n' "${short_timeout_source_entries[@]}" >&2
+  fail 'Critical Agent model routes must not fall back after the old 2.5s cap; use production-grade timeout budgets.'
+fi
+
 category_for_path() {
   local path="$1"
   case "${path}" in
-    backend/src/agent-gateway/*|backend/src/ai/*|backend/src/common/deepseek.util.ts|backend/src/common/deepseek.util.spec.ts|backend/src/openapi/fitmeet-core.openapi.ts|backend/src/scripts/smoke-agent-*|backend/src/scripts/prepare-agent-smoke-seed.ts|backend/tsconfig.json)
+    backend/src/agent-gateway/*|backend/src/ai/*|backend/src/common/deepseek.util.ts|backend/src/common/deepseek.util.spec.ts|backend/src/database/migrations/*SocialAgent*|backend/src/openapi/fitmeet-core.openapi.ts|backend/tsconfig.json)
       printf 'agent-backend-core'
       ;;
-    frontend/src/components/agent-workspace/*|frontend/src/components/assistant-ui/*|frontend/src/components/agent-loop/AgentApprovalCard.tsx|frontend/src/components/agent/Agent*.tsx|frontend/src/components/agent/ant-guide/*|frontend/src/assets/agent/ant-guide/*|frontend/src/api/socialAgentApi.ts|frontend/src/api/socialAgentDebugApi.ts|frontend/src/lib/agentApprovalCopy.ts|frontend/src/lib/socialCodexProcessCopy.ts|frontend/src/pages/AgentControlCenterPage.tsx|frontend/src/global.css)
+    frontend/src/components/agent-workspace/*|frontend/src/components/assistant-ui/*|frontend/src/components/ai-elements/*|frontend/src/components/agent-loop/ActivityIcebreakerCard.tsx|frontend/src/components/agent-loop/ActivityProofUploader.tsx|frontend/src/components/agent-loop/AgentApprovalCard.tsx|frontend/src/components/agent/Agent*.tsx|frontend/src/components/agent/ant-guide/*|frontend/src/assets/agent/ant-guide/*|frontend/src/api/socialAgentApi.ts|frontend/src/api/socialAgentDebugApi.ts|frontend/src/api/agentL5RuntimeApi.ts|frontend/src/lib/agentApprovalCopy.ts|frontend/src/lib/socialCodexProcessCopy.ts|frontend/src/pages/AgentL5AdminPage.tsx|frontend/src/pages/DemoAgentSocialLoopPage.tsx|frontend/src/pages/DemoInvestorPage.tsx|frontend/src/types/agent.ts|frontend/src/global.css)
       printf 'agent-frontend-assistant-ui'
       ;;
-    backend/src/match/*|backend/src/social-requests/*|frontend/src/api/socialRequestsApi.ts|frontend/src/pages/DiscoverPage.tsx|frontend/src/pages/AiProfileBuilderPage.tsx|frontend/src/pages/HomePage.legacy.tsx|frontend/src/data/*|frontend/src/test/DiscoverClosure.test.ts|frontend/src/test/discoverContent.test.ts|frontend/src/routes/AppRoutes.tsx|frontend/src/types/index.ts)
+    backend/src/match/*|backend/src/social-requests/*|frontend/src/pages/DiscoverPage.tsx|frontend/src/pages/PublicIntentDetailPage.tsx|frontend/src/pages/UserProfilePage.tsx|frontend/src/pages/AgentPersonalInfoPage.tsx|frontend/src/pages/PlatformPage.tsx|frontend/src/components/hero/*|frontend/src/components/sections/*|frontend/src/components/showcase/*|frontend/src/components/three/*|frontend/src/components/ui/GatewayPortalCard.tsx|frontend/src/components/ui/SectionHeading.tsx|frontend/src/data/*|frontend/src/styles/visual-upgrades.css|frontend/src/test/DiscoverClosure.test.ts|frontend/src/test/DiscoverPage.test.tsx|frontend/src/routes/AppRoutes.tsx|frontend/src/types/index.ts)
       printf 'discover-profile-closure'
       ;;
-    deploy/*|docker-compose.prod.yml|scripts/build-deploy-zip.*|scripts/ecs-*|scripts/verify-production.sh|scripts/verify-agent-goal-production.sh|scripts/verify-agent-release.sh|scripts/agent-release-matrix.sh|scripts/agent-release-worktree-audit.sh|backend/src/config/production-*|.env.example|backend/.env.example|frontend/.env.example)
+    deploy/*|docker-compose.prod.yml|scripts/build-deploy-zip.*|scripts/check-production-deploy-consistency.mjs|scripts/ecs-*|scripts/verify-production.sh|scripts/verify-agent-goal-production.sh|scripts/verify-agent-token-cost.sh|scripts/verify-agent-release.sh|scripts/agent-release-matrix.sh|scripts/agent-release-worktree-audit.sh|scripts/launch-status.sh|backend/src/config/production-*|backend/src/users/user.entity.ts|.env.example|backend/.env.example|frontend/.env.example)
       printf 'deploy-production'
       ;;
-    docs/*|README.md|frontend/FRONTEND_ACCEPTANCE_CHECKLIST.md|frontend/scripts/*|frontend/src/test/*|frontend/src/test/utils/*|scripts/agent-remote-smoke-*|scripts/fix-*|scripts/verify-agent-release.sh|scripts/agent-release-matrix.sh|scripts/stage-agent-release-bucket.sh|scripts/test-agent-release-worktree-audit.sh)
+    docs/*|README.md|frontend/FRONTEND_ACCEPTANCE_CHECKLIST.md|frontend/scripts/*|frontend/src/api/fitmeetCoreContract.ts|frontend/src/test/*|frontend/src/test/utils/*|scripts/fix-*|scripts/verify-agent-release.sh|scripts/verify-agent-skills.mjs|scripts/run-agent-skill-evals.mjs|scripts/agent-release-matrix.sh|scripts/stage-agent-release-bucket.sh)
       printf 'tests-docs'
       ;;
     *)
@@ -149,11 +398,18 @@ category_for_path() {
 }
 
 status_output="$(git status --short)"
+status_output_all="$(git status --short --untracked-files=all)"
 
 if [[ -z "${status_output}" ]]; then
   ok "Worktree clean"
   exit 0
 fi
+
+for forbidden_dirty_path in "${forbidden_release_dirty_paths[@]}"; do
+  if grep -Eq "^[ MARCUD?!]{2}[[:space:]]+${forbidden_dirty_path//./\\.}$" <<<"${status_output_all}"; then
+    fail "${forbidden_dirty_path} is a dev-only Agent mock fixture. Do not include mock adapter changes in release cleanup; move real assertions into API smoke/eval paths instead."
+  fi
+done
 
 agent_backend_core_count=0
 agent_frontend_assistant_ui_count=0
@@ -343,11 +599,17 @@ while IFS= read -r line; do
 
   case "${path}" in
     frontend/src/components/agent-workspace/CodexAntPet.tsx|\
+    frontend/src/components/agent-loop/ActivityIcebreakerCard.tsx|\
+    frontend/src/components/agent-loop/ActivityProofUploader.tsx|\
+    frontend/src/components/agent-loop/AgentApprovalCard.tsx|\
     frontend/src/components/agent/ant-guide/*|\
     frontend/src/assets/agent/ant-guide/*|\
+    frontend/src/components/ai-elements/*|\
     frontend/src/debug/*|\
     frontend/src/debug/agent-workbench/*|\
     frontend/src/pages/SocialAgentConsolePage.tsx|\
+    frontend/src/pages/DemoAgentSocialLoopPage.tsx|\
+    frontend/src/pages/DemoInvestorPage.tsx|\
     frontend/src/styles/agent-workspace.css|\
     frontend/src/styles/agent-gpt-copy-shell.css|\
     frontend/src/styles/fitmeet-assistant-ui.css|\
@@ -361,7 +623,7 @@ while IFS= read -r line; do
     scripts/fix-loginmodal.mjs|\
     scripts/fix-meetmodal.mjs|\
     scripts/fix-postmodal.mjs)
-      if [[ "${status}" != D* && "${status}" != R* ]]; then
+      if [[ "${index_status}" != "D" && "${worktree_status}" != "D" && "${index_status}" != "R" && "${worktree_status}" != "R" ]]; then
         legacy_entries+=("${status} ${path}")
       fi
       ;;

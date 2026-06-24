@@ -11,7 +11,7 @@ import {
   AgentTaskPermissionMode,
   AgentTaskStatus,
 } from './entities/agent-task.entity';
-/* eslint-disable @typescript-eslint/require-await */
+
 import { SocialAgentAutopilotService } from './social-agent-autopilot.service';
 import { SocialAgentToolName } from './social-agent-tool-executor.service';
 
@@ -74,7 +74,7 @@ function makeRequest(
   } as UserSocialRequest;
 }
 
-function makeService() {
+function makeService(options: { lifeGraph?: Record<string, jest.Mock> } = {}) {
   const taskRepo = repo();
   const requestRepo = repo();
   const connectionRepo = repo();
@@ -110,6 +110,7 @@ function makeService() {
     planner as never,
     executor as never,
     actionLogs as never,
+    options.lifeGraph as never,
   );
 
   return {
@@ -356,5 +357,178 @@ describe('SocialAgentAutopilotService', () => {
     expect(executor.runNext).toHaveBeenCalledWith(200, 1);
     expect(summary.createdTasks).toBe(1);
     expect(summary.processedTasks).toBe(1);
+  });
+
+  it('creates a periodic profile enrichment proposal from recent chat signals', async () => {
+    const lifeGraph = {
+      extractFromChat: jest.fn().mockResolvedValue({
+        proposalId: 301,
+        proposedFields: [{ fieldKey: 'activityPreference' }],
+        confirmationRequired: true,
+        missingFields: [],
+      }),
+    };
+    const { service, taskRepo, requestRepo, messages, actionLogs } =
+      makeService({ lifeGraph });
+    const processedReplyTask = makeTask({
+      memory: {
+        socialLoop: {
+          conversationId: 'conv_1',
+          processedMessageIds: ['msg_1'],
+        },
+      },
+    });
+    let profileTask: AgentTask | null = null;
+
+    taskRepo.find.mockResolvedValue([]);
+    taskRepo.findOne.mockImplementation(
+      async ({ where }: { where: Record<string, unknown> }) => {
+        if (where.id === 100) return processedReplyTask;
+        if (where.taskType === 'profile_enrichment') return null;
+        return null;
+      },
+    );
+    taskRepo.save.mockImplementation(async (value) => {
+      if (value.taskType === 'profile_enrichment') {
+        profileTask = makeTask({
+          ...value,
+          id: 201,
+          taskType: 'profile_enrichment',
+          status: value.status,
+          memory: value.memory ?? {},
+          result: value.result ?? {},
+        });
+        return profileTask;
+      }
+      if (profileTask && value.id === profileTask.id) {
+        profileTask = { ...profileTask, ...value };
+        return profileTask;
+      }
+      return value;
+    });
+    requestRepo.find.mockResolvedValue([]);
+    messages.getRecentAgentConversationSignals.mockResolvedValue([
+      {
+        conversationId: 'conv_1',
+        messageId: 'msg_1',
+        agentConnectionId: 7,
+        ownerUserId: 1,
+        fromUserId: 2,
+        text: '我喜欢周末下午在青岛低压力散步，微信 abc123456',
+        metadata: { agentTaskId: 100 },
+        createdAt: new Date(),
+      },
+    ]);
+
+    const summary = await service.runOnce('manual', 1);
+
+    expect(taskRepo.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ownerUserId: 1,
+        agentConnectionId: 7,
+        taskType: 'profile_enrichment',
+        permissionMode: AgentTaskPermissionMode.Confirm,
+        idempotencyKey: expect.stringMatching(
+          /^profile_enrichment:1:periodic:/,
+        ),
+        input: expect.objectContaining({
+          source: 'periodic_profile_enrichment',
+          conversationId: 'conv_1',
+          messageId: 'msg_1',
+          sourceMessage: '我喜欢周末下午在青岛低压力散步，微信已隐藏',
+        }),
+      }),
+    );
+    expect(lifeGraph.extractFromChat).toHaveBeenCalledWith(
+      1,
+      expect.objectContaining({
+        message: '我喜欢周末下午在青岛低压力散步，微信已隐藏',
+        taskId: 201,
+        messageId: 'msg_1',
+        context: expect.objectContaining({
+          intent: 'periodic_profile_enrichment',
+          source: 'social_agent_autopilot',
+        }),
+      }),
+    );
+    expect(profileTask).toMatchObject({
+      id: 201,
+      taskType: 'profile_enrichment',
+      status: AgentTaskStatus.AwaitingFeedback,
+      statusReason: 'life_graph_profile_confirmation',
+      result: {
+        profileUpdateProposal: expect.objectContaining({
+          proposalId: 301,
+          proposedFieldCount: 1,
+          confirmationRequired: true,
+        }),
+      },
+    });
+    expect(summary).toMatchObject({
+      createdTasks: 1,
+      profileEnrichmentTasks: 1,
+      profileEnrichmentProposals: 1,
+      processedTasks: 0,
+      skippedDuplicates: 1,
+    });
+    expect(actionLogs.logAgentAction).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventType: 'social_agent_autopilot.profile_enrichment',
+        status: 'proposal_created',
+      }),
+    );
+  });
+
+  it('does not create duplicate profile enrichment tasks inside the 3 day window', async () => {
+    const lifeGraph = { extractFromChat: jest.fn() };
+    const { service, taskRepo, requestRepo, messages } = makeService({
+      lifeGraph,
+    });
+    const processedReplyTask = makeTask({
+      memory: {
+        socialLoop: {
+          conversationId: 'conv_1',
+          processedMessageIds: ['msg_1'],
+        },
+      },
+    });
+    const existingProfileTask = makeTask({
+      id: 201,
+      ownerUserId: 1,
+      taskType: 'profile_enrichment',
+      createdAt: new Date(),
+    });
+
+    taskRepo.find.mockResolvedValue([]);
+    taskRepo.findOne.mockImplementation(
+      async ({ where }: { where: Record<string, unknown> }) => {
+        if (where.id === 100) return processedReplyTask;
+        if (where.taskType === 'profile_enrichment') return existingProfileTask;
+        return null;
+      },
+    );
+    requestRepo.find.mockResolvedValue([]);
+    messages.getRecentAgentConversationSignals.mockResolvedValue([
+      {
+        conversationId: 'conv_1',
+        messageId: 'msg_1',
+        agentConnectionId: 7,
+        ownerUserId: 1,
+        fromUserId: 2,
+        text: '周末下午更方便跑步',
+        metadata: { agentTaskId: 100 },
+        createdAt: new Date(),
+      },
+    ]);
+
+    const summary = await service.runOnce('manual', 1);
+
+    expect(lifeGraph.extractFromChat).not.toHaveBeenCalled();
+    expect(taskRepo.create).not.toHaveBeenCalledWith(
+      expect.objectContaining({ taskType: 'profile_enrichment' }),
+    );
+    expect(summary.profileEnrichmentTasks).toBe(0);
+    expect(summary.profileEnrichmentProposals).toBe(0);
+    expect(summary.skippedDuplicates).toBe(2);
   });
 });

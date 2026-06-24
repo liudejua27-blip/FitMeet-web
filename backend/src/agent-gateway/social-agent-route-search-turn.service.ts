@@ -1,14 +1,17 @@
 import { Injectable } from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
 
 import { cleanDisplayText } from '../common/display-text.util';
-import type { AgentTask } from './entities/agent-task.entity';
+import { AgentTask } from './entities/agent-task.entity';
 import {
-  hasSocialAgentSearchContext,
   hasSocialAgentSearchResultContext,
   socialAgentCandidateFollowupReply,
 } from './social-agent-candidate-context.presenter';
+import type { FitMeetAlphaCard } from './fitmeet-alpha-agent.types';
 import type {
   SocialAgentActivityResult,
+  SocialAgentAssistantMessageSource,
   SocialAgentAsyncRunSnapshot,
   SocialAgentChatReplanRunBody,
   SocialAgentIntentRouteResult,
@@ -19,14 +22,21 @@ import {
   evaluateSocialOpportunityClarification,
   resolveSocialOpportunitySearchGoal,
 } from './social-agent-opportunity-clarification';
+import { readSocialAgentTaskMemory } from './social-agent-memory.util';
 import { SocialAgentProfileGateService } from './social-agent-profile-gate.service';
 import { SocialAgentProfileEnrichmentService } from './social-agent-profile-enrichment.service';
+import {
+  buildSocialAgentOpportunityDraftFromTask,
+  buildSocialAgentPublishConfirmationCard,
+  shouldCreateOpportunityCardBeforeCandidates,
+} from './social-agent-opportunity-card-draft';
+import { rememberSocialAgentOpportunityDraft } from './social-agent-opportunity-draft-memory';
 
 type QueueInitialSearchForTask = (
   ownerUserId: number,
   task: AgentTask,
   goal: string,
-  options?: { signal?: AbortSignal | null },
+  options?: { signal?: AbortSignal | null; waitForCompletionMs?: number },
 ) => Promise<SocialAgentAsyncRunSnapshot>;
 
 type ReplanAndRefresh = (
@@ -51,8 +61,10 @@ type HandleRouteSearchTurnInput = {
 type HandleRouteSearchTurnResult = {
   handled: boolean;
   assistantMessage?: string;
+  assistantMessageSource?: SocialAgentAssistantMessageSource;
   savedContext: boolean;
   activityResults: SocialAgentActivityResult[];
+  cards: FitMeetAlphaCard[];
   queuedRun: SocialAgentAsyncRunSnapshot | null;
   runMode: SocialAgentIntentRouteResult['runMode'];
 };
@@ -60,6 +72,8 @@ type HandleRouteSearchTurnResult = {
 @Injectable()
 export class SocialAgentRouteSearchTurnService {
   constructor(
+    @InjectRepository(AgentTask)
+    private readonly taskRepo: Repository<AgentTask>,
     private readonly profileEnrichment: SocialAgentProfileEnrichmentService,
     private readonly activitySearch: SocialAgentActivitySearchService,
     private readonly profileGate: SocialAgentProfileGateService,
@@ -80,6 +94,7 @@ export class SocialAgentRouteSearchTurnService {
         return {
           ...this.emptyResult(true),
           assistantMessage: clarification.assistantMessage,
+          assistantMessageSource: 'deterministic_route',
           savedContext: true,
         };
       }
@@ -94,6 +109,7 @@ export class SocialAgentRouteSearchTurnService {
         return {
           ...this.emptyResult(true),
           assistantMessage: gate.assistantMessage,
+          assistantMessageSource: 'deterministic_route',
           savedContext: true,
         };
       }
@@ -102,6 +118,7 @@ export class SocialAgentRouteSearchTurnService {
         return {
           ...this.emptyResult(true),
           assistantMessage: emptySearchReply,
+          assistantMessageSource: 'deterministic_route',
           savedContext: true,
         };
       }
@@ -118,8 +135,10 @@ export class SocialAgentRouteSearchTurnService {
       return {
         handled: true,
         assistantMessage: handled.assistantMessage,
+        assistantMessageSource: handled.assistantMessageSource,
         savedContext: false,
         activityResults: handled.activityResults,
+        cards: [],
         queuedRun: null,
         runMode: null,
       };
@@ -150,7 +169,40 @@ export class SocialAgentRouteSearchTurnService {
       return {
         ...this.emptyResult(true),
         assistantMessage: clarification.assistantMessage,
+        assistantMessageSource: 'deterministic_route',
         savedContext: true,
+      };
+    }
+    if (
+      shouldCreateOpportunityCardBeforeCandidates(clarification.searchGoal) &&
+      !this.hasPublishedOpportunityContext(input.task)
+    ) {
+      const draft = buildSocialAgentOpportunityDraftFromTask(
+        input.task,
+        clarification.searchGoal,
+      );
+      if (!draft.ready) {
+        return {
+          ...this.emptyResult(true),
+          assistantMessage: draft.assistantMessage,
+          assistantMessageSource: 'deterministic_route',
+          savedContext: true,
+        };
+      }
+      rememberSocialAgentOpportunityDraft(input.task, draft.draft);
+      await this.taskRepo.save(input.task);
+      return {
+        ...this.emptyResult(true),
+        assistantMessage:
+          '我先帮你整理成一张约练卡片，你确认后再发布。发布前不会公开，也不会直接推荐候选。',
+        assistantMessageSource: 'deterministic_route',
+        savedContext: true,
+        cards: [
+          buildSocialAgentPublishConfirmationCard({
+            task: input.task,
+            draft: draft.draft,
+          }),
+        ],
       };
     }
     this.assertNotAborted(input.signal);
@@ -164,6 +216,7 @@ export class SocialAgentRouteSearchTurnService {
       return {
         ...this.emptyResult(true),
         assistantMessage: gate.assistantMessage,
+        assistantMessageSource: 'deterministic_route',
         savedContext: true,
       };
     }
@@ -184,11 +237,31 @@ export class SocialAgentRouteSearchTurnService {
         return {
           ...this.emptyResult(true),
           assistantMessage: lifeGraphClarification,
+          assistantMessageSource: 'deterministic_route',
           savedContext: true,
         };
       }
     }
     return this.queueSearch(input, clarification.searchGoal);
+  }
+
+  private hasPublishedOpportunityContext(task: AgentTask): boolean {
+    const memory = this.recordValue(task.memory);
+    const shortTerm = this.recordValue(memory?.shortTerm);
+    const result = this.recordValue(task.result);
+    const publishResult = this.recordValue(result?.publishSocialRequest);
+    const taskMemory = readSocialAgentTaskMemory(task);
+    const publishedStatus =
+      cleanDisplayText(shortTerm?.publishStatus, '') === 'published' ||
+      cleanDisplayText(publishResult?.status, '') === 'published';
+    const hasPublishedId = Boolean(
+      cleanDisplayText(shortTerm?.publicIntentId, '') ||
+      cleanDisplayText(publishResult?.publicIntentId, ''),
+    );
+    const hasPublishedTaskState =
+      taskMemory.currentTask.lastCompletedStep === 'published_to_discover' ||
+      taskMemory.currentTask.waitingFor === 'post_publish_candidate_search';
+    return (publishedStatus && hasPublishedId) || hasPublishedTaskState;
   }
 
   private emptySearchFollowupReply(
@@ -233,7 +306,9 @@ export class SocialAgentRouteSearchTurnService {
     };
   }
 
-  private lastSearchCandidateCount(lastSearch: Record<string, unknown>): number {
+  private lastSearchCandidateCount(
+    lastSearch: Record<string, unknown>,
+  ): number {
     const value = Number(lastSearch.candidateCount);
     return Number.isFinite(value) ? value : 0;
   }
@@ -271,7 +346,9 @@ export class SocialAgentRouteSearchTurnService {
 
   private asksKnownCityOrArea(copy: string, goal: string): boolean {
     return (
-      /(城市|大致区域|常活动区域|区域|在哪里|在哪个城市)/.test(copy) &&
+      /(城市|大致区域|常活动区域|区域|在哪里|在哪个城市|哪个区|哪一带|哪里跑|活动地点|大概位置|常去哪里)/.test(
+        copy,
+      ) &&
       /(青岛|北京|上海|深圳|广州|杭州|南京|成都|武汉|西安|重庆|苏州|厦门|天津|长沙|郑州|济南|宁波|崂山区|市南区|市北区|李沧区|黄岛区|青岛大学|五四广场|奥帆中心|大学城|附近)/.test(
         goal,
       )
@@ -324,6 +401,7 @@ export class SocialAgentRouteSearchTurnService {
       return {
         ...this.emptyResult(true),
         assistantMessage: emptySearchReply,
+        assistantMessageSource: 'deterministic_route',
         savedContext: true,
       };
     }
@@ -359,13 +437,67 @@ export class SocialAgentRouteSearchTurnService {
       input.ownerUserId,
       input.task,
       searchGoal,
-      { signal: input.signal ?? null },
+      {
+        signal: input.signal ?? null,
+        waitForCompletionMs: this.shouldWaitForInitialSearch(input)
+          ? 45_000
+          : 0,
+      },
+    );
+    const completedResult = this.completedQueuedRunResult(queuedRun);
+    const assistantMessage = cleanDisplayText(
+      completedResult?.assistantMessage,
+      '',
     );
     return {
       ...this.emptyResult(true),
+      assistantMessage: assistantMessage || undefined,
+      assistantMessageSource: assistantMessage
+        ? this.assistantSourceFromQueuedRunResult(completedResult)
+        : undefined,
+      cards: this.cardsFromQueuedRun(queuedRun),
       queuedRun,
       runMode: 'initial',
     };
+  }
+
+  private shouldWaitForInitialSearch(
+    input: HandleRouteSearchTurnInput,
+  ): boolean {
+    return (
+      input.route.intent === 'social_search' &&
+      input.route.shouldSearch === true &&
+      !input.route.shouldReplan
+    );
+  }
+
+  private completedQueuedRunResult(
+    queuedRun: SocialAgentAsyncRunSnapshot,
+  ): Record<string, unknown> | null {
+    if (queuedRun.status !== 'completed') return null;
+    return this.recordValue(queuedRun.result);
+  }
+
+  private cardsFromQueuedRun(
+    queuedRun: SocialAgentAsyncRunSnapshot,
+  ): FitMeetAlphaCard[] {
+    const result = this.completedQueuedRunResult(queuedRun);
+    const cards = Array.isArray(result?.cards) ? result.cards : [];
+    return cards.filter(
+      (card): card is FitMeetAlphaCard => this.recordValue(card) !== null,
+    );
+  }
+
+  private assistantSourceFromQueuedRunResult(
+    result: Record<string, unknown> | null,
+  ): SocialAgentAssistantMessageSource {
+    const source = cleanDisplayText(result?.assistantMessageSource, '');
+    return source === 'llm' ||
+      source === 'fallback' ||
+      source === 'deterministic_action' ||
+      source === 'deterministic_route'
+      ? source
+      : 'deterministic_route';
   }
 
   private emptyResult(handled: boolean): HandleRouteSearchTurnResult {
@@ -373,6 +505,7 @@ export class SocialAgentRouteSearchTurnService {
       handled,
       savedContext: false,
       activityResults: [],
+      cards: [],
       queuedRun: null,
       runMode: null,
     };

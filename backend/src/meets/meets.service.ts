@@ -11,8 +11,6 @@ import { Cron } from '@nestjs/schedule';
 import { randomUUID } from 'crypto';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, LessThanOrEqual, Repository } from 'typeorm';
-import { Club } from '../clubs/club.entity';
-import { ClubMember } from '../clubs/club-member.entity';
 import { NotificationsService } from '../notifications/notifications.service';
 import { ActivitiesService } from '../activities/activities.service';
 import { ActivityType } from '../activities/entities/activity-template.entity';
@@ -25,7 +23,6 @@ type Origin = { lat?: number; lng?: number };
 type MeetQuery = {
   type?: string;
   city?: string;
-  clubId?: number;
   origin?: Origin;
 };
 
@@ -36,10 +33,6 @@ export class MeetsService {
     private readonly meetRepo: Repository<Meet>,
     @InjectRepository(MeetParticipant)
     private readonly participantRepo: Repository<MeetParticipant>,
-    @InjectRepository(Club)
-    private readonly clubRepo: Repository<Club>,
-    @InjectRepository(ClubMember)
-    private readonly clubMemberRepo: Repository<ClubMember>,
     private readonly configService: ConfigService,
     private readonly notificationsService: NotificationsService,
     @Inject(forwardRef(() => ActivitiesService))
@@ -51,7 +44,6 @@ export class MeetsService {
     const qb = this.meetRepo
       .createQueryBuilder('meet')
       .leftJoinAndSelect('meet.user', 'user')
-      .leftJoinAndSelect('meet.club', 'club')
       .where('meet.status != :cancelled', { cancelled: 'cancelled' })
       .orderBy('meet.createdAt', 'DESC');
 
@@ -60,9 +52,6 @@ export class MeetsService {
     }
     if (query.city) {
       qb.andWhere('meet.city = :city', { city: query.city });
-    }
-    if (query.clubId) {
-      qb.andWhere('meet.clubId = :clubId', { clubId: query.clubId });
     }
 
     const meets = await qb.getMany();
@@ -86,7 +75,7 @@ export class MeetsService {
   async findOne(id: number, origin: Origin = {}) {
     const meet = await this.meetRepo.findOne({
       where: { id },
-      relations: ['user', 'club'],
+      relations: ['user'],
     });
     if (!meet) throw new NotFoundException('Meet not found');
 
@@ -129,17 +118,6 @@ export class MeetsService {
   }
 
   async create(userId: number, dto: CreateMeetDto) {
-    const clubId = dto.clubId ?? null;
-    const club = clubId
-      ? await this.clubRepo.findOne({ where: { id: clubId } })
-      : null;
-    if (clubId && !club) {
-      throw new NotFoundException('Club not found');
-    }
-    if (clubId) {
-      await this.assertActiveClubMember(clubId, userId);
-    }
-
     const startAt = this.parseStartAt(dto.startAt || dto.time);
     const autoCancelAt = startAt
       ? new Date(startAt.getTime() - 24 * 60 * 60 * 1000)
@@ -147,8 +125,7 @@ export class MeetsService {
 
     const meet = this.meetRepo.create({
       ...dto,
-      clubId,
-      city: dto.city?.trim() || club?.city || '',
+      city: dto.city?.trim() || '',
       startAt,
       autoCancelAt,
       cancelReason: null,
@@ -165,9 +142,6 @@ export class MeetsService {
       status: 'active',
     });
     const saved = await this.meetRepo.save(meet);
-    if (clubId) {
-      await this.clubRepo.increment({ id: clubId }, 'meetCount', 1);
-    }
     return this.findOne(saved.id);
   }
 
@@ -310,14 +284,10 @@ export class MeetsService {
     if (!meet) throw new NotFoundException('Meet not found');
 
     if (meet.userId === userId) {
-      const wasActive = meet.status !== 'cancelled';
       meet.status = 'cancelled';
       meet.cancelReason = 'creator_cancelled';
       await this.meetRepo.save(meet);
       await this.participantRepo.update({ meetId }, { status: 'cancelled' });
-      if (wasActive && meet.clubId) {
-        await this.decrementClubMeetCount(meet.clubId);
-      }
       return { cancelled: true, scope: 'meet' };
     }
 
@@ -361,7 +331,7 @@ export class MeetsService {
 
     return {
       token,
-      url: `${baseUrl.replace(/\/$/, '')}/meet?trip=${token}`,
+      url: `${baseUrl.replace(/\/$/, '')}/discover?trip=${token}`,
     };
   }
 
@@ -432,9 +402,6 @@ export class MeetsService {
       meet.status = 'cancelled';
       meet.cancelReason = 'no_participants_before_24h';
       await this.meetRepo.save(meet);
-      if (meet.clubId) {
-        await this.decrementClubMeetCount(meet.clubId);
-      }
       await this.safeNotify({
         userId: meet.userId,
         type: 'meet',
@@ -477,8 +444,6 @@ export class MeetsService {
       title: meet.title,
       type: meet.type,
       sport: meet.sport,
-      clubId: meet.clubId,
-      clubName: meet.club?.name || '',
       city: meet.city,
       username: user?.name || '',
       color: user?.color || '#C8FF00',
@@ -523,30 +488,11 @@ export class MeetsService {
     };
   }
 
-  private async assertActiveClubMember(clubId: number, userId: number) {
-    const member = await this.clubMemberRepo.findOne({
-      where: { clubId, userId, status: 'active' },
-    });
-    if (!member) {
-      throw new ForbiddenException('Join this club before posting a club meet');
-    }
-    return member;
-  }
-
   private parseStartAt(value?: string) {
     if (!value) return null;
     const date = new Date(value);
     if (Number.isNaN(date.getTime())) return null;
     return date;
-  }
-
-  private async decrementClubMeetCount(clubId: number) {
-    await this.clubRepo
-      .createQueryBuilder()
-      .update(Club)
-      .set({ meetCount: () => 'GREATEST("meetCount" - 1, 0)' })
-      .where('id = :clubId', { clubId })
-      .execute();
   }
 
   private async safeNotify(data: {

@@ -156,6 +156,7 @@ check_domain_env() {
   [ "${alerts:-false}" = "false" ] && pass "Agent alert delivery disabled for first launch" || warn "Agent alert delivery is enabled; verify webhook/token before launch."
   check_deepseek_models
   check_agent_intelligence_env
+  check_agent_cache_env
   check_worker_env
   [[ "$upload_temp" = /* ]] && pass "UPLOAD_TEMP_DIR is absolute: $upload_temp" || fail "UPLOAD_TEMP_DIR must be an absolute writable path."
 }
@@ -216,7 +217,7 @@ check_agent_intelligence_env() {
   [ "$intent_mode" = "llm_first" ] && pass "SOCIAL_AGENT_INTENT_ROUTER_MODE keeps LLM-first routing" || fail "SOCIAL_AGENT_INTENT_ROUTER_MODE must be llm_first."
   check_not_false_env SOCIAL_AGENT_INTENT_LLM
   check_not_false_env SOCIAL_AGENT_BRAIN_LLM_PLANNER
-  check_minimum_integer_env SOCIAL_AGENT_CONTEXT_TURN_LIMIT 40
+  check_minimum_integer_env SOCIAL_AGENT_CONTEXT_TURN_LIMIT 80
   check_minimum_integer_env SOCIAL_AGENT_DEEPSEEK_TIMEOUT_MS 30000
   check_minimum_integer_env SOCIAL_AGENT_DEEPSEEK_FIRST_CHUNK_TIMEOUT_MS 20000
   check_minimum_integer_env SOCIAL_AGENT_CHAT_LLM_TIMEOUT_MS 30000
@@ -237,6 +238,30 @@ check_agent_intelligence_env() {
       pass "$key matches the release chat model"
     fi
   done
+}
+
+check_agent_cache_env() {
+  local backend tool_backend
+  backend="$(env_value SOCIAL_AGENT_CACHE_BACKEND | tr '[:upper:]' '[:lower:]')"
+  tool_backend="$(env_value SOCIAL_AGENT_TOOL_RESULT_CACHE_BACKEND | tr '[:upper:]' '[:lower:]')"
+
+  case "$backend" in
+    redis|hybrid)
+      pass "SOCIAL_AGENT_CACHE_BACKEND uses distributed cache: $backend"
+      ;;
+    *)
+      fail "SOCIAL_AGENT_CACHE_BACKEND must be redis or hybrid in ECS production; process-local cache makes hit rate unstable across backend/worker instances."
+      ;;
+  esac
+
+  case "$tool_backend" in
+    redis)
+      pass "SOCIAL_AGENT_TOOL_RESULT_CACHE_BACKEND uses Redis"
+      ;;
+    *)
+      fail "SOCIAL_AGENT_TOOL_RESULT_CACHE_BACKEND must be redis in ECS production."
+      ;;
+  esac
 }
 
 check_positive_integer_env() {
@@ -263,7 +288,7 @@ check_worker_env() {
   esac
   check_positive_integer_env FITMEET_SUBAGENT_WORKER_CONCURRENCY
   check_positive_integer_env FITMEET_SUBAGENT_WORKER_POLL_MS
-  check_positive_integer_env FITMEET_SUBAGENT_WORKER_TIMEOUT_MS
+  check_minimum_integer_env FITMEET_SUBAGENT_WORKER_TIMEOUT_MS 25000
   check_positive_integer_env FITMEET_SUBAGENT_WORKER_HEARTBEAT_MS
   check_positive_integer_env FITMEET_SUBAGENT_WORKER_HEALTH_MAX_AGE_MS
 }
@@ -325,11 +350,23 @@ check_compose_config() {
     else
       fail "backend must run as FITMEET_PROCESS_ROLE=api with ENABLE_SCHEDULER=false"
     fi
+    if grep -A100 '^  backend:' <<<"$compose_rendered" | grep -Eq 'SOCIAL_AGENT_CACHE_BACKEND: (redis|hybrid)' &&
+      grep -A100 '^  backend:' <<<"$compose_rendered" | grep -q 'SOCIAL_AGENT_TOOL_RESULT_CACHE_BACKEND: redis'; then
+      pass "backend receives Social Agent Redis cache configuration"
+    else
+      fail "backend must receive SOCIAL_AGENT_CACHE_BACKEND=redis|hybrid and SOCIAL_AGENT_TOOL_RESULT_CACHE_BACKEND=redis"
+    fi
     if grep -A100 '^  subagent-worker:' <<<"$compose_rendered" | grep -q 'FITMEET_PROCESS_ROLE: worker' &&
       grep -A100 '^  subagent-worker:' <<<"$compose_rendered" | grep -q 'ENABLE_SCHEDULER: "true"'; then
       pass "subagent-worker process role owns scheduler jobs"
     else
       fail "subagent-worker must run as FITMEET_PROCESS_ROLE=worker with ENABLE_SCHEDULER=true"
+    fi
+    if grep -A120 '^  subagent-worker:' <<<"$compose_rendered" | grep -Eq 'SOCIAL_AGENT_CACHE_BACKEND: (redis|hybrid)' &&
+      grep -A120 '^  subagent-worker:' <<<"$compose_rendered" | grep -q 'SOCIAL_AGENT_TOOL_RESULT_CACHE_BACKEND: redis'; then
+      pass "subagent-worker receives Social Agent Redis cache configuration"
+    else
+      fail "subagent-worker must receive SOCIAL_AGENT_CACHE_BACKEND=redis|hybrid and SOCIAL_AGENT_TOOL_RESULT_CACHE_BACKEND=redis"
     fi
     if grep -q 'user: "0:0"' <<<"$compose_rendered" || grep -q "user: 0:0" <<<"$compose_rendered"; then
       fail "backend/subagent-worker must not run as root user 0:0"

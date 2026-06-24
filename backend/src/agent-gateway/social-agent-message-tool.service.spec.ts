@@ -163,7 +163,7 @@ describe('SocialAgentMessageToolService', () => {
     });
   });
 
-  it('returns inbox event patches for agent replies', async () => {
+  it('returns message event patches for agent replies', async () => {
     const { service, messages } = makeService();
     messages.sendAgentReply.mockResolvedValue({
       id: 'reply_1',
@@ -197,7 +197,7 @@ describe('SocialAgentMessageToolService', () => {
       lastAgentMessageId: 'reply_1',
       sourceTool: SocialAgentToolName.ReplyMessage,
     });
-    expect(result.inboxEvent).toMatchObject({
+    expect(result.messageEvent).toMatchObject({
       eventType: 'social_agent.reply.sent',
       input: {
         conversationId: 'conv_1',

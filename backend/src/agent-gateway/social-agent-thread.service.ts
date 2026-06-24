@@ -169,7 +169,8 @@ export class SocialAgentThreadService {
           goal,
           firstMessage,
         })
-      : cleanDisplayText(task.title, '') || inferSocialAgentThreadTitle({ goal, firstMessage });
+      : cleanDisplayText(task.title, '') ||
+        inferSocialAgentThreadTitle({ goal, firstMessage });
     return {
       id: threadId,
       threadId,
@@ -202,7 +203,9 @@ export class SocialAgentThreadService {
   private messageCount(task: AgentTask): number {
     const memoryMessages = task.memory?.messages;
     if (Array.isArray(memoryMessages)) return memoryMessages.length;
-    const conversationTurns = this.turnArray(task.memory?.socialAgentConversation);
+    const conversationTurns = this.turnArray(
+      task.memory?.socialAgentConversation,
+    );
     if (conversationTurns.length > 0) return conversationTurns.length;
     const recentTurns = this.turnArray(task.memory?.shortTerm);
     if (recentTurns.length > 0) return recentTurns.length;
@@ -213,8 +216,11 @@ export class SocialAgentThreadService {
 
   private firstMessageFromTask(task: AgentTask): string {
     const inputFirstMessage =
-      typeof task.input?.firstMessage === 'string' ? task.input.firstMessage : '';
-    if (inputFirstMessage.trim()) return cleanDisplayText(inputFirstMessage, '');
+      typeof task.input?.firstMessage === 'string'
+        ? task.input.firstMessage
+        : '';
+    if (inputFirstMessage.trim())
+      return cleanDisplayText(inputFirstMessage, '');
     const memoryMessages = task.memory?.messages;
     if (Array.isArray(memoryMessages)) {
       const userMessage = memoryMessages.find(
@@ -255,7 +261,9 @@ export class SocialAgentThreadService {
       : [];
   }
 
-  private firstUserTextFromTurns(turns: Array<Record<string, unknown>>): string {
+  private firstUserTextFromTurns(
+    turns: Array<Record<string, unknown>>,
+  ): string {
     const userTurn = turns.find((turn) => turn.role === 'user');
     const text =
       typeof userTurn?.content === 'string'

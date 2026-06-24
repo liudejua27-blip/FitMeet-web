@@ -508,4 +508,41 @@ describe('SocialCodexTraceEvalService', () => {
       expect.objectContaining({ runId: 'run:2', eventCount: 3 }),
     ]);
   });
+
+  it('normalizes same-run async writes by event timestamp and sequence', () => {
+    const result = service.evaluate([
+      event(1, 'run.started', {
+        runId: 'run:async',
+        eventId: 'run:async:1',
+        createdAt: '2026-06-23T08:00:00.001Z',
+      }),
+      event(2, 'visible_process.delta', {
+        runId: 'run:async',
+        eventId: 'run:async:2',
+        createdAt: '2026-06-23T08:00:00.002Z',
+      }),
+      event(5, 'tool.progress', {
+        runId: 'run:async',
+        eventId: 'run:async:5',
+        createdAt: '2026-06-23T08:00:00.005Z',
+      }),
+      event(4, 'tool.done', {
+        runId: 'run:async',
+        eventId: 'run:async:4',
+        createdAt: '2026-06-23T08:00:00.004Z',
+      }),
+      event(6, 'run.completed', {
+        runId: 'run:async',
+        eventId: 'run:async:6',
+        createdAt: '2026-06-23T08:00:00.006Z',
+      }),
+    ]);
+
+    expect(result.pass).toBe(true);
+    expect(result.issues).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: 'non_monotonic_sequence' }),
+      ]),
+    );
+  });
 });

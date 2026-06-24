@@ -1,25 +1,15 @@
-import { useCallback, type MutableRefObject } from 'react';
+import { useCallback, useEffect, useRef, type MutableRefObject } from 'react';
 
 import type {
   FitMeetAgentCardExecutableAction,
   FitMeetAgentSchemaAction,
   UserFacingAgentResponse,
 } from '../../api/socialAgentApi';
-import type {
-  ToolUISchemaAction,
-} from '../assistant-ui/tool-ui-schema';
+import type { ToolUISchemaAction } from '../assistant-ui/tool-ui-schema';
 import { toolUISchemaActionFromUnknown } from '../assistant-ui/tool-ui-schema';
 import type { FitMeetAssistantRecovery } from './FitMeetAssistantUI.types';
-import {
-  type AgentAdapter,
-  type AgentError,
-  type AgentStreamEvent,
-  mapAgentError,
-} from './api';
-import type {
-  AgentConversationIntent,
-  Step,
-} from './socialAgentThreadStore';
+import { type AgentAdapter, type AgentError, type AgentStreamEvent, mapAgentError } from './api';
+import type { AgentConversationIntent, Step } from './socialAgentThreadStore';
 
 type SetState<T> = (value: T | ((current: T) => T)) => void;
 
@@ -77,16 +67,29 @@ export function useAgentCardActionRuntime({
   isAbortError,
   createRecoveryFromError,
 }: UseAgentCardActionRuntimeInput) {
+  const isRunningRef = useRef(isRunning);
+
+  useEffect(() => {
+    isRunningRef.current = isRunning;
+  }, [isRunning]);
+
   const runCardActionStream = useCallback(
     async (input?: CardActionInput) => {
-      if (isRunning) throw new Error('上一轮还在生成，请先停止或等待它完成。');
-      const taskId = numberFromUnknown(input?.taskId) ?? activeTaskId;
+      if (isRunningRef.current) throw new Error('上一轮还在生成，请先停止或等待它完成。');
+      const taskId =
+        numberFromUnknown(input?.taskId) ??
+        numberFromUnknown(input?.payload?.taskId) ??
+        activeTaskId;
       if (!taskId) throw new Error('当前卡片缺少任务上下文，不能继续执行。');
       const action = schemaActionFromToolInput(input?.schemaAction);
       if (!action) throw new Error('当前卡片动作暂时不可执行。');
 
+      isRunningRef.current = true;
       runConversationIntentRef.current =
-        action === 'opener.confirm_send' || action === 'activity.confirm_create'
+        action === 'candidate.connect' ||
+        action === 'opener.confirm_send' ||
+        action === 'publish_to_discover' ||
+        action === 'activity.confirm_create'
           ? 'approval'
           : 'social';
       setRecovery(null);
@@ -98,7 +101,9 @@ export function useAgentCardActionRuntime({
         })),
       );
 
-      let appendedActionResultMessage = shouldAppendActionResultMessage(action);
+      const inlineActionResult = shouldRenderCardActionResultInline(action, input?.payload);
+      let appendedActionResultMessage =
+        !inlineActionResult && shouldAppendActionResultMessage(action, input?.payload);
       if (appendedActionResultMessage) {
         appendStreamingAssistant(taskId, runConversationIntentRef.current);
       }
@@ -115,12 +120,14 @@ export function useAgentCardActionRuntime({
           },
           {
             onEvent: (event) => {
+              if (inlineActionResult) return;
               if (event.type === 'result') {
                 const shouldAppendResult = shouldAppendCardActionResultMessage(
                   action,
                   event.result,
+                  input?.payload,
                 );
-                if (!shouldAppendResult) return;
+                if (!shouldAppendResult || inlineActionResult) return;
                 if (!appendedActionResultMessage) {
                   appendStreamingAssistant(taskId, runConversationIntentRef.current);
                   appendedActionResultMessage = true;
@@ -133,7 +140,10 @@ export function useAgentCardActionRuntime({
         );
         setActiveTaskId(finalResult.taskId ?? taskId);
         if (!finishedRef.current) {
-          if (shouldAppendCardActionResultMessage(action, finalResult.response)) {
+          if (
+            !inlineActionResult &&
+            shouldAppendCardActionResultMessage(action, finalResult.response, input?.payload)
+          ) {
             if (!appendedActionResultMessage) {
               appendStreamingAssistant(taskId, runConversationIntentRef.current);
             }
@@ -153,6 +163,7 @@ export function useAgentCardActionRuntime({
           }
         }
         void refreshThreads();
+        return finalResult.response;
       } catch (error) {
         const stopped = stopRequestedRef.current || isAbortError(error);
         if (stopped) {
@@ -167,6 +178,7 @@ export function useAgentCardActionRuntime({
         );
         if (!stopped) throw error;
       } finally {
+        isRunningRef.current = false;
         setIsRunning(false);
         finishAbortableRun();
       }
@@ -184,7 +196,6 @@ export function useAgentCardActionRuntime({
       finishedRef,
       handleAgentStreamEvent,
       isAbortError,
-      isRunning,
       refreshThreads,
       runConversationIntentRef,
       setActiveTaskId,
@@ -221,7 +232,12 @@ function isExecutableToolUISchemaAction(
     value === 'opener.confirm_send' ||
     value === 'opener.regenerate' ||
     value === 'opener.reject' ||
+    value === 'publish_to_discover' ||
+    value === 'social_intent.decline_publish' ||
+    value === 'social_intent.dismiss' ||
+    value === 'social_intent.retry_publish' ||
     value === 'activity.confirm_create' ||
+    value === 'activity.skip_publish' ||
     value === 'activity.modify_time' ||
     value === 'activity.modify_location' ||
     value === 'activity.check_in' ||
@@ -236,11 +252,47 @@ function isExecutableToolUISchemaAction(
   );
 }
 
-function shouldAppendActionResultMessage(action: FitMeetAgentCardExecutableAction) {
+function shouldAppendActionResultMessage(
+  action: FitMeetAgentCardExecutableAction,
+  payload: Record<string, unknown> | undefined,
+) {
+  const confirmsExistingApproval = hasApprovalId(payload) || isSafetyApprovalCardPayload(payload);
+  if (action === 'candidate.more_like_this' && isPrivateCandidateContinuationPayload(payload)) {
+    return true;
+  }
   return (
+    action === 'opener.reject' ||
+    (action === 'candidate.connect' && confirmsExistingApproval) ||
+    (action === 'opener.confirm_send' && confirmsExistingApproval) ||
+    (action === 'publish_to_discover' && confirmsExistingApproval) ||
+    (action === 'activity.confirm_create' && confirmsExistingApproval)
+  );
+}
+
+function shouldRenderCardActionResultInline(
+  action: FitMeetAgentCardExecutableAction,
+  payload: Record<string, unknown> | undefined,
+) {
+  if (hasApprovalId(payload) || isSafetyApprovalCardPayload(payload)) return false;
+  if (action === 'candidate.more_like_this' && isPrivateCandidateContinuationPayload(payload)) {
+    return false;
+  }
+  return (
+    action === 'candidate.view_detail' ||
+    action === 'candidate.like' ||
+    action === 'candidate.skip' ||
+    action === 'candidate.more_like_this' ||
+    action === 'candidate.generate_opener' ||
+    action === 'activity.view_detail' ||
+    action === 'activity.modify_time' ||
+    action === 'activity.modify_location' ||
+    action === 'activity.skip_publish' ||
+    action === 'social_intent.decline_publish' ||
+    action === 'social_intent.dismiss' ||
     action === 'candidate.connect' ||
     action === 'opener.confirm_send' ||
-    action === 'opener.reject' ||
+    action === 'opener.regenerate' ||
+    action === 'publish_to_discover' ||
     action === 'activity.confirm_create'
   );
 }
@@ -248,18 +300,34 @@ function shouldAppendActionResultMessage(action: FitMeetAgentCardExecutableActio
 function shouldAppendCardActionResultMessage(
   action: FitMeetAgentCardExecutableAction,
   response: UserFacingAgentResponse,
+  payload?: Record<string, unknown>,
 ) {
-  if (shouldAppendActionResultMessage(action)) return true;
+  if (shouldAppendActionResultMessage(action, payload)) return true;
   if (action === 'candidate.view_detail' || action === 'activity.view_detail') {
     return response.cards.length > 0 || Boolean(response.assistantMessage.trim());
   }
-  if (action !== 'candidate.generate_opener' && action !== 'opener.regenerate') {
+  return false;
+}
+
+function isPrivateCandidateContinuationPayload(payload: Record<string, unknown> | undefined) {
+  if (
+    payload?.publicDiscoverPublishSkipped === true ||
+    stringFromUnknown(payload?.sourceAction) === 'activity.skip_publish' ||
+    stringFromUnknown(payload?.sourceAction) === 'social_intent.decline_publish'
+  ) {
     return false;
   }
-  if (response.cards.length > 0 || response.assistantMessage.trim()) return true;
-  return response.cards.some(
-    (card) => card.type === 'opener_approval' || card.schemaType === 'safety.approval',
+  return (
+    payload?.privateMatchMode === true || Boolean(stringFromUnknown(payload?.candidateSearchMode))
   );
+}
+
+function hasApprovalId(payload: Record<string, unknown> | undefined) {
+  return Boolean(numberFromUnknown(payload?.approvalId) ?? stringFromUnknown(payload?.approvalId));
+}
+
+function isSafetyApprovalCardPayload(payload: Record<string, unknown> | undefined) {
+  return stringFromUnknown(payload?.schemaType) === 'safety.approval';
 }
 
 function idempotencyKeyForCardAction(
@@ -296,7 +364,11 @@ const CARD_ACTION_ASSISTANT_MESSAGES: Partial<Record<FitMeetAgentCardExecutableA
   'candidate.connect': '已准备邀请请求，真正触达前仍会经过确认。',
   'opener.confirm_send': '已进入发送确认流程，发送结果会继续回到这段对话。',
   'opener.reject': '已取消这次发送，未联系对方。',
+  publish_to_discover: '已发布到发现页，你可以从发现页查看这张约练卡。',
   'activity.confirm_create': '已准备活动发起流程，发布前仍会保留确认边界。',
+  'activity.skip_publish': '已取消发布，不会出现在发现页，也不会继续匹配。',
+  'social_intent.decline_publish': '已取消发布，不会出现在发现页，也不会继续匹配。',
+  'social_intent.dismiss': '已隐藏这张约练卡，不会出现在发现页，也不会继续匹配。',
   'activity.modify_time': '已准备时间调整方案，真正改动前仍会等你确认。',
   'activity.modify_location': '已准备地点调整方案，真正改动前仍会等你确认。',
   'activity.check_in': '已记录到达状态，后续会继续跟进活动完成情况。',

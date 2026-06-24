@@ -34,7 +34,7 @@ describe('toUserFacingAgentResponse', () => {
         source: 'rules',
         action: 'queue_search',
         taskId: 101,
-        assistantMessage: '我会先结合你的 Life Graph，再筛选合适的人。',
+        assistantMessage: '我会先结合你的长期偏好，再筛选合适的人。',
         savedContext: true,
         profileUpdated: false,
         shouldQueueRun: true,
@@ -86,12 +86,14 @@ describe('toUserFacingAgentResponse', () => {
       'lightStatus',
       'pendingConfirmations',
       'permissionMode',
-      'runtime',
       'safeStatus',
+      'taskId',
+      'workflow',
     ]);
     expect(response).toMatchObject({
-      assistantMessage: '我会先结合你的 Life Graph，再筛选合适的人。',
-      lightStatus: '正在筛选合适的人',
+      taskId: 101,
+      assistantMessage: '我会先结合你的长期偏好，再筛选合适的人。',
+      lightStatus: '正在筛选公开可发现的人',
       pendingConfirmations: [],
       permissionMode: AgentTaskPermissionMode.Confirm,
       safeStatus: {
@@ -99,6 +101,13 @@ describe('toUserFacingAgentResponse', () => {
         level: 'low',
         boundaryNotes: ['第一次见面建议选择公共场所'],
         requiredConfirmations: ['发送消息'],
+      },
+      workflow: {
+        workflowId: 'agent-task:101',
+        state: 'IDLE',
+        requiredAction: null,
+        retryable: false,
+        recoveryMessage: null,
       },
     });
 
@@ -112,7 +121,7 @@ describe('toUserFacingAgentResponse', () => {
     expect(serialized).not.toContain('internal keyword match');
   });
 
-  it('keeps safe checkpoint resume metadata while stripping internal runtime fields', () => {
+  it('strips checkpoint resume metadata from ordinary user-facing responses', () => {
     const response = toUserFacingAgentResponse(
       {
         taskId: 101,
@@ -133,7 +142,8 @@ describe('toUserFacingAgentResponse', () => {
           canFork: true,
           parentCheckpointId: 320,
           threadId: 'agent-task:101',
-          idempotencyKey: 'agent-checkpoint:replay:agent-task:101:checkpoint:321:step:rank',
+          idempotencyKey:
+            'agent-checkpoint:replay:agent-task:101:checkpoint:321:step:rank',
           checkpointAction: 'replay',
           resumeCursor: {
             threadId: 'agent-task:101',
@@ -165,39 +175,26 @@ describe('toUserFacingAgentResponse', () => {
       AgentTaskPermissionMode.Confirm,
     );
 
-    expect(response.runtime).toMatchObject({
-      checkpointId: 321,
-      checkpointType: 'step',
-      canReplay: true,
-      canFork: true,
-      parentCheckpointId: 320,
-      threadId: 'agent-task:101',
-      checkpointAction: 'replay',
-      resumeCursor: {
-        threadId: 'agent-task:101',
-        checkpointId: 321,
-        parentCheckpointId: 320,
-        action: 'replay',
-        stepId: 'rank',
-      },
-      sourceStep: {
-        stepId: 'rank',
-        label: '正在排序候选人',
-        toolName: '匹配步骤',
-      },
-      stepScope: {
-        mode: 'through_step',
-        stepCount: 3,
-        sourceCheckpointId: 320,
-      },
-      sideEffectPolicy: {
-        idempotencyKey:
-          'agent-checkpoint:replay:agent-task:101:checkpoint:321:step:rank',
-        sideEffectsBeforeResume: 'idempotent_only',
-        duplicatePolicy: 'reuse_idempotency_key',
+    expect(response).toMatchObject({
+      taskId: 101,
+      workflow: {
+        workflowId: 'agent-task:101',
+        state: 'IDLE',
+        requiredAction: null,
+        retryable: false,
+        recoveryMessage: null,
       },
     });
     const serialized = JSON.stringify(response);
+    expect(serialized).not.toContain('checkpointId');
+    expect(serialized).not.toContain('idempotencyKey');
+    expect(serialized).not.toContain('resumeCursor');
+    expect(serialized).not.toContain('sourceStep');
+    expect(serialized).not.toContain('sideEffectPolicy');
+    expect(serialized).not.toContain('hidden-runtime-trace');
+    expect(serialized).not.toContain('hidden-runtime-planner');
+    expect(serialized).not.toContain('social_match');
+    expect(serialized).not.toContain('checkpoint:321');
     expect(serialized).not.toContain('hidden-runtime-trace');
     expect(serialized).not.toContain('hidden-runtime-planner');
     expect(serialized).not.toContain('social_match');
@@ -267,10 +264,12 @@ describe('toUserFacingAgentResponse', () => {
       AgentTaskPermissionMode.Confirm,
     );
 
-    expect(Object.prototype.hasOwnProperty.call(
-      unknownSourceResponse,
-      'assistantMessageSource',
-    )).toBe(false);
+    expect(
+      Object.prototype.hasOwnProperty.call(
+        unknownSourceResponse,
+        'assistantMessageSource',
+      ),
+    ).toBe(false);
   });
 
   it('turns suppressed fallback recovery copy into a structured recovery notice', () => {
@@ -297,7 +296,7 @@ describe('toUserFacingAgentResponse', () => {
         shouldQueueRun: false,
         runMode: null,
         taskId: 104,
-        assistantMessage: '这次处理时间有点久。我已经保留当前对话，你可以稍后再试。',
+        assistantMessage: '这次处理时间有点久。这段需求还在，可以稍后继续。',
         assistantMessageSource: 'fallback',
         cards: [],
         permissionMode: AgentTaskPermissionMode.Confirm,
@@ -309,11 +308,53 @@ describe('toUserFacingAgentResponse', () => {
     expect(response.assistantMessageSource).toBe('fallback');
     expect(response.recoveryNotice).toMatchObject({
       kind: 'timeout',
-      title: '这次处理时间有点久',
+      title: '这段需求还在',
+      message:
+        '刚才处理比平时久一点，可以继续处理；不会重复执行已确认的高风险动作。',
       retryable: true,
       source: 'stream_error',
     });
     expect(JSON.stringify(response)).not.toContain('稍后再试');
+  });
+
+  it('collapses duplicated assistant text before exposing the final response', () => {
+    const duplicated =
+      '谢谢你的认可！我现在会先确认时间和活动类型，然后帮你推荐合适的人。';
+    const response = toUserFacingAgentResponse(
+      {
+        intent: 'social_search',
+        confidence: 1,
+        entities: {
+          city: '青岛',
+          activityType: 'walking',
+          targetGender: '',
+          timePreference: '今晚',
+          locationPreference: '青岛大学附近',
+        },
+        shouldSearch: true,
+        shouldReplan: false,
+        shouldUpdateProfile: false,
+        shouldExecuteAction: false,
+        replyStrategy: 'search_candidates',
+        source: 'rules',
+        action: 'queue_search',
+        savedContext: true,
+        profileUpdated: false,
+        shouldQueueRun: false,
+        runMode: null,
+        taskId: 104,
+        assistantMessage: `${duplicated}\n\n${duplicated}`,
+        assistantMessageSource: 'llm',
+        cards: [],
+        permissionMode: AgentTaskPermissionMode.Confirm,
+      },
+      AgentTaskPermissionMode.Confirm,
+    );
+
+    expect(response.assistantMessage).toBe(duplicated);
+    expect(response.assistantMessage.match(/谢谢你的认可/g) ?? []).toHaveLength(
+      1,
+    );
   });
 
   it('does not create a failed recovery notice when a suppressed fallback carries pending approval', () => {
@@ -359,7 +400,75 @@ describe('toUserFacingAgentResponse', () => {
 
     expect(response.assistantMessage).toBe('');
     expect(response.pendingConfirmations).toHaveLength(1);
+    expect(response.publicLoop).toEqual({
+      stage: 'publish_confirmation_required',
+      publicIntentId: null,
+      discoverHref: null,
+      publicIntentHref: null,
+      messagesHref: null,
+      requiredConfirmation: true,
+    });
     expect(response.recoveryNotice).toBeUndefined();
+  });
+
+  it('keeps useful cards while suppressing generic fallback assistant copy', () => {
+    const response = toUserFacingAgentResponse(
+      {
+        intent: 'social_search',
+        confidence: 1,
+        entities: {
+          city: '青岛',
+          activityType: 'walking',
+          targetGender: '',
+          timePreference: '今晚',
+          locationPreference: '青岛大学附近',
+        },
+        shouldSearch: true,
+        shouldReplan: false,
+        shouldUpdateProfile: false,
+        shouldExecuteAction: false,
+        replyStrategy: 'search_candidates',
+        source: 'rules',
+        action: 'queue_search',
+        savedContext: true,
+        profileUpdated: false,
+        shouldQueueRun: false,
+        runMode: null,
+        taskId: 106,
+        assistantMessage:
+          'FitMeet Agent 暂时没有顺利完成。我已经保留当前对话，请稍后再试。',
+        assistantMessageSource: 'fallback',
+        cards: [
+          {
+            id: 'candidate-501',
+            type: 'candidate_card',
+            schemaVersion: 'fitmeet.tool-ui.v1',
+            schemaType: 'social_match.candidate',
+            title: '陈砚',
+            body: '公开资料显示她也喜欢轻松散步。',
+            data: {
+              schemaType: 'social_match.candidate',
+              candidateRecordId: 501,
+              targetUserId: 22,
+            },
+            actions: [],
+          },
+        ],
+        permissionMode: AgentTaskPermissionMode.Confirm,
+      },
+      AgentTaskPermissionMode.Confirm,
+    );
+
+    expect(response.assistantMessage).toBe('');
+    expect(response.assistantMessageSource).toBe('fallback');
+    expect(response.cards).toHaveLength(1);
+    expect(response.cards[0]).toMatchObject({
+      id: 'candidate-501',
+      schemaType: 'social_match.candidate',
+    });
+    expect(response.recoveryNotice).toBeUndefined();
+    expect(JSON.stringify(response)).not.toContain('稍后再试');
+    expect(JSON.stringify(response)).not.toContain('暂时没有顺利完成');
   });
 
   it('keeps generic assistant-ui cards while stripping internal debug fields', () => {
@@ -407,9 +516,25 @@ describe('toUserFacingAgentResponse', () => {
               details: ['只用于消息内展示', '不触发社交工具'],
               traceId: 'trace-generic',
               planner: 'hidden planner',
+              plannerSource: 'deepseek planner',
+              knownTaskSlotConstraints: {
+                instruction: 'planner/router must keep this internal',
+              },
               rawJson: { debug: true },
             },
-            actions: [],
+            actions: [
+              {
+                id: 'safe_action',
+                label: '继续',
+                action: 'see_more',
+                requiresConfirmation: false,
+                payload: {
+                  taskId: 101,
+                  toolCallId: 'hidden-call',
+                  safeCopy: '可以继续查看',
+                },
+              },
+            ],
           },
         ],
         safety: {
@@ -437,7 +562,11 @@ describe('toUserFacingAgentResponse', () => {
     const serialized = JSON.stringify(response);
     expect(serialized).not.toContain('trace-generic');
     expect(serialized).not.toContain('planner');
+    expect(serialized).not.toContain('toolCallId');
+    expect(serialized).not.toContain('hidden-call');
+    expect(serialized).not.toContain('knownTaskSlotConstraints');
     expect(serialized).not.toContain('rawJson');
+    expect(serialized).toContain('可以继续查看');
   });
 
   it('maps pending approvals to natural pending confirmations', () => {
@@ -493,8 +622,203 @@ describe('toUserFacingAgentResponse', () => {
         expiresAt: null,
       },
     ]);
+    expect(response.publicLoop).toEqual({
+      stage: 'contact_confirmation_required',
+      publicIntentId: null,
+      discoverHref: null,
+      publicIntentHref: null,
+      messagesHref: null,
+      requiredConfirmation: true,
+    });
     expect(JSON.stringify(response)).not.toContain('payload');
     expect(JSON.stringify(response)).not.toContain('trace-2');
+  });
+
+  it('keeps safe approval identity payload for inline card placement and dedupe', () => {
+    const response = toUserFacingAgentResponse(
+      {
+        taskId: 101,
+        status: AgentTaskStatus.Executing,
+        visibleSteps: [],
+        assistantMessage: '发送邀请前需要你确认。',
+        socialRequestDraft: null,
+        candidates: [],
+        approvalRequiredActions: [
+          {
+            id: null,
+            actionType: 'send_invite',
+            summary: '发送邀请给陈砚前需要你确认。',
+            riskLevel: 'medium',
+            payload: {
+              taskId: 101,
+              candidateRecordId: 501,
+              targetUserId: 22,
+              opportunityId: 'qdu-walk-tonight',
+              message: '这条私信不应直接进入前端去重 payload',
+              traceId: 'trace-hidden',
+              rawJson: { planner: 'hidden' },
+            },
+          },
+        ],
+        events: [],
+        cards: [],
+        permissionMode: AgentTaskPermissionMode.Confirm,
+      },
+      AgentTaskPermissionMode.Confirm,
+    );
+
+    expect(response.pendingConfirmations).toEqual([
+      {
+        id: null,
+        type: 'send_invite',
+        actionType: 'send_invite',
+        summary: '发送邀请给陈砚前需要你确认。',
+        riskLevel: 'medium',
+        payload: {
+          taskId: 101,
+          candidateRecordId: 501,
+          targetUserId: 22,
+          opportunityId: 'qdu-walk-tonight',
+        },
+        expiresAt: null,
+      },
+    ]);
+    expect(JSON.stringify(response.pendingConfirmations)).not.toContain(
+      'trace-hidden',
+    );
+    expect(JSON.stringify(response.pendingConfirmations)).not.toContain(
+      'rawJson',
+    );
+    expect(JSON.stringify(response.pendingConfirmations)).not.toContain(
+      '这条私信',
+    );
+  });
+
+  it('filters low-risk card actions out of user-facing pending confirmations', () => {
+    const response = toUserFacingAgentResponse(
+      {
+        taskId: 101,
+        status: AgentTaskStatus.Executing,
+        visibleSteps: [],
+        assistantMessage: '我整理好了候选卡，低风险动作会直接留在卡片上。',
+        socialRequestDraft: null,
+        candidates: [],
+        approvalRequiredActions: [
+          {
+            id: 1,
+            actionType: 'candidate.like',
+            summary: '收藏候选陈砚，后续推荐会参考。',
+            riskLevel: 'medium',
+          },
+          {
+            id: 2,
+            actionType: 'save_candidate',
+            summary: '保存候选陈砚，后续推荐会参考。',
+            riskLevel: 'medium',
+          },
+          {
+            id: 3,
+            actionType: 'candidate.generate_opener',
+            summary: '生成开场白草稿。',
+            riskLevel: 'medium',
+          },
+          {
+            id: 4,
+            actionType: 'generate_opener',
+            summary: '生成开场白，不会发送给对方。',
+            riskLevel: 'medium',
+          },
+          {
+            id: 5,
+            actionType: 'opener.confirm_send',
+            summary: '发送邀请给陈砚前需要你确认。',
+            riskLevel: 'medium',
+          },
+          {
+            id: 6,
+            actionType: 'candidate.connect',
+            summary: '加好友并聊天前需要你确认。',
+            riskLevel: 'medium',
+          },
+          {
+            id: 7,
+            actionType: 'publish_social_request',
+            summary: '发布约练卡到发现前需要你确认。',
+            riskLevel: 'medium',
+          },
+        ],
+        events: [],
+        cards: [],
+        permissionMode: AgentTaskPermissionMode.Confirm,
+      },
+      AgentTaskPermissionMode.Confirm,
+    );
+
+    expect(
+      response.pendingConfirmations.map((item) => item.actionType),
+    ).toEqual([
+      'opener.confirm_send',
+      'candidate.connect',
+      'publish_social_request',
+    ]);
+    expect(JSON.stringify(response.pendingConfirmations)).not.toContain(
+      '收藏候选',
+    );
+    expect(JSON.stringify(response.pendingConfirmations)).not.toContain(
+      '生成开场白草稿',
+    );
+  });
+
+  it('filters a low-risk single pendingApproval out of user-facing confirmations', () => {
+    const response = toUserFacingAgentResponse(
+      {
+        intent: 'action_request',
+        confidence: 1,
+        entities: {
+          city: '青岛',
+          activityType: 'walking',
+          targetGender: '',
+          timePreference: '今晚',
+          locationPreference: '青岛大学附近',
+        },
+        shouldSearch: false,
+        shouldReplan: false,
+        shouldUpdateProfile: false,
+        shouldExecuteAction: true,
+        replyStrategy: 'execute_action',
+        source: 'rules',
+        action: 'reply',
+        taskId: 101,
+        assistantMessage: '已收藏这个候选，后续推荐会参考你的选择。',
+        savedContext: true,
+        profileUpdated: false,
+        shouldQueueRun: false,
+        runMode: null,
+        queuedRun: null,
+        pendingApproval: {
+          id: 77,
+          type: ApprovalType.Custom,
+          actionType: 'candidate.like',
+          summary: '收藏候选陈砚，后续推荐会参考。',
+          riskLevel: ApprovalRiskLevel.Medium,
+          payload: {
+            candidateRecordId: 501,
+            traceId: 'trace-should-not-leak',
+          },
+          expiresAt: null,
+        },
+        activityResults: [],
+        profileUpdateProposal: null,
+        cards: [],
+        permissionMode: AgentTaskPermissionMode.Confirm,
+      },
+      AgentTaskPermissionMode.Confirm,
+    );
+
+    expect(response.pendingConfirmations).toEqual([]);
+    expect(response.lightStatus).not.toBe('正在等待你确认');
+    expect(JSON.stringify(response)).not.toContain('trace-should-not-leak');
+    expect(JSON.stringify(response)).not.toContain('收藏候选陈砚');
   });
 
   it('normalizes legacy card actions into the user-facing agent action schema', () => {
@@ -612,7 +936,7 @@ describe('toUserFacingAgentResponse', () => {
         source: 'rules',
         action: 'answer',
         taskId: 101,
-        assistantMessage: '我识别到以下画像信息，是否保存到你的 Life Graph？',
+        assistantMessage: '我识别到以下画像信息，是否保存到你的个人信息？',
         savedContext: true,
         profileUpdated: false,
         shouldQueueRun: false,
@@ -663,13 +987,13 @@ describe('toUserFacingAgentResponse', () => {
           taskId: 101,
           proposalId: 77,
           proposedFields: ['lifestyle.availableTimes: 周末下午'],
-          confirmationBoundary: '确认前不会写入长期 Life Graph。',
-          privacyBoundary: '仅保存脱敏画像偏好，不保存私聊原文或精确敏感信息。',
-          revokeHint: '确认后仍可在 Life Graph 中查看、纠正或撤回。',
+          confirmationBoundary: '确认前不会写入长期偏好。',
+          privacyBoundary: '仅保存脱敏偏好，不保存私聊原文或精确敏感信息。',
+          revokeHint: '确认后仍可在个人信息里查看、纠正或撤回。',
           diff: expect.objectContaining({
-            description: '只在你确认后写入长期 Life Graph。',
-            confirmationBoundary: '确认前不会写入长期 Life Graph。',
-            privacyBoundary: '仅保存脱敏画像偏好，不保存私聊原文或精确敏感信息。',
+            description: '只在你确认后写入长期偏好。',
+            confirmationBoundary: '确认前不会写入长期偏好。',
+            privacyBoundary: '仅保存脱敏偏好，不保存私聊原文或精确敏感信息。',
             sourceSignals: ['用户提到周末下午一般有空'],
           }),
         }),
@@ -756,8 +1080,7 @@ describe('toUserFacingAgentResponse', () => {
               rawMessage: 'Sure, where should we meet?',
             },
           ],
-          confirmationBoundary:
-            '这只是画像更新建议，确认前不会写入长期 Life Graph。',
+          confirmationBoundary: '这只是画像更新建议，确认前不会写入长期偏好。',
           privacyBoundary:
             '不保存对方私聊原文，只保存脱敏后的互动信号和下一步建议。',
           revokeHint: '确认后仍可在 Life Graph 中撤回这次影响。',
@@ -793,8 +1116,7 @@ describe('toUserFacingAgentResponse', () => {
           confidence: 0.76,
         },
       ],
-      confirmationBoundary:
-        '这只是画像更新建议，确认前不会写入长期 Life Graph。',
+      confirmationBoundary: '这只是画像更新建议，确认前不会写入长期偏好。',
       privacyBoundary:
         '不保存对方私聊原文，只保存脱敏后的互动信号和下一步建议。',
       revokeHint: '确认后仍可在 Life Graph 中撤回这次影响。',
@@ -875,14 +1197,14 @@ describe('toUserFacingAgentResponse', () => {
       conflicts: ['lifestyle.availableTimes: 工作日晚上 -> 周末下午'],
       sensitivityLevel: 'medium',
       confirmationBoundary:
-        '确认保存表示你允许这次提案覆盖冲突的旧画像；拒绝则不会写入。',
-      privacyBoundary: '仅保存脱敏画像偏好，不保存私聊原文或精确敏感信息。',
+        '确认保存表示你允许这次提案覆盖冲突的旧资料；拒绝则不会写入。',
+      privacyBoundary: '仅保存脱敏偏好，不保存私聊原文或精确敏感信息。',
       diff: expect.objectContaining({
         current: 'lifestyle.availableTimes: 工作日晚上 -> 周末下午',
         conflicts: ['lifestyle.availableTimes: 工作日晚上 -> 周末下午'],
         sensitivityLevel: 'medium',
         confirmationBoundary:
-          '确认保存表示你允许这次提案覆盖冲突的旧画像；拒绝则不会写入。',
+          '确认保存表示你允许这次提案覆盖冲突的旧资料；拒绝则不会写入。',
         sourceSignals: ['用户这次明确说周末下午方便'],
       }),
     });
@@ -910,5 +1232,80 @@ describe('toUserFacingAgentResponse', () => {
         }),
       }),
     ]);
+  });
+
+  it('exposes the public loop state after Discover publish and candidate recommendation', () => {
+    const response = toUserFacingAgentResponse(
+      {
+        intent: 'social_search',
+        confidence: 1,
+        entities: {
+          city: '青岛',
+          activityType: '散步',
+          targetGender: '',
+          timePreference: '今晚',
+          locationPreference: '青岛大学附近',
+        },
+        shouldSearch: true,
+        shouldReplan: false,
+        shouldUpdateProfile: false,
+        shouldExecuteAction: false,
+        replyStrategy: 'search_candidates',
+        source: 'rules',
+        action: 'reply',
+        taskId: 101,
+        assistantMessage: '已发布到发现页，并找到合适候选。',
+        savedContext: true,
+        profileUpdated: false,
+        shouldQueueRun: false,
+        runMode: 'follow_up',
+        queuedRun: null,
+        pendingApproval: null,
+        activityResults: [],
+        profileUpdateProposal: null,
+        cards: [
+          {
+            id: 'publish_to_discover:101:intent_302',
+            type: 'activity_status',
+            schemaVersion: 'fitmeet.tool-ui.v1',
+            schemaType: 'social_match.activity',
+            title: '已发布到发现',
+            body: '公开可发现用户现在可以看到这张约练卡。',
+            status: 'completed',
+            data: {
+              publicIntentId: 'intent_302',
+              discoverHref: '/discover?publicIntentId=intent_302',
+              publicIntentHref: '/public-intent/intent_302',
+            },
+            actions: [],
+          },
+          {
+            id: 'candidate_22',
+            type: 'candidate_card',
+            title: '合适候选',
+            body: '时间和地点匹配。',
+            data: {},
+            actions: [],
+          },
+        ],
+        safety: {
+          blocked: false,
+          level: 'low',
+          reasons: [],
+          boundaryNotes: [],
+          requiredConfirmations: [],
+        },
+      },
+      AgentTaskPermissionMode.Confirm,
+    );
+
+    expect(response.publicLoop).toEqual({
+      stage: 'candidates_recommended',
+      publicIntentId: 'intent_302',
+      discoverHref: '/discover?publicIntentId=intent_302',
+      publicIntentHref: '/public-intent/intent_302',
+      messagesHref: null,
+      requiredConfirmation: false,
+    });
   });
 });

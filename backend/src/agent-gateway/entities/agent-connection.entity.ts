@@ -31,7 +31,7 @@ export enum ConnectionStatus {
 }
 
 export enum KnownAgent {
-  OpenClaw = 'openclaw',
+  FitMeetAgent = 'fitmeet_agent',
   Codex = 'codex',
   Hermes = 'hermes',
   QClaw = 'qclaw',
