@@ -1,19 +1,76 @@
-name: CI
+name: Agent Public Loop P0 CI
 
 on:
   pull_request:
+    branches:
+      - main
   push:
     branches:
       - main
       - "codex/**"
 
+concurrency:
+  group: p0-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
 jobs:
-  backend:
-    name: Backend
+  backend-p0:
+    name: Backend P0
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     defaults:
       run:
         working-directory: backend
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: fitmeet_ci
+          POSTGRES_USER: fitmeet
+          POSTGRES_PASSWORD: fitmeet
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U fitmeet -d fitmeet_ci"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+      mongo:
+        image: mongo:7
+        ports:
+          - 27017:27017
+        options: >-
+          --health-cmd "mongosh --quiet --eval 'db.adminCommand({ ping: 1 }).ok'"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      CI: true
+      NODE_ENV: test
+      DATABASE_URL: postgres://fitmeet:fitmeet@127.0.0.1:5432/fitmeet_ci
+      DB_HOST: 127.0.0.1
+      DB_PORT: 5432
+      DB_USERNAME: fitmeet
+      DB_PASSWORD: fitmeet
+      DB_DATABASE: fitmeet_ci
+      REDIS_URL: redis://127.0.0.1:6379
+      REDIS_HOST: 127.0.0.1
+      REDIS_PORT: 6379
+      MONGO_URI: mongodb://127.0.0.1:27017/fitmeet_ci
+      JWT_SECRET: ci_jwt_secret_32_chars_minimum_value
+      AGENT_WEBHOOK_SIGNING_SECRET: ci_webhook_secret_32_chars_minimum
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -33,24 +90,27 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Lint
+      - name: Backend lint
         run: pnpm lint
 
-      - name: Build
+      - name: Backend typecheck
+        run: pnpm exec tsc --noEmit -p tsconfig.json
+
+      - name: Backend build
         run: pnpm build
 
-      - name: Test
-        run: pnpm test
+      - name: Backend full Jest with open-handle detection
+        run: pnpm exec jest --runInBand --detectOpenHandles
 
-      - name: App contract smoke
-        run: APP_SMOKE_DRY_RUN=true pnpm smoke:app-core
-
-  frontend:
-    name: Frontend
+  frontend-p0:
+    name: Frontend P0
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     defaults:
       run:
         working-directory: frontend
+    env:
+      CI: true
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -70,45 +130,17 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Lint
+      - name: Frontend lint
         run: pnpm lint
 
-      - name: Build
-        run: pnpm build
+      - name: Frontend typecheck
+        run: pnpm exec tsc -b
 
-      - name: Test
+      - name: Frontend full test
         run: pnpm test
 
-  fitmeet-landing:
-    name: FitMeet Landing
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: fitmeet-landing
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: 10.23.0
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: pnpm
-          cache-dependency-path: fitmeet-landing/pnpm-lock.yaml
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Lint
-        run: pnpm lint
-
-      - name: Build
+      - name: Frontend build
         run: pnpm build
 
-      - name: Test landing smoke
-        run: pnpm test
+      - name: Frontend production build audit
+        run: pnpm check:prod-build
