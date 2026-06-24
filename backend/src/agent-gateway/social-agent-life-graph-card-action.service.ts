@@ -96,7 +96,7 @@ export class SocialAgentLifeGraphCardActionService {
         objective: 'profile_enrichment',
         nextStep: accepted
           ? '继续补齐可约时间、边界要求，或确认现在开始搜索'
-          : '继续补充画像信息，或重新告诉我哪些内容可以保存',
+          : '继续补充个人信息，或重新告诉我哪些内容可以保存',
         shouldSearchNow: false,
         profileSaved: accepted,
         awaitingSearchConfirmation: accepted,
@@ -271,7 +271,7 @@ export class SocialAgentLifeGraphCardActionService {
     payload: Record<string, unknown>,
   ): string {
     if (this.lifeGraphInfluenceSource(payload) === 'counterpart_reply') {
-      return '好的，这次回复不会作为长期画像偏好信号。我会保留会话上下文，但后续推荐不会继续参考这条互动信号。';
+      return '好的，这次回复不会作为长期偏好信号。我会保留会话上下文，但后续推荐不会继续参考这条互动信号。';
     }
     return '好的，这次约练评价不会继续用于后续推荐。我已经保留聊天记录本身，但不会把它作为画像偏好信号。';
   }
@@ -281,13 +281,13 @@ export class SocialAgentLifeGraphCardActionService {
     accepted: boolean,
   ): string {
     if (!accepted) {
-      return '好的，这次画像更新建议我不会保存。你可以继续补充画像、时间或安全边界；如果想现在开始找人，也直接告诉我。';
+      return '好的，这次个人信息更新建议我不会保存。你可以继续补充资料、时间或安全边界；如果想现在开始找人，也直接告诉我。';
     }
     const count = proposal.proposedFields.filter(
       (field) => field.status === 'confirmed',
     ).length;
     const countText = count > 0 ? `${count} 条` : '这些';
-    return `已保存 ${countText} 画像信息。接下来你可以继续补充可约时间和边界，或告诉我“现在开始找搭子”。`;
+    return `已保存 ${countText} 个人信息。接下来你可以继续补充可约时间和边界，或告诉我“现在开始找搭子”。`;
   }
 
   private lifeGraphFieldSnapshots(proposal: LifeGraphProposalDto) {

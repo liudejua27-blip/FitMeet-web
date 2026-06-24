@@ -1,6 +1,8 @@
 import { Injectable } from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
 
-import type { AgentTask } from './entities/agent-task.entity';
+import { AgentTask } from './entities/agent-task.entity';
 import type { FitMeetAlphaCard } from './fitmeet-alpha-agent.types';
 import type { SocialAgentPendingApprovalSnapshot } from './social-agent-chat.types';
 import type { SocialAgentIntentRouterResult } from './social-agent-intent-router.service';
@@ -13,6 +15,7 @@ import {
   buildSocialAgentOpportunityDraftFromTask,
   buildSocialAgentPublishConfirmationCard,
 } from './social-agent-opportunity-card-draft';
+import { rememberSocialAgentOpportunityDraft } from './social-agent-opportunity-draft-memory';
 
 type HandleRouteActionTurnInput = {
   ownerUserId: number;
@@ -34,6 +37,8 @@ type HandleRouteActionTurnResult = {
 @Injectable()
 export class SocialAgentRouteActionTurnService {
   constructor(
+    @InjectRepository(AgentTask)
+    private readonly taskRepo: Repository<AgentTask>,
     private readonly candidateActions: SocialAgentCandidateActionService,
     private readonly metrics: SocialAgentMetricsService,
   ) {}
@@ -63,6 +68,8 @@ export class SocialAgentRouteActionTurnService {
           cards: [],
         };
       }
+      rememberSocialAgentOpportunityDraft(input.task, publishDraft.draft);
+      await this.taskRepo.save(input.task);
       return {
         handled: true,
         assistantMessage:

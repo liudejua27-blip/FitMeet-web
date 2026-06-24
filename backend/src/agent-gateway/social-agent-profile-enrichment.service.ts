@@ -94,7 +94,7 @@ export class SocialAgentProfileEnrichmentService {
     if (this.shouldStartProfileCompletionMode(message, intent)) {
       transitionSocialAgentState(task, 'profile_detected', {
         objective: 'profile_completion',
-        nextStep: '等待用户回答画像完善问题',
+        nextStep: '等待用户回答个人信息补全问题',
         shouldSearchNow: false,
         profileSaved: false,
         awaitingSearchConfirmation: false,
@@ -191,7 +191,7 @@ export class SocialAgentProfileEnrichmentService {
       if (proposal.proposedFields.length > 0) {
         rememberSocialAgentCurrentTask(task, {
           objective: 'profile_enrichment',
-          nextStep: '等待用户确认是否保存画像更新建议',
+          nextStep: '等待用户确认是否保存个人信息更新建议',
           shouldSearchNow: false,
           profileSaved: false,
           waitingFor: 'life_graph_profile_confirmation',
@@ -299,7 +299,7 @@ export class SocialAgentProfileEnrichmentService {
     );
     rememberSocialAgentCurrentTask(task, {
       objective: 'profile_enrichment',
-      nextStep: '询问是否保存画像，或继续补齐可约时间和边界',
+      nextStep: '询问是否保存个人信息，或继续补齐可约时间和边界',
       shouldSearchNow: false,
       profileSaved: false,
       awaitingSearchConfirmation: true,
@@ -370,7 +370,7 @@ export class SocialAgentProfileEnrichmentService {
       return `- ${this.lifeGraphFieldLabel(field.fieldKey)}：${value}`;
     });
     return [
-      '我识别到以下画像信息：',
+      '我识别到以下个人信息：',
       ...lines,
       '是否保存到你的个人信息？保存后我会用它提升匹配准确度；不保存也不会影响当前聊天。',
     ].join('\n');
@@ -494,8 +494,8 @@ export class SocialAgentProfileEnrichmentService {
         objective: 'profile_enrichment',
         nextStep:
           brainMode === 'profile_update_tool'
-            ? '保存画像后询问可约时间和边界要求'
-            : '提取画像信息，询问是否保存或继续补齐',
+            ? '保存个人信息后询问可约时间和边界要求'
+            : '提取个人信息，询问是否保存或继续补齐',
         shouldSearchNow: false,
         awaitingSearchConfirmation: true,
         waitingFor:
@@ -514,7 +514,7 @@ export class SocialAgentProfileEnrichmentService {
     if (route.intent === 'workflow_help') {
       rememberSocialAgentCurrentTask(task, {
         objective: 'workflow_help',
-        nextStep: '解释直接发布需求和先完善画像两种路径',
+        nextStep: '解释直接发布需求和先完善个人信息两种路径',
         shouldSearchNow: false,
         awaitingSearchConfirmation: false,
         waitingFor: 'user_choice',
@@ -541,7 +541,7 @@ export class SocialAgentProfileEnrichmentService {
     recordSocialAgentMisunderstanding(task, reason || 'user_correction');
     transitionSocialAgentState(task, 'user_correction', {
       objective: 'profile_enrichment',
-      nextStep: '重新理解上一段画像信息并继续补齐',
+      nextStep: '重新理解上一段个人信息并继续补齐',
       shouldSearchNow: false,
       waitingFor: 'profile_repair',
     });
@@ -550,7 +550,7 @@ export class SocialAgentProfileEnrichmentService {
   rememberLifeGraphProfileProposal(task: AgentTask): void {
     rememberSocialAgentCurrentTask(task, {
       objective: 'profile_enrichment',
-      nextStep: '等待用户确认是否保存画像更新建议',
+      nextStep: '等待用户确认是否保存个人信息更新建议',
       shouldSearchNow: false,
       profileSaved: false,
       waitingFor: 'life_graph_profile_confirmation',
@@ -597,16 +597,18 @@ export class SocialAgentProfileEnrichmentService {
     }
     return (
       this.isProfileMissingFieldsQuestion(text) ||
-      /(帮我|可以|想|需要|继续|请你).{0,16}(完善|补充|整理|更新).{0,16}(画像|资料|偏好|信息)/i.test(
+      /(帮我|可以|想|需要|继续|请你).{0,16}(完善|补充|补全|整理|更新).{0,16}(画像|资料|个人信息|偏好|信息)/i.test(
         text,
       ) ||
-      /(完善|补充|整理|更新).{0,16}(画像|资料|偏好|信息)/i.test(text) ||
+      /(完善|补充|补全|整理|更新).{0,16}(画像|资料|个人信息|偏好|信息)/i.test(
+        text,
+      ) ||
       /问我.{0,8}(几个问题|问题)/i.test(text)
     );
   }
 
   private isProfileMissingFieldsQuestion(message: string): boolean {
-    return /(\u8fd8\u7f3a\u4ec0\u4e48|\u8fd8\u5dee\u4ec0\u4e48|\u7f3a\u54ea\u4e9b|\u7f3a\u5c11\u54ea\u4e9b|\u753b\u50cf.*\u7f3a|\u8d44\u6599.*\u7f3a|\u8fd8\u9700\u8981\u8865\u5145\u4ec0\u4e48)/i.test(
+    return /(\u8fd8\u7f3a\u4ec0\u4e48|\u8fd8\u5dee\u4ec0\u4e48|\u7f3a\u54ea\u4e9b|\u7f3a\u5c11\u54ea\u4e9b|\u753b\u50cf.*\u7f3a|\u8d44\u6599.*\u7f3a|\u4e2a\u4eba\u4fe1\u606f.*\u7f3a|\u8fd8\u9700\u8981\u8865\u5145\u4ec0\u4e48)/i.test(
       message,
     );
   }
@@ -890,7 +892,7 @@ export class SocialAgentProfileEnrichmentService {
     const knownMissing =
       missingFields.length > 0
         ? `工具返回还缺：${missingFields.join('、')}。`
-        : '目前画像主干已经有了，但关键约练条件还不够完整。';
+        : '目前个人信息主干已经有了，但关键约练条件还不够完整。';
 
     return [
       knownMissing,
@@ -904,11 +906,11 @@ export class SocialAgentProfileEnrichmentService {
     const questionCount = 5;
     const missingLine =
       missingFields.length > 0
-        ? `当前画像信息建议先补：${missingFields.join('、')}。`
-        : '当前画像信息建议先补：当前目标、互动形式、时间地点、活动偏好和安全边界。';
+        ? `当前个人信息建议先补：${missingFields.join('、')}。`
+        : '当前个人信息建议先补：当前目标、互动形式、时间地点、活动偏好和安全边界。';
 
     return [
-      `我会先帮你补充 ${questionCount} 项关键画像信息，所有问题都可以跳过，或选“暂不确定”。`,
+      `我会先帮你补充 ${questionCount} 项关键个人信息，所有问题都可以跳过，或选“暂不确定”。`,
       missingLine,
       '本次不会推荐具体人物，不会生成联系文案，也不会替你执行外部动作；也不会直接搜索候选人。',
       '',
@@ -1012,14 +1014,14 @@ export class SocialAgentProfileEnrichmentService {
   ): string {
     const lines = this.profileFieldLines(extractedProfile);
     const intro = corrected
-      ? '我理解了，刚才那段是你的画像信息，不是立即搜索需求。我先不搜索。'
-      : '我已提取到这些画像信息，先不直接搜索候选人。';
+      ? '我理解了，刚才那段是你的个人信息，不是立即搜索需求。我先不搜索。'
+      : '我已提取到这些个人信息，先不直接搜索候选人。';
     return [
       intro,
       lines.length > 0
         ? `已提取：${lines.join('；')}`
-        : '我还没有提取到足够明确的画像字段。',
-      '你要我把这些信息保存到 AI 画像里吗？保存后，我也可以继续问你可约时间、边界要求，再基于画像开始搜索。',
+        : '我还没有提取到足够明确的个人信息字段。',
+      '你要我把这些信息保存到个人信息里吗？保存后，我也可以继续问你可约时间、边界要求，再基于这些资料开始搜索。',
       '你也可以直接补充：城市/区域、兴趣、可约时间、想认识的人和边界。',
     ].join('\n');
   }
@@ -1042,9 +1044,9 @@ export class SocialAgentProfileEnrichmentService {
       : [];
     const lines = this.profileFieldLines(extractedProfile);
     return [
-      '已帮你把刚才的信息写入 AI 画像。',
+      '已帮你把刚才的信息保存到个人信息。',
       updatedFields.length > 0
-        ? `已保存到画像字段：${updatedFields.join('、')}`
+        ? `已保存到个人信息字段：${updatedFields.join('、')}`
         : '',
       memoryFields.length > 0
         ? `作为补充偏好记录：${memoryFields.join('、')}`
@@ -1063,7 +1065,7 @@ export class SocialAgentProfileEnrichmentService {
     const lines = this.profileFieldLines(extractedProfile);
     return [
       '好的，这些信息本次只用于当前对话，不保存到个人信息。',
-      lines.length > 0 ? `本次使用的画像预览：${lines.join('；')}` : '',
+      lines.length > 0 ? `本次使用的资料预览：${lines.join('；')}` : '',
       '接下来要基于这些信息开始匹配吗？你可以回复“开始匹配”，我再进入候选推荐；未确认前不会推荐具体人物、发送邀请或发布约练卡。',
     ]
       .filter(Boolean)

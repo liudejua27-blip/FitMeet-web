@@ -16,6 +16,8 @@ import type {
   UserFacingAgentPublicLoop,
   UserFacingAgentRecoveryNotice,
   UserFacingAgentResponse,
+  UserFacingAgentWorkflow,
+  UserFacingAgentWorkflowState,
 } from '../user-facing-agent-response';
 import { AgentCardAssemblerService } from './agent-card-assembler.service';
 import { LightStatusMapperService } from './light-status-mapper.service';
@@ -55,25 +57,30 @@ export class UserFacingResponseSanitizerService {
     const taskId = this.readNumber(
       this.isRecord(result) ? result.taskId : undefined,
     );
-    const runtime = this.readRuntime(result);
-    const threadId =
-      (this.isRecord(result) ? this.readText(result.threadId, '') : '') ||
-      runtime?.threadId ||
-      (typeof taskId === 'number' ? `agent-task:${taskId}` : '');
+    const recoveryNoticePatch = this.readRecoveryNoticePatch({
+      assistantMessage,
+      assistantMessageSource,
+      rawAssistantMessage,
+      cards,
+      pendingConfirmations,
+      safety,
+    });
+    const recoveryNotice =
+      'recoveryNotice' in recoveryNoticePatch
+        ? recoveryNoticePatch.recoveryNotice
+        : undefined;
+    const workflow = this.readWorkflow({
+      taskId,
+      publicLoop,
+      pendingConfirmations,
+      recoveryNotice,
+    });
 
     return {
       ...(typeof taskId === 'number' ? { taskId } : {}),
-      ...(threadId ? { threadId } : {}),
       assistantMessage,
       ...(assistantMessageSource ? { assistantMessageSource } : {}),
-      ...this.readRecoveryNoticePatch({
-        assistantMessage,
-        assistantMessageSource,
-        rawAssistantMessage,
-        cards,
-        pendingConfirmations,
-        safety,
-      }),
+      ...recoveryNoticePatch,
       lightStatus: this.lightStatusMapper.resolve(result, pendingConfirmations),
       cards,
       safeStatus: {
@@ -84,9 +91,9 @@ export class UserFacingResponseSanitizerService {
       },
       pendingConfirmations,
       ...(publicLoop ? { publicLoop } : {}),
+      ...(workflow ? { workflow } : {}),
       ...this.readLifeGraphWritebackProposal(result),
       permissionMode,
-      runtime,
     };
   }
 
@@ -178,105 +185,6 @@ export class UserFacingResponseSanitizerService {
       : undefined;
   }
 
-  private readRuntime(
-    result: SanitizableAgentResult,
-  ): UserFacingAgentResponse['runtime'] {
-    if (!('runtime' in result) || !result.runtime) return undefined;
-    const runtime = result.runtime;
-    return {
-      runId: this.readText(runtime.runId, '') || null,
-      messageId: this.readText(runtime.messageId, '') || null,
-      checkpointId: this.readNumber(runtime.checkpointId),
-      checkpointType: this.readText(runtime.checkpointType, ''),
-      canResume: runtime.canResume === true,
-      canReplay: runtime.canReplay === true,
-      canFork: runtime.canFork === true,
-      parentCheckpointId: this.readNumber(runtime.parentCheckpointId),
-      threadId: this.readText(runtime.threadId, '') || null,
-      idempotencyKey: this.readText(runtime.idempotencyKey, '') || null,
-      checkpointAction: this.readCheckpointAction(runtime.checkpointAction),
-      resumeCursor: this.readResumeCursor(runtime.resumeCursor),
-      sourceStep: this.readSourceStep(runtime.sourceStep),
-      stepScope: this.readStepScope(runtime.stepScope),
-      sideEffectPolicy: this.readSideEffectPolicy(runtime.sideEffectPolicy),
-    };
-  }
-
-  private readCheckpointAction(
-    value: unknown,
-  ): 'resume' | 'retry' | 'replay' | 'fork' | null {
-    return value === 'resume' ||
-      value === 'retry' ||
-      value === 'replay' ||
-      value === 'fork'
-      ? value
-      : null;
-  }
-
-  private readResumeCursor(
-    value: unknown,
-  ): NonNullable<UserFacingAgentResponse['runtime']>['resumeCursor'] {
-    if (!this.isRecord(value)) return null;
-    return {
-      threadId: this.readText(value.threadId, '') || null,
-      checkpointId:
-        this.readNumber(value.checkpointId) ??
-        (this.readText(value.checkpointId, '') || null),
-      parentCheckpointId:
-        this.readNumber(value.parentCheckpointId) ??
-        (this.readText(value.parentCheckpointId, '') || null),
-      action: this.readCheckpointAction(value.action),
-      stepId: this.readText(value.stepId, '') || null,
-    };
-  }
-
-  private readSourceStep(value: unknown) {
-    if (!this.isRecord(value)) return null;
-    const stepId = this.readText(value.stepId, '');
-    if (!stepId) return null;
-    return {
-      stepId,
-      label: this.readText(value.label, '') || null,
-      toolName: this.publicToolName(this.readText(value.toolName, '')),
-    };
-  }
-
-  private readStepScope(
-    value: unknown,
-  ): NonNullable<UserFacingAgentResponse['runtime']>['stepScope'] {
-    if (!this.isRecord(value)) return null;
-    const mode: 'full_checkpoint' | 'through_step' =
-      value.mode === 'through_step' || value.mode === 'full_checkpoint'
-        ? value.mode
-        : 'full_checkpoint';
-    return {
-      mode,
-      stepCount: this.readNumber(value.stepCount) ?? 0,
-      sourceCheckpointId: this.readNumber(value.sourceCheckpointId),
-    };
-  }
-
-  private readSideEffectPolicy(value: unknown) {
-    if (!this.isRecord(value)) return null;
-    const idempotencyKey = this.readText(value.idempotencyKey, '');
-    if (!idempotencyKey) return null;
-    return {
-      idempotencyKey,
-      sideEffectsBeforeResume: 'idempotent_only' as const,
-      duplicatePolicy: 'reuse_idempotency_key' as const,
-    };
-  }
-
-  private publicToolName(value: string): string | null {
-    const text = value.trim().toLowerCase();
-    if (!text) return null;
-    if (text === 'social_match') return '匹配步骤';
-    if (text === 'life_graph') return '画像步骤';
-    if (text === 'meet_loop') return '约练步骤';
-    if (text === 'approval_gate') return '确认步骤';
-    return null;
-  }
-
   private readSafety(
     result: SanitizableAgentResult,
   ): FitMeetAgentSafety | undefined {
@@ -336,7 +244,7 @@ export class UserFacingResponseSanitizerService {
         proposedSignals,
         confirmationBoundary: this.readText(
           proposal.confirmationBoundary,
-          '这只是画像更新建议，确认前不会写入长期偏好。',
+          '这只是资料更新建议，确认前不会写入长期偏好。',
         ),
         privacyBoundary: this.readText(
           proposal.privacyBoundary,
@@ -389,7 +297,7 @@ export class UserFacingResponseSanitizerService {
         discoverHref,
         publicIntentHref,
         messagesHref,
-        requiredConfirmation: null,
+        requiredConfirmation: false,
       };
     }
 
@@ -402,7 +310,7 @@ export class UserFacingResponseSanitizerService {
         discoverHref,
         publicIntentHref,
         messagesHref: null,
-        requiredConfirmation: confirmation,
+        requiredConfirmation: true,
       };
     }
 
@@ -416,7 +324,7 @@ export class UserFacingResponseSanitizerService {
         discoverHref,
         publicIntentHref,
         messagesHref: null,
-        requiredConfirmation: null,
+        requiredConfirmation: false,
       };
     }
 
@@ -427,7 +335,7 @@ export class UserFacingResponseSanitizerService {
         discoverHref,
         publicIntentHref,
         messagesHref: null,
-        requiredConfirmation: null,
+        requiredConfirmation: false,
       };
     }
 
@@ -438,7 +346,7 @@ export class UserFacingResponseSanitizerService {
         discoverHref: null,
         publicIntentHref: null,
         messagesHref: null,
-        requiredConfirmation: null,
+        requiredConfirmation: false,
       };
     }
 
@@ -449,10 +357,94 @@ export class UserFacingResponseSanitizerService {
         discoverHref: null,
         publicIntentHref: null,
         messagesHref: null,
-        requiredConfirmation: null,
+        requiredConfirmation: false,
       };
     }
 
+    return null;
+  }
+
+  private readWorkflow(input: {
+    taskId: number | null;
+    publicLoop: UserFacingAgentPublicLoop | null;
+    pendingConfirmations: UserFacingAgentPendingConfirmation[];
+    recoveryNotice?: UserFacingAgentRecoveryNotice;
+  }): UserFacingAgentWorkflow | null {
+    const state = this.workflowState(input);
+    if (
+      !state &&
+      typeof input.taskId !== 'number' &&
+      input.pendingConfirmations.length === 0 &&
+      !input.recoveryNotice
+    ) {
+      return null;
+    }
+    const requiredAction =
+      input.pendingConfirmations[0]?.actionType ??
+      this.workflowRequiredAction(input.publicLoop) ??
+      null;
+    return {
+      workflowId:
+        typeof input.taskId === 'number' ? `agent-task:${input.taskId}` : null,
+      state: state ?? 'IDLE',
+      requiredAction,
+      retryable: input.recoveryNotice?.retryable === true,
+      recoveryMessage: input.recoveryNotice?.message ?? null,
+    };
+  }
+
+  private workflowState(input: {
+    publicLoop: UserFacingAgentPublicLoop | null;
+    pendingConfirmations: UserFacingAgentPendingConfirmation[];
+    recoveryNotice?: UserFacingAgentRecoveryNotice;
+  }): UserFacingAgentWorkflowState | null {
+    if (input.recoveryNotice) return 'RECOVERY';
+    if (input.publicLoop) {
+      switch (input.publicLoop.stage) {
+        case 'profile_completion':
+          return 'PROFILE_REQUIRED';
+        case 'opportunity_card_generated':
+          return 'INTENT_DRAFT';
+        case 'publish_confirmation_required':
+          return 'PUBLISH_CONFIRMATION_REQUIRED';
+        case 'discover_visible':
+          return 'DISCOVER_VISIBLE';
+        case 'candidates_recommended':
+          return 'CANDIDATES_READY';
+        case 'contact_confirmation_required':
+          return 'CONTACT_CONFIRMATION_REQUIRED';
+        case 'messages_handoff':
+          return 'CONVERSATION_ACTIVE';
+        case 'dismissed':
+          return 'DISMISSED';
+      }
+    }
+    const actionText = input.pendingConfirmations
+      .map((item) => `${item.actionType} ${item.summary}`)
+      .join(' ');
+    if (/publish|social_request|公开|发布/i.test(actionText)) {
+      return 'PUBLISH_CONFIRMATION_REQUIRED';
+    }
+    if (
+      /send|message|invite|connect|friend|发送|私信|邀请|加好友|好友/i.test(
+        actionText,
+      )
+    ) {
+      return 'CONTACT_CONFIRMATION_REQUIRED';
+    }
+    return null;
+  }
+
+  private workflowRequiredAction(
+    publicLoop: UserFacingAgentPublicLoop | null,
+  ): string | null {
+    if (!publicLoop?.requiredConfirmation) return null;
+    if (publicLoop.stage === 'publish_confirmation_required') {
+      return 'publish_to_discover';
+    }
+    if (publicLoop.stage === 'contact_confirmation_required') {
+      return 'confirm_contact_action';
+    }
     return null;
   }
 
@@ -468,7 +460,8 @@ export class UserFacingResponseSanitizerService {
       stage !== 'discover_visible' &&
       stage !== 'candidates_recommended' &&
       stage !== 'contact_confirmation_required' &&
-      stage !== 'messages_handoff'
+      stage !== 'messages_handoff' &&
+      stage !== 'dismissed'
     ) {
       return null;
     }
@@ -478,8 +471,7 @@ export class UserFacingResponseSanitizerService {
       discoverHref: this.readText(value.discoverHref, '') || null,
       publicIntentHref: this.readText(value.publicIntentHref, '') || null,
       messagesHref: this.readText(value.messagesHref, '') || null,
-      requiredConfirmation:
-        this.readText(value.requiredConfirmation, '') || null,
+      requiredConfirmation: this.readBoolean(value.requiredConfirmation),
     };
   }
 
@@ -501,6 +493,20 @@ export class UserFacingResponseSanitizerService {
       if (text) return text;
     }
     return null;
+  }
+
+  private readBoolean(value: unknown): boolean {
+    if (typeof value === 'boolean') return value;
+    if (typeof value === 'string') {
+      const normalized = value.trim().toLowerCase();
+      if (!normalized) return false;
+      if (normalized === 'false' || normalized === '0' || normalized === 'no') {
+        return false;
+      }
+      return true;
+    }
+    if (typeof value === 'number') return value !== 0;
+    return false;
   }
 
   private profileProposalCard(
@@ -538,7 +544,7 @@ export class UserFacingResponseSanitizerService {
       title: '建议更新个人信息',
       body:
         proposal.aiSummary ||
-        '我识别到一些可以用于后续推荐的画像信息，请确认是否保存。',
+        '我识别到一些可以用于后续推荐的个人信息，请确认是否保存。',
       status: 'waiting_confirmation',
       data: {
         taskId: resolvedTaskId,
@@ -551,26 +557,26 @@ export class UserFacingResponseSanitizerService {
         ),
         fields: proposal.proposedFields,
         diff: {
-          title: '画像更新建议',
+          title: '资料更新建议',
           description: hasConflicts
-            ? '这条记忆和旧记录存在差异，只有你确认后才会覆盖长期画像。'
+            ? '这条记忆和旧记录存在差异，只有你确认后才会覆盖长期偏好。'
             : '只在你确认后写入长期偏好。',
           current: conflicts.length ? conflicts.join('；') : '暂无明确冲突',
           proposed: proposal.aiSummary || '等待你确认后更新',
           conflicts,
           sensitivityLevel: hasConflicts ? 'medium' : 'low',
           confirmationBoundary: hasConflicts
-            ? '确认保存表示你允许这次提案覆盖冲突的旧画像；拒绝则不会写入。'
+            ? '确认保存表示你允许这次提案覆盖冲突的旧资料；拒绝则不会写入。'
             : '确认前不会写入长期偏好。',
-          privacyBoundary: '仅保存脱敏画像偏好，不保存私聊原文或精确敏感信息。',
+          privacyBoundary: '仅保存脱敏偏好，不保存私聊原文或精确敏感信息。',
           sourceSignals,
         },
         conflicts,
         sensitivityLevel: hasConflicts ? 'medium' : 'low',
         confirmationBoundary: hasConflicts
-          ? '确认保存表示你允许这次提案覆盖冲突的旧画像；拒绝则不会写入。'
+          ? '确认保存表示你允许这次提案覆盖冲突的旧资料；拒绝则不会写入。'
           : '确认前不会写入长期偏好。',
-        privacyBoundary: '仅保存脱敏画像偏好，不保存私聊原文或精确敏感信息。',
+        privacyBoundary: '仅保存脱敏偏好，不保存私聊原文或精确敏感信息。',
         sourceSignals,
         revokeHint: '确认后仍可在个人信息里查看、纠正或撤回。',
         confirmationRequired: proposal.confirmationRequired,
@@ -732,11 +738,7 @@ export class UserFacingResponseSanitizerService {
   ): Record<string, unknown> | null {
     if (!this.isRecord(value)) return null;
     const payload: Record<string, unknown> = {};
-    this.copySafePayloadPrimitive(value, payload, 'checkpointId');
-    this.copySafePayloadPrimitive(value, payload, 'resumeCheckpointId');
-    this.copySafePayloadPrimitive(value, payload, 'parentCheckpointId');
     this.copySafePayloadPrimitive(value, payload, 'taskId');
-    this.copySafePayloadPrimitive(value, payload, 'threadId');
     this.copySafePayloadPrimitive(value, payload, 'proposalId');
     this.copySafePayloadPrimitive(value, payload, 'publicIntentId');
     this.copySafePayloadPrimitive(value, payload, 'socialRequestId');

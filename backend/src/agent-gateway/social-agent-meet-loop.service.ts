@@ -60,6 +60,7 @@ import type {
 } from './social-agent-chat.types';
 import {
   appendSocialAgentShortTermTurn,
+  rememberSocialAgentShortTerm,
   recordSocialAgentPendingAction,
   recordSocialAgentShortTermAction,
   readSocialAgentTaskMemory,
@@ -493,18 +494,37 @@ export class SocialAgentMeetLoopService {
     body: SocialAgentCardActionBody,
   ): Promise<SocialAgentIntentRouteResult> {
     const task = await this.assertTaskOwner(taskId, ownerUserId);
+    const resultRecord = this.isRecord(task.result) ? task.result : {};
+    const chatRun = this.isRecord(resultRecord.chatRun)
+      ? resultRecord.chatRun
+      : {};
+    const memory = this.isRecord(task.memory) ? task.memory : {};
+    const socialAgentChat = this.isRecord(memory.socialAgentChat)
+      ? memory.socialAgentChat
+      : {};
+    const now = new Date().toISOString();
     const payload: Record<string, unknown> = {
       ...this.mergeActivityPayload(task, body.payload ?? {}),
-      status: 'draft_kept_private',
-      loopStage: 'activity_draft_private',
-      visibility: 'private',
+      status: 'draft_cancelled',
+      loopStage: 'activity_publish_cancelled',
+      visibility: 'hidden',
+      publishStatus: 'cancelled',
     };
     task.result = {
-      ...(task.result ?? {}),
+      ...resultRecord,
+      chatRun: {
+        ...chatRun,
+        socialRequestDraft: null,
+        publishStatus: 'cancelled',
+        publicIntentId: null,
+        discoverHref: null,
+        publicIntentHref: null,
+      },
       activityDraft: {
         ...payload,
-        visibility: 'private',
+        visibility: 'hidden',
         autoPublished: false,
+        dismissed: true,
       },
       meetLoop: {
         ...readSocialAgentMeetLoopState(task, (value) => this.isRecord(value)),
@@ -512,41 +532,51 @@ export class SocialAgentMeetLoopService {
         waitingFor: 'user_next_message',
       },
     };
+    task.memory = {
+      ...memory,
+      socialAgentChat: {
+        ...socialAgentChat,
+        socialRequestDraft: null,
+        publishStatus: 'cancelled',
+        publicIntentId: null,
+        discoverHref: null,
+        publicIntentHref: null,
+        updatedAt: now,
+      },
+    };
+    rememberSocialAgentShortTerm(task, {
+      socialRequestDraft: null,
+      publishStatus: 'cancelled',
+      publicIntentId: null,
+      discoverHref: null,
+      publicIntentHref: null,
+      hasSearched: false,
+      lastSearchCandidateCount: 0,
+      lastSearchEmptyReason: null,
+      lastSearchNextStep: null,
+    });
     transitionSocialAgentState(task, 'message_action', {
       objective: 'meet_loop',
-      nextStep:
-        '约练卡已保留为草稿，暂不发布到发现；可以继续私密匹配公开可发现用户。',
+      nextStep: '已取消发布，不会进入发现或继续匹配。',
       shouldSearchNow: false,
       awaitingSearchConfirmation: false,
       waitingFor: 'user_next_message',
-      lastCompletedStep: 'activity_publish_skipped',
+      lastCompletedStep: 'activity_publish_cancelled',
     });
     await this.taskRepo.save(task);
-    await this.persistMeetLoopState(task, 'activity_draft_created', {
+    await this.persistMeetLoopState(task, 'activity_publish_cancelled', {
       waitingFor: 'user_next_message',
       payload,
     });
 
-    const card = buildSocialAgentMeetLoopTimelineCard({
-      taskId: task.id,
-      activityId: this.number(payload.activityId),
-      candidateUserId: this.number(
-        payload.candidateUserId ?? payload.targetUserId,
-      ),
-      stage: 'activity_draft_private',
-      description: '这张约练卡已作为草稿保留，暂时不会发布到发现。',
-      nextAction:
-        '你可以继续私密匹配公开可发现用户，也可以之后再确认发布到发现。',
-      payload,
-    });
     const assistantMessage =
-      '好的，我先不发布这张约练卡，已经把它保留为草稿。接下来可以直接基于你的画像和公开可发现用户做私密匹配；只有你确认后，我才会发邀请、加好友或公开发布。';
-    const result = this.cardActionRouteResult(task, assistantMessage, [card]);
+      '已取消发布，不会出现在发现页，也不会继续匹配。你之后可以重新描述需求，再生成新的约练卡。';
+    const result = this.cardActionRouteResult(task, assistantMessage, []);
     await this.writeEvent(
       task,
       AgentTaskEventType.Note,
-      'Agent activity publish skipped from card action',
-      { action: body.action, visibility: 'private' },
+      'Agent activity publish cancelled from card action',
+      { action: body.action, visibility: 'hidden' },
       AgentTaskEventActor.Agent,
     );
     await this.recordAssistantMessage(task, assistantMessage, result);
@@ -803,7 +833,7 @@ export class SocialAgentMeetLoopService {
       candidateUserId: resolvedCandidateUserId,
       stage: 'activity_confirmed',
       description:
-        '约练计划已经按你的确认创建。后续签到、完成、评价和画像回写会继续保存在同一条约练进展里。',
+        '约练计划已经按你的确认创建。后续签到、完成、评价和长期偏好更新会继续保存在同一条约练进展里。',
       nextAction:
         '活动开始前等待你确认到达；我不会共享你的精确位置，也不会重复打扰对方。',
       payload: {
@@ -1118,7 +1148,7 @@ export class SocialAgentMeetLoopService {
     });
 
     const assistantMessage =
-      '评价已提交。这次完成记录已经用于更新你的长期偏好，并生成了可信度更新说明；你之后仍然可以查看、纠正或撤回这次画像影响。';
+      '评价已提交。这次完成记录已经用于更新你的长期偏好，并生成了可信度更新说明；你之后仍然可以查看、纠正或撤回这次资料影响。';
     const result = this.cardActionRouteResult(task, assistantMessage, [card]);
     await this.writeEvent(
       task,
@@ -1368,6 +1398,7 @@ export class SocialAgentMeetLoopService {
     task: AgentTask,
     stage:
       | 'activity_draft_created'
+      | 'activity_publish_cancelled'
       | 'activity_confirmed'
       | 'activity_checked_in'
       | 'activity_completed'

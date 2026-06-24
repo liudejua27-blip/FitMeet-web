@@ -86,14 +86,12 @@ describe('toUserFacingAgentResponse', () => {
       'lightStatus',
       'pendingConfirmations',
       'permissionMode',
-      'runtime',
       'safeStatus',
       'taskId',
-      'threadId',
+      'workflow',
     ]);
     expect(response).toMatchObject({
       taskId: 101,
-      threadId: 'agent-task:101',
       assistantMessage: '我会先结合你的长期偏好，再筛选合适的人。',
       lightStatus: '正在筛选公开可发现的人',
       pendingConfirmations: [],
@@ -103,6 +101,13 @@ describe('toUserFacingAgentResponse', () => {
         level: 'low',
         boundaryNotes: ['第一次见面建议选择公共场所'],
         requiredConfirmations: ['发送消息'],
+      },
+      workflow: {
+        workflowId: 'agent-task:101',
+        state: 'IDLE',
+        requiredAction: null,
+        retryable: false,
+        recoveryMessage: null,
       },
     });
 
@@ -116,7 +121,7 @@ describe('toUserFacingAgentResponse', () => {
     expect(serialized).not.toContain('internal keyword match');
   });
 
-  it('keeps safe checkpoint resume metadata while stripping internal runtime fields', () => {
+  it('strips checkpoint resume metadata from ordinary user-facing responses', () => {
     const response = toUserFacingAgentResponse(
       {
         taskId: 101,
@@ -170,43 +175,26 @@ describe('toUserFacingAgentResponse', () => {
       AgentTaskPermissionMode.Confirm,
     );
 
-    expect(response.runtime).toMatchObject({
-      checkpointId: 321,
-      checkpointType: 'step',
-      canReplay: true,
-      canFork: true,
-      parentCheckpointId: 320,
-      threadId: 'agent-task:101',
-      checkpointAction: 'replay',
-      resumeCursor: {
-        threadId: 'agent-task:101',
-        checkpointId: 321,
-        parentCheckpointId: 320,
-        action: 'replay',
-        stepId: 'rank',
-      },
-      sourceStep: {
-        stepId: 'rank',
-        label: '正在排序候选人',
-        toolName: '匹配步骤',
-      },
-      stepScope: {
-        mode: 'through_step',
-        stepCount: 3,
-        sourceCheckpointId: 320,
-      },
-      sideEffectPolicy: {
-        idempotencyKey:
-          'agent-checkpoint:replay:agent-task:101:checkpoint:321:step:rank',
-        sideEffectsBeforeResume: 'idempotent_only',
-        duplicatePolicy: 'reuse_idempotency_key',
-      },
-    });
     expect(response).toMatchObject({
       taskId: 101,
-      threadId: 'agent-task:101',
+      workflow: {
+        workflowId: 'agent-task:101',
+        state: 'IDLE',
+        requiredAction: null,
+        retryable: false,
+        recoveryMessage: null,
+      },
     });
     const serialized = JSON.stringify(response);
+    expect(serialized).not.toContain('checkpointId');
+    expect(serialized).not.toContain('idempotencyKey');
+    expect(serialized).not.toContain('resumeCursor');
+    expect(serialized).not.toContain('sourceStep');
+    expect(serialized).not.toContain('sideEffectPolicy');
+    expect(serialized).not.toContain('hidden-runtime-trace');
+    expect(serialized).not.toContain('hidden-runtime-planner');
+    expect(serialized).not.toContain('social_match');
+    expect(serialized).not.toContain('checkpoint:321');
     expect(serialized).not.toContain('hidden-runtime-trace');
     expect(serialized).not.toContain('hidden-runtime-planner');
     expect(serialized).not.toContain('social_match');
@@ -412,6 +400,14 @@ describe('toUserFacingAgentResponse', () => {
 
     expect(response.assistantMessage).toBe('');
     expect(response.pendingConfirmations).toHaveLength(1);
+    expect(response.publicLoop).toEqual({
+      stage: 'publish_confirmation_required',
+      publicIntentId: null,
+      discoverHref: null,
+      publicIntentHref: null,
+      messagesHref: null,
+      requiredConfirmation: true,
+    });
     expect(response.recoveryNotice).toBeUndefined();
   });
 
@@ -626,6 +622,14 @@ describe('toUserFacingAgentResponse', () => {
         expiresAt: null,
       },
     ]);
+    expect(response.publicLoop).toEqual({
+      stage: 'contact_confirmation_required',
+      publicIntentId: null,
+      discoverHref: null,
+      publicIntentHref: null,
+      messagesHref: null,
+      requiredConfirmation: true,
+    });
     expect(JSON.stringify(response)).not.toContain('payload');
     expect(JSON.stringify(response)).not.toContain('trace-2');
   });
@@ -984,13 +988,12 @@ describe('toUserFacingAgentResponse', () => {
           proposalId: 77,
           proposedFields: ['lifestyle.availableTimes: 周末下午'],
           confirmationBoundary: '确认前不会写入长期偏好。',
-          privacyBoundary: '仅保存脱敏画像偏好，不保存私聊原文或精确敏感信息。',
+          privacyBoundary: '仅保存脱敏偏好，不保存私聊原文或精确敏感信息。',
           revokeHint: '确认后仍可在个人信息里查看、纠正或撤回。',
           diff: expect.objectContaining({
             description: '只在你确认后写入长期偏好。',
             confirmationBoundary: '确认前不会写入长期偏好。',
-            privacyBoundary:
-              '仅保存脱敏画像偏好，不保存私聊原文或精确敏感信息。',
+            privacyBoundary: '仅保存脱敏偏好，不保存私聊原文或精确敏感信息。',
             sourceSignals: ['用户提到周末下午一般有空'],
           }),
         }),
@@ -1194,14 +1197,14 @@ describe('toUserFacingAgentResponse', () => {
       conflicts: ['lifestyle.availableTimes: 工作日晚上 -> 周末下午'],
       sensitivityLevel: 'medium',
       confirmationBoundary:
-        '确认保存表示你允许这次提案覆盖冲突的旧画像；拒绝则不会写入。',
-      privacyBoundary: '仅保存脱敏画像偏好，不保存私聊原文或精确敏感信息。',
+        '确认保存表示你允许这次提案覆盖冲突的旧资料；拒绝则不会写入。',
+      privacyBoundary: '仅保存脱敏偏好，不保存私聊原文或精确敏感信息。',
       diff: expect.objectContaining({
         current: 'lifestyle.availableTimes: 工作日晚上 -> 周末下午',
         conflicts: ['lifestyle.availableTimes: 工作日晚上 -> 周末下午'],
         sensitivityLevel: 'medium',
         confirmationBoundary:
-          '确认保存表示你允许这次提案覆盖冲突的旧画像；拒绝则不会写入。',
+          '确认保存表示你允许这次提案覆盖冲突的旧资料；拒绝则不会写入。',
         sourceSignals: ['用户这次明确说周末下午方便'],
       }),
     });
@@ -1302,7 +1305,7 @@ describe('toUserFacingAgentResponse', () => {
       discoverHref: '/discover?publicIntentId=intent_302',
       publicIntentHref: '/public-intent/intent_302',
       messagesHref: null,
-      requiredConfirmation: null,
+      requiredConfirmation: false,
     });
   });
 });

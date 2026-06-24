@@ -633,21 +633,19 @@ export class SocialCodexEventPipelineService {
       const itemPayload = this.recordValue(item.payload)
         ? (item.payload as Record<string, unknown>)
         : {};
-      const checkpointId =
-        this.positiveNumber(itemPayload.checkpointId) ??
-        this.positiveNumber(itemPayload.resumeCheckpointId) ??
-        result.runtime?.checkpointId ??
-        null;
+      const publicItemPayload = { ...itemPayload };
+      delete publicItemPayload.checkpointId;
+      delete publicItemPayload.resumeCheckpointId;
+      delete publicItemPayload.resumeCursor;
       const schemaPayload = this.approvalSchemaService().enrichPayload({
         actionType: item.actionType,
         summary: item.summary,
         riskLevel: item.riskLevel,
         payload: {
           approvalId: item.id,
-          checkpointId,
           actionType: item.actionType,
           riskLevel: item.riskLevel,
-          ...itemPayload,
+          ...publicItemPayload,
         },
       });
       const schema = schemaPayload.socialCodexApproval as

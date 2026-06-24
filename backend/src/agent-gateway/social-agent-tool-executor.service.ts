@@ -71,6 +71,7 @@ import {
   type SocialAgentDecisionToolResult,
 } from './social-agent-decision-tool.service';
 import { SocialAgentTaskMemoryService } from './social-agent-task-memory.service';
+import { AgentSideEffectLedgerService } from './agent-side-effect-ledger.service';
 import { summarizeSocialAgentToolCalls } from './social-agent-tool-execution-summary';
 import { buildSocialAgentProfileContextPatch } from './social-agent-profile-context-patch';
 import { buildSocialAgentSocialRequestToolInput } from './social-agent-social-request-tool-input';
@@ -220,6 +221,8 @@ export class SocialAgentToolExecutorService {
     private readonly l5Runtime?: AgentL5RuntimeService,
     @Optional()
     private readonly config?: ConfigService,
+    @Optional()
+    private readonly sideEffectLedger?: AgentSideEffectLedgerService,
   ) {}
 
   async executeTask(
@@ -1915,15 +1918,29 @@ export class SocialAgentToolExecutorService {
     input: Record<string, unknown>,
   ): Promise<unknown> {
     const answers = Array.isArray(input.answers) ? input.answers : [];
-    let latest: unknown = null;
+    const normalizedAnswers: Array<{
+      key: string;
+      question?: string;
+      answer: string;
+    }> = [];
     for (const raw of answers) {
       if (!this.toolInput.isRecord(raw)) continue;
       const key = this.toolInput.string(raw.key);
       const answer = this.toolInput.string(raw.answer ?? raw.value);
       if (!key || !answer) continue;
-      latest = await this.socialProfiles.saveAnswer(ownerUserId, key, answer);
+      normalizedAnswers.push({
+        key,
+        question: this.toolInput.string(raw.question) || undefined,
+        answer,
+      });
     }
-    if (latest) return latest;
+    if (normalizedAnswers.length > 0) {
+      return this.socialProfiles.generateAiDraft(ownerUserId, {
+        answers: normalizedAnswers,
+        rawText: this.toolInput.string(input.rawText),
+        source: 'agent_tool_update_ai_profile',
+      });
+    }
 
     if (this.toolInput.isRecord(input.profile)) {
       return this.socialProfiles.saveAiDraft(ownerUserId, {
@@ -2060,26 +2077,87 @@ export class SocialAgentToolExecutorService {
     const socialRequestId = this.toolInput.number(
       input.socialRequestId ?? input.requestId,
     );
-    return this.candidatePool.searchSocial({
-      ownerUserId: task.ownerUserId,
-      taskId: task.id,
-      socialRequestId,
-      city: sanitizeCity(input.city),
-      activityType: this.toolInput.string(input.activityType),
-      interestTags: this.toolInput.stringArray(
-        input.interestTags ?? input.tags,
-      ),
-      candidatePreference: this.toolInput.string(input.candidatePreference),
-      candidatePreferencePolicy: this.toolInput.string(
-        input.candidatePreferencePolicy,
-      ),
-      timePreference: this.toolInput.string(input.timePreference),
-      locationPreference: this.toolInput.string(input.locationPreference),
-      rawText: this.toolInput.string(
-        input.rawText ?? input.goal ?? input.message,
-      ),
-      limit: this.toolInput.number(input.limit) ?? undefined,
-    });
+    const limit = this.toolInput.number(input.limit) ?? undefined;
+    const runSearch = () =>
+      this.candidatePool.searchSocial({
+        ownerUserId: task.ownerUserId,
+        taskId: task.id,
+        socialRequestId,
+        city: sanitizeCity(input.city),
+        activityType: this.toolInput.string(input.activityType),
+        interestTags: this.toolInput.stringArray(
+          input.interestTags ?? input.tags,
+        ),
+        candidatePreference: this.toolInput.string(input.candidatePreference),
+        candidatePreferencePolicy: this.toolInput.string(
+          input.candidatePreferencePolicy,
+        ),
+        timePreference: this.toolInput.string(input.timePreference),
+        locationPreference: this.toolInput.string(input.locationPreference),
+        rawText: this.toolInput.string(
+          input.rawText ?? input.goal ?? input.message,
+        ),
+        limit,
+      });
+    const idempotencyKey = this.searchMatchesIdempotencyKey(
+      task,
+      input,
+      socialRequestId ?? null,
+      limit,
+    );
+    if (!this.sideEffectLedger || !idempotencyKey) return runSearch();
+    const { result } = await this.sideEffectLedger.run(
+      {
+        ownerUserId: task.ownerUserId,
+        agentTaskId: task.id,
+        actionType: 'search_candidates',
+        idempotencyKey,
+        resourceType: socialRequestId ? 'social_request' : 'candidate_query',
+        resourceId: socialRequestId ?? task.id,
+        metadata: {
+          socialRequestId,
+          limit: limit ?? null,
+          city: sanitizeCity(input.city) || null,
+          activityType: this.toolInput.string(input.activityType) || null,
+        },
+      },
+      runSearch,
+    );
+    return result;
+  }
+
+  private searchMatchesIdempotencyKey(
+    task: AgentTask,
+    input: Record<string, unknown>,
+    socialRequestId: number | null,
+    limit?: number,
+  ): string {
+    const explicit = this.text(input.idempotencyKey);
+    if (explicit) return explicit.slice(0, 180);
+    if (socialRequestId) {
+      return `search_candidates:${task.id}:request:${socialRequestId}:limit:${limit ?? 10}`;
+    }
+    const fingerprint = [
+      sanitizeCity(input.city),
+      this.toolInput.string(input.activityType),
+      this.toolInput.string(input.timePreference),
+      this.toolInput.string(input.locationPreference),
+      this.toolInput.string(input.rawText ?? input.goal ?? input.message),
+      this.toolInput.stringArray(input.interestTags ?? input.tags).join(','),
+      limit ?? 10,
+    ]
+      .filter(Boolean)
+      .join(':')
+      .replace(/[^A-Za-z0-9\u4e00-\u9fa5:,_-]+/g, '_')
+      .slice(0, 120);
+    return `search_candidates:${task.id}:query:${fingerprint || 'empty'}`.slice(
+      0,
+      180,
+    );
+  }
+
+  private text(value: unknown): string {
+    return typeof value === 'string' ? value.replace(/\s+/g, ' ').trim() : '';
   }
 
   private async searchPublicIntents(
@@ -2257,9 +2335,26 @@ export class SocialAgentToolExecutorService {
       input,
       task.ownerUserId,
     );
+    const idempotencyKey =
+      this.text(input.idempotencyKey) ||
+      `ensure_following:${task.id}:${targetUserId}`;
     const friend = await this.friends.ensureFollowing(
       task.ownerUserId,
       targetUserId,
+      {
+        agentTaskId: task.id,
+        idempotencyKey,
+        metadata: {
+          source: 'social_agent_tool_executor',
+          toolName: SocialAgentToolName.AddFriend,
+          stepId,
+          targetUserId,
+          candidateRecordId: this.toolInput.number(input.candidateRecordId),
+          socialRequestId: this.toolInput.number(
+            input.socialRequestId ?? input.requestId,
+          ),
+        },
+      },
     );
     const friendRecord = this.toolInput.asRecord(friend);
     const rawFriendRequestId =
@@ -2284,6 +2379,7 @@ export class SocialAgentToolExecutorService {
       this.messageConversationOptions(task, stepId, {
         ...(this.toolInput.isRecord(input.metadata) ? input.metadata : {}),
         toolName: SocialAgentToolName.AddFriend,
+        idempotencyKey: `${idempotencyKey}:conversation`,
         targetUserId,
         candidateRecordId: this.toolInput.number(input.candidateRecordId),
         socialRequestId: this.toolInput.number(

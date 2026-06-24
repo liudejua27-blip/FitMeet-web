@@ -10,7 +10,7 @@ import {
 } from './social-agent-loop-state';
 import {
   buildSocialAgentConversationOptions,
-  buildSocialAgentMessageMetadata,
+  buildSocialAgentDelegateMessageOptions,
   buildSocialAgentMessageSendOptions,
 } from './social-agent-message-options';
 import { SocialAgentConfirmationPolicyService } from './social-agent-confirmation-policy.service';
@@ -98,7 +98,14 @@ export class SocialAgentMessageToolService {
       const conversation = await this.messages.startConversation(
         task.ownerUserId,
         targetUserId,
-        buildSocialAgentConversationOptions(task, stepId),
+        buildSocialAgentConversationOptions(task, stepId, {
+          targetUserId,
+          candidateRecordId: this.toolInput.number(input.candidateRecordId),
+          socialRequestId: this.toolInput.number(
+            input.socialRequestId ?? input.requestId,
+          ),
+          toolName: SocialAgentToolName.SendMessage,
+        }),
       );
       conversationId = conversation.conversationId;
     }
@@ -199,14 +206,12 @@ export class SocialAgentMessageToolService {
           conversationId,
           task.agentConnectionId,
           text,
-          {
-            ownerUserId: task.ownerUserId,
-            metadata: buildSocialAgentMessageMetadata(
-              task,
-              stepId,
-              input.metadata,
-            ),
-          },
+          buildSocialAgentDelegateMessageOptions(task, stepId, {
+            ...(this.toolInput.isRecord(input.metadata) ? input.metadata : {}),
+            targetUserId: targetForDedupe,
+            toolName: SocialAgentToolName.ReplyMessage,
+            textPreview: this.taskMemory.preview(text),
+          }),
         )
       : await this.messages.sendMessage(
           conversationId,

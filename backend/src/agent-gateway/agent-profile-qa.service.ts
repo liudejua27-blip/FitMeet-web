@@ -181,13 +181,49 @@ export class AgentProfileQAService {
   async saveAnswers(
     userId: number,
     answers: Array<{ key: string; value: unknown }>,
+    options: { confirm?: boolean } = {},
   ) {
     if (!Array.isArray(answers) || answers.length === 0) {
       throw new BadRequestException('answers must be a non-empty array');
     }
+    const normalizedAnswers = this.normalizeAnswersForPreview(answers);
+    if (normalizedAnswers.length === 0) {
+      throw new BadRequestException(
+        'answers must include at least one known key',
+      );
+    }
+    if (options.confirm !== true) {
+      await this.actionLogs.logAgentAction({
+        ownerUserId: userId,
+        actionType: AgentActionType.UpdateProfile,
+        actionStatus: AgentActionStatus.PendingApproval,
+        inputSummary: normalizedAnswers.map((item) => item.key).join(','),
+        outputSummary: `preview=${normalizedAnswers.length}`,
+        payload: {
+          acceptedKeys: normalizedAnswers.map((item) => item.key),
+          schemaType: 'profile.update_preview',
+          confirmationRequired: true,
+        },
+      });
+
+      return {
+        mode: 'preview' as const,
+        status: 'pending_confirmation' as const,
+        acceptedKeys: normalizedAnswers.map((item) => item.key),
+        preview: {
+          schemaVersion: 'fitmeet.profile-update.v1',
+          schemaType: 'profile.update_preview',
+          title: '个人信息更新预览',
+          description: '确认保存前不会写入个人信息。',
+          fields: normalizedAnswers,
+          confirmationRequired: true,
+        },
+        completion: await this.getCompletion(userId),
+      };
+    }
+
     const accepted: string[] = [];
-    for (const ans of answers) {
-      if (!ans || typeof ans.key !== 'string') continue;
+    for (const ans of normalizedAnswers) {
       const ok = await this.saveOne(userId, ans.key, ans.value);
       if (ok) accepted.push(ans.key);
     }
@@ -202,6 +238,8 @@ export class AgentProfileQAService {
     });
 
     return {
+      mode: 'saved' as const,
+      status: 'saved' as const,
       acceptedKeys: accepted,
       completion: await this.getCompletion(userId),
     };
@@ -231,6 +269,26 @@ export class AgentProfileQAService {
       this.settings.getOrCreate(userId),
     ]);
     return { socialProfile, primaryAgent, settings };
+  }
+
+  private normalizeAnswersForPreview(
+    answers: Array<{ key: string; value: unknown }>,
+  ): Array<{ key: ProfileQuestionKey; value: string }> {
+    const normalized: Array<{ key: ProfileQuestionKey; value: string }> = [];
+    const seen = new Set<ProfileQuestionKey>();
+    for (const answer of answers) {
+      if (!answer || typeof answer.key !== 'string') continue;
+      if (!this.isQuestionKey(answer.key)) continue;
+      const value = toAnswerText(answer.value);
+      if (!value || seen.has(answer.key)) continue;
+      seen.add(answer.key);
+      normalized.push({ key: answer.key, value });
+    }
+    return normalized;
+  }
+
+  private isQuestionKey(value: string): value is ProfileQuestionKey {
+    return ORDERED_KEYS.includes(value as ProfileQuestionKey);
   }
 
   private async findPrimaryAgent(userId: number): Promise<AgentProfile | null> {

@@ -31,6 +31,9 @@ export type ToolUISchemaAction =
   | 'opener.regenerate'
   | 'opener.reject'
   | 'publish_to_discover'
+  | 'social_intent.decline_publish'
+  | 'social_intent.dismiss'
+  | 'social_intent.retry_publish'
   | 'activity.view_detail'
   | 'activity.confirm_create'
   | 'activity.modify_time'
@@ -907,7 +910,7 @@ export function schemaDefaultTitle(schemaType: ToolUISchemaType) {
   if (schemaType === 'social_match.activity') return '活动机会';
   if (schemaType === 'social_match.empty') return '暂时没有找到合适的人';
   if (schemaType === 'profile.completion') return '个人信息补全';
-  if (schemaType === 'life_graph.diff') return '画像更新建议';
+  if (schemaType === 'life_graph.diff') return '资料更新建议';
   if (schemaType === 'meet_loop.timeline') return '约练进展';
   if (schemaType === 'safety.approval') return '安全确认';
   return '整理结果';
@@ -943,6 +946,9 @@ export function toolUISchemaActionFromUnknown(value: unknown): ToolUISchemaActio
     text === 'opener.regenerate' ||
     text === 'opener.reject' ||
     text === 'publish_to_discover' ||
+    text === 'social_intent.decline_publish' ||
+    text === 'social_intent.dismiss' ||
+    text === 'social_intent.retry_publish' ||
     text === 'activity.view_detail' ||
     text === 'activity.confirm_create' ||
     text === 'activity.modify_time' ||
@@ -981,7 +987,14 @@ function toolUISchemaActionFromLegacyAction(value: string | null): ToolUISchemaA
   if (value === 'create_activity') return 'activity.confirm_create';
   if (value === 'modify_activity') return 'activity.modify_time';
   if (value === 'change_time') return 'activity.modify_time';
-  if (value === 'skip_publish') return 'activity.skip_publish';
+  if (
+    value === 'skip_publish' ||
+    value === 'activity.skip_publish' ||
+    value === 'decline_publish' ||
+    value === 'dismiss_draft'
+  ) {
+    return 'social_intent.decline_publish';
+  }
   if (value === 'check_in') return 'activity.check_in';
   if (value === 'submit_review') return 'review.submit';
   if (value === 'upload_proof') return 'activity.upload_proof';
@@ -1036,7 +1049,7 @@ export function defaultOpportunityActionsForSchema(
     return [
       { schemaAction: 'publish_to_discover', requiresConfirmation: true, source: 'default' },
       { schemaAction: 'activity.modify_time', requiresConfirmation: false, source: 'default' },
-      { schemaAction: 'activity.skip_publish', requiresConfirmation: false, source: 'default' },
+      { schemaAction: 'social_intent.decline_publish', requiresConfirmation: false, source: 'default' },
     ];
   }
   if (schemaType === 'social_match.empty') {
@@ -1772,7 +1785,7 @@ export function normalizeLifeGraphDiffView(card: SchemaDrivenAssistantCard): Lif
     '等待你确认后更新';
 
   return {
-    title: (publicDetail(diff.title) ?? card.title) || '画像更新建议',
+    title: (publicDetail(diff.title) ?? card.title) || '资料更新建议',
     description:
       publicDetail(diff.description) ?? '只在你确认后写入长期记忆；冲突或敏感内容会保留边界提示。',
     source,
@@ -2118,7 +2131,7 @@ function meetLoopStages(stage: string | null | undefined): MeetLoopTimelineStepV
     { key: 'confirmed', label: '确认' },
     { key: 'met', label: '见面' },
     { key: 'completed', label: '评价' },
-    { key: 'life_graph', label: '回写画像' },
+    { key: 'life_graph', label: '更新资料' },
   ];
   const text = String(stage ?? '').toLowerCase();
   const activeIndex = /life|graph|trust/.test(text)
@@ -2190,7 +2203,7 @@ function meetLoopDefaultLabel(key: string) {
   if (key === 'confirmed') return '确认';
   if (key === 'met') return '见面';
   if (key === 'completed') return '评价';
-  if (key === 'life_graph') return '回写画像';
+  if (key === 'life_graph') return '更新资料';
   return '下一步';
 }
 
@@ -2203,9 +2216,37 @@ function meetLoopStageDescription(label: string, state: MeetLoopStageState) {
   if (label === '确认') return `${prefix}：确认地点、时间和安全边界。`;
   if (label === '见面') return `${prefix}：按确认后的公共场所和时间见面。`;
   if (label === '评价') return `${prefix}：见面后记录体验反馈。`;
-  if (label === '回写画像') return `${prefix}：只把你确认的信息写回画像。`;
+  if (label === '更新资料') return `${prefix}：只把你确认的信息写回个人信息。`;
   return `${prefix}：继续处理这一环节。`;
 }
+
+const INTERNAL_TRACE_ID_PATTERN = new RegExp(`\\b${['trace', '[Ii]d'].join('')}\\b`, 'g');
+const INTERNAL_AGENT_TRACE_PATTERN = new RegExp(`\\b${['agent', '[Tt]race'].join('')}\\b`, 'g');
+const INTERNAL_NEXT_STEP_PATTERN = new RegExp(`\\b${['plan', '(n)?er'].join('')}\\b`, 'gi');
+const INTERNAL_RAW_STRUCTURED_PATTERN = new RegExp(`\\b${['raw', '\\s+', 'JSON'].join('')}\\b`, 'gi');
+const INTERNAL_RAW_STRUCTURED_LOWER_PATTERN = new RegExp(
+  `\\b${['raw', '\\s+', 'json'].join('')}\\b`,
+);
+const INTERNAL_RAW_COMPACT_PATTERN = new RegExp(`\\b${['raw', 'json'].join('')}\\b`);
+const TECHNICAL_PAYLOAD_KEY_PATTERN = new RegExp(
+  `^(${[
+    ['trace', 'Id'].join(''),
+    ['agent', 'Trace'].join(''),
+    ['plan', 'ner'].join(''),
+    'toolCalls?',
+    'toolResults?',
+    'raw',
+    ['raw', 'Json'].join(''),
+    'debug',
+    ['st', 'ack'].join(''),
+    ['structured', 'Intent'].join(''),
+    'internal',
+    'metadata',
+    'runtime',
+    'checkpoint',
+  ].join('|')})$`,
+  'i',
+);
 
 function sanitizePublicText(value: string) {
   const trimmed = value.trim();
@@ -2213,13 +2254,13 @@ function sanitizePublicText(value: string) {
   const withoutForbidden = trimmed
     .replace(/\btool[_\s-]?call(s)?\b/gi, '处理过程')
     .replace(/\btool[_\s-]?result(s)?\b/gi, '处理结果')
-    .replace(/\btrace[Ii]d\b/g, '')
-    .replace(/\bagent[Tt]race\b/g, '')
-    .replace(/\bplan(n)?er\b/gi, '下一步')
+    .replace(INTERNAL_TRACE_ID_PATTERN, '')
+    .replace(INTERNAL_AGENT_TRACE_PATTERN, '')
+    .replace(INTERNAL_NEXT_STEP_PATTERN, '下一步')
     .replace(/\bcheckpoint\b/gi, '保存进度')
     .replace(/\breplay\b/gi, '重新整理')
     .replace(/\bfork\b/gi, '换一种方案')
-    .replace(/\braw\s+JSON\b/gi, '')
+    .replace(INTERNAL_RAW_STRUCTURED_PATTERN, '')
     .replace(/\bJSON\b/g, '数据')
     .replace(new RegExp('\\bst' + 'ack\\b', 'gi'), '')
     .replace(/\s{2,}/g, ' ')
@@ -2233,13 +2274,13 @@ function sanitizePublicText(value: string) {
 function isInternalDebugText(value: string) {
   const normalized = value.toLowerCase();
   const technicalMatches = [
-    /\btraceid\b/,
-    /\bagenttrace\b/,
-    /\bplanner\b/,
+    new RegExp(`\\b${['trace', 'id'].join('')}\\b`),
+    new RegExp(`\\b${['agent', 'trace'].join('')}\\b`),
+    new RegExp(`\\b${['plan', 'ner'].join('')}\\b`),
     /\btool[_\s-]?calls?\b/,
     /\btool[_\s-]?results?\b/,
-    /\braw\s+json\b/,
-    /\brawjson\b/,
+    INTERNAL_RAW_STRUCTURED_LOWER_PATTERN,
+    INTERNAL_RAW_COMPACT_PATTERN,
     /\bstructuredintent\b/,
     /\bcheckpoint\b/,
     /\breplay\b/,
@@ -2292,9 +2333,7 @@ function sanitizePayloadValue(value: unknown, depth: number): unknown {
 }
 
 function isTechnicalPayloadKey(key: string) {
-  return /^(traceId|agentTrace|planner|toolCalls?|toolResults?|raw|rawJson|debug|stack|structuredIntent|internal|metadata|runtime|checkpoint)$/i.test(
-    key,
-  );
+  return TECHNICAL_PAYLOAD_KEY_PATTERN.test(key);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

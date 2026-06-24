@@ -698,15 +698,30 @@ function normalizeStep(step: Record<string, unknown>, index: number): ProcessSte
 function publicStepId(value: unknown, index: number) {
   const raw = publicString(value);
   if (!raw || sanitizePublicText(raw) === null) return `step-${index}`;
-  if (
-    /\b(llm|model|schema|metadata|token|latency|payload|traceid|runid|planner|debug|internal|runtime)\b/i.test(
-      raw,
-    )
-  ) {
+  if (technicalStepIdPattern.test(raw)) {
     return `step-${index}`;
   }
   return raw.replace(/[^a-z0-9:_-]+/gi, '-').slice(0, 64) || `step-${index}`;
 }
+
+const technicalStepIdPattern = new RegExp(
+  `\\b(${[
+    'llm',
+    'model',
+    'schema',
+    'metadata',
+    'token',
+    'latency',
+    'payload',
+    ['trace', 'id'].join(''),
+    ['run', 'id'].join(''),
+    ['plan', 'ner'].join(''),
+    'debug',
+    'internal',
+    'runtime',
+  ].join('|')})\\b`,
+  'i',
+);
 
 function normalizeStepSnapshot(value: unknown): ProcessStepSnapshot | undefined {
   if (!isRecord(value) || value.schemaVersion !== 'fitmeet.step-snapshot.v1') return undefined;

@@ -1,6 +1,12 @@
-import { useCallback, useRef } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 
 import { useAuthStore } from '../../stores';
+import {
+  socialProfileApi,
+  type SocialProfileCompletion,
+  type SocialProfileQuestion,
+} from '../../api/socialProfileApi';
+import type { FitMeetAlphaCard, UserFacingAgentResponse } from '../../api/socialAgentApi';
 import { buildAgentAssistantProps } from './buildAgentAssistantProps';
 import { useSocialAgentThreadStore } from './socialAgentThreadStore';
 import {
@@ -122,6 +128,7 @@ export function useAgentWorkspaceController(view: AgentView) {
     nextId,
   });
   const skipNextRestoreRef = useRef(false);
+  const profileCompletionBootstrapRef = useRef<string | null>(null);
   const createBranchForNextAssistantRef = useRef(false);
   const { agentAdapter, isRealAgent } = useAgentAdapterRuntime();
   const currentUserId = user?.id ?? null;
@@ -171,10 +178,73 @@ export function useAgentWorkspaceController(view: AgentView) {
   const resetConversation = useCallback(() => {
     clearStoredAgentThread(currentUserId);
     skipNextRestoreRef.current = true;
+    profileCompletionBootstrapRef.current = null;
     resetConversationCore(conversationSteps);
     setIsRunning(false);
     runConversationIntentRef.current = 'conversation';
   }, [currentUserId, resetConversationCore, runConversationIntentRef, setIsRunning]);
+
+  useEffect(() => {
+    const userKey = currentUserId ? String(currentUserId) : null;
+    if (!userKey) return;
+    const explicitProfileIntent = /(?:^|[?&])intent=profile(?:&|$)/.test(location.search);
+    if (!isRealAgent || !isLoggedIn || shellView !== 'chat' || sessionRestoring || isRunning) {
+      return;
+    }
+    if (profileCompletionBootstrapRef.current === userKey && !explicitProfileIntent) return;
+    if (messages.some(messageHasProfileCompletionCard)) return;
+    if (messages.length > 0 && !explicitProfileIntent) return;
+
+    let cancelled = false;
+    profileCompletionBootstrapRef.current = userKey;
+    socialProfileApi
+      .questions()
+      .then(({ questions, completion }) => {
+        if (cancelled) return;
+        if (!shouldShowProfileCompletionCard(completion)) return;
+        const response = buildProfileCompletionBootstrapResponse({
+          userId: userKey,
+          questions,
+          completion,
+          permissionMode: mode,
+        });
+        setMessages((current) => {
+          if (current.some(messageHasProfileCompletionCard)) return current;
+          if (current.length > 0 && !explicitProfileIntent) return current;
+          return [
+            ...current,
+            {
+              id: `assistant-profile-completion-${Date.now()}`,
+              role: 'assistant',
+              content: response.assistantMessage,
+              status: 'done',
+              result: response,
+              assistantMessageSource: response.assistantMessageSource,
+              showSocialResult: true,
+              conversationIntent: 'conversation',
+            },
+          ];
+        });
+      })
+      .catch(() => {
+        profileCompletionBootstrapRef.current = null;
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    currentUserId,
+    isLoggedIn,
+    isRealAgent,
+    isRunning,
+    location.search,
+    messages,
+    mode,
+    sessionRestoring,
+    setMessages,
+    shellView,
+  ]);
 
   const { refreshThreads, startNewThread, loadThread, renameThread, deleteThread } =
     useAgentThreadRuntime({
@@ -454,8 +524,7 @@ export function useAgentWorkspaceController(view: AgentView) {
     onToggleReminders: isRealAgent && isLoggedIn ? toggleReminders : undefined,
     onDisableReminders: isRealAgent && isLoggedIn ? disableReminders : undefined,
     onDismissReminder: isRealAgent && isLoggedIn ? dismissReminder : undefined,
-    onUpdateReminderPreference:
-      isRealAgent && isLoggedIn ? updateReminderSettings : undefined,
+    onUpdateReminderPreference: isRealAgent && isLoggedIn ? updateReminderSettings : undefined,
     onApproveApproval: approveInlineApproval,
     onRejectApproval: rejectInlineApproval,
     onResumeState: resumeState,
@@ -466,4 +535,162 @@ export function useAgentWorkspaceController(view: AgentView) {
   });
 
   return { assistantProps };
+}
+
+function shouldShowProfileCompletionCard(completion: SocialProfileCompletion | null | undefined) {
+  if (!completion) return true;
+  if (completion.readinessLevel !== 'agent_ready') return true;
+  return (completion.missingFields ?? []).length > 0;
+}
+
+function messageHasProfileCompletionCard(message: { result?: UserFacingAgentResponse | null }) {
+  return Boolean(
+    message.result?.cards?.some(
+      (card) => card.type === 'profile_completion' || card.schemaType === 'profile.completion',
+    ),
+  );
+}
+
+function buildProfileCompletionBootstrapResponse(input: {
+  userId: string;
+  questions: SocialProfileQuestion[];
+  completion: SocialProfileCompletion;
+  permissionMode: UserFacingAgentResponse['permissionMode'];
+}): UserFacingAgentResponse {
+  const questions = normalizeProfileCompletionQuestions(input.questions);
+  const card: FitMeetAlphaCard = {
+    id: `profile_completion:onboarding:${input.userId}:${input.completion.percent ?? 0}`,
+    type: 'profile_completion',
+    schemaVersion: 'fitmeet.tool-ui.v1',
+    schemaType: 'profile.completion',
+    title: '让 Agent 帮你补充个人信息',
+    body: '回答几个问题后，我会先生成更新预览；确认后才保存到个人信息。',
+    status: 'waiting_confirmation',
+    data: {
+      schemaName: 'ProfileCompletionCard',
+      schemaVersion: 'fitmeet.tool-ui.v1',
+      schemaType: 'profile.completion',
+      questionCount: questions.length,
+      missingFields: input.completion.missingFields ?? [],
+      questions,
+      savePolicy: 'preview_before_write',
+      boundaries: [
+        '不会推荐具体人物',
+        '不会生成邀约文案',
+        '不会自动开始匹配',
+        '所有问题都可以跳过',
+      ],
+    },
+    actions: [],
+  };
+  return {
+    assistantMessage:
+      '我先帮你补充个人信息。你可以回答几个问题，我会先生成更新预览，确认后才保存。',
+    assistantMessageSource: 'deterministic_route',
+    lightStatus: '正在整理回复',
+    cards: [card],
+    safeStatus: {
+      blocked: false,
+      level: 'low',
+      boundaryNotes: [],
+      requiredConfirmations: [],
+    },
+    pendingConfirmations: [],
+    publicLoop: {
+      stage: 'profile_completion',
+      publicIntentId: null,
+      discoverHref: null,
+      publicIntentHref: null,
+      messagesHref: null,
+      requiredConfirmation: false,
+    },
+    permissionMode: input.permissionMode,
+  };
+}
+
+function normalizeProfileCompletionQuestions(questions: SocialProfileQuestion[]) {
+  const normalized = questions
+    .map((question) => ({
+      key: question.key,
+      label: profileCompletionQuestionLabel(question),
+      question: question.question,
+      placeholder: profileCompletionQuestionPlaceholder(question),
+      options: profileCompletionQuestionOptions(question),
+    }))
+    .filter((question) => question.key.trim() && question.question.trim());
+  return normalized.length > 0 ? normalized.slice(0, 6) : fallbackProfileCompletionQuestions();
+}
+
+function profileCompletionQuestionLabel(question: SocialProfileQuestion) {
+  const text = `${question.key} ${question.domain ?? ''} ${question.matchRole ?? ''} ${question.question}`;
+  if (/city|nearby|location|地点|城市|附近|范围/i.test(text)) return '城市与活动范围';
+  if (/time|available|availability|weekday|weekend|时间|周末|工作日/i.test(text)) {
+    return '可约时间';
+  }
+  if (/interest|fitness|sport|activity|兴趣|运动|活动/i.test(text)) return '兴趣活动';
+  if (/want|preferred|meet|preference|想认识|偏好|类型/i.test(text)) return '想认识的人';
+  if (/privacy|reject|avoid|boundary|safe|安全|边界|隐私|拒绝/i.test(text)) return '安全边界';
+  return '补充信息';
+}
+
+function profileCompletionQuestionPlaceholder(question: SocialProfileQuestion) {
+  const label = profileCompletionQuestionLabel(question);
+  if (label === '城市与活动范围') return '例如：青岛大学附近，3 公里内';
+  if (label === '可约时间') return '例如：周末下午，工作日晚上也可以';
+  if (label === '兴趣活动') return '例如：跑步、羽毛球、散步、健身';
+  if (label === '想认识的人') return '例如：节奏轻松、愿意先站内沟通的人';
+  if (label === '安全边界') return '例如：只接受公共场所，不交换联系方式';
+  return '可以简单说一句，也可以选暂不确定';
+}
+
+function profileCompletionQuestionOptions(question: SocialProfileQuestion) {
+  const label = profileCompletionQuestionLabel(question);
+  if (label === '城市与活动范围') return ['青岛', '学校或公司附近', '3 公里内', '暂不确定'];
+  if (label === '可约时间') return ['周末下午', '工作日晚上', '今天晚上', '暂不确定'];
+  if (label === '兴趣活动') return ['跑步', '羽毛球', '散步', '健身', '暂不确定'];
+  if (label === '想认识的人') return ['找运动搭子', '低压力轻松聊', '先运动后熟悉', '暂不确定'];
+  if (label === '安全边界') {
+    return ['只接受公共场所', '先站内沟通', '不交换联系方式', '不接受太晚见面', '暂不确定'];
+  }
+  return ['暂不确定'];
+}
+
+function fallbackProfileCompletionQuestions() {
+  return [
+    {
+      key: 'currentGoal',
+      label: '当前目标',
+      question: '你这次最想达成什么？',
+      placeholder: '例如：找一个周末下午能一起慢跑的搭子',
+      options: ['找运动搭子', '找轻松聊天的人', '参加附近活动', '暂不确定'],
+    },
+    {
+      key: 'interactionStyle',
+      label: '互动形式',
+      question: '你更偏好怎样开始互动？',
+      placeholder: '例如：先站内聊，再约公共路线',
+      options: ['先站内沟通', '低压力轻松聊', '先运动后熟悉', '暂不确定'],
+    },
+    {
+      key: 'timeLocation',
+      label: '时间和地点',
+      question: '你方便的时间和地点范围？',
+      placeholder: '例如：青岛大学附近，周末下午，3 公里内',
+      options: ['今天晚上', '周末下午', '学校或公司附近', '3 公里内', '暂不确定'],
+    },
+    {
+      key: 'activityPreference',
+      label: '活动偏好',
+      question: '你更想参加哪类活动？',
+      placeholder: '例如：3-5km 慢跑，节奏轻松',
+      options: ['跑步', '羽毛球', '散步', '健身', '暂不确定'],
+    },
+    {
+      key: 'safetyBoundary',
+      label: '安全边界',
+      question: '有哪些必要的安全边界？',
+      placeholder: '例如：只接受公共场所，不交换联系方式',
+      options: ['只接受公共场所', '不交换联系方式', '不接受太晚见面', '暂不确定'],
+    },
+  ];
 }

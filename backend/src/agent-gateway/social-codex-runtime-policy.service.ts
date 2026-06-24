@@ -312,8 +312,8 @@ export class SocialCodexRuntimePolicyService {
     if (actionType === 'offline_meeting') return '线下见面确认预览';
     if (actionType === 'exchange_contact') return '联系方式交换预览';
     if (actionType === 'reveal_precise_location') return '位置公开预览';
-    if (actionType === 'update_sensitive_profile') return '画像更新预览';
-    if (actionType === 'life_graph_writeback') return '画像更新预览';
+    if (actionType === 'update_sensitive_profile') return '资料更新预览';
+    if (actionType === 'life_graph_writeback') return '资料更新预览';
     if (actionType === 'payment') return '支付动作预览';
     return '工具执行预览';
   }

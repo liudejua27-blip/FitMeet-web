@@ -47,7 +47,7 @@ export function socialAgentAssistantMessageForRoute(input: {
     route.intent === 'profile_enrichment_request' ||
     route.intent === 'correction_or_clarification'
   ) {
-    return '我先按你的画像信息来理解，不会直接搜索候选人。';
+    return '我先按你的个人信息来理解，不会直接搜索候选人。';
   }
   if (route.intent === 'profile_update') {
     return '已记住你的偏好，并写入当前上下文。等你明确说要找人、找活动或找搭子时，我再开始匹配。';

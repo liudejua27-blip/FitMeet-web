@@ -66,11 +66,7 @@ export class SocialAgentDraftSearchService {
     });
     this.assertNotAborted(input.signal);
     task = input.refreshTask ? await input.refreshTask() : task;
-    const searchResult = await this.searchCandidates(task, draft, {
-      signal: input.signal ?? null,
-    });
-    this.assertNotAborted(input.signal);
-    task = input.refreshTask ? await input.refreshTask() : task;
+    const searchResult = this.publishRequiredBeforeMatchingResult();
     return {
       task,
       draft,
@@ -296,6 +292,16 @@ export class SocialAgentDraftSearchService {
         blockedReason: gate.reason,
       };
     }
+    if (this.isPublicDemandFlow(task, draft)) {
+      return {
+        autoPublished: false,
+        synced: false,
+        publicIntentId: null,
+        discoverHref: null,
+        publishPolicy: 'requires_user_confirmation',
+        blockedReason: 'explicit_publish_confirmation_required',
+      };
+    }
 
     if (!draft.socialRequestId) {
       return {
@@ -429,6 +435,46 @@ export class SocialAgentDraftSearchService {
       message,
       debugReasons,
     };
+  }
+
+  private publishRequiredBeforeMatchingResult(): SocialAgentCandidateSearchResult {
+    return {
+      candidates: [],
+      emptyReason: null,
+      message: '约练卡发布到发现页并读回可见后，才会继续推荐候选。',
+      debugReasons: null,
+    };
+  }
+
+  private isPublicDemandFlow(
+    task: AgentTask,
+    draft: SocialAgentRequestDraft,
+  ): boolean {
+    const metadata = this.isRecord(draft.metadata) ? draft.metadata : {};
+    const explicitMode = cleanDisplayText(
+      metadata.productMode ??
+        metadata.discoveryMode ??
+        metadata.matchingMode ??
+        metadata.flowMode,
+      '',
+    )
+      .trim()
+      .toLowerCase();
+    if (explicitMode === 'private_discovery') return false;
+    const memoryRecord = this.isRecord(task.memory) ? task.memory : {};
+    const taskMemory = this.isRecord(memoryRecord.taskMemory)
+      ? memoryRecord.taskMemory
+      : {};
+    const socialAgentChat = this.isRecord(memoryRecord.socialAgentChat)
+      ? memoryRecord.socialAgentChat
+      : {};
+    const memoryMode = cleanDisplayText(
+      taskMemory.socialMode ?? socialAgentChat.socialMode,
+      '',
+    )
+      .trim()
+      .toLowerCase();
+    return memoryMode !== 'private_discovery';
   }
 
   private readMatchedCandidates(output: unknown): MatchedCandidateView[] {

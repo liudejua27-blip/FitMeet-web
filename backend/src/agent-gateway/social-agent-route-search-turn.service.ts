@@ -1,7 +1,9 @@
 import { Injectable } from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
 
 import { cleanDisplayText } from '../common/display-text.util';
-import type { AgentTask } from './entities/agent-task.entity';
+import { AgentTask } from './entities/agent-task.entity';
 import {
   hasSocialAgentSearchResultContext,
   socialAgentCandidateFollowupReply,
@@ -28,6 +30,7 @@ import {
   buildSocialAgentPublishConfirmationCard,
   shouldCreateOpportunityCardBeforeCandidates,
 } from './social-agent-opportunity-card-draft';
+import { rememberSocialAgentOpportunityDraft } from './social-agent-opportunity-draft-memory';
 
 type QueueInitialSearchForTask = (
   ownerUserId: number,
@@ -69,6 +72,8 @@ type HandleRouteSearchTurnResult = {
 @Injectable()
 export class SocialAgentRouteSearchTurnService {
   constructor(
+    @InjectRepository(AgentTask)
+    private readonly taskRepo: Repository<AgentTask>,
     private readonly profileEnrichment: SocialAgentProfileEnrichmentService,
     private readonly activitySearch: SocialAgentActivitySearchService,
     private readonly profileGate: SocialAgentProfileGateService,
@@ -168,6 +173,38 @@ export class SocialAgentRouteSearchTurnService {
         savedContext: true,
       };
     }
+    if (
+      shouldCreateOpportunityCardBeforeCandidates(clarification.searchGoal) &&
+      !this.hasPublishedOpportunityContext(input.task)
+    ) {
+      const draft = buildSocialAgentOpportunityDraftFromTask(
+        input.task,
+        clarification.searchGoal,
+      );
+      if (!draft.ready) {
+        return {
+          ...this.emptyResult(true),
+          assistantMessage: draft.assistantMessage,
+          assistantMessageSource: 'deterministic_route',
+          savedContext: true,
+        };
+      }
+      rememberSocialAgentOpportunityDraft(input.task, draft.draft);
+      await this.taskRepo.save(input.task);
+      return {
+        ...this.emptyResult(true),
+        assistantMessage:
+          '我先帮你整理成一张约练卡片，你确认后再发布。发布前不会公开，也不会直接推荐候选。',
+        assistantMessageSource: 'deterministic_route',
+        savedContext: true,
+        cards: [
+          buildSocialAgentPublishConfirmationCard({
+            task: input.task,
+            draft: draft.draft,
+          }),
+        ],
+      };
+    }
     this.assertNotAborted(input.signal);
     const gate = await this.profileGate.evaluateForSocialExecution({
       ownerUserId: input.ownerUserId,
@@ -204,36 +241,6 @@ export class SocialAgentRouteSearchTurnService {
           savedContext: true,
         };
       }
-    }
-    if (
-      shouldCreateOpportunityCardBeforeCandidates(clarification.searchGoal) &&
-      !this.hasPublishedOpportunityContext(input.task)
-    ) {
-      const draft = buildSocialAgentOpportunityDraftFromTask(
-        input.task,
-        clarification.searchGoal,
-      );
-      if (!draft.ready) {
-        return {
-          ...this.emptyResult(true),
-          assistantMessage: draft.assistantMessage,
-          assistantMessageSource: 'deterministic_route',
-          savedContext: true,
-        };
-      }
-      return {
-        ...this.emptyResult(true),
-        assistantMessage:
-          '我先帮你整理成一张约练卡片，你确认后再发布。发布前不会公开，也不会直接推荐候选。',
-        assistantMessageSource: 'deterministic_route',
-        savedContext: true,
-        cards: [
-          buildSocialAgentPublishConfirmationCard({
-            task: input.task,
-            draft: draft.draft,
-          }),
-        ],
-      };
     }
     return this.queueSearch(input, clarification.searchGoal);
   }

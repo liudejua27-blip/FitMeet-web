@@ -600,7 +600,7 @@ describe('SocialAgentChatLlmService', () => {
       memoryContext: null,
     });
 
-    expect(answer).toContain('人物画像是 FitMeet 用来理解');
+    expect(answer).toContain('个人信息是 FitMeet 用来理解');
     expect(answer).not.toContain('等你明确说要找人');
     expect(metrics.recordError).toHaveBeenCalledWith(
       'social_agent_chat_deepseek_failed',
@@ -648,7 +648,7 @@ describe('SocialAgentChatLlmService', () => {
     expect(aborts).toHaveLength(0);
     await jest.advanceTimersByTimeAsync(1);
     const fallbackAnswer = await answer;
-    expect(fallbackAnswer).toContain('FitMeet 的 AI 社交助理');
+    expect(fallbackAnswer).toContain('FitMeet Agent');
     expect(fallbackAnswer).not.toContain('等你明确说要找人');
     expect(aborts).toHaveLength(1);
     expect(metrics.recordError).toHaveBeenCalledWith(

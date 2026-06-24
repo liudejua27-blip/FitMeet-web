@@ -98,7 +98,6 @@ function mockApprovalResumePlan(
     },
     idempotencyKey,
     interrupt: null,
-    traceId: 'trace-1',
     runId: 'run-1',
     ...overrides,
   };
@@ -835,11 +834,8 @@ describe('AgentWorkspacePage', () => {
           expiresAt: null,
         },
       ],
-      runtime: {
-        runId: 'run-card-replay',
-        messageId: 'assistant-message-card-replay',
-        threadId: 'agent-task:101',
-      },
+      taskId: 101,
+      workflow: mockWorkflow('run-card-replay'),
     };
     vi.spyOn(socialAgentApi, 'runUserFacingStream').mockImplementation(async (_data, onEvent) => {
       onEvent({
@@ -1281,7 +1277,7 @@ describe('AgentWorkspacePage', () => {
     expect(screen.queryByTestId('assistant-ui-branch-picker')).not.toBeInTheDocument();
   });
 
-  it('keeps subsequent messages in the backend thread returned by the run runtime', async () => {
+  it('keeps subsequent messages in the backend thread returned by the public task result', async () => {
     useRealAgentAdapter();
     useAuthStore.setState({ isLoggedIn: true, showLoginModal: false });
     vi.spyOn(socialAgentApi, 'restoreSession').mockResolvedValue(emptySession());
@@ -1302,33 +1298,25 @@ describe('AgentWorkspacePage', () => {
     });
     const firstResponse = {
       ...mockResponse(),
+      taskId: 101,
       assistantMessage: '我记住了，这段会话会继续沿用同一个 thread。',
       cards: [],
-      runtime: {
-        ...(mockResponse().runtime ?? {}),
-        threadId: 'social-thread:stable-1',
-      },
+      workflow: mockWorkflow('social-thread-stable-1'),
     };
     const secondResponse = {
       ...mockResponse(),
+      taskId: 101,
       assistantMessage: '继续在同一段会话里处理。',
       cards: [],
-      runtime: {
-        ...(mockResponse().runtime ?? {}),
-        threadId: 'social-thread:stable-1',
-      },
+      workflow: mockWorkflow('social-thread-stable-1'),
     };
     const streamSpy = vi
       .spyOn(socialAgentApi, 'runUserFacingStream')
       .mockImplementationOnce(async (_data, onEvent) => {
-        onEvent({ type: 'assistant_delta', delta: firstResponse.assistantMessage, source: 'llm' });
-        onEvent({ type: 'assistant_done', source: 'llm' });
         onEvent({ type: 'result', result: firstResponse });
         return firstResponse;
       })
       .mockImplementationOnce(async (_data, onEvent) => {
-        onEvent({ type: 'assistant_delta', delta: secondResponse.assistantMessage, source: 'llm' });
-        onEvent({ type: 'assistant_done', source: 'llm' });
         onEvent({ type: 'result', result: secondResponse });
         return secondResponse;
       });
@@ -1340,11 +1328,12 @@ describe('AgentWorkspacePage', () => {
 
     submitPrompt('可以，继续帮我找人');
     expect(await screen.findByText(secondResponse.assistantMessage)).toBeInTheDocument();
+    expect(screen.getAllByText(secondResponse.assistantMessage)).toHaveLength(1);
 
     expect(streamSpy).toHaveBeenCalledTimes(2);
     expect(streamSpy.mock.calls[1]?.[0]).toMatchObject({
       clientContext: expect.objectContaining({
-        threadId: 'social-thread:stable-1',
+        threadId: 'agent-task:101',
       }),
     });
     expect(createThreadSpy).not.toHaveBeenCalled();
@@ -2450,17 +2439,9 @@ describe('AgentWorkspacePage', () => {
                 ...mockResponse(),
                 assistantMessage: '活动已经按你的确认进入发起流程，后续回复会继续保存在这里。',
                 lightStatus: '正在等待你确认' as const,
-                runtime: {
-                  checkpointId: 8101,
-                  checkpointType: 'interrupt',
-                  canReplay: true,
-                  canFork: true,
-                  resumeCursor: {
-                    threadId: 'agent-task:101',
-                    action: 'resume',
-                    stepId: 'activity-create-8101',
-                  },
-                },
+                workflow: mockWorkflow('agent-task:101', 'RECOVERY', {
+                  recoveryMessage: '活动已经按你的确认进入发起流程，后续回复会继续保存在这里。',
+                }),
                 cards: [
                   {
                     id: 'meet-loop-activity-created',
@@ -2656,7 +2637,7 @@ describe('AgentWorkspacePage', () => {
     expect(document.querySelector('[data-meet-loop-step="met"]')).toHaveTextContent('见面');
     expect(document.querySelector('[data-meet-loop-step="completed"]')).toHaveTextContent('评价');
     expect(document.querySelector('[data-meet-loop-step="life_graph"]')).toHaveTextContent(
-      '回写画像',
+      '更新资料',
     );
     expect(screen.getByText('安全见面')).toBeInTheDocument();
     expect(screen.getByText('确认后回写')).toBeInTheDocument();
@@ -2886,7 +2867,7 @@ describe('AgentWorkspacePage', () => {
     expect(activityCreateButton).toHaveAttribute('data-requires-confirmation', 'true');
     expect(activityCreateButton).toHaveAttribute('data-checkpoint-required', 'true');
     expect(getEnabledSchemaActionButton('activity.modify_time')).not.toBeNull();
-    expect(getEnabledSchemaActionButton('activity.skip_publish')).not.toBeNull();
+    expect(getEnabledSchemaActionButton('social_intent.decline_publish')).not.toBeNull();
     expect(actionStreamSpy).not.toHaveBeenCalled();
   });
 
@@ -2985,7 +2966,7 @@ describe('AgentWorkspacePage', () => {
         threadId: 101,
         taskId: 101,
         title: '暂不发布约练卡',
-        preview: '约练卡保留为草稿',
+        preview: '约练卡已取消发布',
         status: 'regular',
         goal: '暂不发布约练卡',
         messageCount: 1,
@@ -3006,7 +2987,7 @@ describe('AgentWorkspacePage', () => {
 
     await waitFor(() => expect(getEnabledSchemaActionButton('publish_to_discover')).not.toBeNull());
     expect(getEnabledSchemaActionButton('activity.modify_time')).not.toBeNull();
-    expect(getEnabledSchemaActionButton('activity.skip_publish')).not.toBeNull();
+    expect(getEnabledSchemaActionButton('social_intent.decline_publish')).not.toBeNull();
     expect(screen.queryByTestId('assistant-ui-inline-approval-panel')).not.toBeInTheDocument();
     expect(screen.queryByTestId('assistant-ui-approval-tool')).not.toBeInTheDocument();
     expect(screen.getByText('确认发布')).toBeInTheDocument();
@@ -3242,7 +3223,7 @@ describe('AgentWorkspacePage', () => {
 
     submitPrompt('帮我找青岛周末跑步搭子，并继续推进对方回复');
 
-    expect(await screen.findByText('画像更新建议')).toBeInTheDocument();
+    expect(await screen.findByText('资料更新建议')).toBeInTheDocument();
     expect(screen.getByText('对方询问见面地点。')).toBeInTheDocument();
     expect(screen.getAllByText('对方回复后的弱互动信号').length).toBeGreaterThanOrEqual(1);
     expect(screen.getByTestId('life-graph-source-boundary')).toHaveAttribute(
@@ -3404,9 +3385,9 @@ describe('AgentWorkspacePage', () => {
     expect(stageOverview).toHaveTextContent('确认');
     expect(stageOverview).toHaveTextContent('见面');
     expect(stageOverview).toHaveTextContent('评价');
-    expect(stageOverview).toHaveTextContent('回写画像');
+    expect(stageOverview).toHaveTextContent('更新资料');
     expect(screen.getByTestId('life-graph-counterpart-reply-note')).toHaveTextContent(
-      '确认前不会写入长期画像',
+      '确认前不会写入长期偏好',
     );
     expect(screen.getByText('低压力开场互动信号')).toBeInTheDocument();
     expect(screen.getByText(/不会写入精确位置或私聊内容/)).toBeInTheDocument();
@@ -3949,17 +3930,9 @@ describe('AgentWorkspacePage', () => {
         const response: UserFacingAgentResponse = {
           ...mockResponse(),
           assistantMessage: '已从确认点继续处理。',
-          runtime: {
-            checkpointId: 7001,
-            checkpointType: 'interrupt',
-            canReplay: true,
-            canFork: true,
-            resumeCursor: {
-              threadId: 'agent-task:101',
-              action: 'resume',
-              stepId: 'approval-9001',
-            },
-          },
+          workflow: mockWorkflow('agent-task:101', 'RECOVERY', {
+            recoveryMessage: '已从确认点继续处理。',
+          }),
           cards: [
             {
               id: 'meet-loop-message-sent',
@@ -4225,17 +4198,9 @@ describe('AgentWorkspacePage', () => {
               : {
                   ...mockResponse(),
                   assistantMessage: '已确认发送给小林，接下来等待对方回复。',
-                  runtime: {
-                    checkpointId: 7101,
-                    checkpointType: 'interrupt',
-                    canReplay: true,
-                    canFork: true,
-                    resumeCursor: {
-                      threadId: 'agent-task:101',
-                      action: 'resume',
-                      stepId: 'message-sent-7101',
-                    },
-                  },
+                  workflow: mockWorkflow('agent-task:101', 'RECOVERY', {
+                    recoveryMessage: '已确认发送给小林，接下来等待对方回复。',
+                  }),
                   cards: [
                     {
                       id: 'meet-loop-main-chain',
@@ -8054,14 +8019,14 @@ describe('AgentWorkspacePage', () => {
     expect(
       Number(screen.getByTestId('assistant-ui-tool-ui').getAttribute('data-pending-count')),
     ).toBeGreaterThanOrEqual(0);
-    expect(screen.getByTestId('assistant-ui-tool-ui')).toHaveAttribute('data-replayable', 'true');
+    expect(screen.getByTestId('assistant-ui-tool-ui')).toHaveAttribute('data-replayable', 'false');
     expect(screen.getByTestId('assistant-ui-tool-ui')).toHaveAttribute(
       'data-checkpoint-state',
-      'waiting',
+      'none',
     );
     expect(screen.getByTestId('assistant-ui-tool-ui')).toHaveAttribute(
       'data-has-checkpoint',
-      'true',
+      'false',
     );
     expect(screen.getByTestId('assistant-ui-approval-tool')).toBeInTheDocument();
     expect(screen.getByTestId('assistant-ui-approval-tool')).toHaveAttribute(
@@ -8253,14 +8218,14 @@ describe('AgentWorkspacePage', () => {
     submitPrompt('帮我连接这个候选人');
 
     const approvalTool = await screen.findByTestId('assistant-ui-approval-tool');
-    expect(approvalTool).toHaveAttribute('data-has-checkpoint', 'true');
-    expect(approvalTool).toHaveAttribute('data-checkpoint-id', '99');
+    expect(approvalTool).toHaveAttribute('data-has-checkpoint', 'false');
+    expect(approvalTool).toHaveAttribute('data-checkpoint-id', '');
     expect(approvalTool).toHaveAttribute('data-approval-state', 'pending');
     const approveButton = await screen.findByRole('button', { name: '确认加好友' });
     expect(approveButton).toHaveAttribute('data-testid', 'assistant-ui-approval-action');
     expect(approveButton).toHaveAttribute('data-approval-action', 'approve');
     expect(approveButton).toHaveAttribute('data-approval-id', '88');
-    expect(approveButton).toHaveAttribute('data-checkpoint-id', '99');
+    expect(approveButton).toHaveAttribute('data-checkpoint-id', '');
 
     fireEvent.click(approveButton);
 
@@ -8725,85 +8690,22 @@ describe('AgentWorkspacePage', () => {
         return replayed;
       });
 
-    const exerciseCheckpointAction = async (
-      label: '重新整理' | '换一种方案',
-      action: 'replay' | 'fork',
-    ) => {
-      const view = await renderAgentPage();
+    await renderAgentPage();
+    submitPrompt('我想找周末跑步搭子，帮我整理一个可重新整理的步骤');
 
-      submitPrompt(`我想找周末跑步搭子，帮我整理一个可${label}的步骤`);
-
-      const tool = await screen.findByTestId('assistant-ui-tool-ui');
-      expect(tool).toHaveAttribute('data-checkpoint-state', 'replayable-forkable');
-      expect(tool).toHaveAttribute('data-has-checkpoint', 'true');
-      expect(tool).toHaveAttribute('data-step-id', checkpointStepId);
-      expect(tool).toHaveAttribute('data-render-mode', 'tool-ui');
-      expect(tool).toHaveAttribute('data-process-status', 'complete');
-      expect(tool).toHaveAttribute('data-replayable', 'true');
-      expect(tool).toHaveAttribute('data-forkable', 'true');
-      expect(tool).not.toHaveAttribute('open');
-      expect(screen.queryByTestId('assistant-ui-resume-scope')).not.toBeInTheDocument();
-      const summary = tool.querySelector('summary');
-      expect(summary).not.toBeNull();
-      fireEvent.click(summary as HTMLElement);
-      const compactResumeState = await screen.findByTestId('assistant-ui-compact-resume-state');
-      expect(compactResumeState).toHaveAttribute('data-display-model', 'compact-product-copy');
-      expect(compactResumeState).toHaveTextContent('进度已整理');
-      expect(compactResumeState).toHaveTextContent('可以继续追问、重新整理，或换一种方案。');
-      expect(screen.queryByTestId('assistant-ui-resume-scope')).not.toBeInTheDocument();
-      expect(screen.queryByTestId('assistant-ui-resume-flow')).not.toBeInTheDocument();
-      expect(tool).toHaveAttribute('data-process-display', 'compact');
-      expect(tool).toHaveAttribute('data-process-surface', 'single-line-status');
-      expect(tool).toHaveAttribute('data-process-update-model', 'latest-state');
-      expect(tool).toHaveAttribute('data-process-rendering', 'covering-status');
-      expect(tool).toHaveAttribute('data-process-default-visible-count', '1');
-      expect(tool).toHaveAttribute('data-process-detail-policy', 'collapsed-until-open');
-      expect(tool).toHaveAttribute('data-raw-trace-policy', 'hidden');
-      expect(tool).toHaveAttribute('open');
-      expect(await screen.findByTestId('assistant-ui-process-evidence')).toBeInTheDocument();
-      expect(screen.queryByTestId('assistant-ui-tool-group-summary')).not.toBeInTheDocument();
-      expect(screen.queryByTestId('assistant-ui-tool-group')).not.toBeInTheDocument();
-      const evidence = screen.getByTestId('assistant-ui-process-evidence');
-      expect(Number(evidence.getAttribute('data-evidence-count'))).toBeLessThanOrEqual(1);
-      expect(screen.getAllByTestId('assistant-ui-process-step').length).toBeLessThanOrEqual(1);
-      expect(document.body.textContent ?? '').not.toMatch(forbiddenUserArtifacts);
-      expect(document.body.textContent ?? '').not.toMatch(
-        /Life Graph Agent|Social Match Agent|Meet Loop Agent|Agent Brain/i,
-      );
-      expect(screen.queryByTestId('assistant-ui-step-snapshot')).not.toBeInTheDocument();
-      expect(screen.getByText('结果摘要')).toBeInTheDocument();
-      const actionButton = await screen.findByRole('button', { name: label });
-      expect(actionButton).toHaveAttribute('data-testid', 'assistant-ui-checkpoint-action');
-      expect(actionButton).toHaveAttribute('data-checkpoint-action', action);
-      expect(actionButton).toHaveAttribute('data-checkpoint-id', '123');
-      expect(actionButton).toHaveAttribute('data-step-id', checkpointStepId);
-      expect(actionButton).toHaveAttribute('data-step-level', 'true');
-      expect(actionButton).toHaveAttribute('data-action-source', 'backend');
-      fireEvent.click(actionButton);
-
-      await waitFor(() =>
-        expect(checkpointSpy).toHaveBeenCalledWith(
-          expect.objectContaining({
-            checkpointId: 123,
-            action,
-            stepId: checkpointStepId,
-          }),
-          expect.any(Function),
-          expect.any(AbortSignal),
-        ),
-      );
-      expect(
-        await screen.findByText(action === 'fork' ? '已换一种方案。' : '已重新整理。'),
-      ).toBeInTheDocument();
-      view.unmount();
-      checkpointSpy.mockClear();
-    };
-
-    await exerciseCheckpointAction('重新整理', 'replay');
-    await exerciseCheckpointAction('换一种方案', 'fork');
+    expect(await screen.findByText(streamed.assistantMessage)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '重新整理' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '换一种方案' })).not.toBeInTheDocument();
+    expect(screen.queryByTestId('assistant-ui-checkpoint-action')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('assistant-ui-step-snapshot')).not.toBeInTheDocument();
+    expect(document.body.textContent ?? '').not.toMatch(forbiddenUserArtifacts);
+    expect(document.body.textContent ?? '').not.toMatch(
+      /Life Graph Agent|Social Match Agent|Meet Loop Agent|Agent Brain/i,
+    );
+    expect(checkpointSpy).not.toHaveBeenCalled();
   });
 
-  it('keeps checkpoint action pending until the checkpoint stream finishes', async () => {
+  it('does not expose checkpoint replay controls from a user-facing response', async () => {
     useRealAgentAdapter();
     useAuthStore.setState({ isLoggedIn: true, showLoginModal: false });
     vi.spyOn(socialAgentApi, 'restoreSession').mockResolvedValue(emptySession());
@@ -8836,45 +8738,21 @@ describe('AgentWorkspacePage', () => {
       onEvent({ type: 'result', result: streamed });
       return streamed;
     });
-    let resolveCheckpoint!: () => void;
-    const checkpointDone = new Promise<void>((resolve) => {
-      resolveCheckpoint = resolve;
-    });
-    vi.spyOn(socialAgentApi, 'runCheckpointStream').mockImplementation(async (_data, onEvent) => {
-      await checkpointDone;
-      const replayed = {
-        ...mockResponse(),
-        assistantMessage: '已重新整理。',
-        cards: [],
-      };
-      onEvent({ type: 'result', result: replayed });
-      return replayed;
+    const checkpointSpy = vi.spyOn(socialAgentApi, 'runCheckpointStream').mockResolvedValue({
+      ...mockResponse(),
+      assistantMessage: '不应该从普通用户页触发 checkpoint。',
     });
 
     await renderAgentPage();
     submitPrompt('我想找周末跑步搭子，帮我整理一个可重新整理的步骤');
 
-    const tool = await screen.findByTestId('assistant-ui-tool-ui');
-    const summary = tool.querySelector('summary');
-    expect(summary).not.toBeNull();
-    fireEvent.click(summary as HTMLElement);
-    const actionButton = await screen.findByRole('button', { name: '重新整理' });
-    fireEvent.click(actionButton);
-
-    expect(await screen.findByRole('button', { name: '正在整理' })).toBeDisabled();
-    expect(
-      screen.queryByText('已提交“重新整理”，我会沿同一对话继续处理。'),
-    ).not.toBeInTheDocument();
-
-    await act(async () => {
-      resolveCheckpoint();
-      await checkpointDone;
-    });
-
-    expect(await screen.findByText('已重新整理。')).toBeInTheDocument();
+    expect(await screen.findByText(streamed.assistantMessage)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '重新整理' })).not.toBeInTheDocument();
+    expect(screen.queryByTestId('assistant-ui-checkpoint-action')).not.toBeInTheDocument();
+    expect(checkpointSpy).not.toHaveBeenCalled();
   });
 
-  it('uses checkpoint stream for failed tool step retry', async () => {
+  it('does not expose checkpoint retry controls for failed user-facing steps', async () => {
     useRealAgentAdapter();
     useAuthStore.setState({ isLoggedIn: true, showLoginModal: false });
     vi.spyOn(socialAgentApi, 'restoreSession').mockResolvedValue(emptySession());
@@ -8935,13 +8813,13 @@ describe('AgentWorkspacePage', () => {
     expect(await screen.findByText('刚才连接不稳')).toBeInTheDocument();
     expect(screen.getByTestId('assistant-ui-tool-ui')).toHaveAttribute(
       'data-checkpoint-state',
-      'retryable',
+      'none',
     );
     expect(screen.getByTestId('assistant-ui-tool-ui')).toHaveAttribute(
       'data-process-status',
       'error',
     );
-    expect(screen.getByTestId('assistant-ui-tool-ui')).toHaveAttribute('data-retryable', 'true');
+    expect(screen.getByTestId('assistant-ui-tool-ui')).toHaveAttribute('data-retryable', 'false');
     expect(screen.getByTestId('assistant-ui-tool-ui')).toHaveAttribute('data-step-id', 'rank');
     expect(screen.queryByTestId('assistant-ui-process-step')).not.toBeInTheDocument();
     const retryToolSummary = screen.getByTestId('assistant-ui-tool-ui').querySelector('summary');
@@ -8955,26 +8833,9 @@ describe('AgentWorkspacePage', () => {
     expect(failedStep).toHaveAttribute('data-step-status', 'error');
     expect(failedStep).toHaveAttribute('data-current-step', 'true');
     expect(failedStep).toHaveAttribute('aria-current', 'step');
-    expect(screen.getByText('可以继续')).toBeInTheDocument();
-    const retryButton = await screen.findByRole('button', { name: '继续处理' });
-    expect(retryButton).toHaveAttribute('data-testid', 'assistant-ui-checkpoint-action');
-    expect(retryButton).toHaveAttribute('data-checkpoint-action', 'retry');
-    expect(retryButton).toHaveAttribute('data-checkpoint-id', '321');
-    expect(retryButton).toHaveAttribute('data-step-id', 'rank');
-    expect(retryButton).toHaveAttribute('data-step-level', 'true');
-    fireEvent.click(retryButton);
-
-    await waitFor(() =>
-      expect(checkpointSpy).toHaveBeenCalledWith(
-        expect.objectContaining({
-          checkpointId: 321,
-          action: 'retry',
-          stepId: 'rank',
-        }),
-        expect.any(Function),
-        expect.any(AbortSignal),
-      ),
-    );
+    expect(screen.queryByRole('button', { name: '继续处理' })).not.toBeInTheDocument();
+    expect(screen.queryByTestId('assistant-ui-checkpoint-action')).not.toBeInTheDocument();
+    expect(checkpointSpy).not.toHaveBeenCalled();
     expect(document.body.textContent ?? '').not.toMatch(forbiddenUserArtifacts);
   });
 
@@ -9199,6 +9060,21 @@ function mockResponse(): UserFacingAgentResponse {
   };
 }
 
+function mockWorkflow(
+  workflowId: string,
+  state: NonNullable<UserFacingAgentResponse['workflow']>['state'] = 'IDLE',
+  overrides: Partial<NonNullable<UserFacingAgentResponse['workflow']>> = {},
+): NonNullable<UserFacingAgentResponse['workflow']> {
+  return {
+    workflowId,
+    state,
+    requiredAction: state === 'RECOVERY' ? 'retry' : null,
+    retryable: state === 'RECOVERY',
+    recoveryMessage: state === 'RECOVERY' ? '我保留了这段进度，可以从这里继续。' : null,
+    ...overrides,
+  };
+}
+
 function mockReminderPreference(
   overrides: Partial<SocialAgentReminderPreference> = {},
 ): SocialAgentReminderPreference {
@@ -9273,17 +9149,9 @@ function mockConnectTimelineResponse(): UserFacingAgentResponse {
     assistantMessage:
       '已按你的确认完成连接，并打开后续沟通入口。接下来可以等待对方回复，或继续让我帮你准备更自然的沟通节奏。',
     lightStatus: '已整理回复',
-    runtime: {
-      checkpointId: 6201,
-      checkpointType: 'interrupt',
-      canReplay: true,
-      canFork: true,
-      resumeCursor: {
-        threadId: 'agent-task:101',
-        action: 'resume',
-        stepId: 'candidate-connect-6201',
-      },
-    },
+    workflow: mockWorkflow('agent-task:101', 'RECOVERY', {
+      recoveryMessage: '已按你的确认完成连接，并打开后续沟通入口。',
+    }),
     cards: [
       {
         id: 'meet-loop-connect-opened',

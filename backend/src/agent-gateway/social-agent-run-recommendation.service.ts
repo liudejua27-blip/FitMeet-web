@@ -336,6 +336,49 @@ export class SocialAgentRunRecommendationService {
         if (toolName === 'recommendation_search_candidates') {
           if (!draft)
             throw new Error('Recommendation draft missing before search.');
+          if (
+            !draftPublication?.autoPublished ||
+            !draftPublication.publicIntentId ||
+            draftPublication.synced !== true
+          ) {
+            searchResult = {
+              candidates: [],
+              emptyReason: null,
+              message: '约练卡发布到发现页并读回可见后，才会继续推荐候选。',
+              debugReasons: null,
+            };
+            candidates = [];
+            await progress.recordTool(
+              'fitmeet_search_candidates',
+              FitMeetAgentToolStatus.WaitingConfirmation,
+              {
+                taskId: task.id,
+                socialRequestId: draft.socialRequestId ?? null,
+              },
+              {
+                reason: 'discover_visible_required_before_matching',
+                publishPolicy:
+                  draftPublication?.publishPolicy ??
+                  draft.metadata?.publishPolicy ??
+                  'requires_user_confirmation',
+                publicIntentId: draftPublication?.publicIntentId ?? null,
+              },
+            );
+            await progress.completeStep(
+              'search',
+              '等待你确认发布约练卡',
+              AgentTaskEventType.ConfirmationRequested,
+              {
+                socialRequestId: draft.socialRequestId,
+                reason: 'discover_visible_required_before_matching',
+              },
+            );
+            return {
+              handled: true,
+              phase: 'search_candidates_waiting_publish',
+              candidateCount: 0,
+            };
+          }
           this.realtime?.emitAgentEvent(input.ownerUserId, 'agent:tool_call', {
             taskId: task.id,
             toolName: SocialAgentToolName.SearchMatches,

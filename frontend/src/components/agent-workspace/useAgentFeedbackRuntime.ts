@@ -35,7 +35,6 @@ export function useAgentFeedbackRuntime({
         await socialAgentApi.submitMessageFeedback(messageId, {
           value,
           taskId: message?.taskId ?? activeTaskId,
-          traceId: message?.traceId ?? null,
           source: 'agent_web',
           metadata: {
             role: message?.role,

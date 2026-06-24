@@ -12,6 +12,9 @@ describe('message Mongo schema indexes', () => {
         'agentConnectionId,lastMessageTime',
         'participantAgentIds,lastMessageTime',
         'ownerUserId,lastMessageTime',
+        'source,status,lastMessageTime',
+        'relatedPublicIntentId,lastMessageTime',
+        'relatedSocialRequestId,lastMessageTime',
       ]),
     );
   });

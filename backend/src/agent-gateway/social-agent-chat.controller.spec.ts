@@ -1791,7 +1791,7 @@ describe('SocialAgentChatController user-facing stream', () => {
     expect(serialized).toContain('已检查安全边界');
     expect(serialized).toContain('"type":"approval.required"');
     expect(serialized).toContain('发送邀请前需要你确认');
-    expect(serialized).toContain('"checkpointId":909');
+    expect(serialized).not.toContain('"checkpointId":');
     expect(serialized).toContain('发布到发现前预览');
     expect(serialized).toContain('"lifecycleNode":"approval"');
     expect(serialized).toContain('"type":"run.completed"');

@@ -47,6 +47,7 @@ import { SendMessageDto } from './dto/agent-gateway.dto';
 import { User } from '../users/user.entity';
 import { Follow } from '../friends/follow.entity';
 import { AgentL5RuntimeService } from './agent-l5-runtime.service';
+import { AgentSideEffectLedgerService } from './agent-side-effect-ledger.service';
 
 /**
  * Replays the underlying real action of an approved AgentApprovalRequest.
@@ -120,6 +121,8 @@ export class AgentApprovalDispatcherService {
     @Optional()
     @InjectRepository(AgentTask)
     private readonly taskRepo?: Repository<AgentTask>,
+    @Optional()
+    private readonly sideEffectLedger?: AgentSideEffectLedgerService,
   ) {}
 
   /**
@@ -192,7 +195,7 @@ export class AgentApprovalDispatcherService {
                 discoverHref: null,
                 publicIntentHref: null,
                 messagesHref: this.messagesHref(conversationId),
-                requiredConfirmation: null,
+                requiredConfirmation: false,
               },
             },
           };
@@ -212,6 +215,12 @@ export class AgentApprovalDispatcherService {
             const friend = await this.ensureFollowing(
               approval.userId,
               targetUserId,
+              {
+                approvalId: approval.id,
+                agentTaskId: approval.agentTaskId,
+                actionType: approval.actionType,
+                idempotencyKey: this.text(p.idempotencyKey),
+              },
             );
             const friendRequestId = this.friendRequestId(friend);
             const conversation = await this.openApprovedCandidateConversation(
@@ -269,7 +278,7 @@ export class AgentApprovalDispatcherService {
                   discoverHref: null,
                   publicIntentHref: null,
                   messagesHref: this.messagesHref(conversation.conversationId),
-                  requiredConfirmation: null,
+                  requiredConfirmation: false,
                 },
               },
             };
@@ -440,7 +449,7 @@ export class AgentApprovalDispatcherService {
                 discoverHref,
                 publicIntentHref,
                 messagesHref: null,
-                requiredConfirmation: null,
+                requiredConfirmation: false,
               },
               status: 'published',
               synced: true,
@@ -647,6 +656,19 @@ export class AgentApprovalDispatcherService {
     const { conversationId } = await this.messages.startConversation(
       approval.userId,
       toUserId,
+      {
+        agentConnectionId: approval.agentConnectionId ?? undefined,
+        ownerUserId: approval.userId,
+        actorUserId: approval.userId,
+        agentTaskId: approval.agentTaskId,
+        idempotencyKey: `approval:${approval.id}:start_conversation:${toUserId}`,
+        metadata: {
+          approvalRequestId: approval.id,
+          agentTaskId: approval.agentTaskId,
+          targetUserId: toUserId,
+          source: 'approval_dispatch',
+        },
+      },
     );
     const message = await this.messages.sendMessage(
       conversationId,
@@ -664,6 +686,7 @@ export class AgentApprovalDispatcherService {
           approvalRequestId: approval.id,
           agentTaskId: approval.agentTaskId,
           socialRequestId: dto.socialRequestId,
+          idempotencyKey: `approval:${approval.id}:send_message:${toUserId}`,
         },
       },
     );
@@ -702,14 +725,59 @@ export class AgentApprovalDispatcherService {
     });
   }
 
-  private async ensureFollowing(followerId: number, followingId: number) {
-    const existing = await this.followRepo.findOne({
-      where: { followerId, followingId },
-    });
-    if (existing) return existing;
-    return this.followRepo.save(
-      this.followRepo.create({ followerId, followingId }),
+  private async ensureFollowing(
+    followerId: number,
+    followingId: number,
+    options: {
+      approvalId?: number | null;
+      agentTaskId?: number | null;
+      actionType?: string | null;
+      idempotencyKey?: string | null;
+    } = {},
+  ) {
+    const idempotencyKey =
+      this.text(options.idempotencyKey) ||
+      `approval:${options.approvalId ?? 'none'}:ensure_following:${followerId}:${followingId}`;
+    const run = async () => {
+      const existing = await this.followRepo.findOne({
+        where: { followerId, followingId },
+      });
+      if (existing) return this.followResult(existing);
+      const saved = await this.followRepo.save(
+        this.followRepo.create({ followerId, followingId }),
+      );
+      return this.followResult(saved);
+    };
+    if (!this.sideEffectLedger) return run();
+    const { result } = await this.sideEffectLedger.run(
+      {
+        ownerUserId: followerId,
+        agentTaskId: options.agentTaskId ?? null,
+        actionType: 'ensure_following',
+        idempotencyKey,
+        resourceType: 'follow',
+        resourceId: `${followerId}:${followingId}`,
+        metadata: {
+          approvalId: options.approvalId ?? null,
+          approvalActionType: options.actionType ?? null,
+          followerId,
+          followingId,
+          source: 'approval_dispatch',
+        },
+      },
+      run,
     );
+    return result;
+  }
+
+  private followResult(follow: Follow): Record<string, unknown> {
+    return {
+      id: follow.id,
+      followId: follow.id,
+      followerId: follow.followerId,
+      followingId: follow.followingId,
+      createdAt: follow.createdAt ?? null,
+    };
   }
 
   private async openApprovedCandidateConversation(

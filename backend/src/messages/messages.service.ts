@@ -44,6 +44,7 @@ import {
 } from '../common/display-text.util';
 import { redactSensitiveText } from '../common/privacy-redaction.util';
 import { RealtimeEventService } from '../realtime/realtime-event.service';
+import { AgentSideEffectLedgerService } from '../agent-gateway/agent-side-effect-ledger.service';
 
 type SendMessageOptions = {
   source?: MessageSource;
@@ -56,6 +57,8 @@ type SendMessageOptions = {
   agentConnectionId?: number | null;
   ownerUserId?: number | null;
   actorUserId?: number | null;
+  agentTaskId?: number | null;
+  idempotencyKey?: string | null;
 };
 
 type AgentMessageEventOptions = {
@@ -76,6 +79,8 @@ type StartConversationOptions = {
   ownerUserId?: number | null;
   actorUserId?: number | null;
   metadata?: Record<string, unknown>;
+  agentTaskId?: number | null;
+  idempotencyKey?: string | null;
 };
 
 type AgentMessageEventInput = {
@@ -138,6 +143,8 @@ export class MessagesService {
     private readonly socialRequestRepo: Repository<UserSocialRequest>,
     @Optional()
     private readonly realtime?: RealtimeEventService,
+    @Optional()
+    private readonly sideEffectLedger?: AgentSideEffectLedgerService,
   ) {}
 
   async getConversations(userId: number) {
@@ -232,6 +239,36 @@ export class MessagesService {
   }
 
   async sendMessage(
+    conversationId: string,
+    senderId: number,
+    text: string,
+    options: SendMessageOptions = {},
+  ) {
+    const idempotencyKey = this.sideEffectIdempotencyKey(options);
+    if (this.sideEffectLedger && idempotencyKey) {
+      const { result } = await this.sideEffectLedger.run(
+        {
+          ownerUserId: this.sideEffectOwnerId(options, senderId),
+          agentTaskId: this.sideEffectTaskId(options),
+          actionType: 'send_message',
+          idempotencyKey,
+          resourceType: 'conversation',
+          resourceId: conversationId,
+          metadata: {
+            conversationId,
+            senderId,
+            source: options.source ?? 'user',
+            senderType: options.senderType ?? 'user',
+          },
+        },
+        () => this.sendMessageOnce(conversationId, senderId, text, options),
+      );
+      return result;
+    }
+    return this.sendMessageOnce(conversationId, senderId, text, options);
+  }
+
+  private async sendMessageOnce(
     conversationId: string,
     senderId: number,
     text: string,
@@ -468,6 +505,37 @@ export class MessagesService {
     otherUserId: number,
     options: StartConversationOptions = {},
   ) {
+    const idempotencyKey = this.sideEffectIdempotencyKey(options);
+    if (this.sideEffectLedger && idempotencyKey) {
+      const { result } = await this.sideEffectLedger.run(
+        {
+          ownerUserId: this.sideEffectOwnerId(options, userId),
+          agentTaskId: this.sideEffectTaskId(options),
+          actionType: 'start_conversation',
+          idempotencyKey,
+          resourceType: 'user_pair',
+          resourceId: `${Math.min(Number(userId), Number(otherUserId))}:${Math.max(
+            Number(userId),
+            Number(otherUserId),
+          )}`,
+          metadata: {
+            userId,
+            otherUserId,
+            source: options.metadata?.source ?? null,
+          },
+        },
+        () => this.startConversationOnce(userId, otherUserId, options),
+      );
+      return result;
+    }
+    return this.startConversationOnce(userId, otherUserId, options);
+  }
+
+  private async startConversationOnce(
+    userId: number,
+    otherUserId: number,
+    options: StartConversationOptions = {},
+  ) {
     const ownerId = Number(userId);
     const targetId = Number(otherUserId);
     if (!Number.isFinite(ownerId) || ownerId <= 0) {
@@ -494,6 +562,13 @@ export class MessagesService {
         existing.directKey = directKey;
         existing.participantIds = participantIds;
       }
+      const metadata = this.withAgentMetadata(options.metadata, {
+        agentConnectionId: options.agentConnectionId ?? null,
+        ownerUserId: options.ownerUserId ?? null,
+        actorUserId: options.actorUserId ?? options.ownerUserId ?? null,
+        source: options.agentConnectionId ? 'fitmeet_agent' : undefined,
+      });
+      this.applyConversationLifecycle(existing, metadata);
       if (options.agentConnectionId) {
         await this.bindAgentConversation(existing._id, options);
       }
@@ -523,6 +598,7 @@ export class MessagesService {
       ownerUserId: options.ownerUserId ?? null,
       actorUserId: options.actorUserId ?? options.ownerUserId ?? null,
       metadata,
+      ...this.conversationLifecycle(metadata),
       lastMessage: '',
       lastMessageTime: new Date(),
       unreadCount: { [String(ownerId)]: 0, [String(targetId)]: 0 },
@@ -846,6 +922,41 @@ export class MessagesService {
     options: {
       ownerUserId?: number | null;
       metadata?: Record<string, unknown>;
+      agentTaskId?: number | null;
+      idempotencyKey?: string | null;
+    } = {},
+  ) {
+    const idempotencyKey = this.sideEffectIdempotencyKey(options);
+    if (this.sideEffectLedger && idempotencyKey) {
+      const { result } = await this.sideEffectLedger.run(
+        {
+          ownerUserId: this.sideEffectOwnerId(
+            options,
+            options.ownerUserId ?? 0,
+          ),
+          agentTaskId: this.sideEffectTaskId(options),
+          actionType: 'send_agent_reply',
+          idempotencyKey,
+          resourceType: 'conversation',
+          resourceId: conversationId,
+          metadata: { conversationId, agentId, source: 'fitmeet_agent' },
+        },
+        () => this.sendAgentReplyOnce(conversationId, agentId, text, options),
+      );
+      return result;
+    }
+    return this.sendAgentReplyOnce(conversationId, agentId, text, options);
+  }
+
+  private async sendAgentReplyOnce(
+    conversationId: string,
+    agentId: number,
+    text: string,
+    options: {
+      ownerUserId?: number | null;
+      metadata?: Record<string, unknown>;
+      agentTaskId?: number | null;
+      idempotencyKey?: string | null;
     } = {},
   ) {
     const content = this.normalizeMessageContent(text);
@@ -1607,6 +1718,95 @@ export class MessagesService {
     if (values.ownerUserId != null) out.ownerUserId = values.ownerUserId;
     if (values.actorUserId != null) out.actorUserId = values.actorUserId;
     return Object.keys(out).length > 0 ? out : null;
+  }
+
+  private applyConversationLifecycle(
+    conversation: Conversation,
+    metadata: Record<string, unknown> | null,
+  ) {
+    const lifecycle = this.conversationLifecycle(metadata);
+    conversation.source = lifecycle.source;
+    conversation.status = lifecycle.status;
+    conversation.labels = lifecycle.labels;
+    conversation.relatedPublicIntentId = lifecycle.relatedPublicIntentId;
+    conversation.relatedSocialRequestId = lifecycle.relatedSocialRequestId;
+    conversation.relatedCandidateId = lifecycle.relatedCandidateId;
+    conversation.lastActionAt = lifecycle.lastActionAt;
+    if (metadata) {
+      conversation.metadata = {
+        ...(conversation.metadata ?? {}),
+        ...metadata,
+      };
+    }
+  }
+
+  private conversationLifecycle(metadata: Record<string, unknown> | null) {
+    const source = cleanDisplayText(metadata?.source, 'direct');
+    const relatedPublicIntentId =
+      cleanDisplayText(metadata?.publicIntentId, '') || null;
+    const relatedSocialRequestId = this.optionalPositiveNumber(
+      metadata?.linkedSocialRequestId ?? metadata?.socialRequestId,
+    );
+    const relatedCandidateId = this.optionalPositiveNumber(
+      metadata?.candidateRecordId ?? metadata?.candidateId,
+    );
+    const labels = [
+      source === 'public_social_intent' ? '约练卡' : '',
+      relatedPublicIntentId ? '发现页' : '',
+      relatedSocialRequestId ? '约练需求' : '',
+      relatedCandidateId ? '候选人' : '',
+    ].filter(Boolean);
+    return {
+      source,
+      status: 'open' as const,
+      labels,
+      relatedPublicIntentId,
+      relatedSocialRequestId,
+      relatedCandidateId,
+      lastActionAt: new Date(),
+    };
+  }
+
+  private optionalPositiveNumber(value: unknown): number | null {
+    const number = Number(value);
+    return Number.isFinite(number) && number > 0 ? Math.floor(number) : null;
+  }
+
+  private sideEffectIdempotencyKey(input: {
+    idempotencyKey?: string | null;
+    metadata?: Record<string, unknown>;
+  }): string {
+    const direct = cleanDisplayText(input.idempotencyKey, '');
+    if (direct) return direct.slice(0, 180);
+    const metadata = input.metadata ?? {};
+    return cleanDisplayText(metadata.idempotencyKey, '').slice(0, 180);
+  }
+
+  private sideEffectTaskId(input: {
+    agentTaskId?: number | null;
+    metadata?: Record<string, unknown>;
+  }): number | null {
+    return this.optionalPositiveNumber(
+      input.agentTaskId ?? input.metadata?.agentTaskId,
+    );
+  }
+
+  private sideEffectOwnerId(
+    input: {
+      ownerUserId?: number | null;
+      actorUserId?: number | null;
+      metadata?: Record<string, unknown>;
+    },
+    fallback: number,
+  ): number {
+    return (
+      this.optionalPositiveNumber(
+        input.ownerUserId ??
+          input.actorUserId ??
+          input.metadata?.ownerUserId ??
+          input.metadata?.actorUserId,
+      ) ?? Number(fallback)
+    );
   }
 
   private preview(text: string): string {

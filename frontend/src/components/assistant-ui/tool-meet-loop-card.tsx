@@ -179,7 +179,7 @@ function MeetLoopStageOverview({
     '确认',
     '见面',
     '评价',
-    '回写画像',
+    '更新资料',
   ];
   return (
     <div

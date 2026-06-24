@@ -85,7 +85,7 @@ export const SOCIAL_CODEX_STAGE_COPY: Record<string, SocialCodexStageCopy> = {
     detail: '发送前会展示对方可见内容，并等待你确认。',
   },
   life_graph_writeback: {
-    running: '正在整理画像变化建议',
+    running: '正在整理资料变化建议',
     done: '已整理画像变化建议',
     label: '更新记忆',
     detail: '只沉淀稳定偏好，敏感信息会先征得确认。',

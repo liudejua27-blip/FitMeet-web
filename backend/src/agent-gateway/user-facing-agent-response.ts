@@ -26,8 +26,8 @@ export type UserFacingAgentLightStatus =
   | '正在等待你确认'
   | '正在创建约练计划'
   | '正在整理约练方案'
-  | '正在整理画像更新'
-  | '正在整理画像变化建议';
+  | '正在整理资料更新'
+  | '正在整理资料变化建议';
 
 export interface UserFacingAgentSafeStatus {
   blocked: boolean;
@@ -61,7 +61,8 @@ export type UserFacingAgentPublicLoopStage =
   | 'discover_visible'
   | 'candidates_recommended'
   | 'contact_confirmation_required'
-  | 'messages_handoff';
+  | 'messages_handoff'
+  | 'dismissed';
 
 export interface UserFacingAgentPublicLoop {
   stage: UserFacingAgentPublicLoopStage;
@@ -69,12 +70,31 @@ export interface UserFacingAgentPublicLoop {
   discoverHref: string | null;
   publicIntentHref: string | null;
   messagesHref: string | null;
-  requiredConfirmation: string | null;
+  requiredConfirmation: boolean;
+}
+
+export type UserFacingAgentWorkflowState =
+  | 'PROFILE_REQUIRED'
+  | 'INTENT_DRAFT'
+  | 'PUBLISH_CONFIRMATION_REQUIRED'
+  | 'DISCOVER_VISIBLE'
+  | 'CANDIDATES_READY'
+  | 'CONTACT_CONFIRMATION_REQUIRED'
+  | 'CONVERSATION_ACTIVE'
+  | 'DISMISSED'
+  | 'RECOVERY'
+  | 'IDLE';
+
+export interface UserFacingAgentWorkflow {
+  workflowId: string | null;
+  state: UserFacingAgentWorkflowState;
+  requiredAction: string | null;
+  retryable: boolean;
+  recoveryMessage: string | null;
 }
 
 export interface UserFacingAgentResponse {
   taskId?: number | null;
-  threadId?: string | null;
   assistantMessage: string;
   assistantMessageSource?: SocialAgentAssistantMessageSource;
   recoveryNotice?: UserFacingAgentRecoveryNotice;
@@ -83,43 +103,9 @@ export interface UserFacingAgentResponse {
   safeStatus: UserFacingAgentSafeStatus;
   pendingConfirmations: UserFacingAgentPendingConfirmation[];
   publicLoop?: UserFacingAgentPublicLoop;
+  workflow?: UserFacingAgentWorkflow;
   lifeGraphWritebackProposal?: Record<string, unknown>;
   permissionMode: AgentTaskPermissionMode;
-  runtime?: {
-    runId?: string | null;
-    messageId?: string | null;
-    checkpointId?: number | null;
-    checkpointType?: string | null;
-    canResume?: boolean;
-    canReplay?: boolean;
-    canFork?: boolean;
-    parentCheckpointId?: number | null;
-    threadId?: string | null;
-    idempotencyKey?: string | null;
-    checkpointAction?: 'resume' | 'retry' | 'replay' | 'fork' | null;
-    resumeCursor?: {
-      threadId?: string | null;
-      checkpointId?: number | string | null;
-      parentCheckpointId?: number | string | null;
-      action?: 'resume' | 'retry' | 'replay' | 'fork' | null;
-      stepId?: string | null;
-    } | null;
-    sourceStep?: {
-      stepId: string;
-      label: string | null;
-      toolName: string | null;
-    } | null;
-    stepScope?: {
-      mode: 'full_checkpoint' | 'through_step';
-      stepCount: number;
-      sourceCheckpointId: number | null;
-    } | null;
-    sideEffectPolicy?: {
-      idempotencyKey: string;
-      sideEffectsBeforeResume: 'idempotent_only';
-      duplicatePolicy: 'reuse_idempotency_key';
-    } | null;
-  };
 }
 
 export type SanitizableAgentResult =

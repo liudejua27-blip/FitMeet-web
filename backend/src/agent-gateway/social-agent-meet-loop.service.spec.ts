@@ -884,7 +884,7 @@ describe('SocialAgentMeetLoopService', () => {
     },
   );
 
-  it('keeps an opportunity card private when the user skips publishing', async () => {
+  it('cancels and hides an opportunity card when the user skips publishing', async () => {
     const harness = makeHarness();
 
     const result = await harness.service.performActivityAction(7, 101, {
@@ -900,58 +900,48 @@ describe('SocialAgentMeetLoopService', () => {
     expect(harness.approvals.create).not.toHaveBeenCalled();
     expect(result).toMatchObject({
       action: 'reply',
-      assistantMessage: expect.stringContaining('不发布这张约练卡'),
-      cards: [
-        expect.objectContaining({
-          type: 'meet_loop_timeline',
-          schemaType: 'meet_loop.timeline',
-          actions: expect.arrayContaining([
-            expect.objectContaining({
-              label: '继续私密匹配',
-              schemaAction: 'candidate.more_like_this',
-              requiresConfirmation: false,
-              payload: expect.objectContaining({
-                privateMatchMode: true,
-                publicDiscoverPublishSkipped: true,
-              }),
-            }),
-            expect.objectContaining({
-              label: '重新发布到发现',
-              schemaAction: 'publish_to_discover',
-              requiresConfirmation: true,
-              payload: expect.objectContaining({
-                checkpointRequired: true,
-                resumeMode: 'resume_after_approval',
-              }),
-            }),
-          ]),
-          data: expect.objectContaining({
-            loopStage: 'activity_draft_private',
-            timeline: expect.objectContaining({
-              nextAction:
-                '你可以继续私密匹配公开可发现用户，也可以之后再确认发布到发现。',
-            }),
-          }),
-        }),
-      ],
+      assistantMessage: expect.stringContaining('已取消发布'),
+      cards: [],
     });
     expect(harness.task.result).toMatchObject({
+      chatRun: expect.objectContaining({
+        socialRequestDraft: null,
+        publishStatus: 'cancelled',
+        publicIntentId: null,
+        discoverHref: null,
+        publicIntentHref: null,
+      }),
       activityDraft: expect.objectContaining({
-        visibility: 'private',
+        visibility: 'hidden',
         autoPublished: false,
+        dismissed: true,
+        publishStatus: 'cancelled',
       }),
       meetLoop: expect.objectContaining({
-        status: 'draft_kept_private',
-        loopStage: 'activity_draft_private',
-        visibility: 'private',
+        status: 'draft_cancelled',
+        loopStage: 'activity_publish_cancelled',
+        visibility: 'hidden',
         waitingFor: 'user_next_message',
       }),
     });
     expect(harness.task.memory).toMatchObject({
+      shortTerm: expect.objectContaining({
+        socialRequestDraft: null,
+        publishStatus: 'cancelled',
+        hasSearched: false,
+        lastSearchCandidateCount: 0,
+      }),
+      socialAgentChat: expect.objectContaining({
+        socialRequestDraft: null,
+        publishStatus: 'cancelled',
+        publicIntentId: null,
+        discoverHref: null,
+        publicIntentHref: null,
+      }),
       taskMemory: {
         currentTask: expect.objectContaining({
           waitingFor: 'user_next_message',
-          lastCompletedStep: 'activity_publish_skipped',
+          lastCompletedStep: 'activity_publish_cancelled',
         }),
       },
     });
@@ -961,11 +951,11 @@ describe('SocialAgentMeetLoopService', () => {
         agentTaskId: 101,
         activityId: 700,
         candidateUserId: 22,
-        stage: 'activity_draft_created',
+        stage: 'activity_publish_cancelled',
         waitingFor: 'user_next_message',
         state: expect.objectContaining({
-          loopStage: 'activity_draft_private',
-          visibility: 'private',
+          loopStage: 'activity_publish_cancelled',
+          visibility: 'hidden',
         }),
       }),
     );

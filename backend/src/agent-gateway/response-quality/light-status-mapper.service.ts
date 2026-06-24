@@ -17,10 +17,10 @@ export class LightStatusMapperService {
     if (pendingConfirmations.length > 0) return '正在等待你确认';
 
     if ('profileUpdateProposal' in result && result.profileUpdateProposal) {
-      return '正在整理画像变化建议';
+      return '正在整理资料变化建议';
     }
     if ('profileUpdated' in result && result.profileUpdated) {
-      return '正在整理画像变化建议';
+      return '正在整理资料变化建议';
     }
     if (
       'activityResults' in result &&

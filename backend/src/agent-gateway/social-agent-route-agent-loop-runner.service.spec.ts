@@ -990,6 +990,64 @@ describe('SocialAgentRouteAgentLoopRunnerService', () => {
     );
   });
 
+  it('falls back to the main search branch when the worker queue fails', async () => {
+    const failingWorker = {
+      run: jest.fn().mockRejectedValue(new Error('queue unavailable')),
+    };
+    const { service, deps } = makeService({ subagentWorker: failingWorker });
+    const taskContext = {
+      currentTask: {
+        state: 'slot_filling',
+      },
+      taskSlots: {
+        time_window: { value: '今天晚上', state: 'completed' },
+        location_text: { value: '青岛大学附近', state: 'completed' },
+        activity: { value: '散步', state: 'completed' },
+        candidate_preference: {
+          value: '公开资料带舞蹈相关标签的女生优先',
+          state: 'answered',
+        },
+      },
+      hasSearchContext: true,
+      hasCandidates: false,
+    };
+
+    const result = await service.run({
+      ownerUserId: 7,
+      task: deps.task as never,
+      state: createSocialAgentRouteTurnState('先帮你筛选合适的人。'),
+      message: '今晚找跑步搭子',
+      decision: {
+        task: deps.task,
+        taskContext,
+        route: makeRoute({ intent: 'social_search' }),
+        profile: null,
+        longTermSnapshot: null,
+        brainToolResults: [],
+      } as never,
+      replanAndRefresh: jest.fn(),
+      queueInitialSearchForTask: jest.fn(),
+    });
+
+    expect(failingWorker.run).toHaveBeenCalledWith(
+      expect.objectContaining({
+        agent: 'Match Agent',
+        memoryScope: 'matching.worker_search_turn',
+      }),
+    );
+    expect(deps.searchTurns.handle).toHaveBeenCalledTimes(1);
+    expect(result.loop.finalObservation).toEqual(
+      expect.objectContaining({
+        branch: 'search',
+        handled: true,
+        subagentWorker: true,
+        workerFallback: true,
+        workerFailure: 'queue unavailable',
+      }),
+    );
+    expect(result.subagentHandoffs).toEqual([]);
+  });
+
   it('propagates checkpoint resume context into AgentLoop tools and worker handoff', async () => {
     const { service, deps } = makeService();
     const clientContext = {

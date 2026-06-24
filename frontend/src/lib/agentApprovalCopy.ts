@@ -96,7 +96,7 @@ export function agentApprovalEffectText(
 ): string {
   switch (canonicalAgentApprovalActionType(actionType)) {
     case 'publish_social_request':
-      return '把约练卡公开到发现页，公开前会过滤联系方式、精确住址和敏感画像字段。';
+      return '把约练卡公开到发现页，公开前会过滤联系方式、精确住址和私密资料字段。';
     case 'send_invite':
       return '把这条邀请发给对方，并推进这次约练状态。';
     case 'send_message':

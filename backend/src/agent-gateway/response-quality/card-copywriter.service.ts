@@ -67,7 +67,7 @@ export class CardCopywriterService {
     const lifeGraphUpdatePreview =
       this.personalization.lifeGraphUpdatePreview(activityType);
     const trustScoreUpdatePreview =
-      '如果活动完成并完成评价，我会把履约结果写入 trust score。';
+      '如果活动完成并完成评价，我会把履约结果写入可信度。';
     const description =
       this.tone.cleanUserText(draft.description, '') ||
       this.tone.cleanUserText(draft.rawText, '') ||

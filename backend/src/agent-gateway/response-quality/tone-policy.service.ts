@@ -30,7 +30,7 @@ const USER_STATUSES: Record<string, string> = {
   draft: '正在整理约练方案',
   done: '正在等待你确认',
   approval: '正在等待你确认',
-  life_graph_update: '正在整理画像变化建议',
+  life_graph_update: '正在整理资料变化建议',
 };
 
 @Injectable()

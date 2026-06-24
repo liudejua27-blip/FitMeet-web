@@ -233,19 +233,17 @@ function makeHarness() {
 }
 
 describe('SocialAgentDraftSearchService', () => {
-  it('refreshes a draft and candidates while reloading the task between tool calls', async () => {
+  it('refreshes a draft and waits for publish confirmation before searching candidates', async () => {
     const { executor, service } = makeHarness();
     const initialTask = makeTask({ id: 101 });
     const refreshedTasks = [
       makeTask({ id: 102, ownerUserId: 7 }),
       makeTask({ id: 103, ownerUserId: 7 }),
-      makeTask({ id: 104, ownerUserId: 7 }),
     ];
     const refreshTask = jest
       .fn()
       .mockResolvedValueOnce(refreshedTasks[0])
-      .mockResolvedValueOnce(refreshedTasks[1])
-      .mockResolvedValueOnce(refreshedTasks[2]);
+      .mockResolvedValueOnce(refreshedTasks[1]);
 
     const result = await service.refreshDraftAndCandidates({
       task: initialTask,
@@ -253,8 +251,8 @@ describe('SocialAgentDraftSearchService', () => {
       refreshTask,
     });
 
-    expect(refreshTask).toHaveBeenCalledTimes(3);
-    expect(result.task.id).toBe(104);
+    expect(refreshTask).toHaveBeenCalledTimes(2);
+    expect(result.task.id).toBe(103);
     expect(result.draft).toMatchObject({
       agentTaskId: 102,
       socialRequestId: 301,
@@ -262,14 +260,8 @@ describe('SocialAgentDraftSearchService', () => {
       mode: 'draft',
     });
     expect(result.searchResult).toMatchObject({
-      message: '找到 1 位候选人',
-      candidates: [
-        expect.objectContaining({
-          agentTaskId: 102,
-          socialRequestId: 301,
-          userId: 22,
-        }),
-      ],
+      message: '约练卡发布到发现页并读回可见后，才会继续推荐候选。',
+      candidates: [],
     });
     expect(result.candidates).toBe(result.searchResult.candidates);
     expect(executor.executeToolAction).toHaveBeenNthCalledWith(
@@ -288,19 +280,13 @@ describe('SocialAgentDraftSearchService', () => {
       7,
       { signal: null },
     );
-    expect(executor.executeToolAction).toHaveBeenNthCalledWith(
-      3,
-      103,
+    expect(executor.executeToolAction).toHaveBeenCalledTimes(2);
+    expect(executor.executeToolAction).not.toHaveBeenCalledWith(
+      expect.any(Number),
       SocialAgentToolName.SearchMatches,
-      expect.objectContaining({
-        socialRequestId: 301,
-        safetyPolicy: expect.objectContaining({
-          policyVersion: 'fitmeet.candidate-search.v1',
-          sideEffectPolicy: 'search_only_no_contact_without_approval',
-        }),
-      }),
-      7,
-      { signal: null },
+      expect.any(Object),
+      expect.any(Number),
+      expect.any(Object),
     );
   });
 
@@ -519,7 +505,7 @@ describe('SocialAgentDraftSearchService', () => {
     );
   });
 
-  it('allows auto publish when task memory has explicit public authorization', async () => {
+  it('does not auto publish public-demand drafts even with prior public authorization', async () => {
     const { executor, service } = makeHarness();
     const task = makeTask({
       memory: {
@@ -539,26 +525,19 @@ describe('SocialAgentDraftSearchService', () => {
     );
 
     expect(result).toMatchObject({
-      autoPublished: true,
-      synced: true,
-      publicIntentId: 'pub_301',
-      discoverHref: '/discover?publicIntentId=pub_301',
-      publishPolicy: 'auto_after_first_public_authorization',
-      blockedReason: null,
+      autoPublished: false,
+      synced: false,
+      publicIntentId: null,
+      discoverHref: null,
+      publishPolicy: 'requires_user_confirmation',
+      blockedReason: 'explicit_publish_confirmation_required',
     });
-    expect(executor.executeToolAction).toHaveBeenCalledWith(
-      101,
+    expect(executor.executeToolAction).not.toHaveBeenCalledWith(
+      expect.any(Number),
       SocialAgentToolName.CreateSocialRequest,
-      expect.objectContaining({
-        mode: 'publish',
-        metadata: expect.objectContaining({
-          visibilityConsent: true,
-          autoPublished: true,
-          publishPolicy: 'auto_after_first_public_authorization',
-        }),
-      }),
-      7,
-      { signal: null },
+      expect.objectContaining({ mode: 'publish' }),
+      expect.any(Number),
+      expect.any(Object),
     );
   });
 

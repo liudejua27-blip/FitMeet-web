@@ -350,7 +350,7 @@ export class SocialAgentProfileGateService {
       .map((field) => this.missingFieldLabel(field))
       .join('、');
     const examples = [
-      '可以，我先把最低画像补齐，这样不会乱推荐，也不会误公开你的需求。',
+      '可以，我先把基础资料补齐，这样不会乱推荐，也不会误公开你的需求。',
       `我会一次性确认这些信息，还差：${missingText}。`,
       '你可以直接一句话补齐；每一项都可以说“暂不确定”，也可以选择“本次使用，不保存”。',
       this.profileGateExample(missing),

@@ -29,9 +29,15 @@ export class AgentProfileQAController {
   @HttpCode(200)
   saveAnswers(
     @Req() req: FitMeetRequest,
-    @Body() body: { answers?: Array<{ key: string; value: unknown }> },
+    @Body()
+    body: {
+      answers?: Array<{ key: string; value: unknown }>;
+      confirm?: boolean;
+    },
   ) {
-    return this.qa.saveAnswers(req.user.id, body?.answers ?? []);
+    return this.qa.saveAnswers(req.user.id, body?.answers ?? [], {
+      confirm: body?.confirm === true,
+    });
   }
 
   @Get('completion')

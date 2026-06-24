@@ -53,11 +53,15 @@ function makeHarness() {
   const metrics = {
     recordApproval: jest.fn(),
   };
+  const taskRepo = {
+    save: jest.fn(async (task: AgentTask) => task),
+  };
   const service = new SocialAgentRouteActionTurnService(
+    taskRepo as never,
     candidateActions as never,
     metrics as never,
   );
-  return { candidateActions, metrics, service };
+  return { candidateActions, metrics, service, taskRepo };
 }
 
 describe('SocialAgentRouteActionTurnService', () => {
@@ -129,7 +133,7 @@ describe('SocialAgentRouteActionTurnService', () => {
   });
 
   it('turns a natural-language publish request into a confirmable Discover publish card', async () => {
-    const { candidateActions, metrics, service } = makeHarness();
+    const { candidateActions, metrics, service, taskRepo } = makeHarness();
     const task = makeTask({
       goal: '今晚青岛大学附近健身约练',
       memory: {
@@ -155,6 +159,28 @@ describe('SocialAgentRouteActionTurnService', () => {
 
     expect(candidateActions.createActionApproval).not.toHaveBeenCalled();
     expect(metrics.recordApproval).not.toHaveBeenCalled();
+    expect(taskRepo.save).toHaveBeenCalledWith(task);
+    expect(task.result).toMatchObject({
+      chatRun: {
+        socialRequestDraft: expect.objectContaining({
+          activityType: '健身',
+          timePreference: '今晚',
+          locationName: '青岛大学附近',
+        }),
+        publishStatus: 'draft',
+      },
+    });
+    expect(task.memory).toMatchObject({
+      socialAgentChat: {
+        socialRequestDraft: expect.objectContaining({
+          activityType: '健身',
+        }),
+        publishStatus: 'draft',
+      },
+      shortTerm: {
+        publishStatus: 'draft',
+      },
+    });
     expect(result).toMatchObject({
       handled: true,
       pendingApproval: null,

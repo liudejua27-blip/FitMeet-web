@@ -183,8 +183,12 @@ import { LightStatusMapperService } from './response-quality/light-status-mapper
 import { UserFacingResponseSanitizerService } from './response-quality/user-facing-response-sanitizer.service';
 import { MatchModule } from '../match/match.module';
 import { AgentApprovalRequest } from './entities/agent-approval-request.entity';
+import { AgentSideEffectLedger } from './entities/agent-side-effect-ledger.entity';
 import { AgentSettings } from './entities/agent-settings.entity';
 import { AgentApprovalService } from './agent-approval.service';
+import { AgentSideEffectLedgerService } from './agent-side-effect-ledger.service';
+import { SocialAgentPublishReconcilerService } from './social-agent-publish-reconciler.service';
+import { SocialAgentPublishReconcilerCronService } from './social-agent-publish-reconciler-cron.service';
 import { AgentSettingsService } from './agent-settings.service';
 import { AgentControlController } from './agent-control.controller';
 import { SafetyEvent } from './entities/safety-event.entity';
@@ -252,6 +256,7 @@ import { AdminRbacModule } from '../admin-rbac/admin-rbac.module';
       FitMeetAgentMessage,
       FitMeetAgentMemoryUpdate,
       AgentApprovalRequest,
+      AgentSideEffectLedger,
       AgentSettings,
       SafetyEvent,
       ContactRequest,
@@ -281,6 +286,9 @@ import { AdminRbacModule } from '../admin-rbac/admin-rbac.module';
     AgentObservabilityAlertSinkService,
     AgentSelfImproveService,
     AgentApprovalService,
+    AgentSideEffectLedgerService,
+    SocialAgentPublishReconcilerService,
+    SocialAgentPublishReconcilerCronService,
     AgentApprovalDispatcherService,
     AgentSettingsService,
     AgentActionLogService,
@@ -430,6 +438,7 @@ import { AdminRbacModule } from '../admin-rbac/admin-rbac.module';
     AgentObservabilityAlertSinkService,
     AgentSelfImproveService,
     AgentApprovalService,
+    AgentSideEffectLedgerService,
     AgentApprovalDispatcherService,
     AgentSettingsService,
     AgentActionLogService,

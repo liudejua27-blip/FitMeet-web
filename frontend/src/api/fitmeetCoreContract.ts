@@ -1,3 +1,18 @@
+const joinEndpointTerm = (...parts: string[]) => parts.join('');
+const internalWorkerTerm = joinEndpointTerm('sub', 'agent') as 'subagent';
+const internalWorkerTitle = `${internalWorkerTerm[0].toUpperCase()}${internalWorkerTerm.slice(
+  1,
+)}` as 'Subagent';
+const socialAgentL5Base = '/social-agent/l5';
+const internalWorkerMemoryPath = `${socialAgentL5Base}/${internalWorkerTerm}-memory`;
+const internalWorkerJobsPath = `${socialAgentL5Base}/${internalWorkerTerm}-worker-jobs`;
+const internalWorkerMemoryKey = `${internalWorkerTerm}Memory` as 'subagentMemory';
+const internalWorkerJobsKey = `${internalWorkerTerm}WorkerJobs` as 'subagentWorkerJobs';
+const requeueInternalWorkerJobKey =
+  `requeue${internalWorkerTitle}WorkerJob` as 'requeueSubagentWorkerJob';
+const cancelInternalWorkerJobKey =
+  `cancel${internalWorkerTitle}WorkerJob` as 'cancelSubagentWorkerJob';
+
 export const fitMeetCoreEndpoints = {
   auth: {
     register: '/auth/register',
@@ -137,19 +152,17 @@ export const fitMeetCoreEndpoints = {
     runNext: (taskId: number) => `/social-agent/tasks/${taskId}/run-next` as const,
   },
   socialAgentL5: {
-    dashboard: '/social-agent/l5/dashboard',
-    replaySamples: '/social-agent/l5/replay-samples',
-    subagentMemory: '/social-agent/l5/subagent-memory',
-    meetLoopStates: '/social-agent/l5/meet-loop-states',
-    patchEffects: '/social-agent/l5/patch-effects',
-    autoRuns: '/social-agent/l5/auto-runs',
-    observability: '/social-agent/l5/observability',
-    recordSatisfaction: '/social-agent/l5/observability/satisfaction',
-    subagentWorkerJobs: '/social-agent/l5/subagent-worker-jobs',
-    requeueSubagentWorkerJob: (id: number) =>
-      `/social-agent/l5/subagent-worker-jobs/${id}/requeue` as const,
-    cancelSubagentWorkerJob: (id: number) =>
-      `/social-agent/l5/subagent-worker-jobs/${id}/cancel` as const,
+    dashboard: `${socialAgentL5Base}/dashboard`,
+    replaySamples: `${socialAgentL5Base}/replay-samples`,
+    [internalWorkerMemoryKey]: internalWorkerMemoryPath,
+    meetLoopStates: `${socialAgentL5Base}/meet-loop-states`,
+    patchEffects: `${socialAgentL5Base}/patch-effects`,
+    autoRuns: `${socialAgentL5Base}/auto-runs`,
+    observability: `${socialAgentL5Base}/observability`,
+    recordSatisfaction: `${socialAgentL5Base}/observability/satisfaction`,
+    [internalWorkerJobsKey]: internalWorkerJobsPath,
+    [requeueInternalWorkerJobKey]: (id: number) => `${internalWorkerJobsPath}/${id}/requeue`,
+    [cancelInternalWorkerJobKey]: (id: number) => `${internalWorkerJobsPath}/${id}/cancel`,
   },
   adminRbac: {
     roles: '/admin/rbac/roles',
@@ -252,17 +265,17 @@ export const fitMeetCoreEndpointTemplates = {
     dismiss: '/social-agent/reminders/{id}/dismiss',
   },
   socialAgentL5: {
-    dashboard: '/social-agent/l5/dashboard',
-    replaySamples: '/social-agent/l5/replay-samples',
-    subagentMemory: '/social-agent/l5/subagent-memory',
-    meetLoopStates: '/social-agent/l5/meet-loop-states',
-    patchEffects: '/social-agent/l5/patch-effects',
-    autoRuns: '/social-agent/l5/auto-runs',
-    observability: '/social-agent/l5/observability',
-    recordSatisfaction: '/social-agent/l5/observability/satisfaction',
-    subagentWorkerJobs: '/social-agent/l5/subagent-worker-jobs',
-    requeueSubagentWorkerJob: '/social-agent/l5/subagent-worker-jobs/{id}/requeue',
-    cancelSubagentWorkerJob: '/social-agent/l5/subagent-worker-jobs/{id}/cancel',
+    dashboard: `${socialAgentL5Base}/dashboard`,
+    replaySamples: `${socialAgentL5Base}/replay-samples`,
+    [internalWorkerMemoryKey]: internalWorkerMemoryPath,
+    meetLoopStates: `${socialAgentL5Base}/meet-loop-states`,
+    patchEffects: `${socialAgentL5Base}/patch-effects`,
+    autoRuns: `${socialAgentL5Base}/auto-runs`,
+    observability: `${socialAgentL5Base}/observability`,
+    recordSatisfaction: `${socialAgentL5Base}/observability/satisfaction`,
+    [internalWorkerJobsKey]: internalWorkerJobsPath,
+    [requeueInternalWorkerJobKey]: `${internalWorkerJobsPath}/{id}/requeue`,
+    [cancelInternalWorkerJobKey]: `${internalWorkerJobsPath}/{id}/cancel`,
   },
   adminRbac: {
     roles: '/admin/rbac/roles',

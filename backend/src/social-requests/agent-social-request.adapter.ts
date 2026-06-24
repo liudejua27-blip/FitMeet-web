@@ -3,6 +3,7 @@ import {
   NotFoundException,
   BadRequestException,
   Logger,
+  Optional,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -30,6 +31,7 @@ import {
 } from '../agent-gateway/entities/agent-activity-log.entity';
 import { MessagesService } from '../messages/messages.service';
 import { sanitizeCity } from '../common/city.util';
+import { AgentSideEffectLedgerService } from '../agent-gateway/agent-side-effect-ledger.service';
 
 /**
  * Bridges the legacy agent-gateway social-request surface (which used
@@ -58,6 +60,8 @@ export class AgentSocialRequestAdapter {
     @InjectRepository(AgentActivityLog)
     private readonly logRepo: Repository<AgentActivityLog>,
     private readonly messages: MessagesService,
+    @Optional()
+    private readonly sideEffectLedger?: AgentSideEffectLedgerService,
   ) {}
 
   /** POST /api/agents/social-requests  and  POST /api/agent/social-requests */
@@ -71,9 +75,12 @@ export class AgentSocialRequestAdapter {
       agent,
     });
     const limit = Math.min(dto.limit ?? 10, 20);
-    const { candidates } = await this.matches.runMatch(request.id, userId, {
+    const { candidates } = await this.runInitialMatchWithLedger(
+      request.id,
+      userId,
       limit,
-    });
+      agent,
+    );
     const refreshed = (await this.repo.findOne({ where: { id: request.id } }))!;
     if (agent) {
       const handoff = {
@@ -162,6 +169,38 @@ export class AgentSocialRequestAdapter {
   async listForUser(userId: number) {
     const { items } = await this.socialRequests.findOwn(userId, { limit: 50 });
     return items.map((r) => this.toLegacyShape(r));
+  }
+
+  private async runInitialMatchWithLedger(
+    requestId: number,
+    userId: number,
+    limit: number,
+    agent: AgentConnection | null,
+  ) {
+    if (!this.sideEffectLedger) {
+      return this.matches.runMatch(requestId, userId, { limit });
+    }
+    const { result } = await this.sideEffectLedger.run(
+      {
+        ownerUserId: userId,
+        agentTaskId: null,
+        actionType: 'search_candidates',
+        idempotencyKey: `legacy_social_request_match:${requestId}:limit:${limit}`,
+        resourceType: 'social_request',
+        resourceId: requestId,
+        metadata: {
+          requestId,
+          limit,
+          agentConnectionId: agent?.id ?? null,
+          source: 'agent_social_request_adapter',
+        },
+      },
+      () => this.matches.runMatch(requestId, userId, { limit }),
+    );
+    return result as {
+      socialRequestId: number;
+      candidates: MatchedCandidateView[];
+    };
   }
 
   /** GET /api/agent/social-requests/:id/matches */

@@ -256,7 +256,7 @@ export class SocialAgentDecisionToolService {
           confidence: this.clampConfidence(confidence),
         },
       ],
-      confirmationBoundary: '这只是画像更新建议，确认前不会写入长期偏好。',
+      confirmationBoundary: '这只是资料更新建议，确认前不会写入长期偏好。',
       privacyBoundary:
         '不保存对方私聊原文，只保存脱敏后的互动信号和下一步建议。',
       revokeHint: '确认后仍可在个人信息里撤回这次影响。',

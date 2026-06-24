@@ -5,21 +5,11 @@ import type {
   FitMeetAgentSchemaAction,
   UserFacingAgentResponse,
 } from '../../api/socialAgentApi';
-import type {
-  ToolUISchemaAction,
-} from '../assistant-ui/tool-ui-schema';
+import type { ToolUISchemaAction } from '../assistant-ui/tool-ui-schema';
 import { toolUISchemaActionFromUnknown } from '../assistant-ui/tool-ui-schema';
 import type { FitMeetAssistantRecovery } from './FitMeetAssistantUI.types';
-import {
-  type AgentAdapter,
-  type AgentError,
-  type AgentStreamEvent,
-  mapAgentError,
-} from './api';
-import type {
-  AgentConversationIntent,
-  Step,
-} from './socialAgentThreadStore';
+import { type AgentAdapter, type AgentError, type AgentStreamEvent, mapAgentError } from './api';
+import type { AgentConversationIntent, Step } from './socialAgentThreadStore';
 
 type SetState<T> = (value: T | ((current: T) => T)) => void;
 
@@ -243,6 +233,9 @@ function isExecutableToolUISchemaAction(
     value === 'opener.regenerate' ||
     value === 'opener.reject' ||
     value === 'publish_to_discover' ||
+    value === 'social_intent.decline_publish' ||
+    value === 'social_intent.dismiss' ||
+    value === 'social_intent.retry_publish' ||
     value === 'activity.confirm_create' ||
     value === 'activity.skip_publish' ||
     value === 'activity.modify_time' ||
@@ -294,6 +287,8 @@ function shouldRenderCardActionResultInline(
     action === 'activity.modify_time' ||
     action === 'activity.modify_location' ||
     action === 'activity.skip_publish' ||
+    action === 'social_intent.decline_publish' ||
+    action === 'social_intent.dismiss' ||
     action === 'candidate.connect' ||
     action === 'opener.confirm_send' ||
     action === 'opener.regenerate' ||
@@ -314,14 +309,16 @@ function shouldAppendCardActionResultMessage(
   return false;
 }
 
-function isPrivateCandidateContinuationPayload(
-  payload: Record<string, unknown> | undefined,
-) {
-  return (
-    payload?.privateMatchMode === true ||
+function isPrivateCandidateContinuationPayload(payload: Record<string, unknown> | undefined) {
+  if (
     payload?.publicDiscoverPublishSkipped === true ||
-    Boolean(stringFromUnknown(payload?.candidateSearchMode)) ||
-    stringFromUnknown(payload?.sourceAction) === 'activity.skip_publish'
+    stringFromUnknown(payload?.sourceAction) === 'activity.skip_publish' ||
+    stringFromUnknown(payload?.sourceAction) === 'social_intent.decline_publish'
+  ) {
+    return false;
+  }
+  return (
+    payload?.privateMatchMode === true || Boolean(stringFromUnknown(payload?.candidateSearchMode))
   );
 }
 
@@ -369,7 +366,9 @@ const CARD_ACTION_ASSISTANT_MESSAGES: Partial<Record<FitMeetAgentCardExecutableA
   'opener.reject': '已取消这次发送，未联系对方。',
   publish_to_discover: '已发布到发现页，你可以从发现页查看这张约练卡。',
   'activity.confirm_create': '已准备活动发起流程，发布前仍会保留确认边界。',
-  'activity.skip_publish': '已保留这张约练卡，暂时不会发布到发现。',
+  'activity.skip_publish': '已取消发布，不会出现在发现页，也不会继续匹配。',
+  'social_intent.decline_publish': '已取消发布，不会出现在发现页，也不会继续匹配。',
+  'social_intent.dismiss': '已隐藏这张约练卡，不会出现在发现页，也不会继续匹配。',
   'activity.modify_time': '已准备时间调整方案，真正改动前仍会等你确认。',
   'activity.modify_location': '已准备地点调整方案，真正改动前仍会等你确认。',
   'activity.check_in': '已记录到达状态，后续会继续跟进活动完成情况。',

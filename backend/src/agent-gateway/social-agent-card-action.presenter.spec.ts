@@ -172,8 +172,8 @@ describe('social agent card action presenter', () => {
           confirmedContext: ['公共场所', '不共享精确位置', '确认后创建'],
         }),
         reviewPrompt: expect.stringContaining('简短评价'),
-        lifeGraphUpdatePreview: expect.stringContaining('Life Graph'),
-        trustScoreUpdatePreview: expect.stringContaining('trust score'),
+        lifeGraphUpdatePreview: expect.stringContaining('长期偏好'),
+        trustScoreUpdatePreview: expect.stringContaining('可信度'),
       }),
       actions: expect.arrayContaining([
         expect.objectContaining({ schemaAction: 'activity.confirm_create' }),
@@ -250,7 +250,7 @@ describe('social agent card action presenter', () => {
       loopStage: 'trust_score_updated',
       diff: expect.objectContaining({
         fields: ['运动社交偏好', '约练节奏', '履约可信度'],
-        confirmationBoundary: expect.stringContaining('画像更新建议'),
+        confirmationBoundary: expect.stringContaining('资料更新建议'),
         privacyBoundary: expect.stringContaining('不会写入精确位置'),
         revokeHint: expect.stringContaining('撤回'),
       }),
@@ -329,7 +329,7 @@ describe('social agent card action presenter', () => {
       ['confirmed', '确认', 'next'],
       ['met', '见面', 'next'],
       ['completed', '评价', 'next'],
-      ['life_graph', '回写画像', 'next'],
+      ['life_graph', '更新资料', 'next'],
     ]);
     expect(
       buildSocialAgentMeetLoopTimelineCard({
@@ -396,7 +396,7 @@ describe('social agent card action presenter', () => {
         steps: expect.arrayContaining([
           expect.objectContaining({
             key: 'life_graph',
-            label: '回写画像',
+            label: '更新资料',
             state: 'current',
             actionLabel: '确认后回写',
             checkpointReady: true,
@@ -445,7 +445,7 @@ describe('social agent card action presenter', () => {
         proofStatus: '证明待对方确认',
         opportunity: expect.objectContaining({
           title: '活动证明已提交',
-          meetLoopNextStep: expect.stringContaining('评价与画像更新'),
+          meetLoopNextStep: expect.stringContaining('评价与长期偏好更新'),
         }),
       }),
     });
@@ -477,7 +477,7 @@ describe('social agent card action presenter', () => {
         opportunity: expect.objectContaining({
           title: '周末慢跑',
           safetyBoundary: expect.stringContaining('精确位置'),
-          meetLoopNextStep: expect.stringContaining('评价和画像更新'),
+          meetLoopNextStep: expect.stringContaining('评价和长期偏好更新'),
         }),
       }),
       actions: [

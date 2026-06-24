@@ -797,7 +797,7 @@ export class AgentApprovalService {
       return '不会在确认前交换手机号、微信或外部联系方式。';
     }
     if (type === ApprovalType.PostPublish || /publish/i.test(actionType)) {
-      return '会过滤联系方式、精确住址和敏感画像字段。';
+      return '会过滤联系方式、精确住址和私密资料字段。';
     }
     return '只使用当前任务必要信息；确认记录会保留，方便你之后追踪和撤回。';
   }

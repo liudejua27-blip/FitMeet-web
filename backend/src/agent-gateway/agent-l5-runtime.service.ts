@@ -17,6 +17,7 @@ type MeetLoopStage =
   | 'reply_received'
   | 'rescheduled'
   | 'activity_draft_created'
+  | 'activity_publish_cancelled'
   | 'activity_confirmed'
   | 'activity_checked_in'
   | 'activity_completed'
@@ -584,8 +585,10 @@ export class AgentL5RuntimeService {
       activity_draft_created: [
         'invite_sent',
         'reply_received',
+        'activity_publish_cancelled',
         'activity_confirmed',
       ],
+      activity_publish_cancelled: [],
       activity_confirmed: [
         'rescheduled',
         'activity_checked_in',

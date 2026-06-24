@@ -2025,7 +2025,14 @@ describe('SocialAgentToolExecutorService', () => {
     );
 
     expect(call.status).toBe('succeeded');
-    expect(friends.ensureFollowing).toHaveBeenCalledWith(1, 2);
+    expect(friends.ensureFollowing).toHaveBeenCalledWith(
+      1,
+      2,
+      expect.objectContaining({
+        agentTaskId: 100,
+        idempotencyKey: expect.any(String),
+      }),
+    );
     expect(messages.startConversation).toHaveBeenCalledWith(
       1,
       2,
@@ -2068,7 +2075,14 @@ describe('SocialAgentToolExecutorService', () => {
     );
 
     expect(call.status).toBe('succeeded');
-    expect(friends.ensureFollowing).toHaveBeenCalledWith(1, 3);
+    expect(friends.ensureFollowing).toHaveBeenCalledWith(
+      1,
+      3,
+      expect.objectContaining({
+        agentTaskId: 100,
+        idempotencyKey: expect.any(String),
+      }),
+    );
     expect(messages.startConversation).toHaveBeenCalledWith(
       1,
       3,
@@ -2182,7 +2196,14 @@ describe('SocialAgentToolExecutorService', () => {
     );
 
     expect(call.status).toBe('succeeded');
-    expect(friends.ensureFollowing).toHaveBeenCalledWith(1, 5);
+    expect(friends.ensureFollowing).toHaveBeenCalledWith(
+      1,
+      5,
+      expect.objectContaining({
+        agentTaskId: 100,
+        idempotencyKey: expect.any(String),
+      }),
+    );
     expect(call.output).toMatchObject({
       targetUserId: 5,
       candidateUserId: 5,

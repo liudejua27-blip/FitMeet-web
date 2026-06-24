@@ -529,10 +529,7 @@ describe('SocialAgentRunRecommendationService', () => {
         status: UserSocialRequestStatus.Draft,
       }),
     );
-    expect(draftSearch.searchCandidates).toHaveBeenCalledWith(
-      task,
-      expect.objectContaining({ socialRequestId: 301 }),
-    );
+    expect(draftSearch.searchCandidates).not.toHaveBeenCalled();
     expect(draftSearch.autoPublishDraftIfAllowed).toHaveBeenCalledWith(
       task,
       expect.objectContaining({ socialRequestId: 301 }),
@@ -540,7 +537,7 @@ describe('SocialAgentRunRecommendationService', () => {
     expect(result.result).toMatchObject({
       taskId: 101,
       status: AgentTaskStatus.AwaitingConfirmation,
-      candidates: [expect.objectContaining({ userId: 22 })],
+      candidates: [],
       agentLoop: expect.objectContaining({
         status: 'completed',
         toolBudget: expect.objectContaining({
@@ -567,10 +564,10 @@ describe('SocialAgentRunRecommendationService', () => {
         status: FitMeetAgentToolStatus.WaitingConfirmation,
       }),
     );
-    expect(realtime.emitAgentEvent).toHaveBeenCalledWith(
+    expect(realtime.emitAgentEvent).not.toHaveBeenCalledWith(
       7,
       'agent:candidates',
-      expect.objectContaining({ candidateCount: 1 }),
+      expect.anything(),
     );
     expect(
       recommendationResults.completeRecommendationResult,
@@ -1014,33 +1011,7 @@ describe('SocialAgentRunRecommendationService', () => {
       }),
       expect.any(Object),
     );
-    expect(draftSearch.searchCandidates).toHaveBeenCalledWith(
-      expect.objectContaining({
-        memory: expect.objectContaining({
-          taskSlots: expect.objectContaining({
-            activity: expect.objectContaining({ value: '散步' }),
-            time_window: expect.objectContaining({ value: '今晚' }),
-            location_text: expect.objectContaining({ value: '青岛大学附近' }),
-            geo_area: expect.objectContaining({
-              value: '崂山区',
-              state: 'inferred',
-            }),
-            intensity: expect.objectContaining({
-              value: '低强度',
-              state: 'inferred',
-            }),
-            candidate_preference: expect.objectContaining({
-              value: '公开资料里有舞蹈相关标签的人优先',
-            }),
-          }),
-          knownTaskSlotConstraints: expect.objectContaining({
-            candidatePreferencePolicy:
-              expect.stringContaining('公开可发现资料'),
-          }),
-        }),
-      }),
-      expect.objectContaining({ socialRequestId: 301 }),
-    );
+    expect(draftSearch.searchCandidates).not.toHaveBeenCalled();
     expect(task.memory).toMatchObject({
       knownTaskSlotConstraints: expect.objectContaining({
         treatAsHardConstraints: true,

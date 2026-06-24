@@ -57,7 +57,7 @@ const explicitEmptyCandidateRecoveryPattern =
   /((扩大|放宽).{0,18}(范围|半径|公里|要求|偏好|条件))|((改|换|调整).{0,18}(时间|地点|区域|城市|活动|周末|下午|晚上|今晚|明天))|((不限|都可以|降低要求).{0,12}(范围|条件|偏好|距离|活动)?)/i;
 
 const profileEnrichmentRequestPattern =
-  /(帮我完善.*画像|请帮我完善.*画像|完善.*ai画像|完善.*AI画像|完善.*人物画像|上面.*画像.*完善|刚才.*画像.*完善|把刚才.*写入画像|保存到.*画像|调用工具.*画像|工具.*完善.*画像|写入.*画像|存到.*画像|人物画像|ai画像|AI画像)/i;
+  /((帮我|请|可以|想|需要|继续)?.{0,12}(完善|补充|补全|整理|更新).{0,16}(画像|资料|个人信息|信息|偏好))|((资料|个人信息|信息|画像).{0,12}(还缺|还差|缺什么|缺哪些|完善|补充|补全))|(问我.{0,8}(几个)?问题)|(把刚才.*写入画像|保存到.*画像|调用工具.*画像|工具.*完善.*画像|写入.*画像|存到.*画像|人物画像|ai画像|AI画像)/i;
 
 const immediateSocialSearchPattern =
   /((现在|马上|直接|立刻|立即).{0,16}(帮我找|给我找|找人|搜索|推荐|匹配|找.*搭子|找.*女生|找.*男生))|((帮我找|给我找|搜索|推荐|匹配).{0,24}(候选|用户|朋友|人|搭子|女生|男生|活动|局))/i;
@@ -262,7 +262,8 @@ export function shouldAllowSocialExecution(input: {
   if (input.intent === 'action_request') {
     return (
       hasExplicitSocialSideEffectIntent(input.message) &&
-      (hasExistingSocialActionContext(input) ||
+      (hasExplicitPublishSideEffectIntent(input.message) ||
+        hasExistingSocialActionContext(input) ||
         hasExistingPublishContext(input.message, input.taskContext))
     );
   }
@@ -352,6 +353,7 @@ export function enforceExplicitSocialExecutionRoute(
   if (!hasExplicitSocialExecutionIntent(input.message)) return gated;
   if (hasExplicitSocialSideEffectIntent(input.message)) {
     if (
+      !hasExplicitPublishSideEffectIntent(input.message) &&
       !hasExistingSocialActionContext(input) &&
       !hasExistingPublishContext(input.message, input.taskContext)
     ) {

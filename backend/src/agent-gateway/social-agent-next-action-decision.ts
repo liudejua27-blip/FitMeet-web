@@ -229,8 +229,7 @@ export function buildSocialAgentMeetLoopActivityInput(
     meetLoopStage: 'activity_confirmation',
     lifeGraphUpdatePreview:
       '完成后我会更新你的近期活动节奏、偏好边界和低压力社交信号。',
-    trustScoreUpdatePreview:
-      '完成与评价会写入 trust score，用来提升后续推荐可信度。',
+    trustScoreUpdatePreview: '完成与评价会更新可信度，用来提升后续推荐可信度。',
   };
 }
 

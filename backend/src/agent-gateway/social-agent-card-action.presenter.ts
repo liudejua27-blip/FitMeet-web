@@ -298,10 +298,11 @@ export function buildSocialAgentActivityPlanCard(input: {
       noPreciseLocation: true,
       safetyBoundary: '公共场所见面，不共享精确位置。',
       checkinReminder: '活动开始前我会提醒你确认是否到达。',
-      reviewPrompt: '活动结束后我会请你做一次简短评价，再决定是否写入画像。',
+      reviewPrompt:
+        '活动结束后我会请你做一次简短评价，再决定是否更新个人信息。',
       lifeGraphUpdatePreview: '完成后会把这次活动结果用于更新你的长期偏好。',
       trustScoreUpdatePreview:
-        '完成与评价会写入 trust score，用来提升后续推荐可信度。',
+        '完成与评价会更新可信度，用来提升后续推荐可信度。',
       opportunity: {
         id: `opportunity:${input.taskId}:activity:${input.approvalId}`,
         approvalId: input.approvalId,
@@ -314,7 +315,8 @@ export function buildSocialAgentActivityPlanCard(input: {
         recommendedNextAction: '确认后我再创建约练，不会自动公开发布。',
         safetyBoundary: '公共场所见面，不共享精确位置。',
         checkinReminder: '活动开始前我会提醒你确认是否到达。',
-        reviewPrompt: '活动结束后我会请你做一次简短评价，再决定是否写入画像。',
+        reviewPrompt:
+          '活动结束后我会请你做一次简短评价，再决定是否更新个人信息。',
         confirmedContext: ['公共场所', '不共享精确位置', '确认后创建'],
       },
       opportunityType: 'activity',
@@ -338,7 +340,7 @@ export function buildSocialAgentActivityPlanCard(input: {
           safetyBoundary: '公共场所见面，不共享精确位置。',
           checkinReminder: '活动开始前我会提醒你确认是否到达。',
           reviewPrompt:
-            '活动结束后我会请你做一次简短评价，再决定是否写入画像。',
+            '活动结束后我会请你做一次简短评价，再决定是否更新个人信息。',
           ...input.payload,
         },
       },
@@ -526,11 +528,11 @@ export function buildSocialAgentReviewCard(input: {
       loopStage: 'activity_completed',
       timeline: {
         title: '约练进展',
-        description: '活动已进入评价阶段，确认后才会写入长期画像。',
-        nextAction: '提交评价后，我会给出画像更新建议。',
+        description: '活动已进入评价阶段，确认后才会更新长期偏好。',
+        nextAction: '提交评价后，我会给出资料更新建议。',
         steps: socialAgentMeetLoopTimelineSteps(
           'activity_completed',
-          '提交评价后进入画像确认',
+          '提交评价后进入资料确认',
         ),
       },
       defaultRating: 5,
@@ -815,7 +817,7 @@ export function buildSocialAgentLifeGraphUpdateCard(input: {
     schemaVersion: 'fitmeet.tool-ui.v1',
     schemaType: 'life_graph.diff',
     title: isCounterpartReply
-      ? '这次回应可以作为一条弱画像信号。'
+      ? '这次回应可以作为一条弱互动信号。'
       : '这次约练已经记录到你的长期偏好。',
     body: isCounterpartReply
       ? '如果你愿意，我会把这次低压力开场的回应记录为脱敏互动信号，用来优化后续推荐。'
@@ -840,7 +842,7 @@ export function buildSocialAgentLifeGraphUpdateCard(input: {
             ? '这次完成记录会提高类似运动社交机会的推荐权重。'
             : '这次反馈会降低类似安排的推荐权重。',
         currentValue: isCounterpartReply
-          ? '不把这次回复写入长期画像'
+          ? '不把这次回复写入长期偏好'
           : '沿用当前运动社交偏好',
         proposedValue: isCounterpartReply
           ? '提高低压力开场、公共场所和先站内聊候选的解释权重'
@@ -853,7 +855,7 @@ export function buildSocialAgentLifeGraphUpdateCard(input: {
         conflicts: [],
         sensitivityLevel: 'medium',
         confirmationBoundary:
-          '这只是画像更新建议；你可以保留、撤回或选择不用于推荐。',
+          '这只是资料更新建议；你可以保留、撤回或选择不用于推荐。',
         privacyBoundary: '不会写入精确位置或私聊内容。',
         revokeHint: '确认后仍可在个人信息里撤回或纠正。',
         sourceSignals: isCounterpartReply
@@ -943,7 +945,7 @@ export function buildSocialAgentProofUploadPromptCard(input: {
         summary: '证明只用于活动履约确认，不要求露脸。',
         safetyBadges: ['不公开精确位置', '不强制露脸', '仅用于履约确认'],
         safetyBoundary: '证明仅用于活动履约确认，不公开精确位置，不强制露脸。',
-        meetLoopNextStep: '证明确认后继续推进评价和画像更新。',
+        meetLoopNextStep: '证明确认后继续推进评价和长期偏好更新。',
         confirmedContext: ['活动履约确认', '隐私保护', '可补充证明'],
       },
     },
@@ -997,8 +999,8 @@ export function buildSocialAgentProofSubmittedCard(input: {
         summary: '证明已进入待确认状态，确认后继续更新履约状态。',
         safetyBadges: ['待确认', '隐私保护', '履约状态更新'],
         safetyBoundary: '证明只用于履约确认，不公开精确位置。',
-        meetLoopNextStep: '对方确认后继续评价与画像更新。',
-        confirmedContext: ['证明待确认', '活动履约', '后续回写画像'],
+        meetLoopNextStep: '对方确认后继续评价与长期偏好更新。',
+        confirmedContext: ['证明待确认', '活动履约', '后续更新资料'],
       },
     },
     actions: [
@@ -1081,7 +1083,7 @@ export function buildSocialAgentActivityDetailCard(input: {
         ],
         safetyBoundary:
           '活动详情只展示当前任务关联活动；精确位置由客户端隐私开关控制。',
-        meetLoopNextStep: '根据证明状态继续推进评价和画像更新。',
+        meetLoopNextStep: '根据证明状态继续推进评价和长期偏好更新。',
         confirmedContext: ['活动详情', '履约证明', '隐私边界'],
       },
     },
@@ -1150,7 +1152,7 @@ function socialAgentMeetLoopTimelineSteps(
     },
     {
       key: 'life_graph',
-      label: '回写画像',
+      label: '更新资料',
       description: '只把你确认的信息写回个人信息。',
     },
   ];

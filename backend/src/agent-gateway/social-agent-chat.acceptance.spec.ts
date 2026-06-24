@@ -361,6 +361,14 @@ function makeHarness(options: Record<string, unknown> = {}) {
       agentCanRecommendMe: true,
     }),
     saveAnswer: jest.fn().mockResolvedValue({ id: 1 }),
+    generateAiDraft: jest.fn().mockResolvedValue({
+      mode: 'fallback',
+      draft: {
+        basic: { city: '青岛', nickname: '' },
+        tags: { fitnessGoals: [], interestTags: ['跑步'] },
+      },
+      completion: { percent: 40, missingFields: ['availableTimes'] },
+    }),
     update: jest.fn().mockResolvedValue({ id: 1 }),
   };
   const messages = {
@@ -398,6 +406,32 @@ function makeHarness(options: Record<string, unknown> = {}) {
       take: jest.fn().mockReturnThis(),
       getMany: jest.fn().mockResolvedValue([]),
     }),
+    findOne: jest
+      .fn()
+      .mockImplementation(({ where }: { where?: { id?: string } }) =>
+        Promise.resolve(
+          where?.id
+            ? {
+                id: where.id,
+                mode: 'public',
+                title: '青岛大学晚跑步搭子',
+                description: '今天晚上在青岛大学附近轻松跑步，先站内沟通。',
+                city: '青岛',
+                loc: '青岛大学附近',
+                requestType: 'running',
+                socialGoal: '找 1 人一起跑步',
+                interestTags: ['跑步'],
+                radiusKm: 3,
+                timePreference: '今天晚上',
+                locationPreference: '青岛大学附近',
+                matchedCount: 0,
+                status: 'active',
+                createdAt: new Date('2026-01-01T00:00:00.000Z'),
+                updatedAt: new Date('2026-01-01T00:00:00.000Z'),
+              }
+            : null,
+        ),
+      ),
   };
   const candidatePool = {
     searchActivity: jest.fn().mockResolvedValue({
@@ -523,6 +557,7 @@ function makeHarness(options: Record<string, unknown> = {}) {
   const actionTurns =
     (options.actionTurns as SocialAgentRouteActionTurnService | undefined) ??
     new SocialAgentRouteActionTurnService(
+      taskRepo as never,
       candidateActions as never,
       metrics as never,
     );
@@ -535,6 +570,7 @@ function makeHarness(options: Record<string, unknown> = {}) {
       eventRepo as never,
       executor as never,
       longTermMemory as never,
+      publicIntentRepo as never,
     );
   const draftSearch =
     (options.draftSearch as SocialAgentDraftSearchService | undefined) ??
@@ -560,6 +596,7 @@ function makeHarness(options: Record<string, unknown> = {}) {
   const searchTurns =
     (options.searchTurns as SocialAgentRouteSearchTurnService | undefined) ??
     new SocialAgentRouteSearchTurnService(
+      taskRepo as never,
       profileEnrichment as never,
       activitySearch as never,
       {
@@ -868,7 +905,7 @@ describe('SocialAgentChat acceptance flow', () => {
       cards: [],
       taskId: 101,
     });
-    expect(result.assistantMessage).toContain('FitMeet 的 AI 社交助理');
+    expect(result.assistantMessage).toContain('FitMeet Agent');
     expect(result.assistantMessage).toContain('城市、兴趣、可约时间');
     expect(savedEvents).toEqual(
       expect.arrayContaining([
@@ -927,7 +964,7 @@ describe('SocialAgentChat acceptance flow', () => {
       activityResults: [],
       pendingApproval: null,
     });
-    expect(result.assistantMessage).toContain('FitMeet 的 AI 社交助理');
+    expect(result.assistantMessage).toContain('FitMeet Agent');
     expect(result.assistantMessage).toContain('城市、兴趣、可约时间');
     expect(executor.executeToolAction).not.toHaveBeenCalledWith(
       expect.any(Number),
@@ -956,7 +993,7 @@ describe('SocialAgentChat acceptance flow', () => {
       profileUpdated: false,
       activityResults: [],
     });
-    expect(result.assistantMessage).toContain('人物画像');
+    expect(result.assistantMessage).toContain('个人信息');
     expect(result.assistantMessage).not.toContain('已记住你的偏好');
     expect(socialProfiles.saveAnswer).not.toHaveBeenCalled();
     expect(executor.executeToolAction).not.toHaveBeenCalled();
@@ -998,7 +1035,7 @@ describe('SocialAgentChat acceptance flow', () => {
       profileUpdated: false,
       shouldQueueRun: false,
     });
-    expect(result.assistantMessage).toContain('画像信息');
+    expect(result.assistantMessage).toContain('个人信息');
     expect(result.assistantMessage).toContain('不会直接搜索候选人');
     expect(socialProfiles.saveAnswer).not.toHaveBeenCalled();
   });
@@ -1080,7 +1117,7 @@ describe('SocialAgentChat acceptance flow', () => {
       shouldSearch: false,
       shouldQueueRun: false,
     });
-    expect(result.assistantMessage).toContain('画像信息');
+    expect(result.assistantMessage).toContain('个人信息');
     expect(result.assistantMessage).toContain('先不直接搜索候选人');
     expect(executor.executeToolAction).not.toHaveBeenCalled();
   });
@@ -1144,7 +1181,7 @@ describe('SocialAgentChat acceptance flow', () => {
       proposalId: 77,
       confirmationRequired: true,
     });
-    expect(result.assistantMessage).toContain('画像信息');
+    expect(result.assistantMessage).toContain('个人信息');
     expect(result.assistantMessage).toContain('是否保存到你的个人信息');
     expect(executor.executeToolAction).not.toHaveBeenCalledWith(
       expect.any(Number),
@@ -1204,7 +1241,7 @@ describe('SocialAgentChat acceptance flow', () => {
       intent: 'action_request',
       action: 'reply',
       profileUpdated: true,
-      assistantMessage: expect.stringContaining('已保存 1 条 画像信息'),
+      assistantMessage: expect.stringContaining('已保存 1 条 个人信息'),
     });
     const savedTask = taskRepo.save.mock.calls.at(-1)?.[0] as AgentTask;
     expect(savedTask.memory).toMatchObject({
@@ -1232,7 +1269,7 @@ describe('SocialAgentChat acceptance flow', () => {
 
     expect(result.intent).toBe('correction_or_clarification');
     expect(result.shouldSearch).toBe(false);
-    expect(result.assistantMessage).toContain('画像信息');
+    expect(result.assistantMessage).toContain('个人信息');
     expect(result.assistantMessage).not.toContain('人物画像是 FitMeet');
     expect(executor.executeToolAction).not.toHaveBeenCalledWith(
       expect.any(Number),
@@ -1256,7 +1293,7 @@ describe('SocialAgentChat acceptance flow', () => {
     expect(result.intent).toBe('profile_enrichment_request');
     expect(result.shouldSearch).toBe(false);
     expect(result.profileUpdated).toBe(true);
-    expect(result.assistantMessage).toContain('写入 AI 画像');
+    expect(result.assistantMessage).toContain('保存到个人信息');
     expect(result.assistantMessage).toContain('是否开始匹配');
     expect(result.assistantMessage).toContain('未确认前不会自动推荐候选');
     expect(executor.executeToolAction).toHaveBeenCalledWith(
@@ -1294,7 +1331,7 @@ describe('SocialAgentChat acceptance flow', () => {
     );
   });
 
-  it('routes profile updates into profile storage and context memory', async () => {
+  it('routes profile updates into a preview before profile storage', async () => {
     const { service, executor, socialProfiles, savedEvents } = makeHarness();
 
     const result = await service.routeMessage(7, {
@@ -1306,14 +1343,18 @@ describe('SocialAgentChat acceptance flow', () => {
       action: 'save_context',
       shouldQueueRun: false,
       savedContext: true,
-      profileUpdated: true,
+      profileUpdated: false,
       taskId: 101,
     });
-    expect(socialProfiles.saveAnswer).toHaveBeenCalledWith(
+    expect(socialProfiles.generateAiDraft).toHaveBeenCalledWith(
       7,
-      'interestTags',
-      '我喜欢拍照和跑步',
+      expect.objectContaining({
+        answers: [{ key: 'interestTags', answer: '我喜欢拍照和跑步' }],
+        rawText: '我喜欢拍照和跑步',
+        source: 'social_agent_profile_turn',
+      }),
     );
+    expect(socialProfiles.saveAnswer).not.toHaveBeenCalled();
     expect(executor.executeToolAction).not.toHaveBeenCalled();
     expect(savedEvents.map((event) => event.eventType)).toContain(
       AgentTaskEventType.SocialAgentContextAppended,
@@ -1969,12 +2010,12 @@ describe('SocialAgentChat acceptance flow', () => {
       replyStrategy: 'conversational_answer',
       shouldQueueRun: false,
     });
-    expect(result.assistantMessage).toContain('FitMeet 的 AI 社交助理');
+    expect(result.assistantMessage).toContain('FitMeet Agent');
     expect(result.assistantMessage).toContain('城市、兴趣、可约时间');
     expect(executor.executeToolAction).not.toHaveBeenCalled();
   });
 
-  it('creates a private draft request, persists candidates, and keeps high-risk actions on cards', async () => {
+  it('creates a private draft request and waits for publish confirmation before candidates', async () => {
     const { service, taskRepo, savedEvents, executor } = makeHarness();
 
     const result = await service.run(7, {
@@ -2000,12 +2041,12 @@ describe('SocialAgentChat acceptance flow', () => {
       7,
       { signal: null },
     );
-    expect(executor.executeToolAction).toHaveBeenCalledWith(
-      101,
+    expect(executor.executeToolAction).not.toHaveBeenCalledWith(
+      expect.any(Number),
       SocialAgentToolName.SearchMatches,
-      expect.objectContaining({ socialRequestId: 301, limit: 10 }),
-      7,
-      { signal: null },
+      expect.any(Object),
+      expect.any(Number),
+      expect.any(Object),
     );
     expect(result.status).toBe(AgentTaskStatus.AwaitingConfirmation);
     expect(result.socialRequestDraft).toMatchObject({
@@ -2016,34 +2057,10 @@ describe('SocialAgentChat acceptance flow', () => {
       status: UserSocialRequestStatus.Draft,
       requireUserConfirmation: true,
     });
-    expect(result.candidates[0]).toMatchObject({
-      agentTaskId: 101,
-      socialRequestId: 301,
-      candidateRecordId: 501,
-      userId: 22,
-      nickname: '小林',
-      score: 87,
-    });
+    expect(result.candidates).toEqual([]);
     expect(result.approvalRequiredActions).toEqual([]);
     expect(result.cards).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({
-          type: 'candidate_card',
-          actions: expect.arrayContaining([
-            expect.objectContaining({
-              schemaAction: 'candidate.like',
-              requiresConfirmation: false,
-            }),
-            expect.objectContaining({
-              schemaAction: 'opener.confirm_send',
-              requiresConfirmation: true,
-            }),
-            expect.objectContaining({
-              schemaAction: 'candidate.connect',
-              requiresConfirmation: true,
-            }),
-          ]),
-        }),
         expect.objectContaining({
           type: 'activity_plan',
           actions: expect.arrayContaining([
@@ -2054,7 +2071,9 @@ describe('SocialAgentChat acceptance flow', () => {
               requiresConfirmation: true,
             }),
             expect.objectContaining({
-              schemaAction: 'activity.skip_publish',
+              schemaAction: expect.stringMatching(
+                /^(activity\.skip_publish|social_intent\.decline_publish)$/,
+              ),
               requiresConfirmation: false,
             }),
           ]),
@@ -2076,18 +2095,15 @@ describe('SocialAgentChat acceptance flow', () => {
     expect(shortTermMemory?.steps).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ id: 'understand', status: 'done' }),
-        expect.objectContaining({ id: 'search', status: 'done' }),
+        expect.objectContaining({
+          id: 'search',
+          status: 'done',
+          label: '等待你确认发布约练卡',
+        }),
         expect.objectContaining({ id: 'awaiting_confirmation' }),
       ]),
     );
-    expect(shortTermMemory?.candidates).toEqual([
-      expect.objectContaining({
-        userId: 22,
-        nickname: '小林',
-        candidateRecordId: 501,
-        score: 87,
-      }),
-    ]);
+    expect(shortTermMemory?.candidates ?? []).toEqual([]);
   });
 
   it('keeps a publishable opportunity card when the first social turn asks to publish to Discover', async () => {
@@ -2111,12 +2127,12 @@ describe('SocialAgentChat acceptance flow', () => {
       7,
       { signal: null },
     );
-    expect(executor.executeToolAction).toHaveBeenCalledWith(
-      101,
+    expect(executor.executeToolAction).not.toHaveBeenCalledWith(
+      expect.any(Number),
       SocialAgentToolName.SearchMatches,
-      expect.objectContaining({ socialRequestId: 301, limit: 10 }),
-      7,
-      { signal: null },
+      expect.any(Object),
+      expect.any(Number),
+      expect.any(Object),
     );
 
     const publishCard = (result.cards ?? []).find(
@@ -2126,7 +2142,7 @@ describe('SocialAgentChat acceptance flow', () => {
       (card) => card.type === 'candidate_card',
     );
 
-    expect(candidateCards).toHaveLength(1);
+    expect(candidateCards).toHaveLength(0);
     expect(publishCard).toMatchObject({
       type: 'activity_plan',
       schemaVersion: 'fitmeet.tool-ui.v1',
@@ -2135,8 +2151,8 @@ describe('SocialAgentChat acceptance flow', () => {
         schemaName: 'OpportunityCard',
         opportunityCard: true,
         socialRequestId: 301,
-        publicIntentId: 'social_request_301',
-        discoverHref: '/discover?publicIntentId=social_request_301',
+        publicIntentId: null,
+        discoverHref: null,
       }),
       actions: expect.arrayContaining([
         expect.objectContaining({
@@ -2149,8 +2165,12 @@ describe('SocialAgentChat acceptance flow', () => {
         }),
         expect.objectContaining({
           label: '暂不发布',
-          action: 'activity.skip_publish',
-          schemaAction: 'activity.skip_publish',
+          action: expect.stringMatching(
+            /^(activity\.skip_publish|social_intent\.decline_publish)$/,
+          ),
+          schemaAction: expect.stringMatching(
+            /^(activity\.skip_publish|social_intent\.decline_publish)$/,
+          ),
           requiresConfirmation: false,
         }),
       ]),
@@ -2163,7 +2183,7 @@ describe('SocialAgentChat acceptance flow', () => {
     });
   });
 
-  it('keeps every recalled candidate in memory while showing only three opportunity cards', async () => {
+  it('does not recall candidates before the opportunity card is published', async () => {
     const alphaAgentSdk = new FitMeetAlphaAgentSdkService({
       get: jest.fn((key: string) =>
         key === 'OPENAI_AGENTS_SDK_ENABLED' ? 'false' : undefined,
@@ -2224,52 +2244,17 @@ describe('SocialAgentChat acceptance flow', () => {
       candidates?: Array<Record<string, unknown>>;
     };
 
-    expect(result.candidates).toHaveLength(5);
-    expect(shortTermMemory.candidates).toHaveLength(5);
-    expect(executor.executeToolAction).toHaveBeenCalledWith(
+    expect(result.candidates).toHaveLength(0);
+    expect(shortTermMemory.candidates ?? []).toHaveLength(0);
+    expect(executor.executeToolAction).not.toHaveBeenCalledWith(
       expect.any(Number),
       SocialAgentToolName.SearchMatches,
-      expect.objectContaining({
-        safetyPolicy: expect.objectContaining({
-          policyVersion: 'fitmeet.candidate-search.v1',
-          candidateEligibility: expect.objectContaining({
-            profileDiscoverable: true,
-            agentCanRecommendMe: true,
-            publicOrAuthorizedSourceOnly: true,
-            excludeBlockedUsers: true,
-            excludeComplaintRisk: true,
-            excludeUnsafeMeetRisk: true,
-          }),
-          privacy: expect.objectContaining({
-            redactPreciseLocation: true,
-            redactContactInfo: true,
-            exposeOnlyPublicProfileFields: true,
-            noPrivateLifeGraphLeakage: true,
-          }),
-          rankingSignals: expect.arrayContaining([
-            'city_or_distance',
-            'interests',
-            'time_overlap',
-            'social_boundary',
-            'activity_intensity',
-            'relationship_goal',
-            'public_life_graph_preferences',
-          ]),
-          sideEffectPolicy: 'search_only_no_contact_without_approval',
-          approvalPolicy:
-            'send_message_add_friend_connect_create_activity_publish_require_checkpoint',
-        }),
-      }),
-      7,
-      { signal: null },
+      expect.any(Object),
+      expect.any(Number),
+      expect.any(Object),
     );
-    expect(opportunityCards).toHaveLength(4);
-    expect(candidateOpportunityCards).toHaveLength(3);
-    expect(candidateOpportunityCards.map((card) => card.type)).toEqual([
-      'candidate_card',
-      'candidate_card',
-      'candidate_card',
-    ]);
+    expect(opportunityCards).toHaveLength(1);
+    expect(candidateOpportunityCards).toHaveLength(0);
     expect(activityPlanCard).toMatchObject({
       type: 'activity_plan',
       actions: expect.arrayContaining([
@@ -2280,129 +2265,13 @@ describe('SocialAgentChat acceptance flow', () => {
           requiresConfirmation: true,
         }),
         expect.objectContaining({
-          schemaAction: 'activity.skip_publish',
+          schemaAction: expect.stringMatching(
+            /^(activity\.skip_publish|social_intent\.decline_publish)$/,
+          ),
           requiresConfirmation: false,
         }),
       ]),
     });
-    expect(
-      candidateOpportunityCards.map((card) => card.data?.['displayName']),
-    ).toEqual(['小林', '阿森', '小周']);
-    expect(
-      candidateOpportunityCards.every(
-        (card) =>
-          card.schemaVersion === 'fitmeet.tool-ui.v1' &&
-          card.schemaType === 'social_match.candidate' &&
-          card.data?.['schemaName'] === 'OpportunityCard' &&
-          card.data?.['opportunityCard'] === true,
-      ),
-    ).toBe(true);
-    const cardReadinessIssues = candidateOpportunityCards.flatMap(
-      (card, index) => {
-        const opportunity = card.data?.['opportunity'] as
-          | Record<string, unknown>
-          | undefined;
-        const confirmedContext = opportunity?.['confirmedContext'];
-        const explanationSteps = opportunity?.['explanationSteps'];
-        const discoverySafetySignals = opportunity?.['discoverySafetySignals'];
-        const recommendationProtocol = opportunity?.['recommendationProtocol'];
-        const reasons = opportunity?.['reasons'];
-        const recommendationConsent = card.data?.['recommendationConsent'] as
-          | Record<string, unknown>
-          | undefined;
-        const coldStartSignals = card.data?.['coldStartSignals'];
-        const issues: string[] = [];
-        const prefix = `card-${index + 1}`;
-        if (typeof opportunity?.['summary'] !== 'string')
-          issues.push(`${prefix}:summary`);
-        if (typeof opportunity?.['safetyBoundary'] !== 'string')
-          issues.push(`${prefix}:safetyBoundary`);
-        if (typeof opportunity?.['recommendedNextAction'] !== 'string')
-          issues.push(`${prefix}:recommendedNextAction`);
-        if (typeof opportunity?.['suggestedOpener'] !== 'string')
-          issues.push(`${prefix}:opportunitySuggestedOpener`);
-        if (typeof card.data?.['suggestedOpener'] !== 'string')
-          issues.push(`${prefix}:dataSuggestedOpener`);
-        if (typeof card.data?.['invitePolicy'] !== 'string')
-          issues.push(`${prefix}:invitePolicy`);
-        if (recommendationConsent?.['profileDiscoverable'] !== true)
-          issues.push(`${prefix}:profileDiscoverable`);
-        if (recommendationConsent?.['agentCanRecommendMe'] !== true)
-          issues.push(`${prefix}:agentCanRecommendMe`);
-        if (typeof recommendationConsent?.['sourceLabel'] !== 'string')
-          issues.push(`${prefix}:sourceLabel`);
-        if (!String(recommendationConsent?.['privacyLabel']).includes('脱敏'))
-          issues.push(`${prefix}:privacyLabel`);
-        if (typeof recommendationConsent?.['strangerPolicyLabel'] !== 'string')
-          issues.push(`${prefix}:strangerPolicyLabel`);
-        const hasEnoughColdStartSignals =
-          Array.isArray(coldStartSignals) && coldStartSignals.length >= 2;
-        if (!hasEnoughColdStartSignals)
-          issues.push(`${prefix}:coldStartSignals`);
-        if (
-          !Array.isArray(discoverySafetySignals) ||
-          discoverySafetySignals.length < 3
-        )
-          issues.push(`${prefix}:discoverySafetySignals`);
-        if (
-          !Array.isArray(discoverySafetySignals) ||
-          !discoverySafetySignals.some((signal) =>
-            String(signal).includes('脱敏'),
-          )
-        ) {
-          issues.push(`${prefix}:discoverySafetyPrivacy`);
-        }
-        if (
-          !Array.isArray(recommendationProtocol) ||
-          !recommendationProtocol.some(
-            (item) =>
-              typeof item === 'object' &&
-              item !== null &&
-              (item as Record<string, unknown>)['key'] === 'approval' &&
-              String((item as Record<string, unknown>)['detail']).includes(
-                '确认',
-              ),
-          )
-        ) {
-          issues.push(`${prefix}:recommendationProtocolApproval`);
-        }
-        if (!Array.isArray(reasons) || reasons.length < 1)
-          issues.push(`${prefix}:reasons`);
-        if (!Array.isArray(confirmedContext) || confirmedContext.length < 3)
-          issues.push(`${prefix}:confirmedContext`);
-        if (
-          !Array.isArray(explanationSteps) ||
-          !explanationSteps.some((step) => String(step).startsWith('安全：'))
-        ) {
-          issues.push(`${prefix}:safetyExplanation`);
-        }
-        return issues;
-      },
-    );
-    expect(cardReadinessIssues).toEqual([]);
-    expect(
-      candidateOpportunityCards.every((card) => {
-        const schemaActions = card.actions.map((action) => action.schemaAction);
-        return (
-          schemaActions.includes('candidate.view_detail') &&
-          schemaActions.includes('candidate.like') &&
-          schemaActions.includes('candidate.generate_opener') &&
-          schemaActions.includes('candidate.connect')
-        );
-      }),
-    ).toBe(true);
-    expect(
-      candidateOpportunityCards.every((card) =>
-        card.actions.some(
-          (action) =>
-            action.schemaAction === 'candidate.connect' &&
-            action.requiresConfirmation === true &&
-            action.payload?.['approvalRequired'] === true &&
-            action.payload?.['checkpointRequired'] === true &&
-            action.payload?.['resumeMode'] === 'resume_after_approval',
-        ),
-      ),
-    ).toBe(true);
   });
 
   it('keeps the recommendation to opener to activity flow behind user confirmations', async () => {
@@ -2660,67 +2529,16 @@ describe('SocialAgentChat acceptance flow', () => {
       permissionMode: AgentTaskPermissionMode.Confirm,
     });
 
-    expect(recommendation.candidates[0]).toMatchObject({
-      userId: 22,
-      nickname: '小林',
-    });
+    expect(recommendation.candidates).toHaveLength(0);
     expect(lifeGraph.getUnifiedMatchSignals).toHaveBeenCalledWith(7);
     expect(alphaAgent.buildResultCards).toHaveBeenCalledWith(
       expect.objectContaining({
         taskId: 101,
-        candidates: expect.arrayContaining([
-          expect.objectContaining({ userId: 22 }),
-        ]),
-        lifeGraphSignals: expect.objectContaining({
-          dynamicSignals: expect.objectContaining({
-            matchingGuidance: expect.objectContaining({
-              shouldPreferSameSchoolOrArea: true,
-            }),
-          }),
-        }),
+        candidates: [],
       }),
     );
     expect(recommendation.cards).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({
-          type: 'candidate_card',
-          schemaVersion: 'fitmeet.tool-ui.v1',
-          schemaType: 'social_match.candidate',
-          data: expect.objectContaining({
-            schemaName: 'OpportunityCard',
-            schemaType: 'social_match.candidate',
-            opportunityCard: true,
-            opportunity: expect.objectContaining({
-              type: 'person',
-              name: '小林',
-              title: '和 小林 低压力认识',
-              recommendedNextAction: expect.stringContaining('生成开场白'),
-              confirmedContext: expect.arrayContaining([
-                '青岛大学附近',
-                '今晚',
-                '跑步',
-                '公共场所',
-              ]),
-            }),
-            recommendationLine: expect.stringContaining('小林'),
-            fitReasons: expect.arrayContaining(['青岛大学附近活动']),
-            whyNow: expect.stringContaining('今晚'),
-            safetyBoundary: expect.stringContaining('公共'),
-            suggestedOpener: expect.any(String),
-          }),
-          actions: expect.arrayContaining([
-            expect.objectContaining({
-              action: 'candidate.generate_opener',
-              schemaAction: 'candidate.generate_opener',
-              requiresConfirmation: false,
-            }),
-            expect.objectContaining({
-              action: 'candidate.connect',
-              schemaAction: 'candidate.connect',
-              requiresConfirmation: true,
-            }),
-          ]),
-        }),
         expect.objectContaining({
           type: 'activity_plan',
           schemaVersion: 'fitmeet.tool-ui.v1',
@@ -2800,39 +2618,6 @@ describe('SocialAgentChat acceptance flow', () => {
         }),
       ]),
     );
-
-    const callsAfterRecommendation =
-      executor.executeToolAction.mock.calls.length;
-    const opener = await service.routeMessage(7, {
-      message: '帮我给第一个人发消息',
-      taskId: recommendation.taskId,
-    });
-
-    expect(opener).toMatchObject({
-      intent: 'action_request',
-      action: 'await_confirmation',
-      shouldQueueRun: false,
-      pendingApproval: expect.objectContaining({
-        actionType: 'send_invite',
-      }),
-    });
-    expect(executor.executeToolAction.mock.calls).toHaveLength(
-      callsAfterRecommendation,
-    );
-
-    const activityPlan = await service.routeMessage(7, {
-      message: '帮我邀请第一个人参加约练',
-      taskId: recommendation.taskId,
-    });
-
-    expect(activityPlan).toMatchObject({
-      intent: 'action_request',
-      action: 'await_confirmation',
-      shouldQueueRun: false,
-      pendingApproval: expect.objectContaining({
-        actionType: 'send_invite',
-      }),
-    });
     expect(
       executor.executeToolAction.mock.calls.some(
         (call) =>
@@ -2906,7 +2691,7 @@ describe('SocialAgentChat acceptance flow', () => {
     expect(result.taskId).toBe(101);
   });
 
-  it('queues a follow-up replan and refreshes the draft plus candidates in the background', async () => {
+  it('queues a follow-up replan and refreshes the draft while waiting for publish confirmation', async () => {
     const { service, taskRepo, planner, executor } = makeHarness();
     taskRepo.findOne.mockResolvedValue(makeTask({ goal: '今晚青岛轻松跑步' }));
 
@@ -2942,12 +2727,12 @@ describe('SocialAgentChat acceptance flow', () => {
       7,
       { signal: null },
     );
-    expect(executor.executeToolAction).toHaveBeenCalledWith(
-      101,
+    expect(executor.executeToolAction).not.toHaveBeenCalledWith(
+      expect.any(Number),
       SocialAgentToolName.SearchMatches,
-      expect.objectContaining({ socialRequestId: 301, limit: 10 }),
-      7,
-      { signal: null },
+      expect.any(Object),
+      expect.any(Number),
+      expect.any(Object),
     );
     expect(result.status).toBe('completed');
     expect(
@@ -2959,7 +2744,7 @@ describe('SocialAgentChat acceptance flow', () => {
       socialRequestId: 301,
       mode: 'draft',
     });
-    expect(result.result?.candidates).toHaveLength(1);
+    expect(result.result?.candidates).toHaveLength(0);
   });
 
   describe('real conversation acceptance suite', () => {
@@ -2994,7 +2779,7 @@ describe('SocialAgentChat acceptance flow', () => {
         shouldQueueRun: false,
         profileUpdated: false,
       });
-      expect(b.assistantMessage).toContain('人物画像');
+      expect(b.assistantMessage).toContain('个人信息');
       expect(executor.executeToolAction).toHaveBeenCalledTimes(
         toolCallsBeforeChat,
       );
@@ -3010,7 +2795,7 @@ describe('SocialAgentChat acceptance flow', () => {
       });
       expect(c.assistantMessage).toContain('两种都可以');
       expect(c.assistantMessage).toContain('直接发布需求');
-      expect(c.assistantMessage).toContain('先完善画像');
+      expect(c.assistantMessage).toContain('先完善个人信息');
       expect(c.assistantMessage).toContain('我在__');
 
       const d = await service.routeMessage(7, {
@@ -3024,7 +2809,7 @@ describe('SocialAgentChat acceptance flow', () => {
         shouldQueueRun: false,
         profileUpdated: false,
       });
-      expect(d.assistantMessage).toContain('画像信息');
+      expect(d.assistantMessage).toContain('个人信息');
       expect(d.assistantMessage).toContain('先不直接搜索候选人');
       expect(executor.executeToolAction).toHaveBeenCalledTimes(
         toolCallsBeforeChat,
@@ -3036,7 +2821,7 @@ describe('SocialAgentChat acceptance flow', () => {
       });
       expect(e.intent).toBe('correction_or_clarification');
       expect(e.shouldSearch).toBe(false);
-      expect(e.assistantMessage).toContain('画像信息');
+      expect(e.assistantMessage).toContain('个人信息');
       expect(e.assistantMessage).toContain('我先不搜索');
       expect(e.assistantMessage).not.toContain('人物画像是 FitMeet');
       expect(executor.executeToolAction).toHaveBeenCalledTimes(
@@ -3065,7 +2850,7 @@ describe('SocialAgentChat acceptance flow', () => {
         }),
         7,
       );
-      expect(f.assistantMessage).toContain('写入 AI 画像');
+      expect(f.assistantMessage).toContain('保存到个人信息');
       expect(f.assistantMessage).toContain('是否开始匹配');
       expect(f.assistantMessage).toContain('未确认前不会自动推荐候选');
 
@@ -3075,7 +2860,7 @@ describe('SocialAgentChat acceptance flow', () => {
       });
       expect(g.shouldSearch).toBe(false);
       expect(g.shouldQueueRun).toBe(false);
-      expect(g.assistantMessage).toContain('画像信息');
+      expect(g.assistantMessage).toContain('个人信息');
       expect(g.assistantMessage).toContain('不会直接搜索候选人');
 
       const h = await service.routeMessage(7, {

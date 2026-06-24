@@ -47,8 +47,8 @@ export class AgentQualityEvaluatorService {
     '正在等待你确认',
     '正在创建约练计划',
     '正在整理约练方案',
-    '正在整理画像更新',
-    '正在整理画像变化建议',
+    '正在整理资料更新',
+    '正在整理资料变化建议',
   ]);
 
   private readonly forbiddenUserFacingPatterns: Array<{

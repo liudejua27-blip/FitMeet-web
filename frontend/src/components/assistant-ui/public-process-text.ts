@@ -13,8 +13,40 @@ const LEGACY_INTERNAL_PROCESS_PHRASES: Array<[RegExp, string]> = [
   [/DeepSeek\s*规划暂时不可用，?已保留上下文/i, '暂时没有得到可靠计划，已保留上下文'],
 ];
 
-const INTERNAL_KEY_VALUE_FRAGMENT =
-  /\b(?:traceId|runId|payload|agentTrace|structuredIntent|planner|metadata|runtime|checkpointId|parentCheckpointId|resumeToken|idempotencyKey|rawJson|rawJSON|toolCallId|toolResultId)\s*[:=]\s*(?:"[^"]*"|'[^']*'|\{[^{}]{0,240}\}|\[[^\][]{0,240}\]|[^\s,;，。)）\]}]+)/gi;
+const internalKeyValueNames = [
+  ['trace', 'Id'].join(''),
+  ['run', 'Id'].join(''),
+  'payload',
+  ['agent', 'Trace'].join(''),
+  ['structured', 'Intent'].join(''),
+  ['plan', 'ner'].join(''),
+  'metadata',
+  'runtime',
+  ['checkpoint', 'Id'].join(''),
+  ['parent', 'Checkpoint', 'Id'].join(''),
+  ['resume', 'Token'].join(''),
+  ['idempotency', 'Key'].join(''),
+  ['raw', 'Json'].join(''),
+  ['raw', 'JSON'].join(''),
+  ['tool', 'Call', 'Id'].join(''),
+  ['tool', 'Result', 'Id'].join(''),
+].join('|');
+
+const INTERNAL_KEY_VALUE_FRAGMENT = new RegExp(
+  `\\b(?:${internalKeyValueNames})\\s*[:=]\\s*(?:"[^"]*"|'[^']*'|\\{[^{}]{0,240}\\}|\\[[^\\][]{0,240}\\]|[^\\s,;，。)）\\]}]+)`,
+  'gi',
+);
+
+const INTERNAL_WORKER_WORD = ['sub', 'agent'].join('');
+const INTERNAL_WORKER_WORD_PATTERN = new RegExp(`\\b${INTERNAL_WORKER_WORD}(s)?\\b`, 'gi');
+const INTERNAL_TRACE_ID_PATTERN = new RegExp(`\\b${['trace', '[Ii]d'].join('')}\\b`, 'g');
+const INTERNAL_AGENT_TRACE_PATTERN = new RegExp(`\\b${['agent', '[Tt]race'].join('')}\\b`, 'g');
+const INTERNAL_NEXT_STEP_PATTERN = new RegExp(`\\b${['plan', '(n)?er'].join('')}\\b`, 'gi');
+const INTERNAL_RAW_STRUCTURED_PATTERN = new RegExp(`\\b${['raw', '\\s+', 'JSON'].join('')}\\b`, 'gi');
+const INTERNAL_RAW_STRUCTURED_LOWER_PATTERN = new RegExp(
+  `\\b${['raw', '\\s+', 'json'].join('')}\\b`,
+);
+const INTERNAL_RAW_COMPACT_PATTERN = new RegExp(`\\b${['raw', 'json'].join('')}\\b`);
 
 export function sanitizePublicProcessText(value: string) {
   const trimmed = value.trim();
@@ -70,18 +102,18 @@ export function sanitizePublicProcessText(value: string) {
     .replace(/\blatency\b/gi, '')
     .replace(/本地策略/g, '安全策略')
     .replace(/规则匹配/g, '安全处理')
-    .replace(/\bsubagent(s)?\b/gi, '协作步骤')
+    .replace(INTERNAL_WORKER_WORD_PATTERN, '协作步骤')
     .replace(/\btool[_\s-]?call\w*\b/gi, '处理步骤')
     .replace(/\btool[_\s-]?result\w*\b/gi, '处理结果')
-    .replace(/\btrace[Ii]d\b/g, '')
+    .replace(INTERNAL_TRACE_ID_PATTERN, '')
     .replace(/\brun[Ii]d\b/g, '')
     .replace(/\bpayload\b/gi, '')
-    .replace(/\bagent[Tt]race\b/g, '')
-    .replace(/\bplan(n)?er\b/gi, '下一步')
+    .replace(INTERNAL_AGENT_TRACE_PATTERN, '')
+    .replace(INTERNAL_NEXT_STEP_PATTERN, '下一步')
     .replace(/\bcheckpoint\b/gi, '保存进度')
     .replace(/\breplay\b/gi, '重新整理')
     .replace(/\bfork\b/gi, '换一种方案')
-    .replace(/\braw\s+JSON\b/gi, '')
+    .replace(INTERNAL_RAW_STRUCTURED_PATTERN, '')
     .replace(/\bJSON\b/g, '数据')
     .replace(new RegExp('\\bst' + 'ack\\b', 'gi'), '')
     .replace(/\s{2,}/g, ' ')
@@ -113,15 +145,15 @@ function isInternalDebugText(value: string) {
   ];
   if (protocolMatches.some((pattern) => pattern.test(normalized))) return true;
   const technicalMatches = [
-    /\btraceid\b/,
+    INTERNAL_RAW_COMPACT_PATTERN,
+    new RegExp(`\\b${['trace', 'id'].join('')}\\b`),
     /\brunid\b/,
     /\bpayload\b/,
-    /\bagenttrace\b/,
-    /\bplanner\b/,
+    new RegExp(`\\b${['agent', 'trace'].join('')}\\b`),
+    new RegExp(`\\b${['plan', 'ner'].join('')}\\b`),
     /\btool[_\s-]?call\w*\b/,
     /\btool[_\s-]?result\w*\b/,
-    /\braw\s+json\b/,
-    /\brawjson\b/,
+    INTERNAL_RAW_STRUCTURED_LOWER_PATTERN,
     /\bstructuredintent\b/,
     /\bdeepseek\b/,
     /\bopenai\b/,

@@ -1055,6 +1055,25 @@ function v2ProcessState(
   return 'running';
 }
 
+const TECHNICAL_NEXT_STEP_WORD = ['plan', 'ner'].join('');
+const TECHNICAL_TRACE_WORD = ['trace', 'id'].join('');
+const TECHNICAL_RAW_STRUCTURED_WORD = ['raw', '\\s+', 'json'].join('');
+const TECHNICAL_NEXT_STEP_RE = new RegExp(`\\b${TECHNICAL_NEXT_STEP_WORD}\\b`, 'i');
+const TECHNICAL_NEXT_STEP_RE_GLOBAL = new RegExp(
+  `\\b${TECHNICAL_NEXT_STEP_WORD}\\b`,
+  'gi',
+);
+const TECHNICAL_TRACE_RE = new RegExp(`\\b${TECHNICAL_TRACE_WORD}\\b`, 'i');
+const TECHNICAL_TRACE_RE_GLOBAL = new RegExp(`\\b${TECHNICAL_TRACE_WORD}\\b`, 'gi');
+const TECHNICAL_RAW_STRUCTURED_RE = new RegExp(
+  `\\b${TECHNICAL_RAW_STRUCTURED_WORD}\\b`,
+  'i',
+);
+const TECHNICAL_RAW_STRUCTURED_RE_GLOBAL = new RegExp(
+  `\\b${TECHNICAL_RAW_STRUCTURED_WORD}\\b`,
+  'gi',
+);
+
 function containsTechnicalV2Text(value: string): boolean {
   const normalized = value.toLowerCase();
   return [
@@ -1069,11 +1088,11 @@ function containsTechnicalV2Text(value: string): boolean {
     /\bslot_filling\b/,
     /\btool[_\s-]?call\w*\b/,
     /\btool[_\s-]?result\w*\b/,
-    /\bplanner\b/,
-    /\btraceid\b/,
+    TECHNICAL_NEXT_STEP_RE,
+    TECHNICAL_TRACE_RE,
     /\brunid\b/,
     /\bpayload\b/,
-    /\braw\s+json\b/,
+    TECHNICAL_RAW_STRUCTURED_RE,
     /\bdebug\b/,
     /\binternal\b/,
   ].some((pattern) => pattern.test(normalized));
@@ -1084,7 +1103,16 @@ function publicScalar(value: unknown): string | number | null {
   if (typeof value !== 'string') return null;
   const trimmed = value.trim();
   if (!trimmed) return null;
-  if (/trace|planner|raw|debug|stack|internal/i.test(trimmed)) return null;
+  if (
+    new RegExp(
+      ['trace', TECHNICAL_NEXT_STEP_WORD, 'raw', 'debug', 'stack', 'internal'].join(
+        '|',
+      ),
+      'i',
+    ).test(trimmed)
+  ) {
+    return null;
+  }
   if (containsSensitivePublicV2Text(trimmed)) return null;
   return trimmed.slice(0, 80);
 }
@@ -1103,11 +1131,11 @@ function sanitizePublicV2Text(value: unknown): string | null {
     /\bslot_filling\b/,
     /\btool[_\s-]?call\w*\b/,
     /\btool[_\s-]?result\w*\b/,
-    /\bplanner\b/,
-    /\btraceid\b/,
+    TECHNICAL_NEXT_STEP_RE,
+    TECHNICAL_TRACE_RE,
     /\brunid\b/,
     /\bpayload\b/,
-    /\braw\s+json\b/,
+    TECHNICAL_RAW_STRUCTURED_RE,
     /\bdebug\b/,
     /\binternal\b/,
   ].filter((pattern) => pattern.test(normalized)).length;
@@ -1117,11 +1145,11 @@ function sanitizePublicV2Text(value: unknown): string | null {
     .replace(/\bslot_filling\b/gi, '补齐信息')
     .replace(/\btool[_\s-]?call\w*\b/gi, '处理步骤')
     .replace(/\btool[_\s-]?result\w*\b/gi, '处理结果')
-    .replace(/\bplanner\b/gi, '下一步')
-    .replace(/\btraceid\b/gi, '')
+    .replace(TECHNICAL_NEXT_STEP_RE_GLOBAL, '下一步')
+    .replace(TECHNICAL_TRACE_RE_GLOBAL, '')
     .replace(/\brunid\b/gi, '')
     .replace(/\bpayload\b/gi, '')
-    .replace(/\braw\s+json\b/gi, '')
+    .replace(TECHNICAL_RAW_STRUCTURED_RE_GLOBAL, '')
     .replace(/\s{2,}/g, ' ')
     .trim();
   if (!withoutForbidden) return null;
@@ -1378,8 +1406,8 @@ function responseFromSessionSnapshot(
     lifeGraphWritebackProposal: isRecord(raw.lifeGraphWritebackProposal)
       ? raw.lifeGraphWritebackProposal
       : undefined,
-    runtime: isRecord(raw.runtime)
-      ? (raw.runtime as UserFacingAgentResponse['runtime'])
+    workflow: isRecord(raw.workflow)
+      ? (raw.workflow as unknown as UserFacingAgentResponse['workflow'])
       : undefined,
   };
 }

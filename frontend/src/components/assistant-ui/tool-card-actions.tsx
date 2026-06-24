@@ -12,7 +12,7 @@ import {
   UserPlus,
   X,
 } from 'lucide-react';
-import { useSyncExternalStore } from 'react';
+import { type ReactNode, useSyncExternalStore } from 'react';
 
 import { cn } from '../../lib/utils';
 import type {
@@ -48,6 +48,7 @@ type CardActionRuntimeState = {
   inlineApproval: InlineCardApproval | null;
   inlineDraft: InlineCardDraft | null;
   inlineOutcome: InlineCardOutcome | null;
+  dismissed: boolean;
 };
 
 const EMPTY_CARD_ACTION_STATE: CardActionRuntimeState = {
@@ -58,6 +59,7 @@ const EMPTY_CARD_ACTION_STATE: CardActionRuntimeState = {
   inlineApproval: null,
   inlineDraft: null,
   inlineOutcome: null,
+  dismissed: false,
 };
 
 type InlineCardApproval = {
@@ -97,6 +99,40 @@ export function CardActionSummary(props: {
   actions: SchemaDrivenAssistantCard['actions'];
 }) {
   return <UnifiedActionCard {...props} />;
+}
+
+export function CardActionDismissible({
+  card,
+  dismissed,
+  children,
+}: {
+  card: SchemaDrivenAssistantCard;
+  dismissed: ReactNode;
+  children: ReactNode;
+}) {
+  return <>{useCardDismissedByAction(card) ? dismissed : children}</>;
+}
+
+function useCardDismissedByAction(card: SchemaDrivenAssistantCard) {
+  const runtimeScope = useAuiState((state) => {
+    const custom = state.message.metadata.custom as {
+      fitmeetMessageId?: string;
+      fitmeetThreadId?: string;
+      threadId?: string | number | null;
+      fitmeetTaskId?: string | number | null;
+      taskId?: string | number | null;
+      fitmeetRunId?: string;
+      runId?: string | null;
+    };
+    const messageId = custom.fitmeetMessageId ?? state.message.id;
+    return cardActionRuntimeScope({
+      threadId: custom.fitmeetThreadId ?? custom.threadId ?? custom.fitmeetTaskId ?? custom.taskId,
+      runId: custom.fitmeetRunId ?? custom.runId,
+      messageId,
+    });
+  });
+  const [, actionState] = useCardActionRuntimeState(runtimeScope, card.id);
+  return actionState.dismissed;
 }
 
 export function UnifiedActionCard({
@@ -174,6 +210,7 @@ export function UnifiedActionCard({
         inlineApproval: null,
         inlineDraft: null,
         inlineOutcome: null,
+        dismissed: isPublishDismissSchemaAction(action.schemaAction),
       });
       return;
     }
@@ -264,6 +301,7 @@ export function UnifiedActionCard({
         inlineApproval: null,
         inlineDraft: draft ?? actionState.inlineDraft,
         inlineOutcome: outcome ?? actionState.inlineOutcome,
+        dismissed: isPublishDismissSchemaAction(action.schemaAction),
       });
     } catch (nextError) {
       setCardActionRuntimeState(runtimeKey, {
@@ -737,7 +775,7 @@ function visualActionsForCard(
         action.schemaAction === 'publish_to_discover' ||
         action.schemaAction === 'activity.confirm_create',
     );
-    const close = actions.find((action) => action.schemaAction === 'activity.skip_publish');
+    const close = actions.find((action) => isPublishDismissSchemaAction(action.schemaAction));
     const detail = actions.find((action) => action.schemaAction === 'activity.view_detail');
     return published
       ? compactVisualActions([modify, detail]).slice(0, 2)
@@ -771,6 +809,16 @@ function compactVisualActions(actions: Array<VisibleCardAction | null | undefine
   return result;
 }
 
+function isPublishDismissSchemaAction(
+  schemaAction: ToolUISchemaAction | null | undefined,
+) {
+  return (
+    schemaAction === 'activity.skip_publish' ||
+    schemaAction === 'social_intent.decline_publish' ||
+    schemaAction === 'social_intent.dismiss'
+  );
+}
+
 function visualCardActionLabel(
   card: SchemaDrivenAssistantCard,
   action: VisibleCardAction,
@@ -790,7 +838,7 @@ function visualCardActionLabel(
     ) {
       return '修改卡片';
     }
-    if (action.schemaAction === 'activity.skip_publish') return published ? null : '暂不发布';
+    if (isPublishDismissSchemaAction(action.schemaAction)) return published ? null : '暂不发布';
     if (action.schemaAction === 'activity.view_detail') return '查看详情';
   }
   if (card.schemaType === 'social_match.candidate') {
@@ -820,7 +868,7 @@ function visualCardActionIcon(
     ) {
       return Edit3;
     }
-    if (action.schemaAction === 'activity.skip_publish') return X;
+    if (isPublishDismissSchemaAction(action.schemaAction)) return X;
     if (action.schemaAction === 'activity.view_detail') return Eye;
     return ShieldCheck;
   }
@@ -984,8 +1032,12 @@ function canonicalVisibleActionKey(
     if (/^(change_location|activity\.modify_location)$/.test(rawAction)) {
       return 'activity.modify_location';
     }
-    if (/^(skip_publish|activity\.skip_publish)$/.test(rawAction)) {
-      return 'activity.skip_publish';
+    if (
+      /^(skip_publish|activity\.skip_publish|decline_publish|dismiss_draft|social_intent\.decline_publish|social_intent\.dismiss)$/.test(
+        rawAction,
+      )
+    ) {
+      return 'social_intent.decline_publish';
     }
     if (/^(expand_radius|relax_preference|candidate\.more_like_this)$/.test(rawAction)) {
       return 'candidate.more_like_this';
@@ -1015,6 +1067,8 @@ const LOW_RISK_VISIBLE_SCHEMA_ACTIONS = new Set<ToolUISchemaAction>([
   'activity.modify_time',
   'activity.modify_location',
   'activity.skip_publish',
+  'social_intent.decline_publish',
+  'social_intent.dismiss',
   'opener.regenerate',
   'opener.reject',
 ]);
@@ -1042,6 +1096,8 @@ const LOW_RISK_VISIBLE_RAW_ACTIONS = new Set([
   'activity.modify_time',
   'activity.modify_location',
   'activity.skip_publish',
+  'social_intent.decline_publish',
+  'social_intent.dismiss',
   'change_time',
   'modify_activity',
   'skip_publish',
@@ -1117,6 +1173,7 @@ function sortVisibleCardActions(
             'publish_to_discover',
             'activity.confirm_create',
             'activity.modify_time',
+            'social_intent.decline_publish',
             'activity.skip_publish',
             'activity.view_detail',
             'activity.modify_location',
@@ -1128,6 +1185,7 @@ function sortVisibleCardActions(
               'publish_to_discover',
               'candidate.more_like_this',
               'activity.modify_time',
+              'social_intent.decline_publish',
               'activity.skip_publish',
             ]
           : schemaType === 'meet_loop.timeline'
@@ -1357,7 +1415,7 @@ function inlineOutcomeFromActionResponse(
     action.schemaAction !== 'activity.view_detail' &&
     action.schemaAction !== 'activity.modify_time' &&
     action.schemaAction !== 'activity.modify_location' &&
-    action.schemaAction !== 'activity.skip_publish'
+    !isPublishDismissSchemaAction(action.schemaAction)
   ) {
     return null;
   }
@@ -1388,8 +1446,8 @@ function inlineOutcomeStableBody(schemaAction: ToolUISchemaAction | null | undef
   if (schemaAction === 'candidate.more_like_this') {
     return '我会沿着当前条件继续找类似机会。';
   }
-  if (schemaAction === 'activity.skip_publish') {
-    return '这张约练卡已保留为草稿，暂时不会发布到发现。';
+  if (isPublishDismissSchemaAction(schemaAction)) {
+    return '已取消发布，不会出现在发现页，也不会继续匹配。';
   }
   if (schemaAction === 'publish_to_discover') {
     return '这张约练卡已发布到发现页，公开可发现用户可以看到。';
@@ -1402,7 +1460,7 @@ function inlineOutcomeTitle(schemaAction: ToolUISchemaAction | null | undefined)
   if (schemaAction === 'candidate.skip') return '已跳过';
   if (schemaAction === 'candidate.more_like_this') return '继续找类似机会';
   if (schemaAction === 'publish_to_discover') return '已发布到发现';
-  if (schemaAction === 'activity.skip_publish') return '已暂不发布';
+  if (isPublishDismissSchemaAction(schemaAction)) return '已取消发布';
   if (schemaAction === 'activity.modify_time' || schemaAction === 'activity.modify_location') {
     return '已准备修改';
   }
@@ -1420,8 +1478,8 @@ function inlineOutcomeFallbackBody(schemaAction: ToolUISchemaAction | null | und
   if (schemaAction === 'candidate.more_like_this') {
     return '我会沿着当前条件继续找类似机会。';
   }
-  if (schemaAction === 'activity.skip_publish') {
-    return '这张约练卡已作为草稿保留，暂时不会发布到发现。';
+  if (isPublishDismissSchemaAction(schemaAction)) {
+    return '已取消发布，不会出现在发现页，也不会继续匹配。';
   }
   if (schemaAction === 'publish_to_discover') {
     return '这张约练卡已发布到发现页，公开可发现用户可以看到。';
@@ -1793,7 +1851,12 @@ function normalizeVisibleActionLabel(
   if (schemaType === 'social_match.activity' && canonicalKey === 'activity.confirm_create') {
     return '确认发布';
   }
-  if (schemaType === 'social_match.activity' && canonicalKey === 'activity.skip_publish') {
+  if (
+    schemaType === 'social_match.activity' &&
+    (canonicalKey === 'activity.skip_publish' ||
+      canonicalKey === 'social_intent.decline_publish' ||
+      canonicalKey === 'social_intent.dismiss')
+  ) {
     return '暂不发布';
   }
   if (
@@ -1880,8 +1943,8 @@ function defaultCardActions(card: SchemaDrivenAssistantCard): VisibleCardAction[
         id: `${card.id}:skip-publish`,
         label: '暂不发布',
         requiresConfirmation: false,
-        schemaAction: 'activity.skip_publish',
-        action: 'activity.skip_publish',
+        schemaAction: 'social_intent.decline_publish',
+        action: 'social_intent.decline_publish',
         payload: basePayload,
         source: 'default' as const,
       },

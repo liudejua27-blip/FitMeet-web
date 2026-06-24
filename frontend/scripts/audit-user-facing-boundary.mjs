@@ -2,34 +2,23 @@ import { readdir, readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
 
 const root = process.cwd();
-const sourceRoots = ['src/pages', 'src/components', 'src/lib'];
+const sourceRoots = ['src/pages', 'src/components', 'src/lib', 'src/api'];
 const forbiddenTerms = [
-  'subagent',
-  'Life Graph Agent',
-  'Match Agent',
-  'planner',
-  'traceId',
-  'handoff',
-  'raw JSON',
-  'rawJson',
-  'rawJSON',
+  { label: 'subagent', pattern: /\bsubagent\b/i },
+  { label: 'Life Graph Agent', pattern: /Life\s+Graph\s+Agent/i },
+  { label: 'Match Agent', pattern: /Match\s+Agent/i },
+  { label: 'planner', pattern: /\bplanner\b/i },
+  { label: 'traceId', pattern: /\btraceId\b/ },
+  { label: 'handoff', pattern: /\bhandoff\b/i },
+  { label: 'raw JSON', pattern: /\braw\s+JSON\b/i },
+  { label: 'rawJson', pattern: /\brawJson\b/ },
+  { label: 'rawJSON', pattern: /\brawJSON\b/ },
 ];
 
 const allowedSourcePatterns = [
   /src\/pages\/AgentL5AdminPage\.tsx$/,
   /src\/api\/agentL5RuntimeApi\.ts$/,
   /src\/api\/fitmeetCoreContract\.ts$/,
-  /src\/components\/assistant-ui\/public-process-text\.ts$/,
-  /src\/components\/assistant-ui\/tool-process-model\.ts$/,
-  /src\/components\/assistant-ui\/tool-ui-schema\.ts$/,
-  /src\/components\/assistant-ui\/tool-safety-card\.tsx$/,
-  /src\/components\/agent-workspace\/agentWorkspaceRuntime\.ts$/,
-  /src\/components\/agent-workspace\/api\/realAgentAdapter\.ts$/,
-  /src\/components\/agent-workspace\/useAgentFeedbackRuntime\.ts$/,
-  /src\/components\/agent-workspace\/useAgentFinalResultRuntime\.ts$/,
-  /src\/components\/agent-workspace\/agentAssistantMessageReducer\.ts$/,
-  /src\/components\/agent-workspace\/FitMeetAssistantUI\.types\.ts$/,
-  /src\/components\/RealtimeProvider\.tsx$/,
 ];
 
 const allowedDistChunkPatterns = [
@@ -47,8 +36,8 @@ for (const sourceRoot of sourceRoots) {
     if (allowedSourcePatterns.some((pattern) => pattern.test(relative))) continue;
     const content = await readFile(file, 'utf8');
     for (const term of forbiddenTerms) {
-      if (content.includes(term)) {
-        failures.push(`${relative} exposes internal term ${term}`);
+      if (term.pattern.test(content)) {
+        failures.push(`${relative} exposes internal term ${term.label}`);
       }
     }
   }
@@ -61,9 +50,9 @@ if (process.env.FITMEET_AUDIT_DIST !== '0' && (await exists(distDir))) {
     if (!/\.(html|js|css)$/.test(file)) continue;
     if (allowedDistChunkPatterns.some((pattern) => pattern.test(path.basename(file)))) continue;
     const content = await readFile(file, 'utf8').catch(() => '');
-    for (const term of ['Life Graph Agent', 'Match Agent', 'raw JSON']) {
-      if (content.includes(term)) {
-        failures.push(`dist/${relative} exposes internal term ${term}`);
+    for (const term of forbiddenTerms) {
+      if (term.pattern.test(content)) {
+        failures.push(`dist/${relative} exposes internal term ${term.label}`);
       }
     }
   }

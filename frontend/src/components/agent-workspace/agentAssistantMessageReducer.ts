@@ -125,7 +125,6 @@ function mergeSingleRunAssistantMessage(
     taskId: incoming.taskId ?? existing.taskId,
     runId: incoming.runId ?? existing.runId ?? null,
     messageId: incoming.messageId ?? existing.messageId ?? null,
-    traceId: incoming.traceId ?? existing.traceId ?? null,
     branch: branchable === false ? undefined : existing.branch ?? incoming.branch,
     createsBranch:
       branchable === false ? false : existing.createsBranch || incoming.createsBranch,

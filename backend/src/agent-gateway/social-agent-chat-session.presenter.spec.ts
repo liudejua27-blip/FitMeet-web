@@ -255,4 +255,95 @@ describe('readSocialAgentRestorableResult', () => {
       ]),
     });
   });
+
+  it('does not restore an opportunity card after the draft was cancelled', () => {
+    const task = {
+      id: 204,
+      status: AgentTaskStatus.AwaitingConfirmation,
+      result: {
+        chatRun: {
+          message: '约练卡已生成',
+          publishStatus: 'cancelled',
+          socialRequestDraft: null,
+        },
+        activityDraft: {
+          title: '今晚青岛大学散步搭子',
+          visibility: 'hidden',
+          dismissed: true,
+          publishStatus: 'cancelled',
+          status: 'draft_cancelled',
+        },
+      },
+      memory: {
+        socialAgentChat: {
+          publishStatus: 'cancelled',
+          socialRequestDraft: null,
+        },
+        shortTerm: {
+          publishStatus: 'cancelled',
+          socialRequestDraft: null,
+        },
+      },
+    } as unknown as AgentTask;
+
+    const result = readSocialAgentRestorableResult({
+      task,
+      latestRun: {
+        taskId: 204,
+        runId: 'sar_publish_restore_stale',
+        status: 'completed',
+        phase: 'completed',
+        message: '约练卡已生成',
+        visibleSteps: [],
+        queuedAt: '2026-06-05T00:00:00.000Z',
+        startedAt: '2026-06-05T00:01:00.000Z',
+        updatedAt: '2026-06-05T00:03:00.000Z',
+        completedAt: '2026-06-05T00:03:00.000Z',
+        failedAt: null,
+        pollAfterMs: 1500,
+        error: null,
+        replan: null,
+        result: {
+          taskId: 204,
+          status: AgentTaskStatus.AwaitingConfirmation,
+          visibleSteps: [],
+          assistantMessage: '约练卡已生成',
+          socialRequestDraft: {
+            agentTaskId: 204,
+            mode: 'draft',
+            type: 'city_walk',
+            title: '今晚青岛大学散步搭子',
+            description: '今晚在青岛大学附近散步，只公开模糊地点。',
+            city: '青岛',
+            activityType: '散步',
+            timePreference: '今晚',
+            locationPreference: '青岛大学附近',
+            autoPublished: false,
+            publicIntentId: null,
+            discoverHref: null,
+          } as never,
+          cards: [
+            {
+              id: 'activity_plan:204:draft',
+              type: 'activity_plan',
+              title: '今晚青岛大学散步搭子',
+              schemaType: 'social_match.activity',
+              status: 'waiting_confirmation',
+              data: { schemaType: 'social_match.activity' },
+              actions: [],
+            },
+          ],
+          candidates: [],
+          approvalRequiredActions: [],
+          events: [],
+        },
+      },
+      events: [],
+      visibleStepLabel: (_, label) => label,
+    });
+
+    expect(result?.assistantMessage).toContain('已取消发布');
+    expect(result?.socialRequestDraft).toBeNull();
+    expect(result?.cards ?? []).toEqual([]);
+  });
 });

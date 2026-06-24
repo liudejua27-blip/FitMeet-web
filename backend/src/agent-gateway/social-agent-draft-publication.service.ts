@@ -24,6 +24,7 @@ import { SocialAgentLongTermMemoryService } from './social-agent-long-term-memor
 import {
   appendShortTermMemoryItem,
   rememberSocialAgentShortTerm,
+  transitionSocialAgentState,
 } from './social-agent-memory.util';
 import { toSocialAgentPublishDto } from './social-agent-chat-result.presenter';
 import {
@@ -31,6 +32,8 @@ import {
   SocialAgentToolName,
 } from './social-agent-tool-executor.service';
 import { PublicSocialIntent } from './entities/public-social-intent.entity';
+import { AgentSideEffectLedgerService } from './agent-side-effect-ledger.service';
+import { assertSocialAgentOpportunityPublishable } from './social-agent-opportunity-production-guard';
 
 @Injectable()
 export class SocialAgentDraftPublicationService {
@@ -47,6 +50,8 @@ export class SocialAgentDraftPublicationService {
     @Optional()
     @InjectRepository(PublicSocialIntent)
     private readonly publicIntentRepo?: Repository<PublicSocialIntent>,
+    @Optional()
+    private readonly sideEffectLedger?: AgentSideEffectLedgerService,
   ) {}
 
   async publishDraft(
@@ -54,6 +59,176 @@ export class SocialAgentDraftPublicationService {
     taskId: number,
     draft: CreateSocialRequestDto & { socialRequestId?: number | null },
   ): Promise<Record<string, unknown>> {
+    if (this.sideEffectLedger) {
+      const idempotencyKey = this.publishIdempotencyKey(taskId, draft);
+      const socialRequestId = this.number(
+        draft.socialRequestId ?? draft.metadata?.socialRequestId,
+      );
+      const { result, reused } = await this.sideEffectLedger.run(
+        {
+          ownerUserId,
+          agentTaskId: taskId,
+          actionType: 'publish_social_request',
+          idempotencyKey,
+          resourceType: 'social_request',
+          resourceId: socialRequestId,
+          metadata: {
+            source: 'social_agent_draft_publication',
+            socialRequestId,
+          },
+        },
+        () => this.publishDraftOnce(ownerUserId, taskId, draft),
+      );
+      if (reused) {
+        this.logger.log({
+          event: 'social_agent.publish.reused_side_effect',
+          taskId,
+          idempotencyKey,
+          socialRequestId,
+        });
+      }
+      return result;
+    }
+    return this.publishDraftOnce(ownerUserId, taskId, draft);
+  }
+
+  async dismissDraft(
+    ownerUserId: number,
+    taskId: number,
+    payload: Record<string, unknown> = {},
+  ): Promise<Record<string, unknown>> {
+    const task = await this.assertTaskOwner(taskId, ownerUserId);
+    const now = new Date().toISOString();
+    const result = this.record(task.result);
+    const chatRun = this.record(result.chatRun);
+    const activityDraft = this.record(result.activityDraft);
+    const memory = this.record(task.memory);
+    const socialAgentChat = this.record(memory.socialAgentChat);
+    const existingDraft = this.firstNonEmptyRecord(
+      payload.socialRequestDraft,
+      payload.draft,
+      chatRun.socialRequestDraft,
+      socialAgentChat.socialRequestDraft,
+      activityDraft,
+    );
+    const socialRequestId = this.number(
+      payload.socialRequestId ??
+        existingDraft.socialRequestId ??
+        this.record(existingDraft.metadata).socialRequestId,
+    );
+    const dismissedDraft = {
+      ...existingDraft,
+      ...(socialRequestId ? { socialRequestId } : {}),
+      visibility: 'hidden',
+      publishStatus: 'dismissed',
+      dismissed: true,
+      dismissedAt: now,
+      dismissedBy: 'user',
+      publicDiscoverPublishSkipped: true,
+      matchingStopped: true,
+    };
+
+    task.status = AgentTaskStatus.AwaitingFeedback;
+    task.statusReason = 'social_intent_publish_dismissed';
+    task.result = {
+      ...result,
+      chatRun: {
+        ...chatRun,
+        socialRequestDraft: null,
+        publicIntentId: null,
+        discoverHref: null,
+        publicIntentHref: null,
+        publishStatus: 'dismissed',
+        publicDiscoverPublishSkipped: true,
+        matchingStopped: true,
+      },
+      activityDraft: dismissedDraft,
+      publishSocialRequest: {
+        ...this.record(result.publishSocialRequest),
+        ...(socialRequestId ? { socialRequestId } : {}),
+        status: 'dismissed',
+        synced: false,
+        publicIntentId: null,
+        discoverHref: null,
+        publicIntentHref: null,
+        dismissedAt: now,
+        dismissedBy: 'user',
+      },
+    };
+    task.memory = {
+      ...memory,
+      socialAgentChat: {
+        ...socialAgentChat,
+        socialRequestDraft: null,
+        publishStatus: 'dismissed',
+        publicIntentId: null,
+        discoverHref: null,
+        publicIntentHref: null,
+        publicDiscoverPublishSkipped: true,
+        matchingStopped: true,
+        updatedAt: now,
+      },
+    };
+    rememberSocialAgentShortTerm(task, {
+      socialRequestDraft: null,
+      publishStatus: 'dismissed',
+      publicIntentId: null,
+      discoverHref: null,
+      publicIntentHref: null,
+      publicDiscoverPublishSkipped: true,
+      matchingStopped: true,
+      hasSearched: false,
+      lastSearchCandidateCount: 0,
+      lastSearchEmptyReason: null,
+      lastSearchNextStep: null,
+    });
+    transitionSocialAgentState(task, 'message_action', {
+      objective: 'meet_loop',
+      nextStep: '已取消发布，不会进入发现或继续匹配。',
+      shouldSearchNow: false,
+      awaitingSearchConfirmation: false,
+      waitingFor: 'user_next_message',
+      lastCompletedStep: 'social_intent_publish_dismissed',
+    });
+    await this.taskRepo.save(task);
+    await this.writeEvent(
+      task,
+      AgentTaskEventType.Note,
+      '用户取消发布约练卡',
+      {
+        ...(socialRequestId ? { socialRequestId } : {}),
+        action: cleanDisplayText(
+          payload.action,
+          'social_intent.decline_publish',
+        ),
+        status: 'dismissed',
+        visibility: 'hidden',
+        publicDiscoverPublishSkipped: true,
+        matchingStopped: true,
+      },
+      AgentTaskEventActor.User,
+    );
+    return {
+      success: true,
+      taskId,
+      socialRequestId,
+      status: 'dismissed',
+      visibility: 'hidden',
+      publishStatus: 'dismissed',
+      publicIntentId: null,
+      discoverHref: null,
+      publicIntentHref: null,
+      matchingStopped: true,
+      message: '已取消发布，这张约练卡不会出现在发现页，也不会继续匹配。',
+    };
+  }
+
+  private async publishDraftOnce(
+    ownerUserId: number,
+    taskId: number,
+    draft: CreateSocialRequestDto & { socialRequestId?: number | null },
+  ): Promise<Record<string, unknown>> {
+    assertSocialAgentOpportunityPublishable(draft);
     let task = await this.assertTaskOwner(taskId, ownerUserId);
     const requestId = this.number(
       draft.socialRequestId ?? draft.metadata?.socialRequestId,
@@ -151,8 +326,14 @@ export class SocialAgentDraftPublicationService {
     if (!publicIntentId) {
       throw new BadRequestException('发布约练缺少 publicIntentId');
     }
-    const publicIntentReadback =
-      await this.readPublishedPublicIntent(publicIntentId);
+    const publicIntentReadback = await this.readPublishedPublicIntent(
+      publicIntentId,
+      {
+        socialRequestId,
+        draft,
+        publicIntent,
+      },
+    );
     const discoverHref = this.discoverHref(publicIntentId, socialRequestId);
     const publicIntentHref = this.publicIntentHref(
       publicIntentId,
@@ -190,11 +371,78 @@ export class SocialAgentDraftPublicationService {
       socialRequestId,
       publishStatus: 'published',
     });
+    const memory = this.record(task.memory);
+    const socialAgentChat = this.record(memory.socialAgentChat);
+    const result = this.record(task.result);
+    const chatRun = this.record(result.chatRun);
+    const activityDraft = this.record(result.activityDraft);
+    const socialRequestDraft = this.firstNonEmptyRecord(
+      chatRun.socialRequestDraft,
+      socialAgentChat.socialRequestDraft,
+    );
+    const publishedAt = new Date().toISOString();
+    task.memory = {
+      ...memory,
+      socialAgentChat: {
+        ...socialAgentChat,
+        socialRequestDraft:
+          Object.keys(socialRequestDraft).length > 0
+            ? {
+                ...socialRequestDraft,
+                socialRequestId,
+                publicIntentId,
+                discoverHref,
+                publicIntentHref,
+                publishStatus: 'published',
+                visibility: 'public',
+                publishedAt,
+              }
+            : socialAgentChat.socialRequestDraft,
+        socialRequestId,
+        publicIntentId,
+        discoverHref,
+        publicIntentHref,
+        publishStatus: 'published',
+        updatedAt: publishedAt,
+      },
+    };
     task.status = AgentTaskStatus.Succeeded;
     task.statusReason = 'social_request_published_and_synced';
     task.completedAt = new Date();
     task.result = {
-      ...(task.result ?? {}),
+      ...result,
+      chatRun: {
+        ...chatRun,
+        socialRequestDraft:
+          Object.keys(socialRequestDraft).length > 0
+            ? {
+                ...socialRequestDraft,
+                socialRequestId,
+                publicIntentId,
+                discoverHref,
+                publicIntentHref,
+                publishStatus: 'published',
+                visibility: 'public',
+                publishedAt,
+              }
+            : chatRun.socialRequestDraft,
+        socialRequestId,
+        publicIntentId,
+        discoverHref,
+        publicIntentHref,
+        publishStatus: 'published',
+      },
+      activityDraft: {
+        ...activityDraft,
+        socialRequestId,
+        publicIntentId,
+        discoverHref,
+        publicIntentHref,
+        publishStatus: 'published',
+        visibility: 'public',
+        autoPublished: true,
+        publishedAt,
+      },
       publishSocialRequest: {
         socialRequestId,
         publicIntentId,
@@ -205,6 +453,14 @@ export class SocialAgentDraftPublicationService {
         toolCallId: publishAction.id,
       },
     };
+    transitionSocialAgentState(task, 'message_action', {
+      objective: 'meet_loop',
+      nextStep: 'Discover 已可见，可以继续推荐候选。',
+      shouldSearchNow: true,
+      awaitingSearchConfirmation: false,
+      waitingFor: 'post_publish_candidate_search',
+      lastCompletedStep: 'published_to_discover',
+    });
     await this.taskRepo.save(task);
     void this.longTermMemory?.summarizeTask(task).catch(() => undefined);
 
@@ -231,10 +487,50 @@ export class SocialAgentDraftPublicationService {
     };
   }
 
+  private publishIdempotencyKey(
+    taskId: number,
+    draft: CreateSocialRequestDto & { socialRequestId?: number | null },
+  ): string {
+    const explicit = cleanDisplayText(
+      draft.metadata?.idempotencyKey ??
+        (draft as { idempotencyKey?: unknown }).idempotencyKey,
+      '',
+    );
+    if (explicit) return explicit;
+    const socialRequestId = this.number(
+      draft.socialRequestId ?? draft.metadata?.socialRequestId,
+    );
+    if (socialRequestId)
+      return `publish-social-request:${taskId}:${socialRequestId}`;
+    const fingerprint = [
+      draft.title,
+      draft.city,
+      (draft as { locationName?: unknown }).locationName,
+      (draft as { timePreference?: unknown }).timePreference,
+      draft.type,
+    ]
+      .map((value) =>
+        cleanDisplayText(value, '')
+          .toLowerCase()
+          .replace(/\s+/g, '-')
+          .slice(0, 40),
+      )
+      .filter(Boolean)
+      .join(':');
+    return `publish-social-request:${taskId}:${fingerprint || 'draft'}`;
+  }
+
   private async readPublishedPublicIntent(
     publicIntentId: string,
+    expected: {
+      socialRequestId: number;
+      draft: CreateSocialRequestDto & { socialRequestId?: number | null };
+      publicIntent: Record<string, unknown>;
+    },
   ): Promise<PublicSocialIntent | null> {
-    if (!this.publicIntentRepo) return null;
+    if (!this.publicIntentRepo) {
+      throw new BadRequestException('发布约练缺少发现页读回校验能力');
+    }
     const readback = await this.publicIntentRepo.findOne({
       where: { id: publicIntentId },
     });
@@ -244,7 +540,83 @@ export class SocialAgentDraftPublicationService {
     if (readback.mode !== 'public') {
       throw new BadRequestException('发布约练读回的公开卡片不可见');
     }
+    this.assertPublicIntentReadbackMatches(readback, expected);
     return readback;
+  }
+
+  private assertPublicIntentReadbackMatches(
+    readback: PublicSocialIntent,
+    expected: {
+      socialRequestId: number;
+      draft: CreateSocialRequestDto & { socialRequestId?: number | null };
+      publicIntent: Record<string, unknown>;
+    },
+  ): void {
+    if (
+      typeof readback.linkedSocialRequestId === 'number' &&
+      readback.linkedSocialRequestId > 0 &&
+      readback.linkedSocialRequestId !== expected.socialRequestId
+    ) {
+      throw new BadRequestException('发布约练读回的公开卡片关联需求不一致');
+    }
+    this.assertMatchingPublicText({
+      label: '标题',
+      actual: readback.title,
+      expected: [expected.publicIntent.title, expected.draft.title],
+    });
+    this.assertMatchingPublicText({
+      label: '城市',
+      actual: readback.city,
+      expected: [expected.publicIntent.city, expected.draft.city],
+    });
+    this.assertMatchingPublicText({
+      label: '时间',
+      actual: readback.timePreference,
+      expected: [
+        expected.publicIntent.timePreference,
+        this.record(expected.draft.metadata).timePreference,
+        expected.draft.timeStart,
+      ],
+    });
+    this.assertMatchingPublicText({
+      label: '地点',
+      actual: readback.locationPreference,
+      expected: [
+        expected.publicIntent.locationPreference,
+        this.record(expected.draft.metadata).locationPreference,
+      ],
+    });
+  }
+
+  private assertMatchingPublicText(input: {
+    label: string;
+    actual: unknown;
+    expected: unknown[];
+  }): void {
+    const actual = this.normalizedPublicText(input.actual);
+    const expected = this.firstNormalizedPublicText(input.expected);
+    if (!actual || !expected) return;
+    if (actual !== expected) {
+      throw new BadRequestException(
+        `发布约练读回的公开卡片${input.label}不一致`,
+      );
+    }
+  }
+
+  private firstNormalizedPublicText(values: unknown[]): string | null {
+    for (const value of values) {
+      const text = this.normalizedPublicText(value);
+      if (text) return text;
+    }
+    return null;
+  }
+
+  private normalizedPublicText(value: unknown): string | null {
+    const text = cleanDisplayText(value, '')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .toLowerCase();
+    return text || null;
   }
 
   private async assertTaskOwner(
@@ -316,6 +688,18 @@ export class SocialAgentDraftPublicationService {
 
   private isRecord(value: unknown): value is Record<string, unknown> {
     return typeof value === 'object' && value !== null && !Array.isArray(value);
+  }
+
+  private record(value: unknown): Record<string, unknown> {
+    return this.isRecord(value) ? value : {};
+  }
+
+  private firstNonEmptyRecord(...values: unknown[]): Record<string, unknown> {
+    for (const value of values) {
+      const record = this.record(value);
+      if (Object.keys(record).length > 0) return record;
+    }
+    return {};
   }
 
   private number(value: unknown): number | null {

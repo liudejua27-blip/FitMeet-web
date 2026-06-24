@@ -2,11 +2,19 @@ import {
   BadRequestException,
   Injectable,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Follow } from './follow.entity';
 import { User } from '../users/user.entity';
+import { AgentSideEffectLedgerService } from '../agent-gateway/agent-side-effect-ledger.service';
+
+type EnsureFollowingOptions = {
+  agentTaskId?: number | null;
+  idempotencyKey?: string | null;
+  metadata?: Record<string, unknown>;
+};
 
 @Injectable()
 export class FriendsService {
@@ -15,6 +23,8 @@ export class FriendsService {
     private readonly followRepo: Repository<Follow>,
     @InjectRepository(User)
     private readonly userRepo: Repository<User>,
+    @Optional()
+    private readonly sideEffectLedger?: AgentSideEffectLedgerService,
   ) {}
 
   async toggleFollow(followerId: number, followingId: number) {
@@ -33,7 +43,37 @@ export class FriendsService {
     }
   }
 
-  async ensureFollowing(followerId: number, followingId: number) {
+  async ensureFollowing(
+    followerId: number,
+    followingId: number,
+    options: EnsureFollowingOptions = {},
+  ) {
+    const idempotencyKey = this.idempotencyKey(options);
+    if (this.sideEffectLedger && idempotencyKey) {
+      const { result } = await this.sideEffectLedger.run(
+        {
+          ownerUserId: followerId,
+          agentTaskId: this.positiveNumber(
+            options.agentTaskId ?? options.metadata?.agentTaskId,
+          ),
+          actionType: 'ensure_following',
+          idempotencyKey,
+          resourceType: 'follow',
+          resourceId: `${followerId}:${followingId}`,
+          metadata: {
+            followerId,
+            followingId,
+            ...(options.metadata ?? {}),
+          },
+        },
+        () => this.ensureFollowingOnce(followerId, followingId),
+      );
+      return result;
+    }
+    return this.ensureFollowingOnce(followerId, followingId);
+  }
+
+  private async ensureFollowingOnce(followerId: number, followingId: number) {
     await this.assertFollowTarget(followerId, followingId);
 
     const existing = await this.followRepo.findOne({
@@ -46,6 +86,24 @@ export class FriendsService {
     }
 
     return { following: true, followId: existing.id };
+  }
+
+  private idempotencyKey(options: EnsureFollowingOptions): string {
+    const direct =
+      typeof options.idempotencyKey === 'string'
+        ? options.idempotencyKey.trim()
+        : '';
+    if (direct) return direct.slice(0, 180);
+    const metadataKey =
+      typeof options.metadata?.idempotencyKey === 'string'
+        ? options.metadata.idempotencyKey.trim()
+        : '';
+    return metadataKey.slice(0, 180);
+  }
+
+  private positiveNumber(value: unknown): number | null {
+    const number = Number(value);
+    return Number.isFinite(number) && number > 0 ? Math.floor(number) : null;
   }
 
   private async assertFollowTarget(followerId: number, followingId: number) {

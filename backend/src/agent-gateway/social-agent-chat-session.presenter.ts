@@ -56,17 +56,20 @@ export function readSocialAgentRestorableResult(input: {
     const runResult = latestRun.result as
       | SocialAgentChatRunResult
       | SocialAgentChatReplanRunResult;
+    const restorableResult = sanitizeRestorableRunResult({
+      ...runResult,
+      taskId: task.id,
+      status: task.status,
+      visibleSteps:
+        runResult.visibleSteps?.length > 0
+          ? runResult.visibleSteps
+          : latestRun.visibleSteps,
+      events,
+    });
     return withRestoredOpportunityCard(
-      sanitizeRestorableRunResult({
-        ...runResult,
-        taskId: task.id,
-        status: task.status,
-        visibleSteps:
-          runResult.visibleSteps?.length > 0
-            ? runResult.visibleSteps
-            : latestRun.visibleSteps,
-        events,
-      }),
+      isOpportunityDraftCancelled(task)
+        ? withoutRestoredOpportunityDraft(restorableResult)
+        : restorableResult,
       task.id,
     );
   }
@@ -124,15 +127,19 @@ function readResultFromTaskMemory(
         mode: 'draft',
       } as SocialAgentRequestDraft)
     : null;
+  const restoredDraft = isOpportunityDraftCancelled(task)
+    ? null
+    : socialRequestDraft;
   return withRestoredOpportunityCard(
     {
       taskId: task.id,
       status: task.status,
       visibleSteps: readStoredVisibleSteps(task, visibleStepLabel),
-      assistantMessage:
-        cleanDisplayText(chatRun.message, '') ||
-        cleanDisplayText(eventResult?.message, '') ||
-        buildRecommendationAssistantMessage(candidates),
+      assistantMessage: isOpportunityDraftCancelled(task)
+        ? '已取消发布，不会出现在发现页，也不会继续匹配。'
+        : cleanDisplayText(chatRun.message, '') ||
+          cleanDisplayText(eventResult?.message, '') ||
+          buildRecommendationAssistantMessage(candidates),
       emptyReason:
         cleanDisplayText(chatRun.emptyReason, '') === 'no_real_candidates'
           ? 'no_real_candidates'
@@ -145,7 +152,7 @@ function readResultFromTaskMemory(
         cleanDisplayText(eventResult?.message, '') ||
         null,
       debugReasons: null,
-      socialRequestDraft,
+      socialRequestDraft: restoredDraft,
       candidates,
       approvalRequiredActions: [],
       events,
@@ -173,6 +180,21 @@ function withRestoredOpportunityCard<
   return {
     ...result,
     cards: [buildRestoredOpportunityCard(taskId, draft), ...existingCards],
+  };
+}
+
+function withoutRestoredOpportunityDraft<
+  T extends SocialAgentChatRunResult | SocialAgentChatReplanRunResult,
+>(result: T): T {
+  const cards = Array.isArray(result.cards)
+    ? result.cards.filter((card) => !isUnpublishedOpportunityCard(card))
+    : [];
+  return {
+    ...result,
+    assistantMessage: '已取消发布，不会出现在发现页，也不会继续匹配。',
+    message: '已取消发布，不会出现在发现页，也不会继续匹配。',
+    socialRequestDraft: null,
+    cards,
   };
 }
 
@@ -323,7 +345,7 @@ function buildRestoredOpportunityCard(
         recommendedNextAction: autoPublished
           ? '可以打开发现详情查看公开展示。'
           : '确认后发布到发现页，附近公开可发现用户才能看到。',
-        safetyBoundary: '不会公开精确位置、联系方式或私密画像。',
+        safetyBoundary: '不会公开精确位置、联系方式或私密资料。',
         confirmedContext: [city, time, activityType, location],
         autoPublished,
         publicIntentId,
@@ -336,10 +358,56 @@ function buildRestoredOpportunityCard(
       interestTags: Array.isArray(draft.interestTags) ? draft.interestTags : [],
       publicPlaceOnly: true,
       noPreciseLocation: true,
-      safetyBoundary: '不会公开精确位置、联系方式或私密画像。',
+      safetyBoundary: '不会公开精确位置、联系方式或私密资料。',
     },
     actions,
   };
+}
+
+function isOpportunityDraftCancelled(task: AgentTask): boolean {
+  const result = isRecord(task.result) ? task.result : {};
+  const memory = isRecord(task.memory) ? task.memory : {};
+  const activityDraft = isRecord(result.activityDraft)
+    ? result.activityDraft
+    : {};
+  const meetLoop = isRecord(result.meetLoop) ? result.meetLoop : {};
+  const chatRun = isRecord(result.chatRun) ? result.chatRun : {};
+  const shortTerm = isRecord(memory.shortTerm) ? memory.shortTerm : {};
+  const socialAgentChat = isRecord(memory.socialAgentChat)
+    ? memory.socialAgentChat
+    : {};
+  return (
+    [
+      activityDraft.publishStatus,
+      activityDraft.status,
+      activityDraft.loopStage,
+      meetLoop.publishStatus,
+      meetLoop.status,
+      meetLoop.loopStage,
+      chatRun.publishStatus,
+      shortTerm.publishStatus,
+      socialAgentChat.publishStatus,
+    ].some((value) =>
+      /cancelled|canceled|draft_cancelled|activity_publish_cancelled/.test(
+        cleanDisplayText(value, ''),
+      ),
+    ) ||
+    activityDraft.dismissed === true ||
+    activityDraft.visibility === 'hidden'
+  );
+}
+
+function isUnpublishedOpportunityCard(card: unknown): boolean {
+  if (!isRecord(card)) return false;
+  const data = isRecord(card.data) ? card.data : {};
+  const schemaType =
+    cleanDisplayText(card.schemaType, '') ||
+    cleanDisplayText(data.schemaType, '');
+  if (schemaType !== 'social_match.activity') return false;
+  const autoPublished =
+    card.status === 'completed' || data.autoPublished === true;
+  const publicIntentId = cleanDisplayText(data.publicIntentId, '');
+  return !autoPublished && !publicIntentId;
 }
 
 function readCandidateResultFromEvents(

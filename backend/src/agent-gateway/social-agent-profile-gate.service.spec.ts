@@ -100,7 +100,7 @@ describe('SocialAgentProfileGateService', () => {
 
     expect(result.passed).toBe(false);
     expect(result.missing).toEqual(['city', 'activity', 'availability']);
-    expect(result.assistantMessage).toContain('最低画像');
+    expect(result.assistantMessage).toContain('基础资料');
     expect(result.assistantMessage).not.toContain('暂不公开到发现');
     expect(task.memory).toMatchObject({
       taskMemory: {

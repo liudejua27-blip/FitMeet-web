@@ -16,7 +16,6 @@ export type FitMeetAssistantMessage = {
   taskId?: number | null;
   runId?: string | null;
   messageId?: string | null;
-  traceId?: string | null;
   feedback?: 'positive' | 'negative' | null;
   feedbackStatus?: 'submitting' | 'submitted' | 'failed' | null;
   feedbackErrorValue?: 'positive' | 'negative' | null;

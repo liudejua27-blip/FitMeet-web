@@ -198,7 +198,7 @@ describe('SocialAgentProfileEnrichmentService', () => {
       assistantMessageSource: 'deterministic_route',
       assistantStreamed: false,
     });
-    expect(result.assistantMessage).toContain('5 项关键画像信息');
+    expect(result.assistantMessage).toContain('5 项关键个人信息');
     expect(result.assistantMessage).toContain('当前目标');
     expect(result.assistantMessage).toContain('互动形式');
     expect(result.assistantMessage).toContain('时间和地点范围');
@@ -277,7 +277,9 @@ describe('SocialAgentProfileEnrichmentService', () => {
       }),
     );
     expect(result.profileUpdated).toBe(true);
-    expect(result.assistantMessage).toContain('已帮你把刚才的信息写入 AI 画像');
+    expect(result.assistantMessage).toContain(
+      '已帮你把刚才的信息保存到个人信息',
+    );
     expect(result.assistantMessage).toContain('城市');
     expect(result.assistantMessage).toContain('兴趣和活动偏好');
     expect(result.assistantMessage).not.toMatch(/city|interestTags/);
@@ -534,7 +536,7 @@ describe('SocialAgentProfileEnrichmentService', () => {
     expect(result.assistantMessage).toContain(
       '本次只用于当前对话，不保存到个人信息',
     );
-    expect(result.assistantMessage).toContain('本次使用的画像预览');
+    expect(result.assistantMessage).toContain('本次使用的资料预览');
     expect(result.assistantMessage).toContain('接下来要基于这些信息开始匹配吗');
     expect(result.assistantMessage).not.toMatch(/city:|interestTags:/);
     expect(task.memory).toMatchObject({

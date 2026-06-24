@@ -206,7 +206,7 @@ export function LoginModal() {
         </div>
 
         <div className="login-modal-note" aria-hidden="true">
-          <span>你的联系方式、精确位置和画像更新都不会自动公开。</span>
+          <span>你的联系方式、精确位置和资料更新都不会自动公开。</span>
         </div>
       </section>
     </div>

@@ -201,7 +201,7 @@ function ApprovalConfirmationRow({
             {approvalEffectLine(confirmation)}
           </p>
           <ApprovalGuardrailList
-            checkpointLabel={checkpointId ? '我会接着处理' : '确认后我会接着处理'}
+            checkpointLabel="我会接着处理"
             riskLevel={confirmation.riskLevel}
           />
         </div>

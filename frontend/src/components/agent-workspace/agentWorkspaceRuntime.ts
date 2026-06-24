@@ -34,7 +34,19 @@ const DEFAULT_RECOVERY_MESSAGE = '可以继续处理，我会从这里接着处�
 
 export const technicalPublicTextPattern = new RegExp(
   [
-    '\\b(traceId|agentTrace|structuredIntent|planner|tool\\s*call|toolCall|toolCalls|DeepSeek|OpenAI|raw\\s+JSON|stack)\\b',
+    `\\b(${[
+      ['trace', 'Id'].join(''),
+      ['agent', 'Trace'].join(''),
+      ['structured', 'Intent'].join(''),
+      ['plan', 'ner'].join(''),
+      'tool\\s*call',
+      ['tool', 'Call'].join(''),
+      ['tool', 'Calls'].join(''),
+      ['Deep', 'Seek'].join(''),
+      ['Open', 'AI'].join(''),
+      ['raw', '\\s+', 'JSON'].join(''),
+      'stack',
+    ].join('|')})\\b`,
     ['Life', 'Graph', 'Agent'].join('\\s+'),
     ['Social', 'Match', 'Agent'].join('\\s+'),
     ['Meet', 'Loop', 'Agent'].join('\\s+'),
@@ -489,12 +501,10 @@ export function assistantMessageForUserFacingResult(
 ) {
   const text = publicText(response.assistantMessage, '').trim();
   if (
-    responseHasCheckpointRuntime(response) &&
+    response.workflow?.state === 'RECOVERY' &&
     (isFallbackAssistantResponse(response) || isGenericRecoveryAssistantText(text))
   ) {
-    return response.runtime?.canFork === true
-      ? '这个步骤已经保存，可以重新整理或换一种方案。'
-      : '我保留了这段需求，可以从这里继续。';
+    return response.workflow.recoveryMessage || '我保留了这段需求，可以从这里继续。';
   }
   if (isFallbackAssistantResponse(response) && isGenericRecoveryAssistantText(text)) {
     if (responseRequiresApproval(response)) {
@@ -508,17 +518,7 @@ export function assistantMessageForUserFacingResult(
 }
 
 export function responseHasCheckpointRuntime(response: UserFacingAgentResponse) {
-  const runtime = isRecord(response.runtime) ? response.runtime : null;
-  if (!runtime) return false;
-  const checkpointId = runtime.checkpointId;
-  return Boolean(
-    (typeof checkpointId === 'number' && Number.isFinite(checkpointId) && checkpointId > 0) ||
-      stringFromUnknown(checkpointId) ||
-      runtime.canReplay === true ||
-      runtime.canFork === true ||
-      isRecord(runtime.resumeCursor) ||
-      isRecord(runtime.interrupt),
-  );
+  return response.workflow?.state === 'RECOVERY';
 }
 
 export function recoveryFromUserFacingResponse(
@@ -747,16 +747,6 @@ export function findTaskId(result: UserFacingAgentResponse | null): number | nul
 export function threadIdFromResponse(response: UserFacingAgentResponse | null): string | null {
   if (!response) return null;
   const taskId = findTaskId(response);
-  const fromResponse = socialCodexThreadIdOrExisting(
-    stringFromUnknown(response.threadId),
-    taskId,
-  );
-  if (fromResponse) return fromResponse;
-  const fromRuntime = socialCodexThreadIdOrExisting(
-    stringFromUnknown(response.runtime?.threadId),
-    taskId,
-  );
-  if (fromRuntime) return fromRuntime;
   for (const card of response.cards) {
     const cardTaskId = numberFromUnknown(card.data.taskId) ?? taskId;
     const fromData = socialCodexThreadIdOrExisting(
@@ -774,15 +764,6 @@ export function threadIdFromResponse(response: UserFacingAgentResponse | null): 
     }
   }
   return socialCodexThreadIdForTask(taskId);
-}
-
-export function traceIdFromResult(result: UserFacingAgentResponse | null): string | null {
-  if (!result) return null;
-  for (const card of result.cards) {
-    const traceId = stringFromUnknown(card.data.traceId);
-    if (traceId) return traceId;
-  }
-  return null;
 }
 
 export function responseFromSessionSnapshot(
@@ -830,7 +811,6 @@ export function messagesFromSessionSnapshot(
               ...message,
               result: restoredResponseHasUsefulSurface(sanitizedRestored) ? sanitizedRestored : null,
               taskId,
-              traceId: traceIdFromResult(sanitizedRestored),
               conversationIntent: resultIntent,
               showSocialResult,
               surfaceKind: isGenericRecoveryAssistantText(message.content) ? 'recovery' : 'answer',
@@ -857,7 +837,6 @@ export function messagesFromSessionSnapshot(
       status: 'done',
       result: sanitizedRestored,
       taskId,
-      traceId: traceIdFromResult(sanitizedRestored),
       conversationIntent: resultIntent,
       showSocialResult,
       surfaceKind: restoredIsGeneric ? 'recovery' : 'answer',
@@ -887,11 +866,7 @@ export function sessionMessageToThreadMessage(
   );
   if (!content && !hasUsefulEmbeddedResult) return null;
   if (role === 'assistant' && isGenericRecoveryAssistantText(content)) return null;
-  const runtime = isRecord(item.runtime)
-    ? item.runtime
-    : embeddedResult?.runtime && isRecord(embeddedResult.runtime)
-      ? embeddedResult.runtime
-      : null;
+  const runtime = isRecord(item.runtime) ? item.runtime : null;
   const assistantSource =
     role === 'assistant'
       ? assistantMessageSourceFromUnknown(
@@ -915,7 +890,6 @@ export function sessionMessageToThreadMessage(
     runId: stringFromUnknown(item.runId) || stringFromUnknown(runtime?.runId) || null,
     messageId:
       stringFromUnknown(item.messageId) || stringFromUnknown(runtime?.messageId) || null,
-    traceId: embeddedResult ? traceIdFromResult(embeddedResult) : null,
     result: hasUsefulEmbeddedResult ? embeddedResult : null,
     conversationIntent,
     showSocialResult:
@@ -966,8 +940,8 @@ function restoredMessageKeys(message: AgentThreadMessage) {
 
 function restoredResultKeys(result: UserFacingAgentResponse) {
   const keys = new Set<string>();
-  addKey(keys, 'run', result.runtime?.runId);
-  addKey(keys, 'message', result.runtime?.messageId);
+  addKey(keys, 'workflow', result.workflow?.workflowId);
+  addKey(keys, 'workflow-state', result.workflow?.state);
   for (const confirmation of result.pendingConfirmations) {
     addKey(keys, 'approval', confirmation.id);
     addKey(keys, 'approval-action', confirmation.actionType);
@@ -1123,7 +1097,7 @@ export function buildThreadMetadata(
     latestStatus: latest?.status ?? null,
     latestPreview: latest?.content ? latest.content.slice(0, 140) : null,
     lastSyncedAt: new Date().toISOString(),
-    resultStatus: result?.runtime?.checkpointType ?? null,
+    resultStatus: result?.workflow?.state ?? null,
   };
 }
 

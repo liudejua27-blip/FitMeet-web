@@ -565,8 +565,7 @@ function isTaskRestoreResponse(response: UserFacingAgentResponse | null | undefi
   if (!response) return false;
   if (response.pendingConfirmations.length > 0) return true;
   if (response.cards.some(isBusinessTaskCard)) return true;
-  if (response.runtime?.interrupt || response.runtime?.resumeCursor) return true;
-  if (response.runtime?.canResume || response.runtime?.checkpointAction) return true;
+  if (response.workflow?.state === 'RECOVERY') return true;
   const assistantMessage = response.assistantMessage.trim();
   return /从已保存的步骤继续|原始目标|等待你确认|需要你确认/.test(assistantMessage);
 }

@@ -429,7 +429,7 @@ function convertFitMeetMessage(
   const { cards: assistantCardsWithInlineApprovals, standaloneConfirmations } =
     attachPendingConfirmationsToAssistantCards(assistantCards, pendingConfirmations);
   const visibleProcessSteps = compactAssistantProcessSteps(steps);
-  const checkpointRuntimeSteps = processStepsFromRuntime(message.result?.runtime, message.content);
+  const checkpointRuntimeSteps: FitMeetAssistantStep[] = [];
   const resultProcessSteps = processStepsFromResult(message.result);
   const runtimeProcessSteps =
     checkpointRuntimeSteps.length > 0 && !hasActionableProcessSteps(visibleProcessSteps)
@@ -459,7 +459,7 @@ function convertFitMeetMessage(
         schemaVersion: FITMEET_ASSISTANT_TOOL_SCHEMA_VERSION,
         schemaType: 'agent.process',
         title: '正在整理当前信息',
-        runtime: message.result?.runtime ?? null,
+        runtime: null,
         visibleSummary: visibleProcessSummary,
         steps: runtimeProcessSteps.map((step) => ({
           id: step.id,
@@ -494,7 +494,7 @@ function convertFitMeetMessage(
         schemaVersion: FITMEET_ASSISTANT_TOOL_SCHEMA_VERSION,
         schemaType: 'safety.approval',
         title: '需要确认',
-        runtime: message.result.runtime ?? null,
+        runtime: null,
         pendingConfirmations: standaloneConfirmations,
         resolvedApproval: message.resolvedApproval ?? null,
         safeStatus: message.result.safeStatus,
@@ -514,7 +514,7 @@ function convertFitMeetMessage(
         schemaVersion: FITMEET_ASSISTANT_TOOL_SCHEMA_VERSION,
         schemaType: 'agent.result_cards',
         title: '整理出的可用结果',
-        runtime: message.result.runtime ?? null,
+        runtime: null,
         cards: assistantCardsWithInlineApprovals,
       },
     });
@@ -547,16 +547,11 @@ function convertFitMeetMessage(
         fitmeetMessageId: message.id,
         fitmeetTaskId: message.taskId,
         taskId: message.taskId,
-        fitmeetThreadId:
-          stringFromUnknown(message.result?.runtime?.threadId) ??
-          (message.taskId ? `agent-task:${message.taskId}` : null),
-        threadId:
-          stringFromUnknown(message.result?.runtime?.threadId) ??
-          (message.taskId ? `agent-task:${message.taskId}` : null),
-        fitmeetRunId: message.runId ?? stringFromUnknown(message.result?.runtime?.runId),
-        runId: message.runId ?? stringFromUnknown(message.result?.runtime?.runId),
-        fitmeetAssistantRunMessageId:
-          message.messageId ?? stringFromUnknown(message.result?.runtime?.messageId),
+        fitmeetThreadId: message.taskId ? `agent-task:${message.taskId}` : null,
+        threadId: message.taskId ? `agent-task:${message.taskId}` : null,
+        fitmeetRunId: message.runId ?? stringFromUnknown(message.result?.workflow?.workflowId),
+        runId: message.runId ?? stringFromUnknown(message.result?.workflow?.workflowId),
+        fitmeetAssistantRunMessageId: message.messageId ?? null,
         fitmeetAssistantMessageSource: message.assistantMessageSource,
         fitmeetBranch: message.branch,
         fitmeetCreatesBranch: message.createsBranch === true,
@@ -583,7 +578,7 @@ function shouldRenderProcessPart(
   if (isInitialConversationThinking(message, steps)) return false;
   if (
     !steps.some((step) => step.status !== 'pending') &&
-    !hasResumableRuntime(message.result?.runtime) &&
+    message.result?.workflow?.state !== 'RECOVERY' &&
     !message.result?.cards.some(isAssistantVisibleResultCard) &&
     !message.result?.pendingConfirmations.length
   ) {
@@ -599,7 +594,7 @@ function shouldRenderProcessPart(
   }
   if (hasUserVisibleSocialCodexTrace(steps)) return true;
   if (message.conversationIntent !== 'conversation') return true;
-  return hasResumableRuntime(message.result?.runtime);
+  return message.result?.workflow?.state === 'RECOVERY';
 }
 
 function hasFinalAssistantSurface(message: FitMeetAssistantMessage) {
@@ -615,7 +610,7 @@ function hasActionableProcessSurface(
   steps: FitMeetAssistantStep[],
 ) {
   if (message.result?.pendingConfirmations.length) return true;
-  if (hasResumableRuntime(message.result?.runtime)) return true;
+  if (message.result?.workflow?.state === 'RECOVERY') return true;
   return steps.some((step) => {
     if (step.status === 'waiting' || step.status === 'error') return true;
     const processType =
@@ -797,19 +792,15 @@ function visibleProcessSummaryForMessage(
     };
   }
 
-  const runtime = message.result?.runtime;
-  const checkpointAction =
-    runtime && typeof runtime === 'object' && 'checkpointAction' in runtime
-      ? runtime.checkpointAction
-      : null;
-  if (checkpointAction === 'retry') {
+  if (message.result?.workflow?.state === 'RECOVERY') {
     return {
       ...summary,
-      source: summary?.source ?? 'result.checkpoint',
+      source: summary?.source ?? 'result.recovery',
       title: '刚才连接不稳',
       detail:
         summary?.detail ??
         summary?.title ??
+        message.result.workflow.recoveryMessage ??
         '我保留了这段需求，可以继续处理，不会重复执行已确认的高风险动作。',
       state: 'failed' as const,
       historyVisibility: null,
@@ -846,45 +837,6 @@ function hasUserVisibleSocialCodexTrace(steps: FitMeetAssistantStep[]) {
   });
 }
 
-function hasResumableRuntime(runtime: UserFacingAgentResponse['runtime'] | undefined | null) {
-  if (!runtime) return false;
-  return Boolean(runtime.checkpointId || runtime.canResume || runtime.canReplay || runtime.canFork);
-}
-
-function processStepsFromRuntime(
-  runtime: UserFacingAgentResponse['runtime'] | undefined | null,
-  assistantText: string,
-): FitMeetAssistantStep[] {
-  if (!hasResumableRuntime(runtime) || !isRecord(runtime)) return [];
-  const resumeCursor = isRecord(runtime.resumeCursor) ? runtime.resumeCursor : null;
-  const checkpointAction =
-    stringFromUnknown(runtime.checkpointAction) ?? stringFromUnknown(resumeCursor?.action);
-  const stepId = stringFromUnknown(resumeCursor?.stepId) ?? 'checkpoint';
-  const retryable = checkpointAction === 'retry';
-  const label = retryable ? '刚才连接不稳' : '可以继续处理';
-  const detail = retryable
-    ? '我保留了这段需求，可以从当前进度继续。'
-    : '可以重新整理这一段，或换一种方案继续。';
-  return [
-    {
-      id: stepId,
-      label,
-      detail: assistantText.trim() ? detail : undefined,
-      status: retryable ? 'error' : 'success',
-      kind: 'tool',
-      processType: 'checkpoint',
-      metadata: {
-        checkpointAction: checkpointAction ?? (runtime.canFork ? 'replay' : 'retry'),
-        processType: 'checkpoint',
-        displayMode: 'covering_status',
-        updateModel: 'latest_state',
-        historyVisibility: 'collapsed',
-        defaultVisibleCount: 1,
-      },
-    },
-  ];
-}
-
 function processStepsFromResult(
   result: UserFacingAgentResponse | undefined | null,
 ): FitMeetAssistantStep[] {
@@ -910,11 +862,16 @@ function processStepsFromResult(
     ];
   }
   if (result.cards.some(isAssistantVisibleResultCard)) {
+    const hasProfileCompletionCard = result.cards.some(
+      (card) => card.type === 'profile_completion' || card.schemaType === 'profile.completion',
+    );
     return [
       {
         id: 'result-ready',
-        label: '已整理合适机会',
-        detail: '你可以先看结论，细节已放在卡片里。',
+        label: hasProfileCompletionCard ? '已生成资料补全卡' : '已整理合适机会',
+        detail: hasProfileCompletionCard
+          ? '你可以先回答几个问题，确认后再保存到个人信息。'
+          : '你可以先看结论，细节已放在卡片里。',
         status: 'success',
         kind: 'status',
         processType: 'run_summary',
@@ -940,8 +897,10 @@ function isAssistantVisibleResultCard(card: FitMeetAlphaCard) {
     card.type === 'activity_status' ||
     card.type === 'checkin_card' ||
     card.type === 'review_card' ||
+    card.type === 'profile_completion' ||
     card.schemaType === 'social_match.candidate' ||
     card.schemaType === 'social_match.activity' ||
+    card.schemaType === 'profile.completion' ||
     card.schemaType === 'meet_loop.timeline' ||
     card.schemaType === 'life_graph.diff' ||
     card.schemaType === 'safety.approval'
@@ -1362,7 +1321,7 @@ function lifeGraphWritebackProposalToCard(
     type: 'profile_proposal',
     schemaVersion: FITMEET_ASSISTANT_TOOL_SCHEMA_VERSION,
     schemaType: 'life_graph.diff',
-    title: '画像更新建议',
+    title: '资料更新建议',
     body: stringFromUnknown(summarySignal?.value) ?? '我整理出一条可确认的互动信号。',
     status: 'waiting_confirmation',
     data: {
@@ -1375,7 +1334,7 @@ function lifeGraphWritebackProposalToCard(
       messageId: proposal.messageId,
       candidateUserId: proposal.candidateUserId,
       source: stringFromUnknown(proposal.source) ?? 'counterpart_reply',
-      before: '等待你确认后再查看长期画像影响',
+      before: '等待你确认后再查看长期偏好影响',
       after: stringFromUnknown(summarySignal?.value) ?? '保存这次脱敏互动信号',
       proposedFields: fieldLabels,
       sensitivityLevel: stringFromUnknown(proposal.sensitivityLevel) ?? 'medium',

@@ -28,7 +28,6 @@ import {
   responseAwaitsOpportunityClarification,
   responseRequiresApproval,
   stepIdFromLightStatus,
-  traceIdFromResult,
 } from './agentWorkspaceRuntime';
 import { mergeUniqueAgentCards } from './agentCardIdentity';
 import {
@@ -152,7 +151,6 @@ export function useAgentFinalResultRuntime({
           taskId: findTaskId(displayResult) ?? activeTaskId,
           runId: runAnchor.runId ?? null,
           messageId: runAnchor.messageId ?? null,
-          traceId: traceIdFromResult(displayResult),
           showSocialResult,
           conversationIntent,
           surfaceKind: 'answer',
@@ -173,7 +171,6 @@ export function useAgentFinalResultRuntime({
               taskId: findTaskId(displayResult) ?? activeTaskId,
               runId: runAnchor.runId ?? anchored.runId ?? null,
               messageId: runAnchor.messageId ?? anchored.messageId ?? null,
-              traceId: traceIdFromResult(displayResult),
               branch:
                 createBranchForNextAssistantRef.current && branchAllowed
                   ? branchForAssistant(current, anchored.id)
@@ -208,7 +205,6 @@ export function useAgentFinalResultRuntime({
               taskId: findTaskId(displayResult) ?? activeTaskId,
               runId: runAnchor.runId ?? last.runId ?? null,
               messageId: runAnchor.messageId ?? last.messageId ?? null,
-              traceId: traceIdFromResult(displayResult),
               branch: createBranchForNextAssistantRef.current && branchAllowed
                 ? branchForAssistant(current, last.id)
                 : undefined,
@@ -234,7 +230,6 @@ export function useAgentFinalResultRuntime({
                 taskId: findTaskId(displayResult) ?? activeTaskId,
                 runId: runAnchor.runId ?? last.runId ?? null,
                 messageId: runAnchor.messageId ?? last.messageId ?? null,
-                traceId: traceIdFromResult(displayResult),
                 showSocialResult,
                 conversationIntent,
                 surfaceKind: 'answer',
@@ -253,7 +248,6 @@ export function useAgentFinalResultRuntime({
                   taskId: findTaskId(displayResult) ?? activeTaskId,
                   runId: runAnchor.runId ?? last.runId ?? null,
                   messageId: runAnchor.messageId ?? last.messageId ?? null,
-                  traceId: traceIdFromResult(displayResult),
                   showSocialResult,
                   conversationIntent,
                   surfaceKind: 'answer',
@@ -324,8 +318,8 @@ function resultRunMessageAnchor(
   result: UserFacingAgentResponse,
 ): AssistantRunMessageAnchor {
   return {
-    runId: stringFromUnknown(result.runtime?.runId),
-    messageId: stringFromUnknown(result.runtime?.messageId),
+    runId: stringFromUnknown(result.workflow?.workflowId),
+    messageId: null,
   };
 }
 

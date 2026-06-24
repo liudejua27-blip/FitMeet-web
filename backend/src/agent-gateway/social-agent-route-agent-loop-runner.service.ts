@@ -606,54 +606,71 @@ export class SocialAgentRouteAgentLoopRunnerService {
   ): Promise<RouteBranchExecutionResult> {
     if (!this.subagentWorker) return options.run();
     let branchResult: RouteBranchExecutionResult | null = null;
-    const worker = await this.subagentWorker.run({
-      ownerUserId: input.ownerUserId,
-      taskId: input.task.id,
-      agent: options.agent,
-      goal: input.message,
-      plannerInput: {
-        message: input.message,
-        intent: input.route.intent,
-        routeSource: input.route.source,
-        route: input.route,
-        taskContext: input.taskContext ?? null,
-        hydratedContext: input.hydratedContext ?? null,
-        profile: input.profile ?? null,
-        longTermSnapshot: input.longTermSnapshot ?? null,
-        brainToolResults: input.brainToolResults ?? [],
-        resumeContext: input.resumeContext,
-        assistantMessage: input.state.assistantMessage,
-        branchToolName: options.workerToolName,
-      },
-      memoryScope: options.memoryScope,
-      maxToolCalls: 1,
-      maxRetries: options.agent === 'Match Agent' ? 1 : 0,
-      signal: input.signal,
-      tools: [
-        {
-          toolName: options.workerToolName,
-          requiresApproval: false,
-          input: {
-            taskId: input.task.id,
-            intent: input.route.intent,
-            message: input.message,
-            taskContext: input.taskContext ?? null,
-            hydratedContext: input.hydratedContext ?? null,
-            profile: input.profile ?? null,
-            longTermSnapshot: input.longTermSnapshot ?? null,
-            brainToolResults: input.brainToolResults ?? [],
-            resumeContext: input.resumeContext,
-          },
+    let worker: Awaited<ReturnType<FitMeetSubagentWorkerService['run']>>;
+    try {
+      worker = await this.subagentWorker.run({
+        ownerUserId: input.ownerUserId,
+        taskId: input.task.id,
+        agent: options.agent,
+        goal: input.message,
+        plannerInput: {
+          message: input.message,
+          intent: input.route.intent,
+          routeSource: input.route.source,
+          route: input.route,
+          taskContext: input.taskContext ?? null,
+          hydratedContext: input.hydratedContext ?? null,
+          profile: input.profile ?? null,
+          longTermSnapshot: input.longTermSnapshot ?? null,
+          brainToolResults: input.brainToolResults ?? [],
+          resumeContext: input.resumeContext,
+          assistantMessage: input.state.assistantMessage,
+          branchToolName: options.workerToolName,
         },
-      ],
-      runner: async () => {
-        branchResult = await options.run();
-        return {
-          ...branchResult.observation,
-          subagentWorker: true,
-        };
-      },
-    });
+        memoryScope: options.memoryScope,
+        maxToolCalls: 1,
+        maxRetries: options.agent === 'Match Agent' ? 1 : 0,
+        signal: input.signal,
+        tools: [
+          {
+            toolName: options.workerToolName,
+            requiresApproval: false,
+            input: {
+              taskId: input.task.id,
+              intent: input.route.intent,
+              message: input.message,
+              taskContext: input.taskContext ?? null,
+              hydratedContext: input.hydratedContext ?? null,
+              profile: input.profile ?? null,
+              longTermSnapshot: input.longTermSnapshot ?? null,
+              brainToolResults: input.brainToolResults ?? [],
+              resumeContext: input.resumeContext,
+            },
+          },
+        ],
+        runner: async () => {
+          branchResult = await options.run();
+          return {
+            ...branchResult.observation,
+            subagentWorker: true,
+          };
+        },
+      });
+    } catch (error) {
+      if (!branchResult) branchResult = await options.run();
+      const observation = {
+        ...branchResult.observation,
+        ...(input.resumeContext ? { resumeContext: input.resumeContext } : {}),
+        subagentWorker: true,
+        workerFallback: true,
+        workerFailure: this.workerFailureMessage(error),
+      };
+      return {
+        ...branchResult,
+        observation,
+        handoff: undefined,
+      };
+    }
     if (!branchResult) {
       branchResult = this.branchResultFromWorkerOutput(
         input.task,
@@ -679,6 +696,17 @@ export class SocialAgentRouteAgentLoopRunnerService {
       observation,
       handoff,
     };
+  }
+
+  private workerFailureMessage(error: unknown): string {
+    const message =
+      error instanceof Error
+        ? error.message
+        : typeof error === 'string'
+          ? error
+          : 'worker_failed';
+    const trimmed = message.trim();
+    return (trimmed || 'worker_failed').slice(0, 180);
   }
 
   private branchResultFromWorkerOutput(
@@ -776,7 +804,8 @@ export class SocialAgentRouteAgentLoopRunnerService {
       return (
         route.intent === 'action_request' &&
         hasExplicitSocialSideEffectIntent(message) &&
-        (hasExistingSocialActionContext({ taskContext }) ||
+        (hasExplicitPublishSideEffectIntent(message) ||
+          hasExistingSocialActionContext({ taskContext }) ||
           this.hasExistingPublishContext(message, taskContext))
       );
     }
@@ -798,9 +827,10 @@ export class SocialAgentRouteAgentLoopRunnerService {
       return (
         route.intent === 'action_request' &&
         hasExplicitSocialSideEffectIntent(message) &&
-        (hasExistingSocialActionContext({
-          taskContext: decision.taskContext,
-        }) ||
+        (hasExplicitPublishSideEffectIntent(message) ||
+          hasExistingSocialActionContext({
+            taskContext: decision.taskContext,
+          }) ||
           this.hasExistingPublishContext(message, decision.taskContext))
       );
     }
@@ -846,7 +876,8 @@ export class SocialAgentRouteAgentLoopRunnerService {
     return (
       route.intent === 'action_request' &&
       hasExplicitSocialSideEffectIntent(message) &&
-      (hasExistingSocialActionContext({ taskContext }) ||
+      (hasExplicitPublishSideEffectIntent(message) ||
+        hasExistingSocialActionContext({ taskContext }) ||
         this.hasExistingPublishContext(message, taskContext))
     );
   }

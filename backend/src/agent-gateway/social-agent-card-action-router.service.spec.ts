@@ -55,6 +55,11 @@ function makeHarness(options: { runRunner?: boolean } = {}) {
   };
   const draftPublication = {
     publishDraft: jest.fn(),
+    dismissDraft: jest.fn().mockResolvedValue({
+      success: true,
+      status: 'dismissed',
+      message: '已取消发布，这张约练卡不会出现在发现页，也不会继续匹配。',
+    }),
   };
   const executeCalls: Array<Record<string, unknown>> = [];
   const agentLoop = {
@@ -215,7 +220,7 @@ describe('SocialAgentCardActionRouterService', () => {
     ]);
   });
 
-  it('routes private candidate continuation back into the social workflow instead of ending inline', async () => {
+  it('does not continue private candidate search after publish is skipped', async () => {
     const { candidateActions, handleMessage, metrics, service } = makeHarness();
     candidateActions.performCandidatePreferenceAction.mockResolvedValue(
       routeResult({
@@ -256,40 +261,13 @@ describe('SocialAgentCardActionRouterService', () => {
     );
     expect(handleMessage).not.toHaveBeenCalled();
     expect(result).toMatchObject({
-      intent: 'social_search',
-      action: 'queue_search',
-      replyStrategy: 'search_candidates',
-      shouldSearch: true,
-      shouldQueueRun: true,
-      runMode: 'follow_up',
-      assistantMessage: expect.stringContaining('不发布到发现'),
-      entities: expect.objectContaining({
-        city: '青岛',
-        activityType: '散步',
-        targetGender: '女生',
-        timePreference: '今天晚上',
-        locationPreference: '青岛大学附近',
-      }),
-      structuredIntent: expect.objectContaining({
-        mode: 'private_candidate_search',
-        publicDiscoverPublishSkipped: true,
-        message: expect.stringContaining(
-          '不发布到发现，继续私密匹配公开可发现候选人',
-        ),
-      }),
-      runtime: expect.objectContaining({
-        threadId: 'agent-task:101',
-        idempotencyKey: 'private-more-like-this-101',
-      }),
+      action: 'reply',
+      assistantMessage: '已记录这次私密匹配偏好。',
     });
-    expect(result.structuredIntent).toEqual(
-      expect.objectContaining({
-        taskId: 101,
-      }),
-    );
-    expect(metrics.recordDeterministicAction).not.toHaveBeenCalledWith(
+    expect(result.structuredIntent).toBeUndefined();
+    expect(metrics.recordDeterministicAction).toHaveBeenCalledWith(
       'candidate.more_like_this',
-      expect.anything(),
+      expect.objectContaining({ estimatedAvoidedLlmCalls: 1 }),
     );
   });
 
@@ -388,6 +366,7 @@ describe('SocialAgentCardActionRouterService', () => {
       lifeGraphActions,
       meetLoop,
       metrics,
+      draftPublication,
       service,
     } = makeHarness();
     candidateActions.connectCandidateFromCardAction.mockResolvedValue(
@@ -428,14 +407,6 @@ describe('SocialAgentCardActionRouterService', () => {
               },
               expiresAt: null,
             },
-          }),
-        );
-      }
-      if (body.action === 'activity.skip_publish') {
-        return Promise.resolve(
-          routeResult({
-            action: 'reply',
-            assistantMessage: '已保留为草稿，暂不发布到发现。',
           }),
         );
       }
@@ -492,13 +463,13 @@ describe('SocialAgentCardActionRouterService', () => {
         expectedHandler: meetLoop.performActivityAction,
       },
       {
-        action: 'activity.skip_publish',
+        action: 'social_intent.decline_publish',
         payload: {
           candidateUserId: 22,
           checkpointRequired: false,
         },
-        expectedAgent: 'Match Agent',
-        expectedHandler: meetLoop.performActivityAction,
+        expectedAgent: 'FitMeet Main Agent',
+        expectedHandler: draftPublication.dismissDraft,
       },
       {
         action: 'life_graph.accept_update',
@@ -550,7 +521,7 @@ describe('SocialAgentCardActionRouterService', () => {
       101,
       expect.objectContaining({ action: 'life_graph.accept_update' }),
     );
-    expect(meetLoop.performActivityAction).toHaveBeenCalledTimes(3);
+    expect(meetLoop.performActivityAction).toHaveBeenCalledTimes(2);
     expect(results[0]).toMatchObject({
       action: 'await_confirmation',
       pendingApproval: expect.objectContaining({
@@ -575,8 +546,9 @@ describe('SocialAgentCardActionRouterService', () => {
     });
     expect(results[2]).toMatchObject({
       action: 'reply',
-      assistantMessage: expect.stringContaining('暂不发布到发现'),
+      assistantMessage: expect.stringContaining('不会出现在发现页'),
       pendingApproval: null,
+      publicLoop: expect.objectContaining({ stage: 'dismissed' }),
     });
     expect(results[4].cards).toEqual(
       expect.arrayContaining([
@@ -615,7 +587,7 @@ describe('SocialAgentCardActionRouterService', () => {
     for (const action of [
       'candidate.connect',
       'activity.confirm_create',
-      'activity.skip_publish',
+      'social_intent.decline_publish',
       'life_graph.accept_update',
       'meet_loop.resume',
     ]) {
@@ -874,6 +846,9 @@ describe('SocialAgentCardActionRouterService', () => {
       }),
     );
     draftPublication.publishDraft.mockResolvedValue({
+      success: true,
+      status: 'published',
+      synced: true,
       publicIntentId: 'public-intent:walk-qdu',
     });
 
@@ -1000,6 +975,7 @@ describe('SocialAgentCardActionRouterService', () => {
     draftPublication.publishDraft.mockResolvedValue({
       success: true,
       status: 'published',
+      synced: true,
       socialRequestId: 301,
       publicIntentId: 'public-intent:walk-qdu',
       discoverHref: '/discover?publicIntentId=public-intent%3Awalk-qdu',
@@ -1139,7 +1115,7 @@ describe('SocialAgentCardActionRouterService', () => {
             }),
           }),
           expect.objectContaining({
-            schemaAction: 'activity.skip_publish',
+            schemaAction: 'social_intent.decline_publish',
             requiresConfirmation: false,
           }),
         ]),

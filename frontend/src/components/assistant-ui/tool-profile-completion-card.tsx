@@ -1,10 +1,7 @@
 import { useMemo, useState } from 'react';
 import { CheckCircle2, ChevronRight, Loader2, Sparkles } from 'lucide-react';
 
-import {
-  socialProfileApi,
-  type SocialProfileBuilderCard,
-} from '../../api/socialProfileApi';
+import { socialProfileApi, type SocialProfileBuilderCard } from '../../api/socialProfileApi';
 import type { SchemaDrivenAssistantCard } from './tool-ui-schema';
 
 type ProfileQuestion = {
@@ -41,7 +38,8 @@ export function ProfileCompletionCard({ card }: { card: SchemaDrivenAssistantCar
       answer: answers[question.key]?.trim() ?? '',
     }))
     .filter((item) => item.answer && item.answer !== '跳过');
-  const canPreview = answered.length > 0 && state.status !== 'drafting' && state.status !== 'saving';
+  const canPreview =
+    answered.length > 0 && state.status !== 'drafting' && state.status !== 'saving';
   const canSave = state.status === 'preview' && Boolean(state.draft);
 
   async function createPreview() {
@@ -80,7 +78,7 @@ export function ProfileCompletionCard({ card }: { card: SchemaDrivenAssistantCar
       setState({
         status: 'saved',
         draft: state.draft,
-        message: `已保存到个人信息。当前资料完整度 ${Math.round(result.completion.percent)}%。`,
+        message: savedProfileMessage(result.completion.percent, result.completion.missingFields),
       });
     } catch (error) {
       setState({
@@ -112,7 +110,9 @@ export function ProfileCompletionCard({ card }: { card: SchemaDrivenAssistantCar
           </span>
           <div>
             <p className="text-base font-black text-slate-950">{card.title}</p>
-            {card.body ? <p className="mt-1 text-sm leading-6 text-slate-600">{card.body}</p> : null}
+            {card.body ? (
+              <p className="mt-1 text-sm leading-6 text-slate-600">{card.body}</p>
+            ) : null}
           </div>
         </div>
       </div>
@@ -230,24 +230,36 @@ function ProfileDraftPreview({ draft }: { draft: SocialProfileBuilderCard }) {
     ['城市', draft.basic.city],
     ['兴趣', [...draft.interests.sports, ...draft.interests.lifestyle].join('、')],
     ['想认识的人', draft.preferences.wantToMeet.join('、')],
-    ['可约时间', [draft.availability.weekdays, draft.availability.weekends].filter(Boolean).join('；')],
+    [
+      '可约时间',
+      [draft.availability.weekdays, draft.availability.weekends].filter(Boolean).join('；'),
+    ],
   ].filter(([, value]) => value);
   return (
     <section className="rounded-2xl border border-[#0f9f8b]/20 bg-[#f3fffc] p-4">
       <p className="text-sm font-black text-slate-950">更新预览</p>
-      {draft.summary ? <p className="mt-2 text-sm leading-6 text-slate-700">{draft.summary}</p> : null}
+      {draft.summary ? (
+        <p className="mt-2 text-sm leading-6 text-slate-700">{draft.summary}</p>
+      ) : null}
       <div className="mt-3 grid gap-2">
         {rows.map(([label, value]) => (
           <div key={label} className="flex items-start justify-between gap-4 text-sm">
             <span className="text-slate-500">{label}</span>
-            <strong className="max-w-[70%] text-right font-semibold text-slate-900">
-              {value}
-            </strong>
+            <strong className="max-w-[70%] text-right font-semibold text-slate-900">{value}</strong>
           </div>
         ))}
       </div>
     </section>
   );
+}
+
+function savedProfileMessage(percent: number, missingFields: string[]) {
+  const rounded = Math.round(percent);
+  const missing = missingFields.map((field) => field.trim()).filter(Boolean);
+  if (missing.length === 0) {
+    return `已保存到个人信息。当前资料完整度 ${rounded}%。`;
+  }
+  return `已保存到个人信息。当前资料完整度 ${rounded}%。还可以继续补充：${missing.slice(0, 4).join('、')}。`;
 }
 
 function readQuestions(value: unknown): ProfileQuestion[] {

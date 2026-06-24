@@ -56,12 +56,16 @@ function makeHarness() {
       profileCompleteness: 82,
     }),
   };
+  const taskRepo = {
+    save: jest.fn(async (task: AgentTask) => task),
+  };
   const service = new SocialAgentRouteSearchTurnService(
+    taskRepo as never,
     profileEnrichment as never,
     activitySearch as never,
     profileGate as never,
   );
-  return { activitySearch, profileEnrichment, profileGate, service };
+  return { activitySearch, profileEnrichment, profileGate, service, taskRepo };
 }
 
 describe('SocialAgentRouteSearchTurnService', () => {
@@ -159,6 +163,12 @@ describe('SocialAgentRouteSearchTurnService', () => {
 
   it('creates an OpportunityCard before candidate search for find-partner requests', async () => {
     const { profileGate, service } = makeHarness();
+    profileGate.evaluateForSocialExecution.mockResolvedValue({
+      passed: false,
+      missing: ['publicAuthorization'],
+      assistantMessage: '缺少公开授权',
+      profileCompleteness: 10,
+    });
     const task = makeTask({
       goal: '今天晚上青岛大学附近找轻松跑步搭子',
       memory: {
@@ -194,7 +204,7 @@ describe('SocialAgentRouteSearchTurnService', () => {
       buildMemoryContext: jest.fn(),
     });
 
-    expect(profileGate.evaluateForSocialExecution).toHaveBeenCalled();
+    expect(profileGate.evaluateForSocialExecution).not.toHaveBeenCalled();
     expect(queueInitialSearchForTask).not.toHaveBeenCalled();
     expect(result).toMatchObject({
       handled: true,
@@ -508,7 +518,7 @@ describe('SocialAgentRouteSearchTurnService', () => {
       task: makeTask(),
       route: makeRoute(),
       message:
-        '帮我找青岛周末下午轻松跑步搭子，想认识同城周末有空、先运动再慢慢熟悉的人',
+        '先不发布卡片，只推荐候选：帮我找青岛周末下午轻松跑步搭子，想认识同城周末有空、先运动再慢慢熟悉的人',
       replanAndRefresh: jest.fn(),
       queueInitialSearchForTask,
       buildMemoryContext: jest.fn(),
@@ -541,7 +551,7 @@ describe('SocialAgentRouteSearchTurnService', () => {
       task: makeTask(),
       route: makeRoute(),
       message:
-        '帮我找青岛周末下午轻松跑步搭子，想认识同城周末有空、先运动再慢慢熟悉的人，公共场所先站内聊，接受陌生人，可以公开发起活动',
+        '先不发布卡片，只推荐候选：帮我找青岛周末下午轻松跑步搭子，想认识同城周末有空、先运动再慢慢熟悉的人，公共场所先站内聊，接受陌生人',
       replanAndRefresh: jest.fn(),
       queueInitialSearchForTask,
       buildMemoryContext: jest.fn(),
@@ -793,7 +803,7 @@ describe('SocialAgentRouteSearchTurnService', () => {
   });
 
   it('creates a publish confirmation card after clarification answer allows public activity', async () => {
-    const { service } = makeHarness();
+    const { service, taskRepo } = makeHarness();
     const task = makeTask();
     const queueInitialSearchForTask = jest
       .fn()
@@ -870,6 +880,28 @@ describe('SocialAgentRouteSearchTurnService', () => {
     expect(result.assistantMessage).toContain('约练卡片');
     expect(result.assistantMessage).toContain('确认后再发布');
     expect(queueInitialSearchForTask).not.toHaveBeenCalled();
+    expect(taskRepo.save).toHaveBeenCalledWith(task);
+    expect(task.result).toMatchObject({
+      chatRun: {
+        socialRequestDraft: expect.objectContaining({
+          activityType: '跑步',
+          timePreference: '周末下午',
+          locationName: '青岛大学',
+        }),
+        publishStatus: 'draft',
+      },
+    });
+    expect(task.memory).toMatchObject({
+      socialAgentChat: {
+        socialRequestDraft: expect.objectContaining({
+          activityType: '跑步',
+        }),
+        publishStatus: 'draft',
+      },
+      shortTerm: {
+        publishStatus: 'draft',
+      },
+    });
     expect(
       result.cards?.[0]?.actions?.map((action) => action.label),
     ).not.toContain('删除卡片');

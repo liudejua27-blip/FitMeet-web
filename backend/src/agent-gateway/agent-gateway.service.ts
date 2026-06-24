@@ -1411,6 +1411,16 @@ export class AgentGatewayService {
     const content = (dto.content ?? dto.text ?? '').trim();
     const agentTaskId =
       dto.agentTaskId ?? numberOrNull(dto.metadata?.agentTaskId) ?? null;
+    const idempotencyKey =
+      typeof dto.metadata?.idempotencyKey === 'string' &&
+      dto.metadata.idempotencyKey.trim()
+        ? dto.metadata.idempotencyKey.trim().slice(0, 180)
+        : dto.approvalRequestId
+          ? `approval:${dto.approvalRequestId}:send_message:${targetUserId ?? 'target'}`
+          : `agent_message:${conn.id}:${agentTaskId ?? 'task'}:${targetUserId ?? 'target'}:${content.slice(0, 48).replace(/\s+/g, '_')}`.slice(
+              0,
+              180,
+            );
     if (!targetUserId) {
       throw new BadRequestException(
         'toUserId (or recipientUserId) is required',
@@ -1679,9 +1689,12 @@ export class AgentGatewayService {
         agentConnectionId: conn.id,
         ownerUserId: conn.userId,
         actorUserId: conn.userId,
+        agentTaskId,
+        idempotencyKey: `${idempotencyKey}:conversation`,
         metadata: {
           source: dto.metadata?.source ?? conn.agentName,
           agentTaskId,
+          idempotencyKey: `${idempotencyKey}:conversation`,
           socialRequestId: dto.socialRequestId ?? null,
           activityId: dto.activityId ?? null,
         },
@@ -1698,6 +1711,8 @@ export class AgentGatewayService {
         agentConnectionId: conn.id,
         ownerUserId: conn.userId,
         actorUserId: conn.userId,
+        agentTaskId,
+        idempotencyKey,
         metadata: {
           source: dto.metadata?.source ?? conn.agentName,
           actorType: 'agent',
@@ -1709,6 +1724,7 @@ export class AgentGatewayService {
           candidateRecordId: dto.metadata?.candidateRecordId ?? null,
           socialRequestId: dto.socialRequestId ?? null,
           activityId: dto.activityId ?? null,
+          idempotencyKey,
           ...(dto.metadata ?? {}),
         },
       },

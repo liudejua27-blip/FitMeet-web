@@ -473,7 +473,7 @@ describe('CardCopywriterService', () => {
           reviewPrompt: '活动结束后我会提醒你评价体验，帮助后续推荐更贴近你。',
           lifeGraphUpdatePreview: expect.stringContaining('长期偏好'),
           trustScoreUpdatePreview:
-            '如果活动完成并完成评价，我会把履约结果写入 trust score。',
+            '如果活动完成并完成评价，我会把履约结果写入可信度。',
           recommendedNextAction: '确认后我再创建约练，不会自动公开发布。',
           confirmedContext: expect.arrayContaining([
             '上海',

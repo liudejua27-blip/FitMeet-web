@@ -177,7 +177,7 @@ function fallbackProcessTitle(context: PublicProcessTextContext): string {
     case 'send_invite':
       return done ? '邀请已准备好' : '正在准备邀请';
     case 'life_graph_writeback':
-      return done ? '已整理画像变化建议' : '正在整理画像变化建议';
+      return done ? '已整理资料变化建议' : '正在整理资料变化建议';
     case 'approval':
       return waiting
         ? '需要你确认后继续'

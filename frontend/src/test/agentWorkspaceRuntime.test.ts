@@ -100,10 +100,7 @@ describe('agent workspace runtime fallback boundaries', () => {
           actions: [],
         },
       ],
-      runtime: {
-        threadId: '91',
-      },
-    };
+    } satisfies UserFacingAgentResponse;
 
     expect(threadIdFromResponse(response)).toBe('agent-task:91');
   });
@@ -111,7 +108,6 @@ describe('agent workspace runtime fallback boundaries', () => {
   it('recovers task and thread identity from top-level user-facing result fields without cards', () => {
     const response: UserFacingAgentResponse = {
       taskId: 117,
-      threadId: 'agent-task:117',
       assistantMessage: '我已经保留这张约练卡的上下文。',
       lightStatus: '已整理回复',
       permissionMode: 'limited_auto',
@@ -558,10 +554,6 @@ describe('agent workspace runtime fallback boundaries', () => {
     const finalResult = {
       ...userFacingResponseWithCards([replayedCard]),
       assistantMessage: '我整理好了，先给你 1 个公开可发现的人选。',
-      runtime: {
-        runId: 'run-social-dup',
-        messageId: 'assistant-social-dup',
-      },
     } satisfies UserFacingAgentResponse;
 
     const reduced = reduceSingleRunAssistantMessages([
@@ -575,10 +567,6 @@ describe('agent workspace runtime fallback boundaries', () => {
         messageId: 'assistant-social-dup',
         result: {
           ...userFacingResponseWithCards([existingCard]),
-          runtime: {
-            runId: 'run-social-dup',
-            messageId: 'assistant-social-dup',
-          },
         },
       },
       {
@@ -684,10 +672,6 @@ describe('agent workspace runtime fallback boundaries', () => {
     const finalResult = {
       ...userFacingResponseWithCards([]),
       assistantMessage: '我已经按青岛大学附近、今天上午、散步来继续处理。',
-      runtime: {
-        runId: 'run-interrupted-1',
-        messageId: 'assistant-interrupted-1',
-      },
     } satisfies UserFacingAgentResponse;
 
     const reduced = reduceSingleRunAssistantMessages([
@@ -771,10 +755,6 @@ describe('agent workspace runtime fallback boundaries', () => {
     const finalResult = {
       ...userFacingResponseWithCards([]),
       assistantMessage: duplicated,
-      runtime: {
-        runId: 'run-duplicated-final',
-        messageId: 'assistant-duplicated-final',
-      },
     } satisfies UserFacingAgentResponse;
 
     const reduced = reduceSingleRunAssistantMessages([
@@ -820,10 +800,6 @@ describe('agent workspace runtime fallback boundaries', () => {
           expiresAt: null,
         },
       ],
-      runtime: {
-        runId: 'run-approval-replay',
-        messageId: 'assistant-approval-replay',
-      },
     } satisfies UserFacingAgentResponse;
     const replayedResult = {
       ...userFacingResponseWithCards([]),
@@ -837,10 +813,6 @@ describe('agent workspace runtime fallback boundaries', () => {
           expiresAt: null,
         },
       ],
-      runtime: {
-        runId: 'run-approval-replay',
-        messageId: 'assistant-approval-replay',
-      },
     } satisfies UserFacingAgentResponse;
 
     const reduced = reduceSingleRunAssistantMessages([
@@ -887,10 +859,6 @@ describe('agent workspace runtime fallback boundaries', () => {
           payload: { candidateRecordId: 501, targetUserId: 22 },
         },
       ] as unknown as UserFacingAgentResponse['pendingConfirmations'],
-      runtime: {
-        runId: 'run-candidate-approval-replay',
-        messageId: 'assistant-candidate-approval-replay',
-      },
     } satisfies UserFacingAgentResponse;
     const replayedResult = {
       ...userFacingResponseWithCards([]),
@@ -905,10 +873,6 @@ describe('agent workspace runtime fallback boundaries', () => {
           payload: { candidateRecordId: 501, targetUserId: 22 },
         },
       ] as unknown as UserFacingAgentResponse['pendingConfirmations'],
-      runtime: {
-        runId: 'run-candidate-approval-replay',
-        messageId: 'assistant-candidate-approval-replay',
-      },
     } satisfies UserFacingAgentResponse;
 
     const reduced = reduceSingleRunAssistantMessages([
@@ -1492,12 +1456,14 @@ describe('agent workspace runtime fallback boundaries', () => {
         }),
       ]),
       assistantMessage: '已按你的确认建立站内沟通入口。接下来等待对方回复。',
-      runtime: {
-        runId: 'restore-run-1',
-        messageId: 'restore-message-1',
-        threadId: 'agent-task:42',
+      workflow: {
+        workflowId: 'agent-task:42',
+        state: 'CONVERSATION_ACTIVE',
+        requiredAction: null,
+        retryable: false,
+        recoveryMessage: null,
       },
-    };
+    } satisfies UserFacingAgentResponse;
 
     const messages = messagesFromSessionSnapshot(
       {
@@ -1511,10 +1477,7 @@ describe('agent workspace runtime fallback boundaries', () => {
             id: 'assistant-db-1',
             role: 'assistant',
             content: '邀约已经确认，后续会保存在这条进展里。',
-            runtime: {
-              runId: 'restore-run-1',
-              messageId: 'restore-message-1',
-            },
+            result: restored,
           },
         ],
       },
@@ -1525,8 +1488,6 @@ describe('agent workspace runtime fallback boundaries', () => {
     expect(messages).toHaveLength(2);
     expect(messages.map((message) => message.id)).toEqual(['user-1', 'assistant-db-1']);
     expect(messages[1]).toMatchObject({
-      runId: 'restore-run-1',
-      messageId: 'restore-message-1',
       result: expect.objectContaining({
         assistantMessage: restored.assistantMessage,
         cards: expect.arrayContaining([
@@ -1636,7 +1597,7 @@ describe('agent workspace runtime fallback boundaries', () => {
     ).toBe(true);
   });
 
-  it('keeps checkpoint runtime fallback on the assistant surface so step controls can render', () => {
+  it('keeps workflow recovery on the assistant surface so recovery copy can render', () => {
     const response: UserFacingAgentResponse = {
       assistantMessage: '这一步没有完成，但我已经保存了进度。',
       lightStatus: '已整理回复',
@@ -1649,18 +1610,12 @@ describe('agent workspace runtime fallback boundaries', () => {
         requiredConfirmations: [],
       },
       permissionMode: 'confirm',
-      runtime: {
-        checkpointId: 321,
-        checkpointType: 'step',
-        canReplay: true,
-        canFork: false,
-        checkpointAction: 'retry',
-        resumeCursor: {
-          threadId: 'mock-thread-checkpoint',
-          parentCheckpointId: 321,
-          action: 'retry',
-          stepId: 'rank',
-        },
+      workflow: {
+        workflowId: 'agent-task:321',
+        state: 'RECOVERY',
+        requiredAction: null,
+        retryable: true,
+        recoveryMessage: '我保留了这段需求，可以从这里继续。',
       },
     };
 
@@ -1671,7 +1626,7 @@ describe('agent workspace runtime fallback boundaries', () => {
     );
   });
 
-  it('describes forkable checkpoint runtime as a saved alternative instead of a generic failure', () => {
+  it('describes workflow recovery as a saved alternative instead of a generic failure', () => {
     const response: UserFacingAgentResponse = {
       assistantMessage: '这一步已经完成，并且保存了可恢复状态。',
       assistantMessageSource: 'fallback',
@@ -1685,18 +1640,12 @@ describe('agent workspace runtime fallback boundaries', () => {
         requiredConfirmations: [],
       },
       permissionMode: 'confirm',
-      runtime: {
-        checkpointId: 123,
-        checkpointType: 'step',
-        canReplay: true,
-        canFork: true,
-        checkpointAction: 'replay',
-        resumeCursor: {
-          threadId: 'mock-thread-checkpoint',
-          parentCheckpointId: 123,
-          action: 'replay',
-          stepId: 'rank',
-        },
+      workflow: {
+        workflowId: 'agent-task:123',
+        state: 'RECOVERY',
+        requiredAction: null,
+        retryable: true,
+        recoveryMessage: '这个步骤已经保存，可以重新整理或换一种方案。',
       },
     };
 

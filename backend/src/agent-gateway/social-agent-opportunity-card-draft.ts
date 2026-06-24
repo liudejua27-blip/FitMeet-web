@@ -146,7 +146,7 @@ export function buildSocialAgentPublishConfirmationCard(input: {
   const city = text(draft.city) || '同城';
   const safetyBoundary =
     text(record(draft.metadata).safetyBoundary) ||
-    '不会公开精确位置、联系方式或私密画像。';
+    '不会公开精确位置、联系方式或私密资料。';
   const capacityLabel = text(draft.capacityLabel) || '找 1 人';
   const published = input.published === true;
   const discoverHref =
@@ -263,7 +263,7 @@ export function buildSocialAgentPublishConfirmationCard(input: {
               riskLevel: 'medium',
               riskReasons: [
                 '这张约练卡会公开到发现页',
-                '不会公开精确位置、联系方式或私密画像',
+                '不会公开精确位置、联系方式或私密资料',
               ],
             },
           },

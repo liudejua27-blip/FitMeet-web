@@ -42,14 +42,14 @@ export function LifeGraphDiffCard({ card }: { card: SchemaDrivenAssistantCard })
             data-life-graph-source-label={diff.sourceLabel}
           >
             <MetaChip icon={<ShieldCheck className="h-3 w-3" />} label={diff.sourceLabel} />
-            <MetaChip icon={<Sparkles className="h-3 w-3" />} label="确认前不写入长期画像" />
+            <MetaChip icon={<Sparkles className="h-3 w-3" />} label="确认前不写入长期偏好" />
           </div>
           {isCounterpartReply ? (
             <p
               className="mt-3 rounded-xl bg-emerald-50/70 px-3 py-2 text-xs leading-5 text-emerald-800 ring-1 ring-emerald-100"
               data-testid="life-graph-counterpart-reply-note"
             >
-              这是对方回应后的弱信号：确认前不会写入长期画像，也不会保存私聊原文；确认后仍可撤回或纠正。
+              这是对方回应后的弱信号：确认前不会写入长期偏好，也不会保存私聊原文；确认后仍可撤回或纠正。
             </p>
           ) : null}
           {diff.currentValue || diff.proposedValue ? (

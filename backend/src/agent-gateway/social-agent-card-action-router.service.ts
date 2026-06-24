@@ -171,6 +171,14 @@ export class SocialAgentCardActionRouterService {
       );
     }
 
+    if (this.isPublishDismissAction(action)) {
+      return this.dismissPublishDraftFromCardAction(
+        ownerUserId,
+        taskId,
+        normalizedBody,
+      );
+    }
+
     if (this.isPublishAction(action)) {
       return this.publishToDiscoverFromCardAction(
         ownerUserId,
@@ -230,17 +238,29 @@ export class SocialAgentCardActionRouterService {
     );
   }
 
+  private isPublishDismissAction(action: string) {
+    return (
+      action === 'social_intent.decline_publish' ||
+      action === 'social_intent.dismiss'
+    );
+  }
+
   private shouldContinuePrivateCandidateSearch(
     action: string,
     body: SocialAgentCardActionBody,
   ): boolean {
     if (action !== 'candidate.more_like_this') return false;
     const payload = body.payload ?? {};
+    if (
+      payload.publicDiscoverPublishSkipped === true ||
+      this.text(payload.sourceAction) === 'activity.skip_publish' ||
+      this.text(payload.sourceAction) === 'social_intent.decline_publish'
+    ) {
+      return false;
+    }
     return (
       payload.privateMatchMode === true ||
-      payload.publicDiscoverPublishSkipped === true ||
-      this.text(payload.candidateSearchMode).length > 0 ||
-      this.text(payload.sourceAction) === 'activity.skip_publish'
+      this.text(payload.candidateSearchMode).length > 0
     );
   }
 
@@ -396,6 +416,8 @@ export class SocialAgentCardActionRouterService {
       'activity.modify_time',
       'activity.modify_location',
       'activity.skip_publish',
+      'social_intent.decline_publish',
+      'social_intent.dismiss',
     ]).has(action);
   }
 
@@ -485,8 +507,15 @@ export class SocialAgentCardActionRouterService {
     if (normalized === 'change_location') {
       return 'activity.modify_location';
     }
-    if (normalized === 'skip_publish') {
-      return 'activity.skip_publish';
+    if (
+      normalized === 'skip_publish' ||
+      normalized === 'activity.skip_publish' ||
+      normalized === 'decline_publish' ||
+      normalized === 'dismiss_draft' ||
+      normalized === 'social_intent.decline_publish' ||
+      normalized === 'social_intent.dismiss'
+    ) {
+      return 'social_intent.decline_publish';
     }
     if (normalized === 'view_activity') {
       return 'activity.view_detail';
@@ -496,6 +525,8 @@ export class SocialAgentCardActionRouterService {
 
   private agentForAction(action: string) {
     if (this.isPublishAction(action)) return 'FitMeet Main Agent' as const;
+    if (this.isPublishDismissAction(action))
+      return 'FitMeet Main Agent' as const;
     if (action.startsWith('life_graph.')) return 'Life Graph Agent' as const;
     if (
       action.startsWith('activity.') ||
@@ -512,6 +543,36 @@ export class SocialAgentCardActionRouterService {
       return 'Match Agent' as const;
     }
     return 'FitMeet Main Agent' as const;
+  }
+
+  private async dismissPublishDraftFromCardAction(
+    ownerUserId: number,
+    taskId: number,
+    body: SocialAgentCardActionBody,
+  ): Promise<SocialAgentIntentRouteResult> {
+    if (!this.draftPublication) {
+      throw new BadRequestException('Discover publish runtime is unavailable');
+    }
+    const payload = {
+      ...this.record(body.payload),
+      action: body.action,
+      taskId,
+    };
+    await this.draftPublication.dismissDraft(ownerUserId, taskId, payload);
+    return this.simpleRouteResult({
+      taskId,
+      assistantMessage:
+        '已取消发布，这张约练卡不会出现在发现页，也不会继续匹配。',
+      cards: [],
+      publicLoop: {
+        stage: 'dismissed',
+        publicIntentId: null,
+        discoverHref: null,
+        publicIntentHref: null,
+        messagesHref: null,
+        requiredConfirmation: false,
+      },
+    });
   }
 
   private async publishToDiscoverFromCardAction(
@@ -550,7 +611,7 @@ export class SocialAgentCardActionRouterService {
                 actionType: 'publish_social_request',
                 riskLevel: 'medium',
                 summary: '发布约练卡到发现页',
-                boundary: '不会公开精确位置、联系方式或私密画像',
+                boundary: '不会公开精确位置、联系方式或私密资料',
               },
             },
             actions: [
@@ -571,10 +632,13 @@ export class SocialAgentCardActionRouterService {
               {
                 id: 'skip_publish_to_discover',
                 label: '暂不发布',
-                action: 'activity.skip_publish',
-                schemaAction: 'activity.skip_publish',
+                action: 'social_intent.decline_publish',
+                schemaAction: 'social_intent.decline_publish',
                 requiresConfirmation: false,
-                payload: { taskId },
+                payload: {
+                  taskId,
+                  sourceAction: 'social_intent.decline_publish',
+                },
               },
             ],
           },
@@ -585,7 +649,7 @@ export class SocialAgentCardActionRouterService {
           discoverHref: null,
           publicIntentHref: null,
           messagesHref: null,
-          requiredConfirmation: '发布约练卡到发现页',
+          requiredConfirmation: true,
         },
       });
     }
@@ -656,10 +720,13 @@ export class SocialAgentCardActionRouterService {
               {
                 id: 'skip_publish_to_discover',
                 label: '暂不发布',
-                action: 'activity.skip_publish',
-                schemaAction: 'activity.skip_publish',
+                action: 'social_intent.decline_publish',
+                schemaAction: 'social_intent.decline_publish',
                 requiresConfirmation: false,
-                payload: { taskId },
+                payload: {
+                  taskId,
+                  sourceAction: 'social_intent.decline_publish',
+                },
               },
             ],
           },
@@ -670,11 +737,77 @@ export class SocialAgentCardActionRouterService {
           discoverHref: null,
           publicIntentHref: null,
           messagesHref: null,
-          requiredConfirmation: '发布约练卡到发现页',
+          requiredConfirmation: true,
         },
       });
     }
     const publicIntentId = this.text(result.publicIntentId);
+    if (
+      publishStatus !== 'published' ||
+      result.synced !== true ||
+      !publicIntentId
+    ) {
+      const reason =
+        this.text(result.message) ||
+        '发布后还没有完成发现页读回校验，我不会开始推荐候选。';
+      return this.simpleRouteResult({
+        taskId,
+        assistantMessage: reason,
+        cards: [
+          {
+            id: `publish_to_discover:pending_verification:${taskId}`,
+            type: 'activity_status',
+            schemaVersion: 'fitmeet.tool-ui.v1',
+            schemaType: 'social_match.activity',
+            title: '发布待校验',
+            body: reason,
+            status: 'waiting_confirmation',
+            data: {
+              taskId,
+              publishStatus: publishStatus || 'pending_verification',
+              publicIntentId: publicIntentId || null,
+              synced: result.synced === true,
+              retryable: true,
+            },
+            actions: [
+              {
+                id: 'retry_publish_to_discover',
+                label: '重试发布',
+                action: 'publish_to_discover',
+                schemaAction: 'publish_to_discover',
+                requiresConfirmation: true,
+                payload: {
+                  ...payload,
+                  confirmedPublish: true,
+                  approved: true,
+                  confirmed: true,
+                  taskId,
+                },
+              },
+              {
+                id: 'skip_publish_to_discover',
+                label: '暂不发布',
+                action: 'social_intent.decline_publish',
+                schemaAction: 'social_intent.decline_publish',
+                requiresConfirmation: false,
+                payload: {
+                  taskId,
+                  sourceAction: 'social_intent.decline_publish',
+                },
+              },
+            ],
+          },
+        ],
+        publicLoop: {
+          stage: 'publish_confirmation_required',
+          publicIntentId: publicIntentId || null,
+          discoverHref: null,
+          publicIntentHref: null,
+          messagesHref: null,
+          requiredConfirmation: true,
+        },
+      });
+    }
     if (!publicIntentId) {
       throw new BadRequestException(
         '发布约练缺少 publicIntentId，无法确认发现页可见',
@@ -743,7 +876,7 @@ export class SocialAgentCardActionRouterService {
         discoverHref,
         publicIntentHref,
         messagesHref: null,
-        requiredConfirmation: null,
+        requiredConfirmation: false,
       },
     });
     const matchResult = await this.runPostPublishCandidateSearch({
@@ -880,8 +1013,9 @@ export class SocialAgentCardActionRouterService {
           matchResult.publicLoop?.publicIntentHref ??
           null,
         messagesHref: matchResult.publicLoop?.messagesHref ?? null,
-        requiredConfirmation:
-          matchResult.publicLoop?.requiredConfirmation ?? null,
+        requiredConfirmation: Boolean(
+          matchResult.publicLoop?.requiredConfirmation,
+        ),
       },
     };
   }

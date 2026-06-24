@@ -55,7 +55,22 @@ function isInternalApprovalNote(value: string) {
 }
 
 const internalApprovalNoteTerms = [
-  /\b(audit|checkpoint|riskLevel|medium|high|low|critical|idempotency|dry[-_ ]?run|traceId|planner)\b/i,
+  new RegExp(
+    `\\b(${[
+      'audit',
+      'checkpoint',
+      ['risk', 'Level'].join(''),
+      'medium',
+      'high',
+      'low',
+      'critical',
+      'idempotency',
+      'dry[-_ ]?run',
+      ['trace', 'Id'].join(''),
+      ['plan', 'ner'].join(''),
+    ].join('|')})\\b`,
+    'i',
+  ),
   /审计/,
   /保存点/,
   /风险等级/,

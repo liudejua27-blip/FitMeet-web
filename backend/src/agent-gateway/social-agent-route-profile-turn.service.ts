@@ -126,27 +126,43 @@ export class SocialAgentRouteProfileTurnService {
       const profileKey = profileKeyForSocialAgentIntent(route.intent, message);
       const deferSensitiveProfilePersistence =
         this.shouldDeferSensitiveProfilePersistence(route.intent, profileKey);
-      profileUpdated = deferSensitiveProfilePersistence
-        ? false
-        : await this.saveIntentToProfile(ownerUserId, profileKey, message);
-      assistantMessage = buildSocialAgentProfileSavedNextStepReply({
-        intent: route.intent,
-        message,
-        profileUpdated,
-      });
+      const profileUpdatePreview = deferSensitiveProfilePersistence
+        ? null
+        : await this.createProfileUpdatePreview(
+            ownerUserId,
+            profileKey,
+            message,
+          );
+      profileUpdated = false;
+      if (profileUpdatePreview) {
+        task.result = {
+          ...(task.result ?? {}),
+          profileUpdatePreview,
+        };
+        task.statusReason = 'profile_update_preview_pending_confirmation';
+      }
+      assistantMessage = profileUpdatePreview
+        ? '我先生成了个人信息更新预览。确认保存前不会写入个人信息，也不会自动开始匹配。'
+        : buildSocialAgentProfileSavedNextStepReply({
+            intent: route.intent,
+            message,
+            profileUpdated,
+          });
       rememberSocialAgentCurrentTask(task, {
         objective: 'profile_enrichment',
-        nextStep: deferSensitiveProfilePersistence
-          ? '等待用户确认是否保存这条画像/安全边界'
-          : '等待用户选择继续补齐画像边界，或确认现在开始搜索',
+        nextStep:
+          deferSensitiveProfilePersistence || profileUpdatePreview
+            ? '等待用户确认是否保存资料更新预览'
+            : '等待用户选择继续补齐画像边界，或确认现在开始搜索',
         shouldSearchNow: false,
         profileSaved: profileUpdated,
         awaitingSearchConfirmation: true,
-        waitingFor: deferSensitiveProfilePersistence
-          ? 'life_graph_profile_confirmation'
-          : 'availability_boundaries_or_search_confirmation',
-        lastCompletedStep: profileUpdated
-          ? 'profile_saved'
+        waitingFor:
+          deferSensitiveProfilePersistence || profileUpdatePreview
+            ? 'profile_update_preview_confirmation'
+            : 'availability_boundaries_or_search_confirmation',
+        lastCompletedStep: profileUpdatePreview
+          ? 'profile_update_preview_created'
           : deferSensitiveProfilePersistence
             ? 'profile_context_saved_pending_confirmation'
             : 'profile_context_saved',
@@ -209,25 +225,33 @@ export class SocialAgentRouteProfileTurnService {
     );
   }
 
-  private async saveIntentToProfile(
+  private async createProfileUpdatePreview(
     ownerUserId: number,
     key: string | null,
     message: string,
-  ): Promise<boolean> {
-    if (!key) return false;
+  ): Promise<Record<string, unknown> | null> {
+    if (!key) return null;
     try {
-      await this.socialProfiles.saveAnswer(ownerUserId, key, message);
-      return true;
+      const draft = await this.socialProfiles.generateAiDraft(ownerUserId, {
+        answers: [{ key, answer: message }],
+        rawText: message,
+        source: 'social_agent_profile_turn',
+      });
+      return sanitizeForDisplay({
+        ...draft,
+        status: 'pending_confirmation',
+        confirmationRequired: true,
+      }) as Record<string, unknown>;
     } catch (error) {
       this.logger.warn(
         JSON.stringify({
-          event: 'social_agent.profile_update_failed',
+          event: 'social_agent.profile_update_preview_failed',
           ownerUserId,
           key,
           message: error instanceof Error ? error.message : String(error),
         }),
       );
-      return false;
+      return null;
     }
   }
 
