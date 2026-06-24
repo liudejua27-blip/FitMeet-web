@@ -207,12 +207,8 @@ describe('socialAgentApi checkpoint stream endpoints', () => {
     expect(response).toMatchObject({
       assistantMessage: '我会先整理你的需求。',
       assistantMessageSource: 'llm',
-      runtime: {
-        threadId: 'thread-v2-only',
-        runId: 'run-v2-only',
-        messageId: 'assistant-v2-only',
-      },
     });
+    expect(response).not.toHaveProperty('runtime');
   });
 });
 
