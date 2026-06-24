@@ -65,7 +65,7 @@ export class User {
   @Column({ type: 'text', default: '' })
   bio: string;
 
-  @Column({ nullable: true })
+  @Column({ type: 'text', nullable: true })
   coverUrl: string | null;
 
   @Column({ default: false })

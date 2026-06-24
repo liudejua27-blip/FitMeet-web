@@ -77,6 +77,9 @@ else
   echo "[WARN] RUN_AGENT_RELEASE_WORKTREE_AUDIT=${RUN_AGENT_RELEASE_WORKTREE_AUDIT}. Do not use this skip for production ECS packages." >&2
 fi
 
+step "Check production deploy consistency"
+node "${ROOT_DIR}/scripts/check-production-deploy-consistency.mjs"
+
 step "Install frontend dependencies"
 pnpm --dir "${ROOT_DIR}/frontend" install --frozen-lockfile
 
@@ -143,6 +146,7 @@ require_path "scripts/verify-agent-goal-production.sh"
 require_path "scripts/verify-agent-release.sh"
 require_path "scripts/verify-agent-skills.mjs"
 require_path "scripts/run-agent-skill-evals.mjs"
+require_path "scripts/check-production-deploy-consistency.mjs"
 require_path "scripts/agent-release-matrix.sh"
 require_path "scripts/agent-release-worktree-audit.sh"
 require_path "scripts/stage-agent-release-bucket.sh"
@@ -299,6 +303,9 @@ require_file_contains "scripts/agent-release-matrix.sh" "scripts/agent-release-w
 require_file_contains "scripts/agent-release-matrix.sh" "scripts/verify-agent-release.sh"
 require_file_contains "scripts/verify-agent-release.sh" "scripts/verify-agent-skills.mjs"
 require_file_contains "scripts/verify-agent-release.sh" "scripts/run-agent-skill-evals.mjs"
+require_file_contains "scripts/check-production-deploy-consistency.mjs" "nullable strings/objects/arrays"
+require_file_contains "scripts/check-production-deploy-consistency.mjs" "undefined depends_on"
+require_file_contains "scripts/check-production-deploy-consistency.mjs" "release.json"
 require_file_contains "scripts/run-agent-skill-evals.mjs" "twenty_turn_memory_no_repeat_questions"
 require_file_contains "scripts/run-agent-skill-evals.mjs" "candidate_empty_safe_fallback"
 require_file_contains "scripts/run-agent-skill-evals.mjs" "correction_updates_candidate_preference_without_reasking_core_slots"
@@ -519,6 +526,7 @@ require_entry "scripts/verify-agent-goal-production.sh" '^FitMeet-web/scripts/ve
 require_entry "scripts/verify-agent-release.sh" '^FitMeet-web/scripts/verify-agent-release\.sh$'
 require_entry "scripts/verify-agent-skills.mjs" '^FitMeet-web/scripts/verify-agent-skills\.mjs$'
 require_entry "scripts/run-agent-skill-evals.mjs" '^FitMeet-web/scripts/run-agent-skill-evals\.mjs$'
+require_entry "scripts/check-production-deploy-consistency.mjs" '^FitMeet-web/scripts/check-production-deploy-consistency\.mjs$'
 require_entry "scripts/agent-release-matrix.sh" '^FitMeet-web/scripts/agent-release-matrix\.sh$'
 require_entry "scripts/agent-release-worktree-audit.sh" '^FitMeet-web/scripts/agent-release-worktree-audit\.sh$'
 require_entry "scripts/cloud-platform-preflight.sh" '^FitMeet-web/scripts/cloud-platform-preflight\.sh$'
