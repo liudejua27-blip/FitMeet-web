@@ -9,7 +9,12 @@ import {
 
 export enum AgentSideEffectLedgerStatus {
   Pending = 'pending',
+  Running = 'running',
   Succeeded = 'succeeded',
+  FailedRetryable = 'failed_retryable',
+  UnknownCommitState = 'unknown_commit_state',
+  FailedFinal = 'failed_final',
+  ManualReviewRequired = 'manual_review_required',
   Failed = 'failed',
 }
 
@@ -17,6 +22,7 @@ export enum AgentSideEffectLedgerStatus {
 @Index(['actionType', 'idempotencyKey'], { unique: true })
 @Index(['ownerUserId', 'agentTaskId'])
 @Index(['status', 'nextRetryAt'])
+@Index(['status', 'leaseExpiresAt'])
 export class AgentSideEffectLedger {
   @PrimaryGeneratedColumn()
   id: number;
@@ -49,6 +55,15 @@ export class AgentSideEffectLedger {
   @Column({ type: 'int', default: 0 })
   attemptCount: number;
 
+  @Column({ type: 'varchar', length: 120, nullable: true })
+  leaseOwner: string | null;
+
+  @Column({ type: 'timestamptz', nullable: true })
+  leaseExpiresAt: Date | null;
+
+  @Column({ type: 'varchar', length: 128, default: '' })
+  requestHash: string;
+
   @Column({ type: 'jsonb', default: '{}' })
   result: Record<string, unknown>;
 
@@ -63,6 +78,9 @@ export class AgentSideEffectLedger {
 
   @Column({ type: 'timestamptz', nullable: true })
   nextRetryAt: Date | null;
+
+  @Column({ type: 'timestamptz', nullable: true })
+  completedAt: Date | null;
 
   @CreateDateColumn()
   createdAt: Date;
