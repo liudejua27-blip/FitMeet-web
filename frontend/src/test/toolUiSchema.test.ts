@@ -644,7 +644,7 @@ describe('tool-ui-schema', () => {
         source: 'default',
       },
       {
-        schemaAction: 'activity.skip_publish',
+        schemaAction: 'social_intent.decline_publish',
         requiresConfirmation: false,
         source: 'default',
       },
