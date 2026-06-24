@@ -47,7 +47,7 @@ function migrationTables(): Set<string> {
 }
 
 describe('CoreBaseline migration entity coverage', () => {
-  it('creates every TypeORM entity table through baseline or incremental migrations', () => {
+  it('creates every TypeORM entity table through baseline or incremental migrations and no stale extra tables', () => {
     const entities = entityTables();
     const migrations = migrationTables();
     const entityTableNames = new Set(entities.keys());

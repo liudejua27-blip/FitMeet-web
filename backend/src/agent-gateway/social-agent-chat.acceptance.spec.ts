@@ -399,12 +399,54 @@ function makeHarness(options: Record<string, unknown> = {}) {
     getPendingForTask: jest.fn().mockResolvedValue([]),
   };
   const publicIntentRepo = {
+    publicIntent: {
+      id: 'social_request_301',
+      userId: 7,
+      linkedSocialRequestId: 301,
+      mode: 'public',
+      title: '青岛大学晚跑步搭子',
+      description: '今天晚上在青岛大学附近轻松跑步，先站内沟通。',
+      city: '青岛',
+      loc: '青岛大学附近',
+      requestType: 'running',
+      socialGoal: '找 1 人一起跑步',
+      interestTags: ['跑步'],
+      radiusKm: 3,
+      timePreference: '今天晚上',
+      locationPreference: '青岛大学附近',
+      matchedCount: 0,
+      status: 'active',
+      metadata: { sourceVersion: 'source-v1' },
+      createdAt: new Date('2026-01-01T00:00:00.000Z'),
+      updatedAt: new Date('2026-01-01T00:00:00.000Z'),
+    },
     createQueryBuilder: jest.fn().mockReturnValue({
       where: jest.fn().mockReturnThis(),
       andWhere: jest.fn().mockReturnThis(),
       orderBy: jest.fn().mockReturnThis(),
       take: jest.fn().mockReturnThis(),
       getMany: jest.fn().mockResolvedValue([]),
+      getOne: jest.fn().mockResolvedValue({
+        id: 'social_request_301',
+        userId: 7,
+        linkedSocialRequestId: 301,
+        mode: 'public',
+        title: '青岛大学晚跑步搭子',
+        description: '今天晚上在青岛大学附近轻松跑步，先站内沟通。',
+        city: '青岛',
+        loc: '青岛大学附近',
+        requestType: 'running',
+        socialGoal: '找 1 人一起跑步',
+        interestTags: ['跑步'],
+        radiusKm: 3,
+        timePreference: '今天晚上',
+        locationPreference: '青岛大学附近',
+        matchedCount: 0,
+        status: 'active',
+        metadata: { sourceVersion: 'source-v1' },
+        createdAt: new Date('2026-01-01T00:00:00.000Z'),
+        updatedAt: new Date('2026-01-01T00:00:00.000Z'),
+      }),
     }),
     findOne: jest
       .fn()
@@ -413,6 +455,8 @@ function makeHarness(options: Record<string, unknown> = {}) {
           where?.id
             ? {
                 id: where.id,
+                userId: 7,
+                linkedSocialRequestId: 301,
                 mode: 'public',
                 title: '青岛大学晚跑步搭子',
                 description: '今天晚上在青岛大学附近轻松跑步，先站内沟通。',
@@ -426,6 +470,7 @@ function makeHarness(options: Record<string, unknown> = {}) {
                 locationPreference: '青岛大学附近',
                 matchedCount: 0,
                 status: 'active',
+                metadata: { sourceVersion: 'source-v1' },
                 createdAt: new Date('2026-01-01T00:00:00.000Z'),
                 updatedAt: new Date('2026-01-01T00:00:00.000Z'),
               }
@@ -571,6 +616,19 @@ function makeHarness(options: Record<string, unknown> = {}) {
       executor as never,
       longTermMemory as never,
       publicIntentRepo as never,
+      undefined,
+      {
+        enqueue: jest.fn().mockResolvedValue({
+          job: {
+            id: 9001,
+            publicIntentId: 'social_request_301',
+            sourceVersion: 'source-v1',
+            status: 'queued',
+            candidateCount: 0,
+          },
+          reused: false,
+        }),
+      } as never,
     );
   const draftSearch =
     (options.draftSearch as SocialAgentDraftSearchService | undefined) ??

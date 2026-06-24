@@ -752,6 +752,7 @@ export class SocialRequestsService {
   ): Promise<PublicSocialIntent> {
     const metadata = request.metadata ?? {};
     const id = `social_request_${request.id}`;
+    const sourceVersion = this.publicIntentSourceVersion(request);
     const existing = await this.publicIntentRepo.findOne({ where: { id } });
     const publiclyVisible =
       request.visibility === SocialRequestVisibility.Public &&
@@ -802,13 +803,25 @@ export class SocialRequestsService {
       metadata: {
         ...metadata,
         source: 'ai_social_request',
+        sourceVersion,
         linkedSocialRequestId: request.id,
         visibility: request.visibility,
         publiclyVisible,
+        expiresAt: request.expiresAt ? request.expiresAt.toISOString() : null,
       },
     });
 
     return this.publicIntentRepo.save(intent);
+  }
+
+  private publicIntentSourceVersion(request: UserSocialRequest): string {
+    return [
+      request.id,
+      request.status,
+      request.visibility,
+      request.updatedAt ? request.updatedAt.toISOString() : '',
+      request.expiresAt ? request.expiresAt.toISOString() : '',
+    ].join(':');
   }
 
   private toPublicStatus(

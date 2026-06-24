@@ -5,6 +5,7 @@ export type PublicSocialIntentListFilters = {
   city?: string;
   limit?: number;
   page?: number;
+  publicIntentId?: string;
   q?: string;
   requestType?: string;
   status?: SocialRequestStatus;
@@ -13,6 +14,7 @@ export type PublicSocialIntentListFilters = {
 export type NormalizedPublicSocialIntentListFilters = {
   city?: string;
   page: number;
+  publicIntentId?: string;
   q?: string;
   requestType?: string;
   skip: number;
@@ -41,6 +43,7 @@ export function normalizePublicSocialIntentListFilters(
     page,
     take,
     skip: (page - 1) * take,
+    publicIntentId: filters.publicIntentId?.trim() || undefined,
     q: filters.q?.trim() || undefined,
     city: sanitizeCity(filters.city) || undefined,
     requestType: filters.requestType?.trim() || undefined,

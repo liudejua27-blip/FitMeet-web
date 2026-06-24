@@ -16,6 +16,7 @@ export class PublicSocialIntentController {
     @Query('city') city?: string,
     @Query('requestType') requestType?: string,
     @Query('status') status?: SocialRequestStatus,
+    @Query('publicIntentId') publicIntentId?: string,
   ) {
     return this.svc.listPublicSocialIntents({
       page: Number(page),
@@ -24,6 +25,7 @@ export class PublicSocialIntentController {
       city,
       requestType,
       status,
+      publicIntentId,
     });
   }
 

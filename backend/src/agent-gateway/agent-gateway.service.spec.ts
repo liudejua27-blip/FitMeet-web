@@ -106,6 +106,24 @@ describe('AgentGatewayService public social intents', () => {
     );
   });
 
+  it('can read a discover card by public intent id through the list query', async () => {
+    const queryBuilder = makeQueryBuilder();
+    const service = makeService({
+      createQueryBuilder: jest.fn(() => queryBuilder),
+    });
+
+    await service.listPublicSocialIntents({
+      publicIntentId: 'social_request_301',
+    });
+
+    expect(queryBuilder.andWhere).toHaveBeenCalledWith(
+      'intent.id = :publicIntentId',
+      {
+        publicIntentId: 'social_request_301',
+      },
+    );
+  });
+
   it('searches public discover cards by interest tags and generated filters', async () => {
     const queryBuilder = makeQueryBuilder();
     const service = makeService({

@@ -184,9 +184,11 @@ import { UserFacingResponseSanitizerService } from './response-quality/user-faci
 import { MatchModule } from '../match/match.module';
 import { AgentApprovalRequest } from './entities/agent-approval-request.entity';
 import { AgentSideEffectLedger } from './entities/agent-side-effect-ledger.entity';
+import { MatchingJob } from './entities/matching-job.entity';
 import { AgentSettings } from './entities/agent-settings.entity';
 import { AgentApprovalService } from './agent-approval.service';
 import { AgentSideEffectLedgerService } from './agent-side-effect-ledger.service';
+import { MatchingJobService } from './matching-job.service';
 import { SocialAgentPublishReconcilerService } from './social-agent-publish-reconciler.service';
 import { SocialAgentPublishReconcilerCronService } from './social-agent-publish-reconciler-cron.service';
 import { AgentSettingsService } from './agent-settings.service';
@@ -257,6 +259,7 @@ import { AdminRbacModule } from '../admin-rbac/admin-rbac.module';
       FitMeetAgentMemoryUpdate,
       AgentApprovalRequest,
       AgentSideEffectLedger,
+      MatchingJob,
       AgentSettings,
       SafetyEvent,
       ContactRequest,
@@ -287,6 +290,7 @@ import { AdminRbacModule } from '../admin-rbac/admin-rbac.module';
     AgentSelfImproveService,
     AgentApprovalService,
     AgentSideEffectLedgerService,
+    MatchingJobService,
     SocialAgentPublishReconcilerService,
     SocialAgentPublishReconcilerCronService,
     AgentApprovalDispatcherService,
