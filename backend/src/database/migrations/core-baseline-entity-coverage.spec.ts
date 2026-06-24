@@ -2,7 +2,7 @@ import { readdirSync, readFileSync, statSync } from 'fs';
 import { join, relative } from 'path';
 
 const srcRoot = join(__dirname, '..', '..');
-const baselinePath = join(__dirname, '1780000000000-CoreBaseline.ts');
+const migrationsRoot = __dirname;
 
 function listFiles(dir: string): string[] {
   return readdirSync(dir).flatMap((entry) => {
@@ -32,23 +32,30 @@ function entityTables(): Map<string, string[]> {
   return tables;
 }
 
-function baselineTables(): Set<string> {
-  const text = readFileSync(baselinePath, 'utf8');
-  return new Set(
-    Array.from(text.matchAll(/CREATE TABLE "([^"]+)"/g), (match) => match[1]),
-  );
+function migrationTables(): Set<string> {
+  const tables = new Set<string>();
+  for (const file of listFiles(migrationsRoot)) {
+    if (!/^\d+.*\.ts$/.test(relative(migrationsRoot, file))) continue;
+    const text = readFileSync(file, 'utf8');
+    for (const match of text.matchAll(
+      /CREATE TABLE(?: IF NOT EXISTS)? "([^"]+)"/g,
+    )) {
+      tables.add(match[1]);
+    }
+  }
+  return tables;
 }
 
 describe('CoreBaseline migration entity coverage', () => {
-  it('creates every TypeORM entity table and no stale extra tables', () => {
+  it('creates every TypeORM entity table through baseline or incremental migrations', () => {
     const entities = entityTables();
-    const baseline = baselineTables();
+    const migrations = migrationTables();
     const entityTableNames = new Set(entities.keys());
 
     const missing = Array.from(entityTableNames)
-      .filter((table) => !baseline.has(table))
+      .filter((table) => !migrations.has(table))
       .map((table) => `${table} (${entities.get(table)?.join(', ')})`);
-    const stale = Array.from(baseline).filter(
+    const stale = Array.from(migrations).filter(
       (table) => !entityTableNames.has(table),
     );
 

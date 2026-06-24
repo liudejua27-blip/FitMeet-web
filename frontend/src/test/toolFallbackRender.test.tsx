@@ -3,6 +3,11 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { FitMeetToolUIActionsProvider } from '../components/assistant-ui/tool-ui-actions';
 import { AssistantDataFallback } from '../components/assistant-ui/tool-fallback';
+import {
+  socialProfileApi,
+  type SocialProfileBuilderCard,
+  type SocialProfileCompletion,
+} from '../api/socialProfileApi';
 import type { UserFacingAgentResponse } from '../api/socialAgentApi';
 
 vi.mock('@assistant-ui/react', async (importOriginal) => {
@@ -21,6 +26,79 @@ vi.mock('@assistant-ui/react', async (importOriginal) => {
       }),
   };
 });
+
+function profileDraft(): SocialProfileBuilderCard {
+  return {
+    basic: {
+      nickname: 'Nova',
+      city: '青岛',
+      ageRange: '25-34',
+      gender: '',
+      zodiac: '',
+    },
+    personality: {
+      mbti: '',
+      traits: [],
+      socialStyle: '',
+      communicationStyle: '',
+    },
+    interests: {
+      sports: ['跑步'],
+      lifestyle: [],
+      socialScenes: [],
+    },
+    preferences: {
+      wantToMeet: ['跑步搭子'],
+      preferredTraits: [],
+      avoid: ['夜间私人场所'],
+    },
+    relationshipIntent: {
+      goals: [],
+      openness: '',
+    },
+    availability: {
+      weekdays: '',
+      weekends: '周末下午',
+    },
+    visibility: {
+      profileDiscoverable: true,
+      agentCanRecommendMe: true,
+      agentCanStartChatAfterApproval: true,
+    },
+    matchSignals: {
+      publicTags: ['跑步'],
+      privatePreferenceTags: [],
+      sensitivePrivateTags: [],
+      matchKeywords: ['跑步', '青岛'],
+      confidence: 0.7,
+      source: 'fallback',
+    },
+    summary: '青岛周末跑步。',
+  };
+}
+
+function completion(overrides: Partial<SocialProfileCompletion> = {}): SocialProfileCompletion {
+  return {
+    completedFields: ['city', 'fitnessGoals', 'wantToMeet', 'privacyBoundary'],
+    missingFields: ['availableTimes'],
+    percent: 70,
+    readinessLevel: 'match_ready',
+    canEnterMatchPool: false,
+    authorizationRequired: true,
+    authorization: {
+      matchPoolEnabled: false,
+      profileDiscoverable: false,
+      agentCanRecommendMe: false,
+      agentCanStartChatAfterApproval: false,
+      hideSensitiveTags: true,
+      requiresOwnerConfirmationToEnable: true,
+      consentSource: 'not_enabled',
+    },
+    sections: [],
+    nextActions: [],
+    ...overrides,
+  };
+}
 
 describe('assistant-ui tool fallback rendering', () => {
   const response = (
@@ -225,6 +303,121 @@ describe('assistant-ui tool fallback rendering', () => {
     expect(card).toHaveTextContent('有哪些必要的安全边界');
     expect(within(card).getByRole('button', { name: '生成更新预览' })).toBeDisabled();
     expect(within(card).getByRole('button', { name: '本次使用，不保存' })).toBeInTheDocument();
+  });
+
+  it('saves profile completion without implicit matching consent', async () => {
+    const draft = profileDraft();
+    const aiDraftSpy = vi.spyOn(socialProfileApi, 'aiDraft').mockResolvedValue({
+      mode: 'fallback',
+      draft,
+      proposal: {
+        proposalId: 901,
+        baseProfileVersion: 3,
+        proposedFields: { city: '青岛', fitnessGoals: ['跑步'] },
+        draft,
+        status: 'pending',
+        expiresAt: '2026-06-25T00:00:00.000Z',
+      },
+      profileUsed: {} as never,
+      completion: completion({ authorizationRequired: true }),
+    });
+    const aiSaveSpy = vi.spyOn(socialProfileApi, 'aiSave').mockResolvedValue({
+      profile: {} as never,
+      aiDelegateProfile: null,
+      matchingEnabled: false,
+      completion: completion({
+        percent: 82,
+        missingFields: [],
+        canEnterMatchPool: true,
+        authorizationRequired: true,
+      }),
+      proposal: null,
+    });
+    const updatePrivacySpy = vi.spyOn(socialProfileApi, 'updatePrivacy').mockResolvedValue({
+      profileDiscoverable: true,
+      agentCanRecommendMe: true,
+      agentCanStartChatAfterApproval: false,
+      hideSensitiveTags: true,
+      matchPoolEnabled: true,
+      completion: completion({
+        percent: 82,
+        missingFields: [],
+        canEnterMatchPool: true,
+        authorizationRequired: false,
+      }),
+      authorization: undefined,
+      sensitiveTagSummary: { pending: 0, confirmed: 0, rejected: 0, hidden: 0 },
+    });
+
+    render(
+      <AssistantDataFallback
+        type="data"
+        status={{ type: 'complete' }}
+        name="fitmeet-cards"
+        data={{
+          cards: [
+            {
+              id: 'profile_completion:consent',
+              type: 'profile_completion',
+              schemaVersion: 'fitmeet.tool-ui.v1',
+              schemaType: 'profile.completion',
+              title: '让 Agent 帮你补充个人信息',
+              body: '回答后先生成更新预览。',
+              data: {
+                schemaName: 'ProfileCompletionCard',
+                schemaVersion: 'fitmeet.tool-ui.v1',
+                schemaType: 'profile.completion',
+                questions: [
+                  {
+                    key: 'city',
+                    label: '城市与活动范围',
+                    question: '你在哪个城市？',
+                    options: ['青岛'],
+                  },
+                ],
+              },
+              actions: [],
+            },
+          ],
+        }}
+      />,
+    );
+
+    const card = await screen.findByTestId('profile-completion-card');
+    fireEvent.click(within(card).getByRole('button', { name: '青岛' }));
+    fireEvent.click(within(card).getByRole('button', { name: '生成更新预览' }));
+
+    await waitFor(() => expect(aiDraftSpy).toHaveBeenCalled());
+    fireEvent.click(within(card).getByRole('button', { name: '确认保存' }));
+
+    await waitFor(() =>
+      expect(aiSaveSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          profile: draft,
+          proposalId: 901,
+          expectedProfileVersion: 3,
+        }),
+      ),
+    );
+    expect(aiSaveSpy.mock.calls[0]?.[0]).not.toMatchObject({
+      enableMatching: true,
+      matchingConsent: true,
+      profileVisibilityConsent: true,
+    });
+    expect(await screen.findByTestId('profile-matching-authorization-card')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: '确认开启匹配授权' }));
+    await waitFor(() =>
+      expect(updatePrivacySpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          profileDiscoverable: true,
+          agentCanRecommendMe: true,
+          ownerConfirmed: true,
+          matchingConsent: true,
+          profileVisibilityConsent: true,
+        }),
+      ),
+    );
   });
 
   it('keeps standalone approval panels for high-risk social actions', () => {

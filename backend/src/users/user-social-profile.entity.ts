@@ -17,6 +17,10 @@ export class UserSocialProfile {
   @PrimaryColumn()
   userId: number;
 
+  /** Optimistic version for agent-generated profile update proposals. */
+  @Column({ type: 'int', default: 0 })
+  profileVersion: number;
+
   /** 性别（自报，可为空） */
   @Column({ default: '' })
   gender: string;
