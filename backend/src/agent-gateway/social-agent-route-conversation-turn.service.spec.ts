@@ -193,6 +193,7 @@ describe('SocialAgentRouteConversationTurnService', () => {
       savedContext: false,
       profileUpdated: false,
       profileUpdateProposal: null,
+      cards: [],
     });
     expect(chatLlm.generateConversationalAnswerWithSource).toHaveBeenCalledWith(
       {
@@ -659,6 +660,7 @@ describe('SocialAgentRouteConversationTurnService', () => {
       savedContext: false,
       profileUpdated: false,
       profileUpdateProposal: null,
+      cards: [],
     });
 
     expect(
@@ -692,6 +694,7 @@ describe('SocialAgentRouteConversationTurnService', () => {
       savedContext: false,
       profileUpdated: false,
       profileUpdateProposal: null,
+      cards: [],
     });
 
     expect(

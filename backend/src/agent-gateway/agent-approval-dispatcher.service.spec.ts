@@ -167,7 +167,7 @@ describe('AgentApprovalDispatcherService', () => {
     );
     expect(result).toEqual({
       ok: true,
-      result: {
+      result: expect.objectContaining({
         id: 'public_301',
         status: 'published',
         socialRequestId: 301,
@@ -175,7 +175,13 @@ describe('AgentApprovalDispatcherService', () => {
         discoverHref: '/discover?publicIntentId=public_301',
         publicIntentHref: '/public-intent/public_301',
         synced: true,
-      },
+        publicLoop: expect.objectContaining({
+          stage: 'discover_visible',
+          publicIntentId: 'public_301',
+          discoverHref: '/discover?publicIntentId=public_301',
+          publicIntentHref: '/public-intent/public_301',
+        }),
+      }),
     });
     expect(taskRepo.findOne).toHaveBeenCalledWith({
       where: { id: 101, ownerUserId: 7 },
