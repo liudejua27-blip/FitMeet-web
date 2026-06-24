@@ -613,10 +613,14 @@ export class MatchService {
   }): Promise<User[]> {
     const qb = this.userRepo
       .createQueryBuilder('u')
+      .leftJoin(UserSocialProfile, 'profile', 'profile."userId" = u.id')
       .where('u.id != :uid', { uid: input.excludeSelfId });
 
     if (input.city) {
-      qb.andWhere('u.city ILIKE :city', { city: `%${input.city}%` });
+      qb.andWhere(
+        '(u.city ILIKE :city OR profile.city ILIKE :city OR profile."nearbyArea" ILIKE :city)',
+        { city: `%${input.city}%` },
+      );
     }
     qb.andWhere('u."acceptNearbyMatch" = true');
     if (process.env.NODE_ENV === 'production') {

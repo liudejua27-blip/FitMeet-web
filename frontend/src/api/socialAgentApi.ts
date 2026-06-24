@@ -60,6 +60,24 @@ export interface UserFacingAgentRecoveryNotice {
   source: 'fallback_suppressed' | 'checkpoint_recovery' | 'stream_error';
 }
 
+export type UserFacingAgentPublicLoopStage =
+  | 'profile_completion'
+  | 'opportunity_card_generated'
+  | 'publish_confirmation_required'
+  | 'discover_visible'
+  | 'candidates_recommended'
+  | 'contact_confirmation_required'
+  | 'messages_handoff';
+
+export interface UserFacingAgentPublicLoop {
+  stage: UserFacingAgentPublicLoopStage;
+  publicIntentId: string | null;
+  discoverHref: string | null;
+  publicIntentHref: string | null;
+  messagesHref: string | null;
+  requiredConfirmation: string | null;
+}
+
 export type FitMeetAgentLoopStage =
   | 'social_search'
   | 'candidate_recommendation'
@@ -126,6 +144,7 @@ export interface UserFacingAgentResponse {
   cards: FitMeetAlphaCard[];
   safeStatus: UserFacingAgentSafeStatus;
   pendingConfirmations: UserFacingAgentPendingConfirmation[];
+  publicLoop?: UserFacingAgentPublicLoop;
   permissionMode: SocialAgentPermissionMode;
   lifeGraphWritebackProposal?: Record<string, unknown>;
   runtime?: {

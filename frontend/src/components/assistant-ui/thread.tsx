@@ -85,11 +85,16 @@ export function ChatGPTThread({
 
       <AuiIf condition={(state) => !state.thread.isEmpty || shouldShowViewport}>
         <ThreadPrimitive.Viewport
-          className="flex grow flex-col gap-6 overflow-y-auto overscroll-contain scroll-smooth pt-12 [scrollbar-gutter:stable] [scroll-padding-bottom:calc(8rem+env(safe-area-inset-bottom)+env(keyboard-inset-height,0px))] sm:pt-14"
-          turnAnchor="top"
+          className="flex grow flex-col gap-6 overflow-y-auto overscroll-contain pt-12 [overflow-anchor:none] [scroll-behavior:auto] [scrollbar-gutter:stable] [scroll-padding-bottom:calc(8rem+env(safe-area-inset-bottom)+env(keyboard-inset-height,0px))] sm:pt-14"
+          turnAnchor="bottom"
+          autoScroll
+          scrollToBottomOnRunStart
+          scrollToBottomOnInitialize
           data-testid="assistant-ui-thread-viewport"
           data-viewport-model="assistant-ui-thread-viewport"
-          data-scroll-model="anchored-thread"
+          data-scroll-model="bottom-anchored-thread"
+          data-scroll-anchor="bottom"
+          data-typing-scroll-policy="manual"
           data-footer-behavior="sticky-composer"
         >
           <div

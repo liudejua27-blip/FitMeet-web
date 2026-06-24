@@ -2701,7 +2701,7 @@ describe('AgentWorkspacePage', () => {
       'assistant-ui-product-card-details',
     );
     expect(
-      activityActionCard.compareDocumentPosition(activityDetails) &
+      activityDetails.compareDocumentPosition(activityActionCard) &
         Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
     expect(screen.queryByTestId('activity-explanation-steps')).not.toBeInTheDocument();
@@ -3078,7 +3078,7 @@ describe('AgentWorkspacePage', () => {
       'assistant-ui-product-card-details',
     )[0];
     expect(
-      firstCandidateActionCard.compareDocumentPosition(firstCandidateDetails) &
+      firstCandidateDetails.compareDocumentPosition(firstCandidateActionCard) &
         Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
     expect(screen.getByText('小林')).toBeInTheDocument();
@@ -7652,13 +7652,28 @@ describe('AgentWorkspacePage', () => {
     );
     expect(screen.getByTestId('assistant-ui-thread-viewport')).toHaveAttribute(
       'data-scroll-model',
-      'anchored-thread',
+      'bottom-anchored-thread',
+    );
+    expect(screen.getByTestId('assistant-ui-thread-viewport')).toHaveAttribute(
+      'data-scroll-anchor',
+      'bottom',
+    );
+    expect(screen.getByTestId('assistant-ui-thread-viewport')).toHaveAttribute(
+      'data-typing-scroll-policy',
+      'manual',
     );
     expect(screen.getByTestId('assistant-ui-thread-viewport')).toHaveAttribute(
       'data-footer-behavior',
       'sticky-composer',
     );
     expect(screen.getByTestId('assistant-ui-thread-viewport')).toHaveClass('overscroll-contain');
+    expect(screen.getByTestId('assistant-ui-thread-viewport')).not.toHaveClass('scroll-smooth');
+    expect(screen.getByTestId('assistant-ui-thread-viewport')).toHaveClass(
+      '[scroll-behavior:auto]',
+    );
+    expect(screen.getByTestId('assistant-ui-thread-viewport')).toHaveClass(
+      '[overflow-anchor:none]',
+    );
     expect(screen.getByTestId('assistant-ui-thread-viewport')).toHaveClass(
       '[scrollbar-gutter:stable]',
     );

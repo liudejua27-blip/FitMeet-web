@@ -101,6 +101,25 @@ export function candidateRelationshipGoalScore(
   return 5;
 }
 
+export function candidatePreferenceFitScore(input: {
+  query: CandidatePoolResolvedQuery;
+  candidateSignals: unknown[];
+}): number {
+  const preference = normalizeCandidatePreference(
+    input.query.candidatePreference,
+  );
+  if (!preference) return 0;
+  const haystack = input.candidateSignals
+    .flatMap(signalToStrings)
+    .join(' ')
+    .toLowerCase();
+  if (!haystack) return 0;
+  const tokens = preferenceTokens(preference);
+  const hits = tokens.filter((token) => textContains(haystack, token));
+  if (hits.length === 0) return 0;
+  return Math.min(10, hits.length * 4 + (hits.length >= 2 ? 2 : 0));
+}
+
 export function candidateSafetyRiskScore(
   riskLevel: ReturnType<SceneRiskPolicyService['evaluate']>['riskLevel'],
 ): number {
@@ -150,4 +169,74 @@ export function candidateProfileTimeMatches(
     .join(' ');
   if (!text) return 4;
   return text.includes(queryTime) || queryTime.includes(text) ? 15 : 8;
+}
+
+function normalizeCandidatePreference(value: unknown): string {
+  return safeText(value).trim();
+}
+
+function preferenceTokens(preference: string): string[] {
+  const tokens = [
+    ...normalizeCandidatePoolArray(preference),
+    ...preference
+      .split(/[,\s，、/]+/u)
+      .map((item) => item.trim())
+      .filter(Boolean),
+  ];
+  if (/女生|女孩|女性|女同学|女大学生|female/i.test(preference)) {
+    tokens.push('女生', '女性', 'female');
+  }
+  if (/男生|男孩|男性|男同学|男大学生|male/i.test(preference)) {
+    tokens.push('男生', '男性', 'male');
+  }
+  if (/同校|校友|大学生|学生|青岛大学/i.test(preference)) {
+    tokens.push('同校', '学生', '大学生', '青岛大学');
+  }
+  if (/舞蹈|跳舞|舞者|dance/i.test(preference)) {
+    tokens.push('舞蹈', '跳舞', 'dance');
+  }
+  if (/低压力|轻松|慢热|安全感|边界/i.test(preference)) {
+    tokens.push('低压力', '轻松', '慢热', '边界');
+  }
+  return uniqueStrings(tokens).filter((token) => token.length >= 2);
+}
+
+function textContains(haystack: string, token: string): boolean {
+  const needle = token.toLowerCase();
+  if (!needle) return false;
+  return (
+    haystack.includes(needle) ||
+    haystack
+      .split(/[,\s，、/]+/u)
+      .filter(Boolean)
+      .some((part) => needle.includes(part) || part.includes(needle))
+  );
+}
+
+function uniqueStrings(values: unknown[]): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const value of values) {
+    const text = safeText(value).trim();
+    if (!text) continue;
+    const key = text.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(text);
+  }
+  return out;
+}
+
+function signalToStrings(value: unknown): string[] {
+  if (Array.isArray(value)) return value.flatMap(signalToStrings);
+  const text = safeText(value).trim();
+  return text ? [text] : [];
+}
+
+function safeText(value: unknown): string {
+  if (typeof value === 'string') return value;
+  if (typeof value === 'number' || typeof value === 'boolean') {
+    return String(value);
+  }
+  return '';
 }

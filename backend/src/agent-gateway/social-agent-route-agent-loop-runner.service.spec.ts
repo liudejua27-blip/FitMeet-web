@@ -764,6 +764,40 @@ describe('SocialAgentRouteAgentLoopRunnerService', () => {
     );
   });
 
+  it('plans publish action branch for a fresh publish request so missing fields can be asked', async () => {
+    const { service, deps } = makeService({
+      agentLoop: makeAgentLoop({ runTools: false }),
+    });
+
+    await service.run({
+      ownerUserId: 7,
+      task: deps.task as never,
+      state: createSocialAgentRouteTurnState('我先确认发布信息。'),
+      message: '帮我发布约练卡片',
+      decision: {
+        task: deps.task,
+        taskContext: null,
+        route: makeRoute({
+          intent: 'action_request',
+          replyStrategy: 'execute_action',
+          shouldExecuteAction: true,
+        }),
+        profile: null,
+        longTermSnapshot: null,
+        brainToolResults: [],
+      } as never,
+      replanAndRefresh: jest.fn(),
+      queueInitialSearchForTask: jest.fn(),
+    });
+
+    const plan = deps.agentLoop.execute.mock.calls[0][0].plan.tools;
+    expect(plan).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ toolName: 'route_action_turn' }),
+      ]),
+    );
+  });
+
   it('does not plan candidate follow-up search without existing candidate context', async () => {
     const { service, deps } = makeService({
       agentLoop: makeAgentLoop({ runTools: false }),

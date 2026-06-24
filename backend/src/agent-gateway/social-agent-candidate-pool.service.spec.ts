@@ -297,6 +297,49 @@ describe('SocialAgentCandidatePoolService', () => {
     ).toBeGreaterThan(0);
   });
 
+  it('uses candidate preference text to rank consented profile candidates', async () => {
+    const { service } = makeService({
+      users: [realUser(1), realUser(2), realUser(3)],
+      profiles: [
+        profile(2, {
+          nickname: '偏好命中候选',
+          gender: 'female',
+          interestTags: ['咖啡'],
+          profileDiscoverable: true,
+          agentCanRecommendMe: true,
+        }),
+        profile(3, {
+          nickname: '普通候选',
+          gender: 'male',
+          interestTags: ['咖啡'],
+          profileDiscoverable: true,
+          agentCanRecommendMe: true,
+        }),
+      ],
+    });
+
+    const result = await service.searchSocial({
+      ownerUserId: 1,
+      city: '青岛',
+      candidatePreference: '女生优先',
+      rawText: '想找一个可以轻松聊天的搭子',
+    });
+
+    expect(result.candidates[0]).toMatchObject({
+      candidateUserId: 2,
+      displayName: '偏好命中候选',
+      scoreBreakdown: expect.objectContaining({
+        preferenceFit: expect.any(Number),
+      }),
+      matchReasons: expect.arrayContaining([
+        expect.stringContaining('符合你提到的候选偏好'),
+      ]),
+    });
+    expect(result.candidates[0].scoreBreakdown.preferenceFit).toBeGreaterThan(
+      0,
+    );
+  });
+
   it('uses persisted user interest events to rerank candidates without LLM sorting', async () => {
     const interestEvents = {
       summarizeForUser: jest.fn().mockResolvedValue({

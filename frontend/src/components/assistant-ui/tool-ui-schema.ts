@@ -4,6 +4,7 @@ export type ToolUISchemaType =
   | 'social_match.candidate'
   | 'social_match.activity'
   | 'social_match.empty'
+  | 'profile.completion'
   | 'life_graph.diff'
   | 'meet_loop.timeline'
   | 'safety.approval'
@@ -13,6 +14,7 @@ export type ToolUIProductComponent =
   | 'CandidateCards'
   | 'OpportunityCard'
   | 'CandidateEmptyStateCard'
+  | 'ProfileCompletionCard'
   | 'LifeGraphDiffCard'
   | 'MeetLoopTimeline'
   | 'ApprovalPanel'
@@ -74,6 +76,7 @@ export type ToolUICardCollectionSummary = {
   opportunityCount: number;
   approvalCount: number;
   lifeGraphDiffCount: number;
+  profileCompletionCount: number;
   meetLoopCount: number;
   genericCount: number;
   components: ToolUIProductComponent[];
@@ -164,6 +167,8 @@ export type ActivityOpportunityView = {
   autoPublished: boolean;
   publicIntentId: string | null;
   discoverHref: string | null;
+  publicIntentHref: string | null;
+  messagesHref: string | null;
 };
 
 export type ActivityProtocolItemView = {
@@ -808,6 +813,7 @@ export function productComponentForSchemaType(
   if (schemaType === 'social_match.candidate') return 'CandidateCards';
   if (schemaType === 'social_match.activity') return 'OpportunityCard';
   if (schemaType === 'social_match.empty') return 'CandidateEmptyStateCard';
+  if (schemaType === 'profile.completion') return 'ProfileCompletionCard';
   if (schemaType === 'life_graph.diff') return 'LifeGraphDiffCard';
   if (schemaType === 'meet_loop.timeline') return 'MeetLoopTimeline';
   if (schemaType === 'safety.approval') return 'ApprovalPanel';
@@ -824,6 +830,9 @@ export function summarizeToolUICardCollection(
   const activityCount = cards.filter((card) => card.schemaType === 'social_match.activity').length;
   const approvalCount = cards.filter((card) => card.schemaType === 'safety.approval').length;
   const lifeGraphDiffCount = cards.filter((card) => card.schemaType === 'life_graph.diff').length;
+  const profileCompletionCount = cards.filter(
+    (card) => card.schemaType === 'profile.completion',
+  ).length;
   const meetLoopCount = cards.filter((card) => card.schemaType === 'meet_loop.timeline').length;
   const genericCount = cards.filter((card) => card.schemaType === 'generic.card').length;
   const opportunityCount = candidateCount + activityCount;
@@ -836,21 +845,24 @@ export function summarizeToolUICardCollection(
     activityCount > 0 ? `${activityCount} 张约练卡` : null,
     meetLoopCount > 0 ? `${meetLoopCount} 个约练进展` : null,
     lifeGraphDiffCount > 0 ? `${lifeGraphDiffCount} 条画像建议` : null,
+    profileCompletionCount > 0 ? `${profileCompletionCount} 张资料补全卡` : null,
     approvalCount > 0 ? `${approvalCount} 个待确认动作` : null,
   ].filter(Boolean);
   const title = titleParts.length > 0 ? titleParts.join(' · ') : '整理结果';
-  const detail =
-    opportunityCount > 0
-      ? '候选、约练和真实动作都按结构化卡片展示；涉及连接、发送或公开时会先确认。'
-      : emptyCount > 0
-        ? '没有真实候选时，不会编造结果；你可以选择发布到发现、扩大范围或调整时间。'
-        : approvalCount > 0
-          ? '这次操作涉及真实动作或隐私边界，确认前不会自动执行。'
-          : lifeGraphDiffCount > 0
-            ? '画像变化会展示依据、冲突和撤回边界，确认后才写入长期记忆。'
-            : meetLoopCount > 0
-              ? '约练进展按发起、等待、改期、确认、评价和画像回写展示。'
-              : '结果已按安全的消息卡片展示。';
+  let detail = '结果已按安全的消息卡片展示。';
+  if (opportunityCount > 0) {
+    detail = '候选、约练和真实动作都按结构化卡片展示；涉及连接、发送或公开时会先确认。';
+  } else if (emptyCount > 0) {
+    detail = '没有真实候选时，不会编造结果；你可以选择发布到发现、扩大范围或调整时间。';
+  } else if (approvalCount > 0) {
+    detail = '这次操作涉及真实动作或隐私边界，确认前不会自动执行。';
+  } else if (lifeGraphDiffCount > 0) {
+    detail = '画像变化会展示依据、冲突和撤回边界，确认后才写入长期记忆。';
+  } else if (profileCompletionCount > 0) {
+    detail = '先补齐当前匹配最需要的信息，生成预览并确认后才保存。';
+  } else if (meetLoopCount > 0) {
+    detail = '约练进展按发起、等待、改期、确认、评价和画像回写展示。';
+  }
 
   return {
     title,
@@ -860,6 +872,7 @@ export function summarizeToolUICardCollection(
     opportunityCount,
     approvalCount,
     lifeGraphDiffCount,
+    profileCompletionCount,
     meetLoopCount,
     genericCount,
     components,
@@ -893,6 +906,7 @@ export function schemaDefaultTitle(schemaType: ToolUISchemaType) {
   if (schemaType === 'social_match.candidate') return '候选机会';
   if (schemaType === 'social_match.activity') return '活动机会';
   if (schemaType === 'social_match.empty') return '暂时没有找到合适的人';
+  if (schemaType === 'profile.completion') return '个人信息补全';
   if (schemaType === 'life_graph.diff') return '画像更新建议';
   if (schemaType === 'meet_loop.timeline') return '约练进展';
   if (schemaType === 'safety.approval') return '安全确认';
@@ -905,6 +919,7 @@ export function toolUISchemaTypeFromUnknown(value: unknown): ToolUISchemaType | 
     text === 'social_match.candidate' ||
     text === 'social_match.activity' ||
     text === 'social_match.empty' ||
+    text === 'profile.completion' ||
     text === 'life_graph.diff' ||
     text === 'meet_loop.timeline' ||
     text === 'safety.approval' ||
@@ -1671,6 +1686,9 @@ export function normalizeActivityOpportunityView(
     publicIntentId:
       publicString(opportunity.publicIntentId) ?? publicString(card.data.publicIntentId),
     discoverHref: publicString(opportunity.discoverHref) ?? publicString(card.data.discoverHref),
+    publicIntentHref:
+      publicString(opportunity.publicIntentHref) ?? publicString(card.data.publicIntentHref),
+    messagesHref: publicString(opportunity.messagesHref) ?? publicString(card.data.messagesHref),
   };
 }
 

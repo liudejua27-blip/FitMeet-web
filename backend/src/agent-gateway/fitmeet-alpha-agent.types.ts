@@ -5,6 +5,7 @@ export type FitMeetAlphaAgentName =
   | 'Match Agent';
 
 export type FitMeetAlphaCardType =
+  | 'profile_completion'
   | 'profile_proposal'
   | 'candidate_card'
   | 'opener_approval'
@@ -96,6 +97,7 @@ export interface FitMeetAlphaCard {
     | 'social_match.candidate'
     | 'social_match.activity'
     | 'social_match.empty'
+    | 'profile.completion'
     | 'life_graph.diff'
     | 'meet_loop.timeline'
     | 'safety.approval'

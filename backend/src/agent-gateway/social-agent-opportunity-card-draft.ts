@@ -246,7 +246,7 @@ export function buildSocialAgentPublishConfirmationCard(input: {
       : [
           {
             id: `publish_to_discover:${task.id}`,
-            label: '确认发布',
+            label: '发布卡片',
             action: 'publish_to_discover',
             schemaAction: 'publish_to_discover',
             loopStage: 'activity_draft_created',

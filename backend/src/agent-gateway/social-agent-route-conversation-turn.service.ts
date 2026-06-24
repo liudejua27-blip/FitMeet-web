@@ -6,6 +6,7 @@ import type { SocialAgentIntentRouterResult } from './social-agent-intent-router
 import type { SocialAgentRouteMessageBody } from './social-agent-chat.types';
 import type { StreamEmit } from './social-agent-chat.types';
 import type { SocialAgentAssistantMessageSource } from './social-agent-chat.types';
+import type { FitMeetAlphaCard } from './fitmeet-alpha-agent.types';
 import type { SocialAgentHydratedContext } from './social-agent-context-hydrator.service';
 import type { LongTermMemorySnapshot } from './social-agent-long-term-memory.service';
 import type { SocialAgentMemoryContext } from './social-agent-memory-context.service';
@@ -40,6 +41,7 @@ type HandleRouteConversationTurnResult = {
   savedContext: boolean;
   profileUpdated: boolean;
   profileUpdateProposal: LifeGraphProposalDto | null;
+  cards?: FitMeetAlphaCard[];
   assistantStreamed?: boolean;
   assistantMessageSource?: SocialAgentAssistantMessageSource;
 };
@@ -98,6 +100,7 @@ export class SocialAgentRouteConversationTurnService {
         savedContext: handled.savedContext,
         profileUpdated: handled.profileUpdated,
         profileUpdateProposal: handled.profileUpdateProposal ?? null,
+        cards: handled.cards ?? [],
         assistantStreamed: handled.assistantStreamed,
         assistantMessageSource: handled.assistantMessageSource,
       };
@@ -115,6 +118,7 @@ export class SocialAgentRouteConversationTurnService {
         savedContext: false,
         profileUpdated: false,
         profileUpdateProposal: null,
+        cards: [],
       };
     }
 
@@ -168,6 +172,7 @@ export class SocialAgentRouteConversationTurnService {
         savedContext: false,
         profileUpdated: false,
         profileUpdateProposal: null,
+        cards: [],
       };
     }
 
@@ -177,6 +182,7 @@ export class SocialAgentRouteConversationTurnService {
       savedContext: false,
       profileUpdated: false,
       profileUpdateProposal: null,
+      cards: [],
     };
   }
 

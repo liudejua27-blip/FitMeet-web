@@ -6,6 +6,8 @@ import { CreateSocialRequestDto } from '../social-requests/dto/create-social-req
 import {
   SocialRequestSafety,
   SocialRequestType,
+  SocialRequestVisibility,
+  UserSocialRequestStatus,
 } from '../social-requests/social-request.entity';
 import type { SocialAgentCardActionBody } from './social-agent-action.types';
 import type {
@@ -577,6 +579,14 @@ export class SocialAgentCardActionRouterService {
             ],
           },
         ],
+        publicLoop: {
+          stage: 'publish_confirmation_required',
+          publicIntentId: null,
+          discoverHref: null,
+          publicIntentHref: null,
+          messagesHref: null,
+          requiredConfirmation: '发布约练卡到发现页',
+        },
       });
     }
     if (!this.draftPublication) {
@@ -654,9 +664,22 @@ export class SocialAgentCardActionRouterService {
             ],
           },
         ],
+        publicLoop: {
+          stage: 'publish_confirmation_required',
+          publicIntentId: null,
+          discoverHref: null,
+          publicIntentHref: null,
+          messagesHref: null,
+          requiredConfirmation: '发布约练卡到发现页',
+        },
       });
     }
     const publicIntentId = this.text(result.publicIntentId);
+    if (!publicIntentId) {
+      throw new BadRequestException(
+        '发布约练缺少 publicIntentId，无法确认发现页可见',
+      );
+    }
     const socialRequestId = this.number(result.socialRequestId);
     const publicIntentHref =
       this.text(result.publicIntentHref) ||
@@ -688,6 +711,7 @@ export class SocialAgentCardActionRouterService {
         socialRequestId,
         discoverHref,
         publicIntentHref,
+        messagesHref: null,
         autoPublished: true,
         publishStatus: 'published',
       },
@@ -713,6 +737,14 @@ export class SocialAgentCardActionRouterService {
       assistantMessage:
         '已发布到发现页。我会根据这张约练卡继续帮你匹配合适的人；发送邀请、加好友或私信前仍会让你确认。',
       cards: [publishedCard],
+      publicLoop: {
+        stage: 'discover_visible',
+        publicIntentId,
+        discoverHref,
+        publicIntentHref,
+        messagesHref: null,
+        requiredConfirmation: null,
+      },
     });
     const matchResult = await this.runPostPublishCandidateSearch({
       taskId,
@@ -833,6 +865,24 @@ export class SocialAgentCardActionRouterService {
       cards: [...(publishResult.cards ?? []), ...(matchResult.cards ?? [])],
       pendingApproval:
         matchResult.pendingApproval ?? publishResult.pendingApproval ?? null,
+      publicLoop: {
+        stage: 'candidates_recommended',
+        publicIntentId:
+          publishResult.publicLoop?.publicIntentId ??
+          matchResult.publicLoop?.publicIntentId ??
+          null,
+        discoverHref:
+          publishResult.publicLoop?.discoverHref ??
+          matchResult.publicLoop?.discoverHref ??
+          null,
+        publicIntentHref:
+          publishResult.publicLoop?.publicIntentHref ??
+          matchResult.publicLoop?.publicIntentHref ??
+          null,
+        messagesHref: matchResult.publicLoop?.messagesHref ?? null,
+        requiredConfirmation:
+          matchResult.publicLoop?.requiredConfirmation ?? null,
+      },
     };
   }
 
@@ -877,6 +927,8 @@ export class SocialAgentCardActionRouterService {
       ),
       activityType,
       safetyRequirement: SocialRequestSafety.LowRiskOnly,
+      visibility: SocialRequestVisibility.Public,
+      status: UserSocialRequestStatus.Matching,
       agentAllowed: true,
       requireUserConfirmation: true,
       metadata: {
@@ -892,6 +944,7 @@ export class SocialAgentCardActionRouterService {
     assistantMessage: string;
     cards?: SocialAgentIntentRouteResult['cards'];
     pendingApproval?: SocialAgentIntentRouteResult['pendingApproval'];
+    publicLoop?: SocialAgentIntentRouteResult['publicLoop'];
   }): SocialAgentIntentRouteResult {
     return {
       intent: 'action_request',
@@ -921,6 +974,7 @@ export class SocialAgentCardActionRouterService {
       activityResults: [],
       profileUpdateProposal: null,
       cards: input.cards ?? [],
+      publicLoop: input.publicLoop,
       permissionMode: 'confirm' as never,
     };
   }

@@ -1828,6 +1828,8 @@ describe('tool-ui-schema', () => {
       autoPublished: false,
       publicIntentId: null,
       discoverHref: null,
+      publicIntentHref: null,
+      messagesHref: null,
     });
   });
 

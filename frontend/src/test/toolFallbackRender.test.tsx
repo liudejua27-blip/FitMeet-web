@@ -178,6 +178,55 @@ describe('assistant-ui tool fallback rendering', () => {
     expect(screen.queryByText(/生成开场白草稿/)).not.toBeInTheDocument();
   });
 
+  it('renders profile completion cards as fillable interview cards', async () => {
+    render(
+      <AssistantDataFallback
+        type="data"
+        status={{ type: 'complete' }}
+        name="fitmeet-cards"
+        data={{
+          cards: [
+            {
+              id: 'profile_completion:101',
+              type: 'profile_completion',
+              schemaVersion: 'fitmeet.tool-ui.v1',
+              schemaType: 'profile.completion',
+              title: '让 Agent 帮你补充个人信息',
+              body: '回答后先生成更新预览。',
+              data: {
+                schemaName: 'ProfileCompletionCard',
+                schemaVersion: 'fitmeet.tool-ui.v1',
+                schemaType: 'profile.completion',
+                questions: [
+                  {
+                    key: 'currentGoal',
+                    label: '当前目标',
+                    question: '你这次最想达成什么？',
+                    options: ['找运动搭子', '暂不确定'],
+                  },
+                  {
+                    key: 'safetyBoundary',
+                    label: '安全边界',
+                    question: '有哪些必要的安全边界？',
+                    options: ['只接受公共场所', '暂不确定'],
+                  },
+                ],
+              },
+              actions: [],
+            },
+          ],
+        }}
+      />,
+    );
+
+    const card = await screen.findByTestId('profile-completion-card');
+    expect(card).toHaveTextContent('让 Agent 帮你补充个人信息');
+    expect(card).toHaveTextContent('你这次最想达成什么');
+    expect(card).toHaveTextContent('有哪些必要的安全边界');
+    expect(within(card).getByRole('button', { name: '生成更新预览' })).toBeDisabled();
+    expect(within(card).getByRole('button', { name: '本次使用，不保存' })).toBeInTheDocument();
+  });
+
   it('keeps standalone approval panels for high-risk social actions', () => {
     render(
       <AssistantDataFallback
@@ -355,6 +404,14 @@ describe('assistant-ui tool fallback rendering', () => {
     );
 
     const candidate = screen.getByTestId('assistant-ui-schema-card');
+    const candidateCard = await within(candidate).findByTestId('opportunity-card');
+    expect(candidateCard).toHaveAttribute('data-layout-model', 'structured-recommendation-card');
+    expect(candidateCard).toHaveAttribute('data-action-placement', 'bottom-grid');
+    expect(candidateCard).toHaveTextContent('陈砚，适合从一次轻松散步开始');
+    expect(candidateCard).toHaveTextContent('推荐理由');
+    expect(candidateCard).toHaveTextContent('地点接近');
+    expect(candidateCard).toHaveTextContent('青岛');
+    expect(candidateCard).toHaveTextContent('时间待确认');
     const actionCard = within(candidate).getByTestId('assistant-ui-unified-action-card');
     expect(
       within(actionCard)
@@ -1327,6 +1384,13 @@ describe('assistant-ui tool fallback rendering', () => {
     );
 
     const opportunity = screen.getByTestId('assistant-ui-schema-card');
+    const activityCard = await within(opportunity).findByTestId('activity-opportunity-card');
+    expect(activityCard).toHaveAttribute('data-layout-model', 'structured-activity-card');
+    expect(activityCard).toHaveAttribute('data-action-placement', 'bottom-grid');
+    expect(activityCard).toHaveTextContent('发布前确认');
+    expect(activityCard).toHaveTextContent('约练说明');
+    expect(activityCard).toHaveTextContent('青岛大学附近');
+    expect(activityCard).toHaveTextContent('今天晚上');
     const actionCard = within(opportunity).getByTestId('assistant-ui-unified-action-card');
     expect(within(actionCard).getByRole('button', { name: '确认发布' })).toHaveAttribute(
       'data-requires-confirmation',

@@ -29,6 +29,7 @@ type ConversationTurnPatch = {
   savedContext: boolean;
   profileUpdated: boolean;
   profileUpdateProposal: LifeGraphProposalDto | null;
+  cards?: FitMeetAlphaCard[];
   assistantStreamed?: boolean;
 };
 
@@ -73,6 +74,7 @@ export function applyConversationTurnState(
     savedContext: patch.savedContext || state.savedContext,
     profileUpdated: patch.profileUpdated,
     profileUpdateProposal: patch.profileUpdateProposal,
+    cards: patch.cards ?? state.cards,
     assistantStreamed: patch.assistantStreamed ?? state.assistantStreamed,
   };
 }

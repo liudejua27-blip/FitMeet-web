@@ -13,6 +13,7 @@ import type {
 import type {
   SanitizableAgentResult,
   UserFacingAgentPendingConfirmation,
+  UserFacingAgentPublicLoop,
   UserFacingAgentRecoveryNotice,
   UserFacingAgentResponse,
 } from '../user-facing-agent-response';
@@ -50,6 +51,7 @@ export class UserFacingResponseSanitizerService {
     const assistantMessage = this.readAssistantMessage(rawAssistantMessage);
     const assistantMessageSource = this.readAssistantMessageSource(result);
     const cards = this.cardAssembler.assemble(this.readCards(result));
+    const publicLoop = this.readPublicLoop(result, cards, pendingConfirmations);
     const taskId = this.readNumber(
       this.isRecord(result) ? result.taskId : undefined,
     );
@@ -81,6 +83,7 @@ export class UserFacingResponseSanitizerService {
         requiredConfirmations: safety?.requiredConfirmations ?? [],
       },
       pendingConfirmations,
+      ...(publicLoop ? { publicLoop } : {}),
       ...this.readLifeGraphWritebackProposal(result),
       permissionMode,
       runtime,
@@ -345,6 +348,159 @@ export class UserFacingResponseSanitizerService {
         ),
       },
     };
+  }
+
+  private readPublicLoop(
+    result: SanitizableAgentResult,
+    cards: FitMeetAlphaCard[],
+    pendingConfirmations: UserFacingAgentPendingConfirmation[],
+  ): UserFacingAgentPublicLoop | null {
+    const explicit = this.isRecord(result)
+      ? this.publicLoopFromRecord(result.publicLoop)
+      : null;
+    if (explicit) return explicit;
+
+    const cardRecords = cards.filter((card) => this.isRecord(card.data));
+    const publicIntentId = this.firstText([
+      ...cardRecords.map((card) => this.recordValue(card.data).publicIntentId),
+      this.isRecord(result) ? result.publicIntentId : undefined,
+    ]);
+    const discoverHref = this.firstText([
+      ...cardRecords.map((card) => this.recordValue(card.data).discoverHref),
+      this.isRecord(result) ? result.discoverHref : undefined,
+    ]);
+    const publicIntentHref = this.firstText([
+      ...cardRecords.map(
+        (card) => this.recordValue(card.data).publicIntentHref,
+      ),
+      this.isRecord(result) ? result.publicIntentHref : undefined,
+    ]);
+    const messagesHref = this.firstText([
+      ...cardRecords.map((card) => this.recordValue(card.data).messagesHref),
+      ...cardRecords.map((card) => this.recordValue(card.data).messageHref),
+      this.isRecord(result) ? result.messagesHref : undefined,
+    ]);
+    const confirmation = this.publicLoopConfirmation(pendingConfirmations);
+
+    if (messagesHref) {
+      return {
+        stage: 'messages_handoff',
+        publicIntentId,
+        discoverHref,
+        publicIntentHref,
+        messagesHref,
+        requiredConfirmation: null,
+      };
+    }
+
+    if (confirmation) {
+      return {
+        stage: /publish|social_request|公开|发布/i.test(confirmation)
+          ? 'publish_confirmation_required'
+          : 'contact_confirmation_required',
+        publicIntentId,
+        discoverHref,
+        publicIntentHref,
+        messagesHref: null,
+        requiredConfirmation: confirmation,
+      };
+    }
+
+    const hasCandidateCard = cards.some(
+      (card) => card.type === 'candidate_card',
+    );
+    if (publicIntentId && hasCandidateCard) {
+      return {
+        stage: 'candidates_recommended',
+        publicIntentId,
+        discoverHref,
+        publicIntentHref,
+        messagesHref: null,
+        requiredConfirmation: null,
+      };
+    }
+
+    if (publicIntentId && discoverHref) {
+      return {
+        stage: 'discover_visible',
+        publicIntentId,
+        discoverHref,
+        publicIntentHref,
+        messagesHref: null,
+        requiredConfirmation: null,
+      };
+    }
+
+    if (cards.some((card) => card.schemaType === 'social_match.activity')) {
+      return {
+        stage: 'opportunity_card_generated',
+        publicIntentId: null,
+        discoverHref: null,
+        publicIntentHref: null,
+        messagesHref: null,
+        requiredConfirmation: null,
+      };
+    }
+
+    if (cards.some((card) => card.schemaType === 'profile.completion')) {
+      return {
+        stage: 'profile_completion',
+        publicIntentId: null,
+        discoverHref: null,
+        publicIntentHref: null,
+        messagesHref: null,
+        requiredConfirmation: null,
+      };
+    }
+
+    return null;
+  }
+
+  private publicLoopFromRecord(
+    value: unknown,
+  ): UserFacingAgentPublicLoop | null {
+    if (!this.isRecord(value)) return null;
+    const stage = this.readText(value.stage, '');
+    if (
+      stage !== 'profile_completion' &&
+      stage !== 'opportunity_card_generated' &&
+      stage !== 'publish_confirmation_required' &&
+      stage !== 'discover_visible' &&
+      stage !== 'candidates_recommended' &&
+      stage !== 'contact_confirmation_required' &&
+      stage !== 'messages_handoff'
+    ) {
+      return null;
+    }
+    return {
+      stage,
+      publicIntentId: this.readText(value.publicIntentId, '') || null,
+      discoverHref: this.readText(value.discoverHref, '') || null,
+      publicIntentHref: this.readText(value.publicIntentHref, '') || null,
+      messagesHref: this.readText(value.messagesHref, '') || null,
+      requiredConfirmation:
+        this.readText(value.requiredConfirmation, '') || null,
+    };
+  }
+
+  private publicLoopConfirmation(
+    pendingConfirmations: UserFacingAgentPendingConfirmation[],
+  ): string | null {
+    const confirmation = pendingConfirmations.find((item) => {
+      const text = `${item.actionType} ${item.summary}`;
+      return /publish|social_request|send|message|invite|connect|friend|公开|发布|发送|私信|邀请|加好友|好友/.test(
+        text,
+      );
+    });
+    return confirmation?.summary || confirmation?.actionType || null;
+  }
+
+  private firstText(values: unknown[]): string | null {
+    for (const value of values) {
+      const text = this.readText(value, '');
+      if (text) return text;
+    }
+    return null;
   }
 
   private profileProposalCard(
@@ -666,6 +822,10 @@ export class UserFacingResponseSanitizerService {
 
   private readText(value: unknown, fallback: string): string {
     return typeof value === 'string' && value.trim() ? value : fallback;
+  }
+
+  private recordValue(value: unknown): Record<string, unknown> {
+    return this.isRecord(value) ? value : {};
   }
 
   private isRecord(value: unknown): value is Record<string, unknown> {

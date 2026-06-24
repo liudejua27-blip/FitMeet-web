@@ -7,8 +7,10 @@ import {
   useState,
 } from 'react';
 import clsx from 'clsx';
+import { ShieldCheck, Sparkles, UsersRound } from 'lucide-react';
 import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { SiteLink } from '../components/navigation/SiteLink';
+import { useCinematicMotion } from '../components/website/useCinematicMotion';
 import * as dataService from '../services/dataService';
 import { socialAgentApi } from '../api/socialAgentApi';
 import { getMeetDistanceMeters } from '../lib/distance';
@@ -323,9 +325,9 @@ export const DiscoverPage = () => {
               </button>
             </div>
             <h1>
-              发现附近真实<span>生活场景</span>
+              发现附近<span>真实需求卡片</span>
             </h1>
-            <p>从约练、散步、咖啡和同频动态开始，看见可以自然认识的人。</p>
+            <p>这里展示用户确认后公开的约练、交友和搭子需求。每张卡都能继续看详情、发起邀请或进入站内沟通。</p>
             <div className="discover-hero__actions">
               <Link to="/agent" className="fm-button fm-button--primary">
                 让 Agent 帮我找
@@ -348,43 +350,8 @@ export const DiscoverPage = () => {
               ))}
             </div>
           </div>
-          <div className="discover-hero__visual" aria-label="FitMeet 发现页预览">
-            <div className="discover-phone">
-              <div className="discover-phone__top">
-                <span>Social World</span>
-                <strong>附近正在发生</strong>
-              </div>
-              <div className="discover-phone__people">
-                {activePeople.slice(0, 4).map((person) => (
-                  <span key={person.id} style={{ background: person.color }}>
-                    {person.avatar}
-                  </span>
-                ))}
-              </div>
-              {spotlightMeets.map((meet, index) => (
-                <article
-                  key={meet.id}
-                  className={`discover-phone-card discover-phone-card--${index + 1}`}
-                >
-                  <span>{sportIcon(meet.sport)}</span>
-                  <div>
-                    <strong>{meet.title}</strong>
-                    <p>
-                      {formatMeetTime(meet)} · {meet.dist || '附近'}
-                    </p>
-                  </div>
-                </article>
-              ))}
-            </div>
-            <div className="discover-agent-orbit" aria-hidden="true">
-              <img
-                src="/images/fitmeet/generated/fitmeet-ant-agent-cutout-transparent.png"
-                alt=""
-                aria-hidden="true"
-                width="420"
-                height="420"
-              />
-            </div>
+          <div className="discover-hero__visual" aria-label="FitMeet 发现页产品预览">
+            <DiscoverScenePreview meets={spotlightMeets} people={activePeople} />
           </div>
         </section>
 
@@ -517,7 +484,7 @@ export const DiscoverPage = () => {
                   ))
                 ) : (
                   <p className="rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm leading-6 text-[#9a9487]">
-                    暂时没有公开资料完整的附近用户。你发布真实场景后，系统会优先展示可查看详情的人。
+                    暂时没有公开资料完整的附近用户。你确认发布需求卡后，系统会优先展示可查看详情的人。
                   </p>
                 )}
               </div>
@@ -608,7 +575,7 @@ function DiscoverSiteFooter() {
         <img src="/favicon-192.png" alt="FitMeet" width="28" height="28" />
         FitMeet
       </strong>
-      <p>发现附近真实生活场景，从兴趣出发，遇见真正聊得来的人。</p>
+      <p>发现附近真实需求卡片，从明确目标出发，遇见真正合适的人。</p>
       <nav aria-label="FitMeet 页脚导航">
         <Link to="/features">产品功能</Link>
         <SiteLink to="/discover">发现</SiteLink>
@@ -623,6 +590,96 @@ function DiscoverSiteFooter() {
         </a>
       </nav>
     </footer>
+  );
+}
+
+function DiscoverScenePreview({
+  meets,
+  people,
+}: {
+  meets: DiscoverMeet[];
+  people: Array<{
+    id: number | string;
+    name: string;
+    avatar: string;
+    color: string;
+    sport: string;
+    distance: string;
+  }>;
+}) {
+  const scopeRef = useCinematicMotion<HTMLDivElement>();
+  const primaryMeet = meets[0];
+  const secondaryMeets = meets.slice(1, 3);
+  const location = primaryMeet?.loc || primaryMeet?.city || '青岛 · 市南区';
+  const time = primaryMeet ? formatMeetTime(primaryMeet) : '06/26 19:00';
+  const sport = primaryMeet ? getSportLabel(primaryMeet.sport) : '跑步';
+
+  return (
+    <div ref={scopeRef} className="discover-cinematic-preview">
+      <div className="discover-cinematic-preview__beams" aria-hidden="true">
+        <span data-cinematic-beam />
+        <span data-cinematic-beam />
+        <span data-cinematic-beam />
+      </div>
+      <picture className="discover-cinematic-preview__media" data-cinematic-media>
+        <img
+          src="/images/fitmeet/cinematic/social-world-dark-phones.png"
+          alt="FitMeet 发现页深色手机产品阵列"
+          width="1600"
+          height="900"
+          loading="lazy"
+          decoding="async"
+        />
+      </picture>
+      <div className="discover-cinematic-preview__veil" aria-hidden="true" />
+
+      <article className="discover-cinematic-card discover-cinematic-card--primary" data-cinematic-float>
+        <span>
+          <Sparkles size={18} aria-hidden="true" />
+        </span>
+        <strong>{primaryMeet?.title || '附近新的需求卡片'}</strong>
+        <small>
+          {sport} · {time} · {location}
+        </small>
+      </article>
+
+      <article className="discover-cinematic-card discover-cinematic-card--safety" data-cinematic-float>
+        <span>
+          <ShieldCheck size={18} aria-hidden="true" />
+        </span>
+        <strong>确认后再公开</strong>
+        <small>发布、邀请、私信和位置都由你决定</small>
+      </article>
+
+      <div className="discover-cinematic-card discover-cinematic-card--stack" data-cinematic-float>
+        {(secondaryMeets.length > 0
+          ? secondaryMeets
+          : [
+              { id: 'fallback-1', title: '周末海边散步', loc: '五四广场', sport: 'walk' },
+              { id: 'fallback-2', title: '下班后轻健身', loc: '市南健身房', sport: 'gym' },
+            ]
+        ).map((meet) => (
+          <span key={String(meet.id)}>
+            <span>{getSportLabel(meet.sport)}</span>
+            <strong>{meet.title}</strong>
+            <small>{meet.loc || '附近'}</small>
+          </span>
+        ))}
+      </div>
+
+      <div className="discover-cinematic-card discover-cinematic-card--people" data-cinematic-float>
+        <UsersRound size={18} aria-hidden="true" />
+        {people.slice(0, 3).map((person) => (
+          <span key={person.id} style={{ '--person-color': person.color } as CSSProperties}>
+            <b>{person.avatar}</b>
+            <small>
+              {person.sport} · {person.distance}
+            </small>
+          </span>
+        ))}
+        {people.length === 0 ? <small>真实用户完善资料后会出现在这里</small> : null}
+      </div>
+    </div>
   );
 }
 
@@ -657,6 +714,13 @@ function MeetupMatchCard({
     typeof distance === 'number' && Number.isFinite(distance)
       ? `${(distance / 1000).toFixed(1)}km`
       : meet.dist || '附近';
+  const demandSummary = meetDemandSummary(meet);
+  const bottomState =
+    meet.sourceKind === 'publicIntent'
+      ? meet.meetCount > 0
+        ? `已匹配 ${meet.meetCount} 位候选`
+        : 'Agent 正在匹配'
+      : `${meet.slots}/${meet.maxSlots} 人已加入`;
 
   const handleJoinClick = useCallback(
     (event: MouseEvent<HTMLButtonElement>) => {
@@ -692,6 +756,7 @@ function MeetupMatchCard({
           <span>⌄ {meet.loc || '地点待定'}</span>
           <span>{formatMeetTime(meet)}</span>
         </div>
+        {demandSummary ? <p className="match-card__intent">{demandSummary}</p> : null}
         <div className="match-card__tags">
           <button
             type="button"
@@ -714,18 +779,26 @@ function MeetupMatchCard({
               ),
             )}
           </div>
-          <strong>
-            {meet.slots}/{meet.maxSlots} 人已加入
-          </strong>
+          <strong>{bottomState}</strong>
           <time>{formatRelativePublishedTime(meet.createdAt, '刚刚更新')}</time>
         </div>
         <div className="match-score" style={{ '--score': `${score}%` } as CSSProperties}>
           <strong>{matchLevelLabel(score)}</strong>
-          <span>匹配度</span>
+          <span>需求匹配</span>
         </div>
       </article>
     </Link>
   );
+}
+
+function meetDemandSummary(meet: DiscoverMeet) {
+  const text = (meet.desc || '').replace(/\s+/g, ' ').trim();
+  if (!text || /^发起人正在寻找合适的同频伙伴/.test(text)) {
+    return meet.sourceKind === 'publicIntent'
+      ? '这是一张用户确认后公开的需求卡，适合先看详情再站内沟通。'
+      : '从共同兴趣和附近场景开始，先站内沟通再确认下一步。';
+  }
+  return text.length > 58 ? `${text.slice(0, 58)}…` : text;
 }
 
 function isFocusedDiscoverMeet(

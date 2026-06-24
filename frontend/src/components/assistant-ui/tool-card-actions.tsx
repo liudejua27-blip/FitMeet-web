@@ -425,7 +425,7 @@ export function UnifiedActionCard({
             card.schemaType === 'social_match.activity'
               ? 'grid gap-3 sm:grid-cols-2'
               : card.schemaType === 'social_match.candidate'
-                ? 'grid gap-2 sm:grid-cols-3'
+                ? 'grid gap-2 sm:grid-cols-2 lg:grid-cols-4'
                 : 'flex flex-wrap gap-1.5',
           )}
         >

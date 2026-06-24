@@ -1230,4 +1230,79 @@ describe('toUserFacingAgentResponse', () => {
       }),
     ]);
   });
+
+  it('exposes the public loop state after Discover publish and candidate recommendation', () => {
+    const response = toUserFacingAgentResponse(
+      {
+        intent: 'social_search',
+        confidence: 1,
+        entities: {
+          city: '青岛',
+          activityType: '散步',
+          targetGender: '',
+          timePreference: '今晚',
+          locationPreference: '青岛大学附近',
+        },
+        shouldSearch: true,
+        shouldReplan: false,
+        shouldUpdateProfile: false,
+        shouldExecuteAction: false,
+        replyStrategy: 'search_candidates',
+        source: 'rules',
+        action: 'reply',
+        taskId: 101,
+        assistantMessage: '已发布到发现页，并找到合适候选。',
+        savedContext: true,
+        profileUpdated: false,
+        shouldQueueRun: false,
+        runMode: 'follow_up',
+        queuedRun: null,
+        pendingApproval: null,
+        activityResults: [],
+        profileUpdateProposal: null,
+        cards: [
+          {
+            id: 'publish_to_discover:101:intent_302',
+            type: 'activity_status',
+            schemaVersion: 'fitmeet.tool-ui.v1',
+            schemaType: 'social_match.activity',
+            title: '已发布到发现',
+            body: '公开可发现用户现在可以看到这张约练卡。',
+            status: 'completed',
+            data: {
+              publicIntentId: 'intent_302',
+              discoverHref: '/discover?publicIntentId=intent_302',
+              publicIntentHref: '/public-intent/intent_302',
+            },
+            actions: [],
+          },
+          {
+            id: 'candidate_22',
+            type: 'candidate_card',
+            title: '合适候选',
+            body: '时间和地点匹配。',
+            data: {},
+            actions: [],
+          },
+        ],
+        safety: {
+          blocked: false,
+          level: 'low',
+          reasons: [],
+          boundaryNotes: [],
+          requiredConfirmations: [],
+        },
+      },
+      AgentTaskPermissionMode.Confirm,
+    );
+
+    expect(response.publicLoop).toEqual({
+      stage: 'candidates_recommended',
+      publicIntentId: 'intent_302',
+      discoverHref: '/discover?publicIntentId=intent_302',
+      publicIntentHref: '/public-intent/intent_302',
+      messagesHref: null,
+      requiredConfirmation: null,
+    });
+  });
 });

@@ -780,6 +780,7 @@ export class SocialAgentCandidatePoolService {
       commonTags,
       completeness,
       verified: user.verified,
+      preferenceFit: scoreBreakdown.preferenceFit ?? 0,
     });
     return buildCandidatePoolCandidate({
       source: 'profile_candidate',
@@ -841,6 +842,14 @@ export class SocialAgentCandidatePoolService {
       commonTags,
       completeness,
       updatedAt: intent.updatedAt,
+      candidateSignals: [
+        intent.title,
+        intent.description,
+        intent.requestType,
+        intent.locationPreference,
+        intent.timePreference,
+        intent.socialGoal,
+      ],
       lifeGraphSignals,
       sceneRisk: this.sceneRisk,
     });
@@ -850,6 +859,7 @@ export class SocialAgentCandidatePoolService {
       query,
       city,
       commonTags,
+      preferenceFit: scoreBreakdown.preferenceFit ?? 0,
     });
     return buildCandidatePoolCandidate({
       source: 'public_intent',
@@ -913,6 +923,13 @@ export class SocialAgentCandidatePoolService {
       commonTags,
       completeness,
       updatedAt: request.updatedAt,
+      candidateSignals: [
+        request.title,
+        request.description,
+        request.requestType,
+        request.loc,
+        request.timePreference,
+      ],
       lifeGraphSignals,
       sceneRisk: this.sceneRisk,
     });
@@ -925,6 +942,7 @@ export class SocialAgentCandidatePoolService {
       query,
       city,
       commonTags,
+      preferenceFit: scoreBreakdown.preferenceFit ?? 0,
     });
     return buildCandidatePoolCandidate({
       source: 'public_intent',

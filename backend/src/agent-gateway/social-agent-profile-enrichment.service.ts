@@ -25,6 +25,7 @@ import { readSocialAgentConversationHistory } from './social-agent-chat-memory.p
 import { socialAgentContextTurnLimit } from './social-agent-context-window';
 import type { SocialAgentBrainTurnDecision } from './social-agent-brain.service';
 import { SocialAgentChatLlmService } from './social-agent-chat-llm.service';
+import type { FitMeetAlphaCard } from './fitmeet-alpha-agent.types';
 import type {
   ExtractedProfileFields,
   SocialAgentAssistantMessageSource,
@@ -79,6 +80,7 @@ export class SocialAgentProfileEnrichmentService {
     savedContext: boolean;
     profileUpdated: boolean;
     profileUpdateProposal?: LifeGraphProposalDto | null;
+    cards?: FitMeetAlphaCard[];
     task: AgentTask;
     assistantStreamed?: boolean;
     assistantMessageSource?: SocialAgentAssistantMessageSource;
@@ -106,6 +108,7 @@ export class SocialAgentProfileEnrichmentService {
         savedContext: true,
         profileUpdated: false,
         profileUpdateProposal: null,
+        cards: [this.profileCompletionCard(task)],
         task,
         assistantStreamed: false,
       };
@@ -922,6 +925,85 @@ export class SocialAgentProfileEnrichmentService {
       '',
       '你回答后，我会先生成结构化更新预览，由你选择“确认保存”“修改后保存”或“本次使用，不保存”。保存完成后，我再单独问你是否开始匹配。',
     ].join('\n');
+  }
+
+  private profileCompletionCard(task: AgentTask): FitMeetAlphaCard {
+    const missingFields = this.profileCompletionMissingFields(task);
+    const questions = [
+      {
+        key: 'currentGoal',
+        label: '当前目标',
+        question: '你这次最想达成什么？',
+        placeholder: '例如：找一个周末下午能一起慢跑的搭子',
+        options: ['找运动搭子', '找轻松聊天的人', '参加附近活动', '暂不确定'],
+      },
+      {
+        key: 'interactionStyle',
+        label: '互动形式',
+        question: '你更偏好怎样开始互动？',
+        placeholder: '例如：先站内聊，再约公共路线',
+        options: ['先站内沟通', '低压力轻松聊', '先运动后熟悉', '暂不确定'],
+      },
+      {
+        key: 'timeLocation',
+        label: '时间和地点',
+        question: '你方便的时间和地点范围？',
+        placeholder: '例如：青岛大学附近，周末下午，3 公里内',
+        options: [
+          '今天晚上',
+          '周末下午',
+          '学校或公司附近',
+          '3 公里内',
+          '暂不确定',
+        ],
+      },
+      {
+        key: 'activityPreference',
+        label: '活动偏好',
+        question: '你更想参加哪类活动？',
+        placeholder: '例如：3-5km 慢跑，节奏轻松',
+        options: ['跑步', '羽毛球', '散步', '健身', '暂不确定'],
+      },
+      {
+        key: 'safetyBoundary',
+        label: '安全边界',
+        question: '有哪些必要的安全边界？',
+        placeholder: '例如：只接受公共场所，不交换联系方式',
+        options: [
+          '只接受公共场所',
+          '不交换联系方式',
+          '不接受太晚见面',
+          '暂不确定',
+        ],
+      },
+    ];
+
+    return {
+      id: `profile_completion:${task.id}`,
+      type: 'profile_completion',
+      schemaVersion: 'fitmeet.tool-ui.v1',
+      schemaType: 'profile.completion',
+      title: '让 Agent 帮你补充个人信息',
+      body: '回答 3-5 个问题后，我会先生成更新预览；确认后才保存到个人信息。',
+      status: 'waiting_confirmation',
+      data: {
+        taskId: task.id,
+        schemaName: 'ProfileCompletionCard',
+        schemaVersion: 'fitmeet.tool-ui.v1',
+        schemaType: 'profile.completion',
+        questionCount: questions.length,
+        missingFields,
+        questions,
+        savePolicy: 'preview_before_write',
+        boundaries: [
+          '不会推荐具体人物',
+          '不会生成邀约文案',
+          '不会自动开始匹配',
+          '所有问题都可以跳过',
+        ],
+      },
+      actions: [],
+    };
   }
 
   private profileExtractionReply(

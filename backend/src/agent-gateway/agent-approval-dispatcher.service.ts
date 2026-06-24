@@ -178,7 +178,24 @@ export class AgentApprovalDispatcherService {
               payload: { toUserId: dto.toUserId },
             },
           );
-          return { ok: true, result };
+          const conversationId = this.text(
+            (result as { conversationId?: unknown } | null)?.conversationId,
+          );
+          return {
+            ok: true,
+            result: {
+              ...(typeof result === 'object' && result !== null ? result : {}),
+              messagesHref: this.messagesHref(conversationId),
+              publicLoop: {
+                stage: 'messages_handoff',
+                publicIntentId: null,
+                discoverHref: null,
+                publicIntentHref: null,
+                messagesHref: this.messagesHref(conversationId),
+                requiredConfirmation: null,
+              },
+            },
+          };
         }
 
         case ApprovalType.ContactRequest:
@@ -241,10 +258,19 @@ export class AgentApprovalDispatcherService {
                 targetUserId,
                 friendRequestId,
                 conversationId: conversation.conversationId,
+                messagesHref: this.messagesHref(conversation.conversationId),
                 openedConversation: conversation.opened,
                 socialRequestId: approval.relatedSocialRequestId,
                 candidateRecordId: approval.relatedCandidateId,
                 idempotencyKey: this.text(p.idempotencyKey),
+                publicLoop: {
+                  stage: 'messages_handoff',
+                  publicIntentId: null,
+                  discoverHref: null,
+                  publicIntentHref: null,
+                  messagesHref: this.messagesHref(conversation.conversationId),
+                  requiredConfirmation: null,
+                },
               },
             };
           }
@@ -395,18 +421,27 @@ export class AgentApprovalDispatcherService {
             },
           );
           const publicIntentId = this.text(intent?.id);
+          if (!publicIntentId) {
+            throw new Error('PostPublish did not return publicIntentId');
+          }
+          const discoverHref = `/discover?publicIntentId=${encodeURIComponent(publicIntentId)}`;
+          const publicIntentHref = `/public-intent/${encodeURIComponent(publicIntentId)}`;
           return {
             ok: true,
             result: {
               ...(typeof intent === 'object' && intent !== null ? intent : {}),
               socialRequestId,
               publicIntentId,
-              discoverHref: publicIntentId
-                ? `/discover?publicIntentId=${encodeURIComponent(publicIntentId)}`
-                : `/discover?socialRequestId=${encodeURIComponent(String(socialRequestId))}`,
-              publicIntentHref: publicIntentId
-                ? `/public-intent/${encodeURIComponent(publicIntentId)}`
-                : `/discover?socialRequestId=${encodeURIComponent(String(socialRequestId))}`,
+              discoverHref,
+              publicIntentHref,
+              publicLoop: {
+                stage: 'discover_visible',
+                publicIntentId,
+                discoverHref,
+                publicIntentHref,
+                messagesHref: null,
+                requiredConfirmation: null,
+              },
               status: 'published',
               synced: true,
             },
@@ -722,6 +757,12 @@ export class AgentApprovalDispatcherService {
       return String(value);
     }
     return this.text(value);
+  }
+
+  private messagesHref(conversationId: string | null): string | null {
+    return conversationId
+      ? `/messages?conversationId=${encodeURIComponent(conversationId)}`
+      : null;
   }
 
   private async advanceSocialRequestAfterMessage(

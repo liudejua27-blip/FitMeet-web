@@ -30,6 +30,7 @@ import {
   SocialAgentToolExecutorService,
   SocialAgentToolName,
 } from './social-agent-tool-executor.service';
+import { PublicSocialIntent } from './entities/public-social-intent.entity';
 
 @Injectable()
 export class SocialAgentDraftPublicationService {
@@ -43,6 +44,9 @@ export class SocialAgentDraftPublicationService {
     private readonly executor: SocialAgentToolExecutorService,
     @Optional()
     private readonly longTermMemory?: SocialAgentLongTermMemoryService,
+    @Optional()
+    @InjectRepository(PublicSocialIntent)
+    private readonly publicIntentRepo?: Repository<PublicSocialIntent>,
   ) {}
 
   async publishDraft(
@@ -144,6 +148,11 @@ export class SocialAgentDraftPublicationService {
       : {};
     const publicIntentId =
       cleanDisplayText(output.publicIntentId ?? publicIntent.id, '') || null;
+    if (!publicIntentId) {
+      throw new BadRequestException('发布约练缺少 publicIntentId');
+    }
+    const publicIntentReadback =
+      await this.readPublishedPublicIntent(publicIntentId);
     const discoverHref = this.discoverHref(publicIntentId, socialRequestId);
     const publicIntentHref = this.publicIntentHref(
       publicIntentId,
@@ -211,7 +220,31 @@ export class SocialAgentDraftPublicationService {
       synced: true,
       toolCallId: publishAction.id,
       socialRequest: sanitizeForDisplay(socialRequest),
+      publicIntent: publicIntentReadback
+        ? sanitizeForDisplay({
+            id: publicIntentReadback.id,
+            status: publicIntentReadback.status,
+            mode: publicIntentReadback.mode,
+            title: publicIntentReadback.title,
+          })
+        : undefined,
     };
+  }
+
+  private async readPublishedPublicIntent(
+    publicIntentId: string,
+  ): Promise<PublicSocialIntent | null> {
+    if (!this.publicIntentRepo) return null;
+    const readback = await this.publicIntentRepo.findOne({
+      where: { id: publicIntentId },
+    });
+    if (!readback) {
+      throw new BadRequestException('发布约练后未能在发现页读回公开卡片');
+    }
+    if (readback.mode !== 'public') {
+      throw new BadRequestException('发布约练读回的公开卡片不可见');
+    }
+    return readback;
   }
 
   private async assertTaskOwner(

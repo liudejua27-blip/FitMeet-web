@@ -32,6 +32,7 @@ const mockRepo = () => ({
 
 function qbReturning(rows: User[], calls?: string[]) {
   return {
+    leftJoin: jest.fn().mockReturnThis(),
     where: jest.fn().mockReturnThis(),
     andWhere: jest.fn().mockReturnThis(),
     take: jest.fn().mockReturnThis(),
@@ -399,6 +400,64 @@ describe('MatchService social request matching', () => {
     expect(reasoner.explainSocialRequestCandidate).toHaveBeenCalledWith(
       expect.objectContaining({
         candidateUser: expect.objectContaining({ id: 22 }),
+      }),
+    );
+  });
+
+  it('recalls candidates whose city and interests are stored only in social profile', async () => {
+    const socialProfileOnlyCandidate = user({
+      id: 24,
+      email: 'qingdao-runner@example.com',
+      name: 'Qingdao Runner',
+      city: '',
+      interestTags: [],
+    });
+    const { service, userRepo, requestRepo, profileRepo, reasoner } =
+      makeHarness([socialProfileOnlyCandidate]);
+    requestRepo.findOne.mockResolvedValue(
+      request({
+        city: '青岛',
+        activityType: '跑步',
+        interestTags: ['跑步'],
+        title: '青岛大学晨跑搭子',
+        rawText: '想找青岛大学附近一起晨跑的人',
+      }),
+    );
+    profileRepo.find.mockResolvedValue([
+      profile({
+        userId: 24,
+        city: '青岛',
+        nearbyArea: '青岛大学',
+        fitnessGoals: ['跑步'],
+        interestTags: ['跑步'],
+        socialScenes: ['约练'],
+        profileDiscoverable: true,
+        agentCanRecommendMe: true,
+      }),
+    ]);
+
+    const result = await service.runMatch(301, 10, { limit: 5 });
+
+    expect(
+      result.candidates.map((candidate) => candidate.candidateUserId),
+    ).toEqual([24]);
+    const qb = userRepo.createQueryBuilder.mock.results[0].value;
+    expect(qb.leftJoin).toHaveBeenCalledWith(
+      UserSocialProfile,
+      'profile',
+      'profile."userId" = u.id',
+    );
+    expect(qb.andWhere).toHaveBeenCalledWith(
+      expect.stringContaining('profile.city ILIKE :city'),
+      { city: '%青岛%' },
+    );
+    expect(reasoner.explainSocialRequestCandidate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        candidateUser: expect.objectContaining({ id: 24 }),
+        candidateProfile: expect.objectContaining({
+          city: '青岛',
+          interestTags: ['跑步'],
+        }),
       }),
     );
   });

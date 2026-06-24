@@ -964,6 +964,8 @@ describe('SocialAgentCardActionRouterService', () => {
         title: '青岛大学散步约练',
         city: '青岛',
         activityType: '散步',
+        visibility: 'public',
+        status: 'matching',
       }),
     );
     expect(results[0].pendingApproval).toBeNull();
@@ -1047,6 +1049,18 @@ describe('SocialAgentCardActionRouterService', () => {
     });
 
     expect(draftPublication.publishDraft).toHaveBeenCalled();
+    expect(draftPublication.publishDraft).toHaveBeenCalledWith(
+      7,
+      101,
+      expect.objectContaining({
+        title: '青岛大学散步约练',
+        city: '青岛',
+        activityType: '跑步',
+        socialRequestId: 301,
+        visibility: 'public',
+        status: 'matching',
+      }),
+    );
     expect(handleMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         taskId: 101,

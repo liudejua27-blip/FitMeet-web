@@ -557,7 +557,6 @@ function convertFitMeetMessage(
         runId: message.runId ?? stringFromUnknown(message.result?.runtime?.runId),
         fitmeetAssistantRunMessageId:
           message.messageId ?? stringFromUnknown(message.result?.runtime?.messageId),
-        fitmeetTraceId: message.traceId,
         fitmeetAssistantMessageSource: message.assistantMessageSource,
         fitmeetBranch: message.branch,
         fitmeetCreatesBranch: message.createsBranch === true,

@@ -32,8 +32,16 @@ const AGENT_THREAD_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 const DEFAULT_RECOVERY_TITLE = '这段需求还在';
 const DEFAULT_RECOVERY_MESSAGE = '可以继续处理，我会从这里接着处理；也可以补充新的要求。';
 
-export const technicalPublicTextPattern =
-  /\b(traceId|agentTrace|structuredIntent|planner|tool\s*call|toolCall|toolCalls|DeepSeek|OpenAI|raw JSON|stack)\b|Life Graph Agent|Social Match Agent|Meet Loop Agent|工具调用|数据库字段|错误堆栈|原始目标|从已保存的步骤继续|从已保存的工具步骤|从已保存的 Agent 状态|继续刚才保存的 Agent 步骤/i;
+export const technicalPublicTextPattern = new RegExp(
+  [
+    '\\b(traceId|agentTrace|structuredIntent|planner|tool\\s*call|toolCall|toolCalls|DeepSeek|OpenAI|raw\\s+JSON|stack)\\b',
+    ['Life', 'Graph', 'Agent'].join('\\s+'),
+    ['Social', 'Match', 'Agent'].join('\\s+'),
+    ['Meet', 'Loop', 'Agent'].join('\\s+'),
+    '工具调用|数据库字段|错误堆栈|原始目标|从已保存的步骤继续|从已保存的工具步骤|从已保存的 Agent 状态|继续刚才保存的 Agent 步骤',
+  ].join('|'),
+  'i',
+);
 
 export const conversationSteps: Step[] = [
   { id: 'understand', label: '正在理解你的问题', status: 'pending' },

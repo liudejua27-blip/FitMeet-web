@@ -28,6 +28,7 @@ import type {
   FitMeetAlphaCard,
 } from './fitmeet-alpha-agent.types';
 import type { AgentLoopRun, SubagentHandoffResult } from './agent-loop.types';
+import type { UserFacingAgentPublicLoop } from './user-facing-agent-response';
 
 export interface SocialAgentVisibleStep {
   id: string;
@@ -133,6 +134,7 @@ export interface SocialAgentChatRunResult {
   cards?: FitMeetAlphaCard[];
   lifeGraphWritebackProposal?: Record<string, unknown> | null;
   safety?: FitMeetAgentSafety;
+  publicLoop?: UserFacingAgentPublicLoop;
   traceId?: string;
   agentTrace?: FitMeetAgentTrace;
   structuredIntent?: Record<string, unknown>;
@@ -367,6 +369,7 @@ export interface SocialAgentIntentRouteResult {
   lifeGraphWritebackProposal?: Record<string, unknown> | null;
   cards?: FitMeetAlphaCard[];
   safety?: FitMeetAgentSafety;
+  publicLoop?: UserFacingAgentPublicLoop;
   permissionMode?: AgentTaskPermissionMode;
   traceId?: string;
   agentTrace?: FitMeetAgentTrace;

@@ -95,6 +95,30 @@ describe('candidate score breakdown', () => {
     expect(score.boundaryFit).toBe(0);
   });
 
+  it('adds preference fit from public profile signals', () => {
+    const score = buildProfileCandidateScoreBreakdown({
+      user: user({ gender: 'female' }),
+      profile: profile({
+        gender: 'female',
+        nearbyArea: '青岛大学',
+        interestTags: ['舞蹈'],
+        socialScenes: ['低压力约练'],
+      }),
+      delegate: null,
+      query: query({
+        candidatePreference: '女生、舞蹈相关、同校优先',
+        interestTags: ['女生', '舞蹈相关', '同校/学生'],
+      }),
+      tags: ['舞蹈'],
+      city: '青岛',
+      completeness: 0.8,
+      commonTags: ['舞蹈相关'],
+      sceneRisk,
+    });
+
+    expect(score.preferenceFit).toBeGreaterThanOrEqual(8);
+  });
+
   it('builds public intent score parts and recency trust', () => {
     const score = buildPublicIntentCandidateScoreBreakdown({
       query: query(),

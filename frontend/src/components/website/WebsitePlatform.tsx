@@ -1,9 +1,21 @@
 import { type FormEvent, type ReactNode, useEffect, useMemo, useState } from 'react';
 import clsx from 'clsx';
+import {
+  Activity,
+  Download,
+  HeartHandshake,
+  type LucideIcon,
+  MapPin,
+  MessageCircle,
+  ShieldCheck,
+  Sparkles,
+  Smartphone,
+  UsersRound,
+} from 'lucide-react';
 import { Link, useLocation } from 'react-router-dom';
 import { waitlistApi, type WaitlistDeviceType } from '../../api/waitlistApi';
 import { SiteLink } from '../navigation/SiteLink';
-import { SocialWorldHeroVisual } from './SocialWorldHeroVisual';
+import { useCinematicMotion } from './useCinematicMotion';
 
 const SITE_URL = 'https://ourfitmeet.cn';
 const ICP_TEXT = import.meta.env.VITE_ICP_TEXT || '鲁ICP备2026015946号-2';
@@ -72,9 +84,9 @@ const seo: Record<WebsitePage, { title: string; description: string; path: strin
 };
 
 const homeSeo = {
-  title: 'FitMeet | Social World 让社交更简单',
+  title: 'FitMeet | 需求流社交，让 Agent 帮你匹配合适的人',
   description:
-    'FitMeet 是面向真实生活连接的 Social World。用户从发现附近的人、活动和场景开始，在安全边界内自然认识彼此。',
+    'FitMeet 把社交从刷信息流变成需求流。用户说出想认识什么样的人，Agent 基于目标、兴趣、时间、地点和安全边界匹配，并在确认后发布到发现页。',
 };
 
 const safetyItems = [
@@ -87,24 +99,24 @@ const safetyItems = [
 ];
 
 const enterpriseLoopCopy = [
-  '先从跑步、健身、咖啡、Citywalk 这类真实场景进入。',
-  '用附近、时间、兴趣和边界，把可认识的人组织清楚。',
-  '推荐前展示理由，连接前保留确认，不让用户被动暴露。',
-  '把发现、动态、消息和我的合在一个移动端闭环里。',
-  '线下前保留安全提示，异常时可以撤回、举报或停止。',
+  '用户先说清楚想找谁、做什么、什么时候方便。',
+  'Agent 把需求整理成可发布的约练、交友或搭子卡片。',
+  '用兴趣、爱好、地点、时间和安全边界筛选同频用户。',
+  '用户确认后再发布到发现页，或发起邀请、私信、加好友。',
+  '后续回复、邀请和安全提醒统一回到消息和 Agent 闭环。',
 ];
 
 const featurePillars = [
-  ['兴趣场景', '从跑步、健身、咖啡、Citywalk 等场景进入，让认识一个人有自然理由。'],
-  ['附近机会', '把附近的人、活动和地点按时间、距离、兴趣和边界组织，而不是堆列表。'],
-  ['站内先聊', '第一次连接先保留在站内，用户可以低压力确认节奏、地点和目的。'],
-  ['Agent 推荐', '一句话说出目标，Agent 帮你筛人、找场景、准备话题，但关键动作由你确认。'],
+  ['需求卡片', '把“想找一个跑步搭子”“想认识同城朋友”“想找旅游搭子”整理成可匹配的公开需求。'],
+  ['匹配理由', '每次推荐都说明为什么合适：共同兴趣、时间地点接近、互动节奏和安全边界相容。'],
+  ['发现同步', '用户确认发布后，需求会进入发现页，其他同频用户可以看到真实的新卡片和详情页。'],
+  ['可控动作', '发布、邀请、加好友、私信和公开位置都先确认；查看、收藏、生成开场白保持轻量。'],
 ];
 
 const agentCapabilities = [
-  ['发现人', '结合兴趣、距离、时间和个人偏好，给出更合适的人选。'],
-  ['发现场景', '把“想出门走走”拆成散步、咖啡、Citywalk 或轻运动等可执行场景。'],
-  ['发现话题', '根据对方公开资料和你的边界，生成轻松、不冒犯的开场方式。'],
+  ['理解需求', '从自然语言里识别当前目标、互动形式、时间地点、活动偏好和必要边界。'],
+  ['生成卡片', '找约练时先生成约练卡，再推荐候选；交友和搭子需求也先沉淀成可确认卡片。'],
+  ['筛选候选', '结合个人资料、兴趣爱好、公开需求、距离、时间和安全边界，给出可解释推荐。'],
 ];
 
 const downloadOptions = [
@@ -114,11 +126,11 @@ const downloadOptions = [
 ];
 
 const appTabs = [
-  ['首页', '今天适合发起什么需求'],
-  ['附近', '人、活动和地点按场景组织'],
-  ['Agent', '一句话发起需求和确认动作'],
-  ['消息', '低压力开场、邀请、活动确认'],
-  ['我的', '个人信息、隐私开关和安全记录'],
+  ['首页', '看到需求进展和下一步'],
+  ['发现', '公开需求卡和附近同频用户'],
+  ['Agent', '发起需求、补齐画像、确认发布'],
+  ['消息', '邀请、私信、好友和对方回复'],
+  ['我的', '个人信息、兴趣爱好和安全边界'],
 ];
 
 export function WebsitePlatform({ page }: { page: WebsitePage }) {
@@ -222,35 +234,44 @@ function HomePage() {
     <>
       <section className="fm-hero fm-enterprise-hero">
         <div className="fm-hero__copy">
-          <span className="fm-eyebrow">Social World</span>
-          <h1>让社交更简单</h1>
-          <p>从兴趣出发，遇见真正聊得来的人</p>
+          <span className="fm-eyebrow">Demand Flow Social</span>
+          <h1>
+            <span>说出需求，</span>
+            <span>匹配合适的人</span>
+          </h1>
+          <p>从刷信息流，变成让 Agent 理解你想认识什么样的人，再把约练、交友和搭子需求变成可确认的真实连接。</p>
           <div className="fm-actions">
-            <SiteLink to="/discover" className="fm-button fm-button--primary">
-              进入发现
+            <Link to="/agent" className="fm-button fm-button--primary">
+              让 Agent 帮我匹配
+            </Link>
+            <SiteLink to="/discover" className="fm-button fm-button--ghost">
+              查看发现页
             </SiteLink>
-            <Link to="/agent" className="fm-button fm-button--ghost">
-              体验 Agent
-            </Link>
-            <Link to="/download" className="fm-button fm-button--ghost">
-              打开 App
-            </Link>
           </div>
           <div className="fm-hero__trust" aria-label="FitMeet 安全原则">
-            <span>公共场所优先</span>
-            <span>先站内聊</span>
-            <span>确认后执行</span>
+            <span>需求先行</span>
+            <span>兴趣匹配</span>
+            <span>确认后发布</span>
           </div>
         </div>
         <div className="fm-hero__visual" aria-label="FitMeet Social World App 互动主视觉">
-          <SocialWorldHeroVisual />
+          <CinematicShowcase
+            alt="FitMeet Social World 深色手机产品阵列"
+            imageSrc="/images/fitmeet/cinematic/social-world-dark-phones.png"
+            variant="home"
+            cards={[
+              { label: '需求理解', body: '目标、爱好和边界先对齐', icon: Sparkles },
+              { label: '发布到发现', body: '确认后同步真实新卡', icon: MapPin },
+              { label: '站内连接', body: '邀请和私信都可控', icon: MessageCircle },
+            ]}
+          />
         </div>
       </section>
 
       <Section
         label="Context"
-        title="从兴趣场景出发，让认识一个人有自然理由。"
-        body="FitMeet 不把人简单堆成列表，而是把健身、咖啡、散步、Citywalk 这类场景变成更轻、更真实的连接入口。"
+        title="从问题流、信息流，升级为需求流社交。"
+        body="传统社交让用户不停刷人和内容；FitMeet 让用户先表达当前需求，再由 Agent 把需求转换成可匹配、可发布、可确认的社交场景。"
       >
         <figure className="fm-world-story">
           <picture>
@@ -273,23 +294,23 @@ function HomePage() {
         </figure>
         <div className="fm-context-grid">
           <article className="fm-context-panel">
-            <span>Scene</span>
-            <h3>先有兴趣，再有认识的理由。</h3>
-            <p>用户可以从约练、喝咖啡、城市散步、轻社交活动进入，不需要尴尬地从陌生人列表开始。</p>
+            <span>Demand</span>
+            <h3>先有需求，再有认识的理由。</h3>
+            <p>用户可以说“周末想找低强度跑步搭子”“想认识同城羽毛球朋友”“想找旅行搭子”，不需要从陌生人列表硬聊。</p>
           </article>
           <article className="fm-context-panel fm-context-panel--strong">
-            <span>App</span>
-            <h3>发现页就是 Social World 的入口。</h3>
-            <p>用户进入发现后直接看到附近动态、活动卡片和同频推荐，不需要再跳转到另一个页面。</p>
+            <span>Discover</span>
+            <h3>发现页展示确认后的真实需求。</h3>
+            <p>约练、交友、旅游搭子等需求由 Agent 整理成卡片，用户确认后才公开到发现页，并可以打开详情继续匹配。</p>
           </article>
         </div>
       </Section>
 
       <AgentConversionBand />
 
-      <Section label="App Flow" title="移动端核心流程，只保留真正会发生的下一步。" tone="deep">
+      <Section label="Matching Loop" title="核心不是刷更多人，而是把需求推进到下一步。" tone="deep">
         <div className="fm-enterprise-loop">
-          {['选择场景', '发现同频', '先聊清楚', '确认见面', '安全收束'].map((step, index) => (
+          {['说出需求', '生成卡片', '匹配候选', '确认发布', '消息推进'].map((step, index) => (
             <article key={step}>
               <span>{String(index + 1).padStart(2, '0')}</span>
               <strong>{step}</strong>
@@ -312,8 +333,8 @@ function HomePage() {
 
       <section className="fm-final-cta">
         <span>FitMeet App</span>
-        <h2>从发现开始，认识真正聊得来的人。</h2>
-        <p>先进入发现页，看附近的兴趣场景和同频动态，再决定是否发起一次真实连接。</p>
+        <h2>从一个明确需求开始，认识真正聊得来的人。</h2>
+        <p>先让 Agent 生成需求卡，确认后进入发现页，再围绕同频用户开始邀请、私信或加好友。</p>
         <div className="fm-actions">
           <SiteLink to="/discover" className="fm-button fm-button--primary">
             进入发现
@@ -331,25 +352,18 @@ function FeaturesPage() {
   return (
     <>
       <PageHero
-        title="Social World 怎么帮你更自然地社交。"
-        body="不是把人堆成列表，而是围绕兴趣、附近、站内聊和确认机制，把真实连接变成可理解的下一步。"
+        title="FitMeet 怎样把需求变成匹配。"
+        body="用户不需要先刷大量陌生人。先说目标，Agent 再把兴趣、爱好、时间、地点和安全边界整理成可发布、可匹配、可继续沟通的需求卡。"
         actions={[
           { label: '进入发现', to: '/discover', variant: 'primary' },
           { label: '体验 Agent', to: '/agent' },
         ]}
-        visual={
-          <VisualFigure
-            src="/images/fitmeet/generated/social-world-features-visual-1200.jpg"
-            srcSet="/images/fitmeet/generated/social-world-features-visual-720.jpg 720w, /images/fitmeet/generated/social-world-features-visual-1200.jpg 1200w"
-            alt="FitMeet Social World 产品功能抽象视觉"
-            caption="兴趣、附近机会、推荐理由和站内聊天，被组织成一条轻量连接路径。"
-          />
-        }
+        visual={<FeaturesProductVisual />}
       />
       <Section
         label="Product"
-        title="从“我想认识谁”，变成“我可以怎么开始”。"
-        body="FitMeet 的产品功能围绕真实 To C 场景组织：用户先有目标，再由产品和 Agent 帮他找到人、场景和话题。"
+        title="围绕约练、交友和搭子，把一次社交拆成可执行步骤。"
+        body="参考成熟社交产品的推荐流和本地活动组织方式，但 FitMeet 的入口不是无限滑动，而是当前需求：我想认识什么样的人、为什么现在可以开始。"
       >
         <div className="fm-feature-pillars">
           {featurePillars.map(([title, body]) => (
@@ -361,7 +375,7 @@ function FeaturesPage() {
           ))}
         </div>
       </Section>
-      <Section label="Agent" title="Agent 负责发现人、场景和话题，但不替用户越界。" tone="deep">
+      <Section label="Agent" title="Agent 负责理解、生成和筛选，但不替用户越界。" tone="deep">
         <div className="fm-agent-capabilities">
           {agentCapabilities.map(([title, body]) => (
             <article key={title} className="fm-card">
@@ -374,8 +388,8 @@ function FeaturesPage() {
       </Section>
       <section className="fm-final-cta">
         <span>Try FitMeet</span>
-        <h2>先体验一次 Agent，再进入真实发现页。</h2>
-        <p>你可以直接告诉小蚁：今晚想认识什么样的人、在哪里、希望多轻松。</p>
+        <h2>先体验一次需求匹配，再进入真实发现页。</h2>
+        <p>你可以直接告诉 Agent：想约练、交友还是找搭子，在哪里，什么时间，喜欢什么节奏。</p>
         <div className="fm-actions">
           <Link to="/agent" className="fm-button fm-button--primary">
             体验 Agent
@@ -394,8 +408,8 @@ function AgentConversionBand() {
     <section className="fm-agent-band" aria-label="FitMeet Agent 转化入口">
       <div>
         <span>FitMeet Agent</span>
-        <h2>让小蚁先帮你发现合适的人、场景和话题。</h2>
-        <p>说一句目标，Agent 会整理边界、推荐理由和下一步。确认之前，不会替你联系任何人。</p>
+        <h2>让 Agent 先把需求变成可匹配的卡片。</h2>
+        <p>说一句目标，Agent 会整理当前需求、匹配理由和下一步。确认之前，不会发布到发现，也不会替你联系任何人。</p>
       </div>
       <div className="fm-agent-band__actions">
         <Link to="/agent" className="fm-button fm-button--primary">
@@ -417,9 +431,9 @@ function SafetyCenterPage() {
         body="真实世界社交的安全，不是一个设置页，而是一整套默认机制：隐私、确认、审计、撤回、举报和数据删除。"
         actions={[
           { label: '体验免登录 Demo', to: '/demo', variant: 'primary' },
-      { label: '预约 App Beta', to: '/download#waitlist' },
+          { label: '预约 App Beta', to: '/download#waitlist' },
         ]}
-        visual={<SafetySystemVisual />}
+        visual={<SafetyProductVisual />}
       />
       <Section label="安全机制" title="每个关键动作都要可解释、可确认、可追溯。">
         <div className="fm-safety-grid">
@@ -458,12 +472,12 @@ function DownloadPage() {
     <>
       <PageHero
         title="下载 Social World App。"
-        body="移动端承载真实生活场景：附近机会、Agent 发起需求、消息确认、个人信息和隐私管理。"
+        body="移动端承载完整需求闭环：Agent 发起需求、确认发布、发现页匹配、消息推进、个人信息和安全边界管理。"
         actions={[
           { label: '预约 Beta', to: '#waitlist', variant: 'primary' },
           { label: '先体验 Agent', to: '/agent' },
         ]}
-        visual={<DownloadSystemVisual />}
+        visual={<DownloadProductVisual />}
       />
       <Section label="Download" title="iOS、Android 和 Web 发现页先放在同一个下载入口。">
         <div className="fm-download-options">
@@ -479,7 +493,7 @@ function DownloadPage() {
       <Section label="App Flow" title="用户每天只需要看懂这五个入口。" tone="deep">
         <PhonePreview />
       </Section>
-      <Section label="核心截图" title="把复杂能力压缩成三个真实场景。">
+      <Section label="核心截图" title="把复杂匹配能力压缩成三个真实场景。">
         <AppScenesVisual />
       </Section>
       <WaitlistSection />
@@ -492,7 +506,7 @@ function AboutContactPage() {
     <>
       <PageHero
         title="我们在做一个更真实的 Social World。"
-        body="FitMeet 希望让社交从刷信息流回到真实生活：从兴趣出发，遇见真正聊得来的人。"
+        body="FitMeet 希望让社交从刷信息流回到真实生活：用户表达需求，Agent 帮助匹配，确认后再进入发现和消息。"
         actions={[
           { label: '联系合作', to: '#contact', variant: 'primary' },
           { label: '下载 App', to: '/download' },
@@ -501,9 +515,9 @@ function AboutContactPage() {
       <Section label="Vision" title="不是让用户停留更久，而是让合适的人更自然见面。">
         <div className="fm-about-values">
           {[
-            ['真实有趣', '兴趣和场景先于陌生人曝光，让连接从具体生活开始。'],
+            ['需求先行', '用户先表达约练、交友或搭子需求，再进入匹配和发现。'],
             ['安全可信', '公共场所优先、站内先聊、确认后执行是默认原则。'],
-            ['Agent 可控', 'AI 可以帮用户发现和整理，但不替用户越过关键边界。'],
+            ['Agent 可控', 'AI 可以帮用户整理需求、完善画像和筛选候选，但不替用户越过关键边界。'],
           ].map(([title, body]) => (
             <article key={title} className="fm-card">
               <span>Value</span>
@@ -530,8 +544,8 @@ function AboutContactPage() {
       </Section>
       <section className="fm-final-cta">
         <span>Social World</span>
-        <h2>准备好从真实场景开始认识人。</h2>
-        <p>先体验 Agent，或者进入发现页看附近正在发生的兴趣场景。</p>
+        <h2>准备好从一个真实需求开始认识人。</h2>
+        <p>先体验 Agent 生成需求卡，或者进入发现页看附近已经公开的约练、交友和搭子场景。</p>
         <div className="fm-actions">
           <Link to="/agent" className="fm-button fm-button--primary">
             体验 Agent
@@ -545,62 +559,101 @@ function AboutContactPage() {
   );
 }
 
-function SafetySystemVisual() {
+function FeaturesProductVisual() {
   return (
-    <VisualFigure
-      className="fm-system-visual fm-system-visual--safety"
-      src="/images/fitmeet/generated/social-world-safety-visual-v2-1200.jpg"
-      srcSet="/images/fitmeet/generated/social-world-safety-visual-v2-720.jpg 720w, /images/fitmeet/generated/social-world-safety-visual-v2-1200.jpg 1200w"
-      alt="FitMeet Safety Center 深色玻璃拟态安全控制台视觉"
-      caption="隐私、确认、审计、撤回和举报，是 FitMeet 默认的产品边界。"
+    <CinematicShowcase
+      alt="FitMeet 产品功能深色手机阵列"
+      imageSrc="/images/fitmeet/cinematic/smart-social-matching-dark.png"
+      variant="features"
+      cards={[
+        { label: '需求卡片', body: '约练、交友、搭子', icon: Activity },
+        { label: 'AI 匹配', body: '兴趣和边界都对齐', icon: Sparkles },
+        { label: '确认动作', body: '发布和邀请先确认', icon: UsersRound },
+      ]}
     />
   );
 }
 
-function DownloadSystemVisual() {
+function SafetyProductVisual() {
   return (
-    <VisualFigure
-      className="fm-system-visual fm-system-visual--download"
-      src="/images/fitmeet/generated/social-world-download-visual-v2-1200.jpg"
-      srcSet="/images/fitmeet/generated/social-world-download-visual-v2-720.jpg 720w, /images/fitmeet/generated/social-world-download-visual-v2-1200.jpg 1200w"
-      alt="FitMeet App 深色手机与多端入口产品视觉"
-      caption="下载入口围绕移动端五个真实场景组织，风格与首页主视觉保持一致。"
+    <CinematicShowcase
+      alt="FitMeet 安全和全球连接深色产品视觉"
+      imageSrc="/images/fitmeet/cinematic/global-safety-network-dark.png"
+      variant="safety"
+      cards={[
+        { label: '安全确认', body: '发布、邀请、位置都可控', icon: ShieldCheck },
+        { label: '真实连接', body: '从线上回到真实生活', icon: HeartHandshake },
+        { label: '边界清晰', body: '站内先聊，不暴露手机号', icon: MessageCircle },
+      ]}
+    />
+  );
+}
+
+function DownloadProductVisual() {
+  return (
+    <CinematicShowcase
+      alt="FitMeet 下载页面深色 App 展示"
+      imageSrc="/images/fitmeet/cinematic/download-messages-dark.png"
+      variant="download"
+      cards={[
+        { label: '下载 Beta', body: 'iOS 与 Android 预约', icon: Download },
+        { label: '消息闭环', body: '邀请、私信、回复集中处理', icon: MessageCircle },
+        { label: '需求发现', body: '公开卡片进入发现', icon: Smartphone },
+      ]}
     />
   );
 }
 
 function AppScenesVisual() {
   return (
-    <VisualFigure
-      className="fm-app-scenes-visual"
-      src="/images/fitmeet/generated/social-world-app-scenes-v2-1200.jpg"
-      srcSet="/images/fitmeet/generated/social-world-app-scenes-v2-720.jpg 720w, /images/fitmeet/generated/social-world-app-scenes-v2-1200.jpg 1200w"
-      alt="FitMeet App 三个核心场景：一句话发起需求、查看附近机会、确认后再连接"
-      caption="一句话发起需求、查看附近机会、确认后再连接，三个核心场景被统一成同一套深色产品界面。"
+    <CinematicShowcase
+      alt="FitMeet App 三个核心场景深色产品截图"
+      imageSrc="/images/fitmeet/cinematic/social-world-dark-phones.png"
+      variant="wide"
+      cards={[
+        { label: '发现', body: '确认后的公开需求', icon: MapPin },
+        { label: '匹配', body: 'Agent 推荐合适对象', icon: Sparkles },
+        { label: '沟通', body: '邀请和私信再确认', icon: MessageCircle },
+      ]}
     />
   );
 }
 
-function VisualFigure({
+function CinematicShowcase({
   alt,
-  caption,
-  className,
-  src,
-  srcSet,
+  cards,
+  imageSrc,
+  variant,
 }: {
   alt: string;
-  caption: string;
-  className?: string;
-  src: string;
-  srcSet: string;
+  cards: Array<{ body: string; icon: LucideIcon; label: string }>;
+  imageSrc: string;
+  variant: 'home' | 'features' | 'safety' | 'download' | 'wide';
 }) {
+  const scopeRef = useCinematicMotion<HTMLDivElement>();
+
   return (
-    <figure className={clsx('fm-visual-figure', className)}>
-      <picture>
-        <source srcSet={srcSet} sizes="(max-width: 820px) 92vw, 1180px" />
-        <img src={src} alt={alt} width="1200" height="760" loading="lazy" decoding="async" />
+    <figure ref={scopeRef} className={clsx('fm-cinematic-showcase', `fm-cinematic-showcase--${variant}`)}>
+      <div className="fm-cinematic-showcase__beams" aria-hidden="true">
+        <span data-cinematic-beam />
+        <span data-cinematic-beam />
+        <span data-cinematic-beam />
+      </div>
+      <picture className="fm-cinematic-showcase__media" data-cinematic-media>
+        <img src={imageSrc} alt={alt} width="1600" height="900" loading="lazy" decoding="async" />
       </picture>
-      <figcaption>{caption}</figcaption>
+      <div className="fm-cinematic-showcase__veil" aria-hidden="true" />
+      <div className="fm-cinematic-showcase__cards" aria-label="FitMeet 关键能力">
+        {cards.map(({ body, icon: Icon, label }, index) => (
+          <article key={label} data-cinematic-float className={`is-card-${index + 1}`}>
+            <span>
+              <Icon size={18} aria-hidden="true" />
+            </span>
+            <strong>{label}</strong>
+            <small>{body}</small>
+          </article>
+        ))}
+      </div>
     </figure>
   );
 }
@@ -610,20 +663,20 @@ function PublicDemoPage() {
   const demoSteps = useMemo(
     () => [
       {
-        title: '用户说出场景',
-        body: '今晚想找一个人慢跑，不想太社交，最好离我 3km 内。',
+        title: '用户说出需求',
+        body: '今晚想找一个低压力慢跑搭子，不尬聊，最好离我 3km 内。',
       },
       {
-        title: 'Agent 补全边界',
-        body: '我会优先公共场所、低强度、站内先聊；精确位置不会展示。',
+        title: 'Agent 生成卡片',
+        body: '先整理成约练卡：时间、地点范围、跑步强度、人数、公开范围和安全边界。',
       },
       {
-        title: '推荐候选',
-        body: '匹配理由：同区域、今晚有空、都偏好轻松运动、聊天压力低。',
+        title: '匹配候选',
+        body: '推荐理由：同区域、今晚有空、都偏好轻松运动，适合先站内聊清楚。',
       },
       {
-        title: '用户确认',
-        body: '发送邀请前需要确认；你也可以改成加入附近活动。',
+        title: '确认发布',
+        body: '用户确认后才会发布到发现页；发送邀请、加好友或私信仍会再次确认。',
       },
     ],
     [],
@@ -633,7 +686,7 @@ function PublicDemoPage() {
     <>
       <PageHero
         title="30 秒理解 FitMeet"
-        body="不用登录。走完一次用户场景、Agent 完成和安全确认，就能理解 FitMeet 的产品核心。"
+        body="不用登录。走完一次需求输入、Agent 生成卡片、用户确认、发现页匹配和安全边界，就能理解 FitMeet 的产品核心。"
         actions={[
           { label: '开始 Demo', to: '#demo-flow', variant: 'primary' },
           { label: '进入 Agent', to: '/agent' },
@@ -676,15 +729,15 @@ function PhonePreview() {
           <span>FitMeet</span>
           <small>Beta</small>
         </div>
-        <div className="fm-phone__prompt">今晚想找个人慢跑，不尬聊，轻松一点</div>
+        <div className="fm-phone__prompt">今晚想找低压力慢跑搭子，不尬聊，轻松一点</div>
         <div className="fm-phone__cards">
           <article>
-            <strong>低压力跑步搭子</strong>
+            <strong>需求卡已生成</strong>
             <p>同区域 · 今晚有空 · 强度匹配</p>
           </article>
           <article>
-            <strong>附近轻松活动</strong>
-            <p>公共场所 · 需确认后加入</p>
+            <strong>确认后发布到发现</strong>
+            <p>公共场所 · 站内先聊 · 可撤回</p>
           </article>
         </div>
         <div className="fm-phone__tabs">
@@ -863,7 +916,7 @@ function WebsiteFooter() {
         <img src="/favicon-192.png" alt="FitMeet" width="28" height="28" />
         FitMeet
       </strong>
-      <p>Social World，从兴趣出发，遇见真正聊得来的人。</p>
+      <p>需求流社交，从一个明确需求开始，遇见真正合适的人。</p>
       <nav aria-label="FitMeet 页脚导航">
         <Link to="/features">产品功能</Link>
         <SiteLink to="/discover">发现</SiteLink>

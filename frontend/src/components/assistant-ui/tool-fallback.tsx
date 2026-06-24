@@ -75,6 +75,11 @@ const LazyLifeGraphDiffCard = lazy(() =>
     default: module.LifeGraphDiffCard,
   })),
 );
+const LazyProfileCompletionCard = lazy(() =>
+  import('./tool-profile-completion-card').then((module) => ({
+    default: module.ProfileCompletionCard,
+  })),
+);
 const LazyMeetLoopResultCard = lazy(() =>
   import('./tool-meet-loop-card').then((module) => ({ default: module.MeetLoopResultCard })),
 );
@@ -86,6 +91,7 @@ const ASSISTANT_CARD_RENDERERS: Record<ToolUISchemaType, ToolUICardRenderer> = {
   'social_match.candidate': CandidateResultCard,
   'social_match.activity': ActivityOpportunityCard,
   'social_match.empty': CandidateEmptyStateCard,
+  'profile.completion': ProfileCompletionResultCard,
   'life_graph.diff': LifeGraphDiffCard,
   'meet_loop.timeline': MeetLoopResultCard,
   'safety.approval': SafetyResultCard,
@@ -293,6 +299,14 @@ function CandidateEmptyStateCard({ card }: { card: SchemaDrivenAssistantCard }) 
   return (
     <Suspense fallback={<GenericResultCard card={card} />}>
       <LazyCandidateEmptyStateCard card={card} />
+    </Suspense>
+  );
+}
+
+function ProfileCompletionResultCard({ card }: { card: SchemaDrivenAssistantCard }) {
+  return (
+    <Suspense fallback={<GenericResultCard card={card} />}>
+      <LazyProfileCompletionCard card={card} />
     </Suspense>
   );
 }

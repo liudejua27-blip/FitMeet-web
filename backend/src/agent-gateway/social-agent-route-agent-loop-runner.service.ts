@@ -856,7 +856,7 @@ export class SocialAgentRouteAgentLoopRunnerService {
     taskContext?: Record<string, unknown>,
   ): boolean {
     if (!hasExplicitPublishSideEffectIntent(message)) return false;
-    if (!taskContext) return false;
+    if (!taskContext) return true;
     if (this.nonEmptyRecord(taskContext.taskSlots)) return true;
     if (this.nonEmptyRecord(taskContext.taskSlotSummary)) return true;
     const taskMemory = this.recordOrNull(taskContext.taskMemory);

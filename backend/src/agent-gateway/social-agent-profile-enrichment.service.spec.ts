@@ -134,6 +134,31 @@ describe('SocialAgentProfileEnrichmentService', () => {
     expect(result.assistantMessage).toContain('本次使用，不保存');
     expect(result.assistantMessage).toContain('是否开始匹配');
     expect(result.assistantMessage).toContain('不会直接搜索候选人');
+    expect(result.cards).toEqual([
+      expect.objectContaining({
+        type: 'profile_completion',
+        schemaType: 'profile.completion',
+        title: '让 Agent 帮你补充个人信息',
+        status: 'waiting_confirmation',
+        data: expect.objectContaining({
+          schemaName: 'ProfileCompletionCard',
+          questionCount: 5,
+          questions: expect.arrayContaining([
+            expect.objectContaining({
+              key: 'currentGoal',
+              label: '当前目标',
+              options: expect.arrayContaining(['找运动搭子', '暂不确定']),
+            }),
+            expect.objectContaining({
+              key: 'safetyBoundary',
+              label: '安全边界',
+              options: expect.arrayContaining(['只接受公共场所', '暂不确定']),
+            }),
+          ]),
+          savePolicy: 'preview_before_write',
+        }),
+      }),
+    ]);
     expect(result.profileUpdated).toBe(false);
     expect(taskRepo.save).toHaveBeenCalledWith(task);
     expect(executor.executeToolAction).not.toHaveBeenCalled();
@@ -181,6 +206,19 @@ describe('SocialAgentProfileEnrichmentService', () => {
     expect(result.assistantMessage).toContain('安全边界');
     expect(result.assistantMessage).toContain('不会推荐具体人物');
     expect(result.assistantMessage).toContain('不会替你执行外部动作');
+    expect(result.cards?.[0]).toMatchObject({
+      schemaType: 'profile.completion',
+      data: {
+        schemaName: 'ProfileCompletionCard',
+        questions: expect.arrayContaining([
+          expect.objectContaining({ key: 'currentGoal' }),
+          expect.objectContaining({ key: 'interactionStyle' }),
+          expect.objectContaining({ key: 'timeLocation' }),
+          expect.objectContaining({ key: 'activityPreference' }),
+          expect.objectContaining({ key: 'safetyBoundary' }),
+        ]),
+      },
+    });
     expect(result.assistantMessage).not.toMatch(
       /raw JSON|traceId|planner|system tag|prompt|邀请Ta|开场白|city:|interestTags/i,
     );
