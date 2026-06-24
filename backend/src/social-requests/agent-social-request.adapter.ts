@@ -194,6 +194,11 @@ export class AgentSocialRequestAdapter {
           agentConnectionId: agent?.id ?? null,
           source: 'agent_social_request_adapter',
         },
+        request: {
+          requestId,
+          userId,
+          limit,
+        },
       },
       () => this.matches.runMatch(requestId, userId, { limit }),
     );

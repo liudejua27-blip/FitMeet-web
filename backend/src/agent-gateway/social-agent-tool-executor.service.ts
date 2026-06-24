@@ -2120,6 +2120,18 @@ export class SocialAgentToolExecutorService {
           city: sanitizeCity(input.city) || null,
           activityType: this.toolInput.string(input.activityType) || null,
         },
+        request: {
+          socialRequestId,
+          limit: limit ?? null,
+          city: sanitizeCity(input.city) || null,
+          activityType: this.toolInput.string(input.activityType) || null,
+          interestTags: this.toolInput.stringArray(
+            input.interestTags ?? input.tags,
+          ),
+          candidatePreference: this.toolInput.string(input.candidatePreference),
+          timePreference: this.toolInput.string(input.timePreference),
+          locationPreference: this.toolInput.string(input.locationPreference),
+        },
       },
       runSearch,
     );

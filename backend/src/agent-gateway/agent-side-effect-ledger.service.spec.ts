@@ -67,6 +67,9 @@ describe('AgentSideEffectLedgerService', () => {
         status: AgentSideEffectLedgerStatus.Succeeded,
         result: { publicIntentId: 'public_1' },
         errorMessage: '',
+        completedAt: expect.any(Date),
+        leaseOwner: null,
+        leaseExpiresAt: null,
       }),
     );
   });
@@ -126,10 +129,111 @@ describe('AgentSideEffectLedgerService', () => {
 
     expect(repo.save).toHaveBeenLastCalledWith(
       expect.objectContaining({
-        status: AgentSideEffectLedgerStatus.Failed,
+        status: AgentSideEffectLedgerStatus.FailedRetryable,
         errorMessage: 'read-back failed',
         nextRetryAt: new Date(1_700_000_060_000),
+        leaseOwner: null,
+        leaseExpiresAt: null,
       }),
     );
+  });
+
+  it('marks an expired running lease as unknown commit state before replay', async () => {
+    jest.spyOn(Date, 'now').mockReturnValue(1_700_000_000_000);
+    const repo = makeRepo({
+      id: 1,
+      status: AgentSideEffectLedgerStatus.Running,
+      requestHash: '',
+      leaseOwner: 'old-worker',
+      leaseExpiresAt: new Date(1_699_999_990_000),
+      lastAttemptAt: new Date(1_699_999_990_000),
+      result: {},
+      attemptCount: 1,
+    });
+    const service = new AgentSideEffectLedgerService(repo as never);
+    const operation = jest.fn();
+
+    await expect(
+      service.run(
+        {
+          ownerUserId: 7,
+          agentTaskId: 101,
+          actionType: 'send_message',
+          idempotencyKey: 'message:101:22',
+        },
+        operation,
+      ),
+    ).rejects.toThrow('side_effect_reconciliation_required');
+
+    expect(operation).not.toHaveBeenCalled();
+    expect(repo.save).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        status: AgentSideEffectLedgerStatus.UnknownCommitState,
+        errorMessage: 'side_effect_lease_expired_reconciliation_required',
+        leaseOwner: null,
+        leaseExpiresAt: null,
+      }),
+    );
+  });
+
+  it('allows retry only after an explicit reconciliation says it is safe', async () => {
+    jest.spyOn(Date, 'now').mockReturnValue(1_700_000_000_000);
+    const existing = {
+      id: 1,
+      status: AgentSideEffectLedgerStatus.Running,
+      requestHash: '',
+      leaseOwner: 'old-worker',
+      leaseExpiresAt: new Date(1_699_999_990_000),
+      lastAttemptAt: new Date(1_699_999_990_000),
+      result: {},
+      attemptCount: 1,
+    };
+    const repo = makeRepo(existing);
+    const service = new AgentSideEffectLedgerService(repo as never);
+    const operation = jest.fn(async () => ({ messageId: 'msg_1' }));
+
+    const result = await service.run(
+      {
+        ownerUserId: 7,
+        agentTaskId: 101,
+        actionType: 'send_message',
+        idempotencyKey: 'message:101:22',
+        reconcile: jest.fn(async () => ({ status: 'retry' as const })),
+      },
+      operation,
+    );
+
+    expect(operation).toHaveBeenCalledTimes(1);
+    expect(result).toEqual({ result: { messageId: 'msg_1' }, reused: false });
+    expect(repo.save).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        status: AgentSideEffectLedgerStatus.Succeeded,
+        result: { messageId: 'msg_1' },
+      }),
+    );
+  });
+
+  it('rejects reuse of one idempotency key for a different request hash', async () => {
+    const repo = makeRepo({
+      id: 1,
+      status: AgentSideEffectLedgerStatus.FailedRetryable,
+      requestHash: 'different-request',
+      result: {},
+      attemptCount: 1,
+    });
+    const service = new AgentSideEffectLedgerService(repo as never);
+
+    await expect(
+      service.run(
+        {
+          ownerUserId: 7,
+          agentTaskId: 101,
+          actionType: 'send_message',
+          idempotencyKey: 'message:101:22',
+          request: { conversationId: 'c1', text: 'hello' },
+        },
+        async () => ({ messageId: 'msg_1' }),
+      ),
+    ).rejects.toThrow('side_effect_idempotency_key_conflict');
   });
 });
