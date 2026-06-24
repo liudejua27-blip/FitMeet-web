@@ -5,6 +5,7 @@ import { AiDelegateProfile } from '../ai-match/ai-delegate-profile.entity';
 import { User } from './user.entity';
 import { SocialProfileService } from './social-profile.service';
 import { UserSocialProfile } from './user-social-profile.entity';
+import { ProfileUpdateProposal } from './profile-update-proposal.entity';
 
 /**
  * Privacy / sensitive-tag invariants for SocialProfileService.
@@ -56,6 +57,7 @@ const baseProfile = (
     profileDiscoverable: true,
     agentCanRecommendMe: true,
     agentCanStartChatAfterApproval: false,
+    profileVersion: 1,
     aiSummary: '',
     aiProfileCard: {},
     matchSignals: {
@@ -92,6 +94,10 @@ describe('SocialProfileService — privacy & sensitive tags', () => {
         {
           provide: getRepositoryToken(AiDelegateProfile),
           useValue: delegateRepo,
+        },
+        {
+          provide: getRepositoryToken(ProfileUpdateProposal),
+          useValue: makeRepo(),
         },
         { provide: getRepositoryToken(User), useValue: makeRepo() },
         {
