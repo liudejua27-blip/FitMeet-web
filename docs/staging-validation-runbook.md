@@ -43,11 +43,14 @@ The deploy script records:
 
 - release commit, source, builtAt
 - redacted environment key list
-- resolved Docker Compose config
+- sanitized Docker Compose service summary only: service names, images, ports,
+  and health check timing/retry metadata. Health check commands are redacted
+  because Compose can expand Redis/Mongo passwords into those commands. Full
+  resolved environment values are not written to evidence.
 - migration output
 - critical table check output
 - compose status and recent logs
-- rollback command
+- rollback command with explicit code backup and database backup reference
 
 ## Full E2E
 
@@ -101,8 +104,12 @@ bash ./scripts/staging-fault-injection.sh
 
 The harness collects state before and after:
 
-- second worker peer for multi-instance lease validation
-- worker kill and restart
+- deterministic publish flow that creates a real `matching_jobs` row
+- recorded `matchingJobId`, forced running lease, worker kill, lease expiry,
+  and second worker recovery
+- duplicate matching job and duplicate candidate-row checks for that
+  `matchingJobId`
+- worker restart
 - Redis pause/recovery
 - Mongo pause/recovery
 - matching job and social request status summaries
@@ -130,11 +137,22 @@ cd /opt/fitmeet-staging
 APP_DIR=/opt/fitmeet-staging \
 PUBLIC_BASE_URL=https://staging.example.com \
 PUBLIC_API_BASE_URL=https://staging.example.com/api \
+ROLLBACK_SOURCE=/opt/fitmeet-staging.backup.<timestamp> \
+ROLLBACK_DB_BACKUP_REF=backup/staging-before-<timestamp>.sql \
+ROLLBACK_MIGRATION_COMPATIBILITY_ACK=true \
 bash ./scripts/rollback-staging-ecs.sh
 ```
 
-Set `ROLLBACK_SOURCE=/opt/fitmeet-staging.backup.<timestamp>` to choose a
-specific backup. The rollback preserves `.env.production` and `nginx/ssl/`.
+`ROLLBACK_SOURCE` is required. The script will not auto-select the latest
+backup because that can roll back to the wrong release. `ROLLBACK_DB_BACKUP_REF`
+is also required so the rollback evidence identifies the database backup or
+snapshot captured before rollback. The script restores code only; it does not
+restore PostgreSQL, Redis, MongoDB, or object storage. Set
+`ROLLBACK_MIGRATION_COMPATIBILITY_ACK=true` only after confirming the target
+code can run against the current staging database schema, or after separately
+restoring the referenced database backup.
+
+The rollback preserves `.env.production` and `nginx/ssl/`.
 
 ## Go / No-Go
 
