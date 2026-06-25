@@ -92,6 +92,15 @@ export interface SocialProfileBuilderCard {
   summary: string;
 }
 
+export interface ProfileUpdateProposal {
+  proposalId: number;
+  baseProfileVersion: number;
+  proposedFields: Record<string, unknown>;
+  draft: SocialProfileBuilderCard;
+  status: 'pending' | 'applied' | 'rejected' | 'expired';
+  expiresAt: string;
+}
+
 export interface SocialProfileQuestion {
   key: string;
   question: string;
@@ -160,6 +169,7 @@ export const socialProfileApi = {
     api.request<{
       questions: SocialProfileQuestion[];
       completion: SocialProfileCompletion;
+      pendingProposal?: ProfileUpdateProposal | null;
     }>('/users/me/social-profile/questions'),
   aiDraft: (data: {
     answers?: Array<{ key?: string; question?: string; answer?: string }>;
@@ -169,6 +179,7 @@ export const socialProfileApi = {
     api.request<{
       mode: 'ai' | 'fallback';
       draft: SocialProfileBuilderCard;
+      proposal: ProfileUpdateProposal;
       profileUsed: UserSocialProfile;
       completion: SocialProfileCompletion;
     }>('/users/me/social-profile/ai-draft', {
@@ -177,6 +188,8 @@ export const socialProfileApi = {
     }),
   aiSave: (data: {
     profile: SocialProfileBuilderCard;
+    proposalId?: number;
+    expectedProfileVersion?: number;
     enableMatching?: boolean;
     ownerConfirmed?: boolean;
     matchingConsent?: boolean;
@@ -190,6 +203,7 @@ export const socialProfileApi = {
       matchingEnabled: boolean;
       sensitiveTagSummary?: Record<string, number>;
       completion: SocialProfileCompletion;
+      proposal?: ProfileUpdateProposal | null;
     }>('/users/me/social-profile/ai-save', {
       method: 'POST',
       body: JSON.stringify(data),

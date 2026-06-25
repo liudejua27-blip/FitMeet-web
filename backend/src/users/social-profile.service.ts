@@ -1,4 +1,9 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import {
@@ -9,6 +14,7 @@ import {
 import { AiDelegateProfile } from '../ai-match/ai-delegate-profile.entity';
 import { User } from './user.entity';
 import { UserSocialProfile } from './user-social-profile.entity';
+import { ProfileUpdateProposal } from './profile-update-proposal.entity';
 import { UpdateSocialProfileDto } from './dto/update-social-profile.dto';
 
 type AiProfileAnswer = {
@@ -22,6 +28,8 @@ type SensitiveTagSaveStatus = 'confirmed' | 'rejected' | 'hidden';
 
 type SaveAiDraftInput = {
   profile?: AiProfileBuilderCard;
+  proposalId?: number;
+  expectedProfileVersion?: number;
   enableMatching?: boolean;
   ownerConfirmed?: boolean;
   matchingConsent?: boolean;
@@ -318,6 +326,8 @@ export class SocialProfileService {
   constructor(
     @InjectRepository(UserSocialProfile)
     private readonly repo: Repository<UserSocialProfile>,
+    @InjectRepository(ProfileUpdateProposal)
+    private readonly proposalRepo: Repository<ProfileUpdateProposal>,
     @InjectRepository(AiDelegateProfile)
     private readonly aiDelegateRepo: Repository<AiDelegateProfile>,
     @InjectRepository(User)
@@ -337,10 +347,12 @@ export class SocialProfileService {
     dto: UpdateSocialProfileDto,
   ): Promise<UserSocialProfile> {
     const existing = await this.repo.findOne({ where: { userId } });
+    const nextVersion = (existing?.profileVersion ?? 0) + 1;
     const merged: UserSocialProfile = {
       ...(existing ?? this.empty(userId)),
       ...this.sanitize(dto),
       userId,
+      profileVersion: nextVersion,
     } as UserSocialProfile;
     const saved = await this.repo.save(merged);
     const reseeded = await this.refreshSensitiveDecisions(saved);
@@ -350,6 +362,7 @@ export class SocialProfileService {
 
   async generateQuestions(userId: number) {
     const profile = await this.get(userId);
+    const pendingProposal = await this.getPendingProfileUpdateProposal(userId);
     const missing = PROFILE_INTERVIEW_BANK.filter(
       ({ key }) => !this.hasValue(profile, key as keyof UserSocialProfile),
     );
@@ -389,6 +402,7 @@ export class SocialProfileService {
       role: 'profile_interviewer',
       questions,
       completion,
+      pendingProposal,
       guidance: {
         public: 'public fields can be shown on profile cards',
         private_match:
@@ -488,28 +502,68 @@ export class SocialProfileService {
       },
       source: input.source ?? 'fitmeet_ai_profile_builder',
     });
+    const proposedFields = this.profileCardToDto(draft);
+    this.removeProfileVisibilityFields(proposedFields);
+    const proposal = await this.proposalRepo.save(
+      this.proposalRepo.create({
+        userId,
+        baseProfileVersion: profile.profileVersion ?? 0,
+        proposedFields: proposedFields as Record<string, unknown>,
+        draft: draft as unknown as Record<string, unknown>,
+        status: 'pending',
+        source: input.source ?? 'fitmeet_ai_profile_builder',
+        expiresAt: this.profileProposalExpiry(),
+      }),
+    );
     return {
       mode: this.ai.isLlmEnabled() ? 'ai' : 'fallback',
       draft,
+      proposal: this.serializeProfileUpdateProposal(proposal),
       profileUsed: profile,
       completion: this.getCompletionFromProfile(profile),
     };
   }
 
   async saveAiDraft(userId: number, input: SaveAiDraftInput) {
+    const proposal = input.proposalId
+      ? await this.findPendingProfileUpdateProposal(userId, input.proposalId)
+      : null;
+    const current = await this.get(userId);
+    const expectedProfileVersion =
+      input.expectedProfileVersion ?? proposal?.baseProfileVersion;
+    if (
+      expectedProfileVersion !== undefined &&
+      expectedProfileVersion !== (current.profileVersion ?? 0)
+    ) {
+      throw new ConflictException({
+        code: 'profile_version_conflict',
+        message:
+          'Profile changed after this preview was generated. Refresh the preview before saving.',
+        expectedProfileVersion,
+        currentProfileVersion: current.profileVersion ?? 0,
+      });
+    }
     const card = input.profile;
-    const dto = this.profileCardToDto(card);
-    const wantsMatching = input.enableMatching !== false;
+    const dto = proposal
+      ? ({ ...(proposal.proposedFields ?? {}) } as UpdateSocialProfileDto)
+      : this.profileCardToDto(card);
+    const wantsMatching = input.enableMatching === true;
     if (wantsMatching) {
       this.assertOwnerAuthorizedProfileVisibility(input);
       dto.agentCanRecommendMe = true;
-    }
-    if (input.enableMatching === false) {
+    } else if (input.enableMatching === false) {
       dto.profileDiscoverable = false;
       dto.agentCanRecommendMe = false;
       dto.agentCanStartChatAfterApproval = false;
+    } else {
+      this.removeProfileVisibilityFields(dto);
     }
     const saved = await this.upsert(userId, dto);
+    if (proposal) {
+      proposal.status = 'applied';
+      proposal.appliedAt = new Date();
+      await this.proposalRepo.save(proposal);
+    }
     const decided = await this.applySensitiveTagSaveDecisions(saved, {
       confirmAll: input.sensitiveTagsConfirmed === true,
       decisions: input.sensitiveTagDecisions,
@@ -523,12 +577,14 @@ export class SocialProfileService {
         decided.sensitiveTagDecisions ?? {},
       ),
       completion: this.getCompletionFromProfile(decided),
+      proposal: proposal ? this.serializeProfileUpdateProposal(proposal) : null,
     };
   }
 
   private empty(userId: number): UserSocialProfile {
     return {
       userId,
+      profileVersion: 0,
       gender: '',
       ageRange: '',
       city: '',
@@ -622,6 +678,12 @@ export class SocialProfileService {
     if (dto.aiProfileCard !== undefined) out.aiProfileCard = dto.aiProfileCard;
     if (dto.matchSignals !== undefined) out.matchSignals = dto.matchSignals;
     return out;
+  }
+
+  private removeProfileVisibilityFields(dto: UpdateSocialProfileDto) {
+    delete dto.profileDiscoverable;
+    delete dto.agentCanRecommendMe;
+    delete dto.agentCanStartChatAfterApproval;
   }
 
   private cleanArr(arr: string[]): string[] {
@@ -843,6 +905,54 @@ export class SocialProfileService {
         'profileVisibilityConsent',
       ],
     });
+  }
+
+  private profileProposalExpiry() {
+    return new Date(Date.now() + 24 * 60 * 60 * 1000);
+  }
+
+  private async getPendingProfileUpdateProposal(userId: number) {
+    const proposal = await this.proposalRepo.findOne({
+      where: { userId, status: 'pending' },
+      order: { createdAt: 'DESC' },
+    });
+    if (!proposal || proposal.expiresAt.getTime() <= Date.now()) return null;
+    return this.serializeProfileUpdateProposal(proposal);
+  }
+
+  private async findPendingProfileUpdateProposal(
+    userId: number,
+    proposalId: number,
+  ) {
+    const proposal = await this.proposalRepo.findOne({
+      where: { proposalId, userId, status: 'pending' },
+    });
+    if (!proposal) {
+      throw new NotFoundException({
+        code: 'profile_update_proposal_not_found',
+        message: 'Profile update proposal not found.',
+      });
+    }
+    if (proposal.expiresAt.getTime() <= Date.now()) {
+      proposal.status = 'expired';
+      await this.proposalRepo.save(proposal);
+      throw new BadRequestException({
+        code: 'profile_update_proposal_expired',
+        message: 'Profile update proposal expired.',
+      });
+    }
+    return proposal;
+  }
+
+  private serializeProfileUpdateProposal(proposal: ProfileUpdateProposal) {
+    return {
+      proposalId: proposal.proposalId,
+      baseProfileVersion: proposal.baseProfileVersion,
+      proposedFields: proposal.proposedFields,
+      draft: proposal.draft,
+      status: proposal.status,
+      expiresAt: proposal.expiresAt.toISOString(),
+    };
   }
 
   private normalizeAiAnswers(input: {

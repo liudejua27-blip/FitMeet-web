@@ -1,7 +1,12 @@
 import { useMemo, useState } from 'react';
 import { CheckCircle2, ChevronRight, Loader2, Sparkles } from 'lucide-react';
 
-import { socialProfileApi, type SocialProfileBuilderCard } from '../../api/socialProfileApi';
+import {
+  socialProfileApi,
+  type ProfileUpdateProposal,
+  type SocialProfileBuilderCard,
+  type SocialProfileCompletion,
+} from '../../api/socialProfileApi';
 import type { SchemaDrivenAssistantCard } from './tool-ui-schema';
 
 type ProfileQuestion = {
@@ -12,23 +17,31 @@ type ProfileQuestion = {
   options: string[];
 };
 
-type DraftState =
-  | { status: 'idle'; draft: null; message: string | null }
-  | { status: 'drafting'; draft: null; message: string | null }
-  | { status: 'preview'; draft: SocialProfileBuilderCard; message: string | null }
-  | { status: 'saving'; draft: SocialProfileBuilderCard; message: string | null }
-  | { status: 'saved'; draft: SocialProfileBuilderCard; message: string | null }
-  | { status: 'error'; draft: SocialProfileBuilderCard | null; message: string };
+type DraftState = {
+  status: 'idle' | 'drafting' | 'preview' | 'saving' | 'saved' | 'authorizing' | 'error';
+  draft: SocialProfileBuilderCard | null;
+  proposal: ProfileUpdateProposal | null;
+  completion: SocialProfileCompletion | null;
+  message: string | null;
+};
 
 export function ProfileCompletionCard({ card }: { card: SchemaDrivenAssistantCard }) {
   const questions = useMemo(() => readQuestions(card.data.questions), [card.data.questions]);
+  const pendingProposal = useMemo(
+    () => readPendingProposal(card.data.pendingProposal),
+    [card.data.pendingProposal],
+  );
   const [answers, setAnswers] = useState<Record<string, string>>(() =>
     Object.fromEntries(questions.map((question) => [question.key, ''])),
   );
   const [state, setState] = useState<DraftState>({
-    status: 'idle',
-    draft: null,
-    message: null,
+    status: pendingProposal ? 'preview' : 'idle',
+    draft: pendingProposal?.draft ?? null,
+    proposal: pendingProposal,
+    completion: null,
+    message: pendingProposal
+      ? '已恢复上次未确认的更新预览。确认后才会保存到个人信息。'
+      : null,
   });
 
   const answered = questions
@@ -44,7 +57,7 @@ export function ProfileCompletionCard({ card }: { card: SchemaDrivenAssistantCar
 
   async function createPreview() {
     if (!canPreview) return;
-    setState({ status: 'drafting', draft: null, message: null });
+    setState({ status: 'drafting', draft: null, proposal: null, completion: null, message: null });
     try {
       const result = await socialProfileApi.aiDraft({
         answers: answered,
@@ -53,12 +66,16 @@ export function ProfileCompletionCard({ card }: { card: SchemaDrivenAssistantCar
       setState({
         status: 'preview',
         draft: result.draft,
+        proposal: result.proposal,
+        completion: result.completion,
         message: '已生成更新预览。确认后才会保存到个人信息。',
       });
     } catch (error) {
       setState({
         status: 'error',
         draft: null,
+        proposal: null,
+        completion: null,
         message: error instanceof Error ? error.message : '生成预览失败，请稍后重试。',
       });
     }
@@ -66,25 +83,54 @@ export function ProfileCompletionCard({ card }: { card: SchemaDrivenAssistantCar
 
   async function saveProfile() {
     if (!canSave || !state.draft) return;
-    setState({ status: 'saving', draft: state.draft, message: null });
+    setState({ ...state, status: 'saving', message: null });
     try {
       const result = await socialProfileApi.aiSave({
         profile: state.draft,
-        enableMatching: true,
-        ownerConfirmed: true,
-        matchingConsent: true,
-        profileVisibilityConsent: true,
+        proposalId: state.proposal?.proposalId,
+        expectedProfileVersion: state.proposal?.baseProfileVersion,
       });
       setState({
         status: 'saved',
         draft: state.draft,
-        message: savedProfileMessage(result.completion.percent, result.completion.missingFields),
+        proposal: result.proposal ?? state.proposal,
+        completion: result.completion,
+        message: savedProfileMessage(result.completion),
       });
     } catch (error) {
       setState({
         status: 'error',
         draft: state.draft,
+        proposal: state.proposal,
+        completion: state.completion,
         message: error instanceof Error ? error.message : '保存失败，请稍后重试。',
+      });
+    }
+  }
+
+  async function authorizeMatching() {
+    if (!state.completion) return;
+    setState({ ...state, status: 'authorizing', message: null });
+    try {
+      const result = await socialProfileApi.updatePrivacy({
+        profileDiscoverable: true,
+        agentCanRecommendMe: true,
+        agentCanStartChatAfterApproval: false,
+        ownerConfirmed: true,
+        matchingConsent: true,
+        profileVisibilityConsent: true,
+      });
+      setState({
+        ...state,
+        status: 'saved',
+        completion: result.completion ?? state.completion,
+        message: '已开启匹配授权。之后 Agent 才可以基于你的资料推荐和被推荐。',
+      });
+    } catch (error) {
+      setState({
+        ...state,
+        status: 'error',
+        message: error instanceof Error ? error.message : '开启匹配授权失败，请稍后重试。',
       });
     }
   }
@@ -93,6 +139,8 @@ export function ProfileCompletionCard({ card }: { card: SchemaDrivenAssistantCar
     setState({
       status: 'idle',
       draft: null,
+      proposal: null,
+      completion: null,
       message: '本次回答不会保存到个人信息。需要开始匹配时，请再明确告诉 Agent。',
     });
   }
@@ -171,6 +219,13 @@ export function ProfileCompletionCard({ card }: { card: SchemaDrivenAssistantCar
         </div>
 
         {state.draft ? <ProfileDraftPreview draft={state.draft} /> : null}
+
+        {shouldShowMatchingAuthorization(state) ? (
+          <MatchingAuthorizationPanel
+            disabled={state.status === 'authorizing'}
+            onAuthorize={() => void authorizeMatching()}
+          />
+        ) : null}
 
         {state.message ? (
           <div
@@ -253,13 +308,59 @@ function ProfileDraftPreview({ draft }: { draft: SocialProfileBuilderCard }) {
   );
 }
 
-function savedProfileMessage(percent: number, missingFields: string[]) {
-  const rounded = Math.round(percent);
-  const missing = missingFields.map((field) => field.trim()).filter(Boolean);
+function MatchingAuthorizationPanel({
+  disabled,
+  onAuthorize,
+}: {
+  disabled: boolean;
+  onAuthorize: () => void;
+}) {
+  return (
+    <section
+      className="rounded-2xl border border-amber-200 bg-amber-50 p-4"
+      data-testid="profile-matching-authorization-card"
+    >
+      <p className="text-sm font-black text-slate-950">开启匹配授权</p>
+      <p className="mt-2 text-sm leading-6 text-slate-700">
+        资料已保存。只有你单独确认后，资料才会进入匹配池或被 Agent 推荐。
+      </p>
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={onAuthorize}
+        className="mt-3 inline-flex items-center justify-center gap-2 rounded-2xl bg-slate-950 px-4 py-2.5 text-sm font-black text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300"
+      >
+        {disabled ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : null}
+        确认开启匹配授权
+      </button>
+    </section>
+  );
+}
+
+function shouldShowMatchingAuthorization(state: DraftState) {
+  return (
+    state.status === 'saved' &&
+    state.completion?.canEnterMatchPool === true &&
+    state.completion.authorizationRequired === true
+  );
+}
+
+function savedProfileMessage(completion: SocialProfileCompletion) {
+  const rounded = Math.round(completion.percent);
+  const missing = completion.missingFields.map((field) => field.trim()).filter(Boolean);
   if (missing.length === 0) {
-    return `已保存到个人信息。当前资料完整度 ${rounded}%。`;
+    return `已保存到个人信息。当前资料完整度 ${rounded}%。匹配授权需要单独确认。`;
   }
   return `已保存到个人信息。当前资料完整度 ${rounded}%。还可以继续补充：${missing.slice(0, 4).join('、')}。`;
+}
+
+function readPendingProposal(value: unknown): ProfileUpdateProposal | null {
+  if (!value || typeof value !== 'object') return null;
+  const record = value as Partial<ProfileUpdateProposal>;
+  if (typeof record.proposalId !== 'number') return null;
+  if (typeof record.baseProfileVersion !== 'number') return null;
+  if (!record.draft || typeof record.draft !== 'object') return null;
+  return record as ProfileUpdateProposal;
 }
 
 function readQuestions(value: unknown): ProfileQuestion[] {

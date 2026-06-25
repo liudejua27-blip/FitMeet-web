@@ -5,6 +5,7 @@ import { AiDelegateProfile } from '../ai-match/ai-delegate-profile.entity';
 import { User } from './user.entity';
 import { SocialProfileService } from './social-profile.service';
 import { UserSocialProfile } from './user-social-profile.entity';
+import { ProfileUpdateProposal } from './profile-update-proposal.entity';
 
 const mockRepo = () => ({
   create: jest.fn((data) => data),
@@ -12,13 +13,55 @@ const mockRepo = () => ({
   save: jest.fn((data) => data),
 });
 
+const profileCard = (
+  visibility = {
+    profileDiscoverable: true,
+    agentCanRecommendMe: true,
+    agentCanStartChatAfterApproval: true,
+  },
+) => ({
+  basic: {
+    nickname: 'Nova',
+    city: 'Shanghai',
+    ageRange: '25-34',
+    gender: '',
+    zodiac: '',
+  },
+  personality: {
+    mbti: '',
+    traits: [],
+    socialStyle: '',
+    communicationStyle: '',
+  },
+  interests: { sports: ['running'], lifestyle: [], socialScenes: [] },
+  preferences: {
+    wantToMeet: ['runner'],
+    preferredTraits: [],
+    avoid: [],
+  },
+  relationshipIntent: { goals: [], openness: '' },
+  availability: { weekdays: '', weekends: '' },
+  visibility,
+  matchSignals: {
+    publicTags: ['running'],
+    privatePreferenceTags: [],
+    sensitivePrivateTags: [],
+    matchKeywords: ['running'],
+    confidence: 0.5,
+    source: 'fallback',
+  },
+  summary: '',
+});
+
 describe('SocialProfileService', () => {
   let service: SocialProfileService;
   let profileRepo: ReturnType<typeof mockRepo>;
+  let proposalRepo: ReturnType<typeof mockRepo>;
   let delegateRepo: ReturnType<typeof mockRepo>;
 
   beforeEach(async () => {
     profileRepo = mockRepo();
+    proposalRepo = mockRepo();
     delegateRepo = mockRepo();
 
     const module: TestingModule = await Test.createTestingModule({
@@ -27,6 +70,10 @@ describe('SocialProfileService', () => {
         {
           provide: getRepositoryToken(UserSocialProfile),
           useValue: profileRepo,
+        },
+        {
+          provide: getRepositoryToken(ProfileUpdateProposal),
+          useValue: proposalRepo,
         },
         {
           provide: getRepositoryToken(AiDelegateProfile),
@@ -224,6 +271,79 @@ describe('SocialProfileService', () => {
     );
   });
 
+  it('saves an AI draft without enabling matching by default', async () => {
+    profileRepo.findOne.mockResolvedValue(null);
+    delegateRepo.findOne.mockResolvedValue(null);
+
+    const result = await service.saveAiDraft(1, {
+      profile: profileCard(),
+    });
+
+    expect(profileRepo.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        profileDiscoverable: false,
+        agentCanRecommendMe: false,
+        agentCanStartChatAfterApproval: false,
+      }),
+    );
+    expect(result.matchingEnabled).toBe(false);
+  });
+
+  it('applies a persisted profile update proposal with optimistic version', async () => {
+    const proposal = {
+      proposalId: 10,
+      userId: 1,
+      baseProfileVersion: 2,
+      proposedFields: {
+        nickname: 'Nova',
+        city: 'Shanghai',
+        fitnessGoals: ['running'],
+      },
+      draft: profileCard(),
+      status: 'pending',
+      expiresAt: new Date(Date.now() + 60_000),
+      appliedAt: null,
+      rejectedAt: null,
+    };
+    proposalRepo.findOne.mockResolvedValue(proposal);
+    profileRepo.findOne.mockResolvedValue({
+      ...({} as UserSocialProfile),
+      userId: 1,
+      profileVersion: 2,
+      profileDiscoverable: false,
+      agentCanRecommendMe: false,
+      agentCanStartChatAfterApproval: false,
+      hideSensitiveTags: true,
+      sensitiveTagDecisions: {},
+      matchSignals: {},
+    });
+    delegateRepo.findOne.mockResolvedValue(null);
+
+    await service.saveAiDraft(1, {
+      proposalId: 10,
+      expectedProfileVersion: 2,
+      profile: profileCard(),
+    });
+
+    expect(profileRepo.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        nickname: 'Nova',
+        city: 'Shanghai',
+        fitnessGoals: ['running'],
+        profileVersion: 3,
+        profileDiscoverable: false,
+        agentCanRecommendMe: false,
+      }),
+    );
+    expect(proposalRepo.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        proposalId: 10,
+        status: 'applied',
+        appliedAt: expect.any(Date),
+      }),
+    );
+  });
+
   it('keeps a saved AI draft out of the matching pool when enableMatching is false', async () => {
     profileRepo.findOne.mockResolvedValue(null);
     delegateRepo.findOne.mockResolvedValue(null);
@@ -299,6 +419,7 @@ describe('SocialProfileService', () => {
   it('returns weighted completion, readiness, and authorization state', async () => {
     profileRepo.findOne.mockResolvedValue({
       userId: 1,
+      profileVersion: 1,
       nickname: 'Nova',
       gender: 'female',
       ageRange: '25-34',

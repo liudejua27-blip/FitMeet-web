@@ -132,7 +132,12 @@ export class UsersController {
     @Body()
     body: {
       profile?: AiProfileBuilderCard;
+      proposalId?: number;
+      expectedProfileVersion?: number;
       enableMatching?: boolean;
+      ownerConfirmed?: boolean;
+      matchingConsent?: boolean;
+      profileVisibilityConsent?: boolean;
       sensitiveTagsConfirmed?: boolean;
       sensitiveTagDecisions?: Record<
         string,

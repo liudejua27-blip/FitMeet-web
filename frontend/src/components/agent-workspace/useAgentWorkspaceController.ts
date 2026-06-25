@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef } from 'react';
 import { useAuthStore } from '../../stores';
 import {
   socialProfileApi,
+  type ProfileUpdateProposal,
   type SocialProfileCompletion,
   type SocialProfileQuestion,
 } from '../../api/socialProfileApi';
@@ -199,13 +200,14 @@ export function useAgentWorkspaceController(view: AgentView) {
     profileCompletionBootstrapRef.current = userKey;
     socialProfileApi
       .questions()
-      .then(({ questions, completion }) => {
+      .then(({ questions, completion, pendingProposal }) => {
         if (cancelled) return;
         if (!shouldShowProfileCompletionCard(completion)) return;
         const response = buildProfileCompletionBootstrapResponse({
           userId: userKey,
           questions,
           completion,
+          pendingProposal,
           permissionMode: mode,
         });
         setMessages((current) => {
@@ -555,6 +557,7 @@ function buildProfileCompletionBootstrapResponse(input: {
   userId: string;
   questions: SocialProfileQuestion[];
   completion: SocialProfileCompletion;
+  pendingProposal?: ProfileUpdateProposal | null;
   permissionMode: UserFacingAgentResponse['permissionMode'];
 }): UserFacingAgentResponse {
   const questions = normalizeProfileCompletionQuestions(input.questions);
@@ -572,6 +575,7 @@ function buildProfileCompletionBootstrapResponse(input: {
       schemaType: 'profile.completion',
       questionCount: questions.length,
       missingFields: input.completion.missingFields ?? [],
+      pendingProposal: input.pendingProposal ?? null,
       questions,
       savePolicy: 'preview_before_write',
       boundaries: [
