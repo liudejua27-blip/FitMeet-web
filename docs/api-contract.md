@@ -1,6 +1,6 @@
 # FitMeet Core API Contract
 
-Last updated: 2026-06-23
+Last updated: 2026-06-25
 
 This document is a human-readable index for the cleaned FitMeet Web/Agent API.
 The authoritative machine contract remains:
@@ -40,11 +40,14 @@ Core auth/profile endpoints:
 - `PUT /users/profile`
 - `PUT /users/me/location`
 - `GET /users/me/social-profile`
+- `PUT /users/me/social-profile`
 - `GET /users/me/social-profile/questions`
+- `POST /users/me/social-profile/answers`
 - `POST /users/me/social-profile/ai-draft`
 - `POST /users/me/social-profile/ai-save`
 - `GET /users/me/social-profile/completion`
 - `GET /users/me/social-profile/privacy`
+- `PATCH /users/me/social-profile/privacy`
 - `GET /users/me/social-profile/sensitive-tags/pending`
 - `POST /users/me/social-profile/sensitive-tags/confirm`
 - `POST /users/me/social-profile/sensitive-tags/reject`
@@ -111,8 +114,9 @@ Messages:
 Friends:
 
 - `GET /friends`
-- `POST /friends/users/{id}/follow`
-- `GET /friends/following-ids`
+- `POST /users/{id}/follow`
+- `GET /users/{id}/following`
+- `GET /following/ids`
 
 Meets:
 
@@ -158,12 +162,10 @@ Agent control and admin:
 
 Safety:
 
-- `GET /safety/settings`
-- `POST /safety/settings`
-- `GET /safety/reports`
 - `POST /safety/reports`
-- `GET /safety/blocks`
-- `POST /safety/blocks`
+- `POST /safety/blocks/{id}`
+- `DELETE /safety/blocks/{id}`
+- `GET /safety/blocks/ids`
 
 Uploads:
 
@@ -186,6 +188,12 @@ Core contract drift is guarded by:
 ```bash
 pnpm --dir frontend test -- fitmeetCoreContract.test.ts
 ```
+
+This test imports `backend/src/openapi/fitmeet-core.openapi.ts` and compares the
+OpenAPI path/method table with `frontend/src/api/fitmeetCoreContract.ts`.
+Frontend-only experimental Agent routes may remain in the registry, but every
+path in `fitMeetCoreEndpointMethods` must exist in OpenAPI with the exact same
+HTTP methods.
 
 Deployment smoke should include:
 
