@@ -7289,6 +7289,115 @@ describe('AgentWorkspacePage', () => {
     });
   });
 
+  it('keeps restored slot-completion tasks attached when the user types the default safety follow-up', async () => {
+    useRealAgentAdapter();
+    useAuthStore.setState({ isLoggedIn: true, showLoginModal: false });
+    vi.spyOn(socialAgentApi, 'restoreSession').mockResolvedValue(emptySession(77));
+    vi.spyOn(socialAgentApi, 'listThreads').mockResolvedValue({ threads: [] });
+    const slotCompletionResponse: UserFacingAgentResponse = {
+      ...mockResponse(),
+      taskId: 77,
+      assistantMessage:
+        '发布约练卡前我先一次性确认：还差 安全边界。补齐后我会先生成一张可确认的约练卡。',
+      cards: [
+        {
+          id: 'activity_slot_completion:77',
+          type: 'slot_completion',
+          schemaVersion: 'fitmeet.tool-ui.v1',
+          schemaType: 'social_match.slot_completion',
+          title: '补齐约练卡信息',
+          status: 'waiting_confirmation',
+          data: {
+            schemaType: 'social_match.slot_completion',
+            taskId: 77,
+            workflowState: 'COLLECTING_SLOTS',
+            waitingFor: 'safety_boundary',
+            missing: ['安全边界'],
+          },
+          actions: [],
+        },
+      ],
+      workflow: mockWorkflow('publish-draft-77', 'INTENT_DRAFT', {
+        requiredAction: 'opportunity_slot_completion',
+      }),
+    };
+    window.localStorage.setItem(
+      'fitmeet-agent-thread:current',
+      JSON.stringify({
+        activeTaskId: 77,
+        activeThreadId: 'agent-task:77',
+        mode: 'limited_auto',
+        savedAt: Date.now(),
+        userResult: slotCompletionResponse,
+        messages: [
+          {
+            id: 'stored-user-slot',
+            role: 'user',
+            content: '帮我发布约练卡片，8.27 下午六点青岛中山公园找一个散步的搭子',
+            status: 'done',
+            taskId: 77,
+            conversationIntent: 'social',
+          },
+          {
+            id: 'stored-assistant-slot',
+            role: 'assistant',
+            content: slotCompletionResponse.assistantMessage,
+            status: 'done',
+            result: slotCompletionResponse,
+            taskId: 77,
+            conversationIntent: 'social',
+            showSocialResult: true,
+          },
+        ],
+        branchSelections: {},
+      }),
+    );
+    const streamSpy = vi
+      .spyOn(socialAgentApi, 'runUserFacingStream')
+      .mockImplementation(async (_data, onEvent) => {
+        const activityResponse: UserFacingAgentResponse = {
+          ...mockResponse(),
+          taskId: 77,
+          assistantMessage: '我已经把这次约练整理成发布确认卡。',
+          cards: [
+            {
+              id: 'activity_plan:77:publish_confirmation',
+              type: 'activity_plan',
+              schemaVersion: 'fitmeet.tool-ui.v1',
+              schemaType: 'social_match.activity',
+              title: '散步约练卡',
+              status: 'waiting_confirmation',
+              data: {
+                taskId: 77,
+                schemaName: 'OpportunityCard',
+                opportunityCard: true,
+                socialRequestId: 301,
+              },
+              actions: [],
+            },
+          ],
+        };
+        onEvent({ type: 'result', result: activityResponse });
+        return activityResponse;
+      });
+
+    await renderAgentPageWithRoutes('/agent/chat/77');
+
+    expect(await screen.findByText('补齐约练卡信息')).toBeInTheDocument();
+    submitPrompt('按默认安全设置处理');
+
+    await waitFor(() => expect(streamSpy).toHaveBeenCalledTimes(1));
+    expect(streamSpy.mock.calls[0]?.[0]).toMatchObject({
+      goal: '按默认安全设置处理',
+      taskId: 77,
+      clientContext: expect.objectContaining({
+        conversationIntent: 'social',
+        threadId: 'agent-task:77',
+      }),
+    });
+    expect(await screen.findByText('散步约练卡')).toBeInTheDocument();
+  });
+
   it('renders accessible branch picker state and switches assistant variants', async () => {
     useRealAgentAdapter();
     useAuthStore.setState({ isLoggedIn: true, showLoginModal: false });

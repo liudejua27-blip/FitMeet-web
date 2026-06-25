@@ -21,6 +21,7 @@ import { SocialRequestStatus } from './entities/social-request.entity';
 import { AgentConnection } from './entities/agent-connection.entity';
 import {
   SocialRequestType,
+  SocialRequestSafety,
   SocialRequestVisibility,
   UserSocialRequest,
   UserSocialRequestStatus,
@@ -332,6 +333,101 @@ describeWithDatabase(
           tombstoned: true,
         });
         expect(state.activeMatchingJobCount).toBe(0);
+      } finally {
+        await fresh.dataSource.destroy();
+      }
+    });
+
+    it('stages one private draft request and publishes the same request without a prefilled socialRequestId', async () => {
+      const fresh = await serviceWithFreshDatabase({
+        executorFactory: (dataSource) => createPublishingExecutor(dataSource),
+      });
+      try {
+        const fixture = await insertTaskOnlyFixture(fresh.dataSource, {
+          email: 'stage-without-id@example.com',
+          title: '今晚青岛中山公园散步搭子',
+        });
+        const draft = {
+          type: SocialRequestType.RunningPartner,
+          rawText: fixture.title,
+          title: fixture.title,
+          city: fixture.city,
+          activityType: 'walking',
+          safetyRequirement: SocialRequestSafety.LowRiskOnly,
+          visibility: SocialRequestVisibility.Private,
+          status: UserSocialRequestStatus.Draft,
+          metadata: {
+            locationPreference: '青岛中山公园',
+            timePreference: '今晚 18:00',
+            safetyBoundary: '首次见面只在公共场所，先站内沟通',
+          },
+        };
+
+        const staged = await fresh.service.stagePrivateDraftForPublish(
+          fixture.ownerUserId,
+          fixture.taskId,
+          draft,
+        );
+
+        expect(staged.socialRequestId).toBeGreaterThan(0);
+        expect(staged.draft.socialRequestId).toBe(staged.socialRequestId);
+        const privateRequests = await fresh.dataSource
+          .getRepository(UserSocialRequest)
+          .findBy({ userId: fixture.ownerUserId });
+        expect(privateRequests).toHaveLength(1);
+        expect(privateRequests[0]).toMatchObject({
+          id: staged.socialRequestId,
+          status: UserSocialRequestStatus.Draft,
+          visibility: SocialRequestVisibility.Private,
+          agentAllowed: true,
+          requireUserConfirmation: true,
+        });
+        expect(privateRequests[0].metadata).toMatchObject({
+          publishStatus: 'draft',
+          visibility: 'private',
+          stagedForDiscover: true,
+          agentTaskId: fixture.taskId,
+        });
+
+        const publish = await fresh.service.publishDraft(
+          fixture.ownerUserId,
+          fixture.taskId,
+          draft,
+        );
+
+        expect(publish).toMatchObject({
+          status: 'published',
+          socialRequestId: staged.socialRequestId,
+          publicIntentId: `social_request_${staged.socialRequestId}`,
+        });
+        const requestsAfterPublish = await fresh.dataSource
+          .getRepository(UserSocialRequest)
+          .findBy({ userId: fixture.ownerUserId });
+        expect(requestsAfterPublish).toHaveLength(1);
+        expect(requestsAfterPublish[0]).toMatchObject({
+          id: staged.socialRequestId,
+          status: UserSocialRequestStatus.Matching,
+          visibility: SocialRequestVisibility.Public,
+        });
+        const publicIntent = await fresh.dataSource
+          .getRepository(PublicSocialIntent)
+          .findOneByOrFail({
+            id: `social_request_${staged.socialRequestId}`,
+          });
+        expect(publicIntent).toMatchObject({
+          userId: fixture.ownerUserId,
+          linkedSocialRequestId: staged.socialRequestId,
+          status: SocialRequestStatus.Searching,
+        });
+        const matchingJobs = await fresh.dataSource
+          .getRepository(MatchingJob)
+          .findBy({ linkedSocialRequestId: staged.socialRequestId });
+        expect(matchingJobs).toHaveLength(1);
+        expect(matchingJobs[0]).toMatchObject({
+          ownerUserId: fixture.ownerUserId,
+          publicIntentId: `social_request_${staged.socialRequestId}`,
+          status: MatchingJobStatus.Queued,
+        });
       } finally {
         await fresh.dataSource.destroy();
       }
@@ -655,6 +751,44 @@ async function insertDraftFixture(
     ownerUserId,
     publicIntentId,
     socialRequestId,
+    taskId: Number(taskRows[0].id),
+    title,
+  };
+}
+
+async function insertTaskOnlyFixture(
+  dataSource: DataSource,
+  input: {
+    city?: string;
+    email?: string;
+    title?: string;
+  } = {},
+): Promise<Omit<SocialRequestFixture, 'publicIntentId' | 'socialRequestId'>> {
+  const title = input.title ?? '今晚青岛轻松跑步';
+  const city = input.city ?? '青岛';
+  const ownerUserId = await insertUser(dataSource, {
+    email:
+      input.email ??
+      `task-only-db-${Date.now()}-${Math.random().toString(36).slice(2)}@example.com`,
+    name: 'Task Only DB User',
+  });
+  const taskRows = await dataSource.query(
+    `INSERT INTO "agent_tasks"
+       ("ownerUserId", "taskType", "title", "goal", "result", "memory",
+        "status", "permissionMode")
+     VALUES ($1, 'social_agent_chat', 'FitMeet Agent 聊天任务', $2,
+       '{}'::jsonb, '{}'::jsonb, $3, $4)
+     RETURNING "id"`,
+    [
+      ownerUserId,
+      title,
+      AgentTaskStatus.AwaitingConfirmation,
+      AgentTaskPermissionMode.Confirm,
+    ],
+  );
+  return {
+    city,
+    ownerUserId,
     taskId: Number(taskRows[0].id),
     title,
   };
