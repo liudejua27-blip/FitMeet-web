@@ -3,16 +3,10 @@ import { AgentTaskStatus } from './entities/agent-task.entity';
 
 describe('SocialAgentPublishReconcilerCronService', () => {
   function makeRepo(tasks: Array<Record<string, unknown>>) {
-    const qb = {
-      where: jest.fn().mockReturnThis(),
-      andWhere: jest.fn().mockReturnThis(),
-      orderBy: jest.fn().mockReturnThis(),
-      limit: jest.fn().mockReturnThis(),
-      getMany: jest.fn().mockResolvedValue(tasks),
-    };
     return {
-      qb,
-      createQueryBuilder: jest.fn().mockReturnValue(qb),
+      manager: {
+        query: jest.fn().mockResolvedValue(tasks),
+      },
     };
   }
 
@@ -48,11 +42,15 @@ describe('SocialAgentPublishReconcilerCronService', () => {
     });
     expect(reconciler.reconcileTask).toHaveBeenCalledWith(7, 101);
     expect(reconciler.reconcileTask).toHaveBeenCalledWith(7, 102);
-    expect(repo.qb.andWhere).toHaveBeenCalledWith(
-      expect.stringContaining('publicIntentId'),
-    );
-    expect(repo.qb.andWhere).toHaveBeenCalledWith(
-      expect.stringContaining('publishReconcile,status'),
+    expect(repo.manager.query).toHaveBeenCalledWith(
+      expect.stringContaining('FOR UPDATE SKIP LOCKED'),
+      expect.arrayContaining([
+        expect.arrayContaining([
+          AgentTaskStatus.Succeeded,
+          AgentTaskStatus.WaitingResult,
+          AgentTaskStatus.AwaitingConfirmation,
+        ]),
+      ]),
     );
   });
 

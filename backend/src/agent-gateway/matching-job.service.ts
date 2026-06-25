@@ -17,6 +17,11 @@ type SqlQueryManager = {
   query: (query: string, parameters?: unknown[]) => Promise<unknown>;
 };
 
+export type ClaimedMatchingJob = MatchingJob & {
+  leaseOwner: string;
+  leaseExpiresAt: Date;
+};
+
 @Injectable()
 export class MatchingJobService {
   constructor(
@@ -84,11 +89,120 @@ export class MatchingJobService {
     });
   }
 
+  async claimDueJobs(input: {
+    workerId: string;
+    limit?: number;
+    leaseMs?: number;
+  }): Promise<ClaimedMatchingJob[]> {
+    const workerId = this.requiredText(
+      input.workerId,
+      'matching_job_worker_id_required',
+    );
+    const limit = Math.max(1, Math.min(Math.floor(input.limit ?? 10), 100));
+    const leaseMs = Math.max(
+      5_000,
+      Math.min(Math.floor(input.leaseMs ?? 60_000), 15 * 60_000),
+    );
+    const leaseExpiresAt = new Date(Date.now() + leaseMs);
+    const now = new Date();
+    return this.repo.manager.transaction(async (manager) => {
+      const rows = await this.queryRows<ClaimedMatchingJob>(
+        manager,
+        `WITH claimable AS (
+           SELECT "id"
+           FROM "matching_jobs"
+           WHERE (
+               "status" IN ($1, $2)
+               AND ("nextRunAt" IS NULL OR "nextRunAt" <= $3)
+             )
+             OR (
+               "status" = $4
+               AND ("leaseExpiresAt" IS NULL OR "leaseExpiresAt" < $3)
+             )
+           ORDER BY
+             CASE WHEN "status" = $4 THEN 0 ELSE 1 END,
+             "nextRunAt" NULLS FIRST,
+             "createdAt" ASC,
+             "id" ASC
+           LIMIT $5
+           FOR UPDATE SKIP LOCKED
+         )
+         UPDATE "matching_jobs" job
+         SET "status" = $4,
+             "attemptCount" = job."attemptCount" + 1,
+             "leaseOwner" = $6,
+             "leaseExpiresAt" = $7,
+             "lastHeartbeatAt" = $3,
+             "startedAt" = COALESCE(job."startedAt", $3),
+             "updatedAt" = $3,
+             "errorMessage" = '',
+             "metadata" = COALESCE(job."metadata", '{}'::jsonb) || $8::jsonb
+         FROM claimable
+         WHERE job."id" = claimable."id"
+         RETURNING job.*`,
+        [
+          MatchingJobStatus.Queued,
+          MatchingJobStatus.FailedRetryable,
+          now,
+          MatchingJobStatus.Running,
+          limit,
+          workerId,
+          leaseExpiresAt,
+          JSON.stringify({
+            leaseOwner: workerId,
+            leaseStartedAt: now.toISOString(),
+            leaseExpiresAt: leaseExpiresAt.toISOString(),
+          }),
+        ],
+      );
+      return rows;
+    });
+  }
+
   async markCompleted(
     jobId: number,
     candidateCount: number,
     result: Record<string, unknown> = {},
+    leaseOwner?: string,
   ) {
+    if (leaseOwner) {
+      const count = Math.max(0, Math.floor(Number(candidateCount) || 0));
+      const completedAt = new Date();
+      const status =
+        count > 0
+          ? MatchingJobStatus.CandidatesReady
+          : MatchingJobStatus.NoCandidates;
+      const rows = await this.queryRows<MatchingJob>(
+        this.repo.manager,
+        `UPDATE "matching_jobs"
+         SET "status" = $1,
+             "candidateCount" = $2,
+             "result" = $3::jsonb,
+             "errorMessage" = '',
+             "nextRunAt" = NULL,
+             "leaseOwner" = NULL,
+             "leaseExpiresAt" = NULL,
+             "lastHeartbeatAt" = NULL,
+             "completedAt" = $4,
+             "updatedAt" = $4
+         WHERE "id" = $5
+           AND "status" = $6
+           AND "leaseOwner" = $7
+         RETURNING *`,
+        [
+          status,
+          count,
+          JSON.stringify(result),
+          completedAt,
+          jobId,
+          MatchingJobStatus.Running,
+          leaseOwner,
+        ],
+      );
+      const claimed = rows[0];
+      if (!claimed) throw new BadRequestException('matching_job_lease_lost');
+      return claimed;
+    }
     const job = await this.repo.findOne({ where: { id: jobId } });
     if (!job) throw new BadRequestException('matching_job_not_found');
     const count = Math.max(0, Math.floor(Number(candidateCount) || 0));
@@ -104,7 +218,53 @@ export class MatchingJobService {
     return this.repo.save(job);
   }
 
-  async markFailed(jobId: number, error: unknown, retryable = true) {
+  async markFailed(
+    jobId: number,
+    error: unknown,
+    retryable = true,
+    leaseOwner?: string,
+  ) {
+    if (leaseOwner) {
+      const now = new Date();
+      const retryAt = retryable ? new Date(Date.now() + 60_000) : null;
+      const status = retryable
+        ? MatchingJobStatus.FailedRetryable
+        : MatchingJobStatus.FailedFinal;
+      const rows = await this.queryRows<MatchingJob>(
+        this.repo.manager,
+        `UPDATE "matching_jobs"
+         SET "status" = $1,
+             "errorMessage" = $2,
+             "nextRunAt" = $3,
+             "leaseOwner" = NULL,
+             "leaseExpiresAt" = NULL,
+             "lastHeartbeatAt" = NULL,
+             "completedAt" = CASE WHEN $4::boolean THEN NULL ELSE $5 END,
+             "updatedAt" = $5,
+             "metadata" = COALESCE("metadata", '{}'::jsonb) || $6::jsonb
+         WHERE "id" = $7
+           AND "status" = $8
+           AND "leaseOwner" = $9
+         RETURNING *`,
+        [
+          status,
+          this.errorMessage(error),
+          retryAt,
+          retryable,
+          now,
+          JSON.stringify({
+            failedAt: now.toISOString(),
+            retryable,
+          }),
+          jobId,
+          MatchingJobStatus.Running,
+          leaseOwner,
+        ],
+      );
+      const claimed = rows[0];
+      if (!claimed) throw new BadRequestException('matching_job_lease_lost');
+      return claimed;
+    }
     const job = await this.repo.findOne({ where: { id: jobId } });
     if (!job) throw new BadRequestException('matching_job_not_found');
     job.status = retryable
@@ -116,6 +276,42 @@ export class MatchingJobService {
       : null;
     job.completedAt = retryable ? null : new Date();
     return this.repo.save(job);
+  }
+
+  async cancelClaimed(jobId: number, leaseOwner: string, reason: string) {
+    const now = new Date();
+    const rows = await this.queryRows<MatchingJob>(
+      this.repo.manager,
+      `UPDATE "matching_jobs"
+       SET "status" = $1,
+           "errorMessage" = $2,
+           "nextRunAt" = NULL,
+           "leaseOwner" = NULL,
+           "leaseExpiresAt" = NULL,
+           "lastHeartbeatAt" = NULL,
+           "completedAt" = $3,
+           "updatedAt" = $3,
+           "metadata" = COALESCE("metadata", '{}'::jsonb) || $4::jsonb
+       WHERE "id" = $5
+         AND "status" = $6
+         AND "leaseOwner" = $7
+       RETURNING *`,
+      [
+        MatchingJobStatus.Cancelled,
+        this.errorMessage(reason),
+        now,
+        JSON.stringify({
+          cancelledAt: now.toISOString(),
+          cancelReason: reason,
+        }),
+        jobId,
+        MatchingJobStatus.Running,
+        leaseOwner,
+      ],
+    );
+    const claimed = rows[0];
+    if (!claimed) throw new BadRequestException('matching_job_lease_lost');
+    return claimed;
   }
 
   private requiredText(value: unknown, errorCode: string): string {
@@ -148,6 +344,14 @@ export class MatchingJobService {
     parameters: unknown[] = [],
   ): Promise<T[]> {
     const rows: unknown = await manager.query(query, parameters);
+    if (
+      Array.isArray(rows) &&
+      rows.length === 2 &&
+      Array.isArray(rows[0]) &&
+      typeof rows[1] === 'number'
+    ) {
+      return rows[0] as T[];
+    }
     if (!Array.isArray(rows)) return [];
     return rows as T[];
   }

@@ -189,6 +189,8 @@ import { AgentSettings } from './entities/agent-settings.entity';
 import { AgentApprovalService } from './agent-approval.service';
 import { AgentSideEffectLedgerService } from './agent-side-effect-ledger.service';
 import { MatchingJobService } from './matching-job.service';
+import { SocialAgentMatchingJobProcessorService } from './social-agent-matching-job-processor.service';
+import { SocialAgentMatchingJobWorkerCronService } from './social-agent-matching-job-worker-cron.service';
 import { SocialAgentPublishReconcilerService } from './social-agent-publish-reconciler.service';
 import { SocialAgentPublishReconcilerCronService } from './social-agent-publish-reconciler-cron.service';
 import { AgentSettingsService } from './agent-settings.service';
@@ -291,6 +293,8 @@ import { AdminRbacModule } from '../admin-rbac/admin-rbac.module';
     AgentApprovalService,
     AgentSideEffectLedgerService,
     MatchingJobService,
+    SocialAgentMatchingJobProcessorService,
+    SocialAgentMatchingJobWorkerCronService,
     SocialAgentPublishReconcilerService,
     SocialAgentPublishReconcilerCronService,
     AgentApprovalDispatcherService,
@@ -443,6 +447,8 @@ import { AdminRbacModule } from '../admin-rbac/admin-rbac.module';
     AgentSelfImproveService,
     AgentApprovalService,
     AgentSideEffectLedgerService,
+    MatchingJobService,
+    SocialAgentMatchingJobProcessorService,
     AgentApprovalDispatcherService,
     AgentSettingsService,
     AgentActionLogService,
