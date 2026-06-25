@@ -4,10 +4,12 @@ import {
   SocialRequestSafety,
   SocialRequestType,
   SocialRequestVisibility,
+  UserSocialRequest,
   UserSocialRequestStatus,
 } from '../social-requests/social-request.entity';
 import {
   AgentTask,
+  AgentTaskEvent,
   AgentTaskEventType,
   AgentTaskPermissionMode,
   AgentTaskStatus,
@@ -18,6 +20,7 @@ import { SocialAgentChatLlmService } from './social-agent-chat-llm.service';
 import { SocialAgentChatDeepSeekClientService } from './social-agent-chat-deepseek-client.service';
 import { SocialAgentCandidateActionService } from './social-agent-candidate-action.service';
 import { SocialAgentDraftPublicationService } from './social-agent-draft-publication.service';
+import { PublicSocialIntent } from './entities/public-social-intent.entity';
 import { SocialAgentDraftSearchService } from './social-agent-draft-search.service';
 import { SocialAgentRecommendationResultService } from './social-agent-recommendation-result.service';
 import { SocialAgentActivitySearchService } from './social-agent-activity-search.service';
@@ -421,6 +424,7 @@ function makeHarness(options: Record<string, unknown> = {}) {
       updatedAt: new Date('2026-01-01T00:00:00.000Z'),
     },
     createQueryBuilder: jest.fn().mockReturnValue({
+      setLock: jest.fn().mockReturnThis(),
       where: jest.fn().mockReturnThis(),
       andWhere: jest.fn().mockReturnThis(),
       orderBy: jest.fn().mockReturnThis(),
@@ -477,7 +481,50 @@ function makeHarness(options: Record<string, unknown> = {}) {
             : null,
         ),
       ),
+    save: jest.fn((input) => Promise.resolve(input)),
   };
+  const userSocialRequest = {
+    id: 301,
+    userId: 7,
+    status: UserSocialRequestStatus.Draft,
+    visibility: SocialRequestVisibility.Private,
+    metadata: {},
+  };
+  const userSocialRequestQuery = {
+    setLock: jest.fn().mockReturnThis(),
+    where: jest.fn().mockReturnThis(),
+    andWhere: jest.fn().mockReturnThis(),
+    getOne: jest.fn().mockResolvedValue(userSocialRequest),
+  };
+  const userSocialRequestRepo = {
+    createQueryBuilder: jest.fn(() => userSocialRequestQuery),
+    findOne: jest.fn().mockResolvedValue(userSocialRequest),
+    save: jest.fn((input) => Promise.resolve(input)),
+  };
+  const matchingJobRepo = {
+    findOne: jest.fn().mockResolvedValue(null),
+    save: jest.fn((input) => Promise.resolve(input)),
+  };
+  const sideEffectLedger = {
+    run: jest.fn(async (_input, operation) => ({
+      result: await operation(),
+      reused: false,
+    })),
+  };
+  const transactionManager = {
+    query: jest.fn().mockResolvedValue([]),
+    transaction: jest.fn(async (runner: (manager: never) => unknown) =>
+      runner(transactionManager as never),
+    ),
+    getRepository: jest.fn((entity: unknown) => {
+      if (entity === AgentTask) return taskRepo;
+      if (entity === AgentTaskEvent) return eventRepo;
+      if (entity === UserSocialRequest) return userSocialRequestRepo;
+      if (entity === PublicSocialIntent) return publicIntentRepo;
+      return {};
+    }),
+  };
+  (taskRepo as { manager?: unknown }).manager = transactionManager;
   const candidatePool = {
     searchActivity: jest.fn().mockResolvedValue({
       activityResults: [],
@@ -616,7 +663,7 @@ function makeHarness(options: Record<string, unknown> = {}) {
       executor as never,
       longTermMemory as never,
       publicIntentRepo as never,
-      undefined,
+      sideEffectLedger as never,
       {
         enqueue: jest.fn().mockResolvedValue({
           job: {
@@ -629,6 +676,8 @@ function makeHarness(options: Record<string, unknown> = {}) {
           reused: false,
         }),
       } as never,
+      userSocialRequestRepo as never,
+      matchingJobRepo as never,
     );
   const draftSearch =
     (options.draftSearch as SocialAgentDraftSearchService | undefined) ??
@@ -1583,7 +1632,7 @@ describe('SocialAgentChat acceptance flow', () => {
   });
 
   it('turns the tested QDU running-partner request into a publishable draft card, not candidate cards', async () => {
-    const { service, executor } = makeHarness();
+    const { service, executor, taskRepo } = makeHarness();
 
     const result = await service.routeMessage(7, {
       message:
@@ -1637,6 +1686,51 @@ describe('SocialAgentChat acceptance flow', () => {
       expect.any(Object),
       expect.any(Number),
     );
+    const task = (await taskRepo.findOne()) as AgentTask;
+    const taskResult = task.result ?? {};
+    const chatRun = (taskResult.chatRun ?? {}) as Record<string, unknown>;
+    const activityDraft = (taskResult.activityDraft ?? {}) as Record<
+      string,
+      unknown
+    >;
+    const chatDraft = (chatRun.socialRequestDraft ?? {}) as Record<
+      string,
+      unknown
+    >;
+    const memory = (task.memory ?? {}) as Record<string, unknown>;
+    const socialAgentChat = (memory.socialAgentChat ?? {}) as Record<
+      string,
+      unknown
+    >;
+    const memoryDraft = (socialAgentChat.socialRequestDraft ?? {}) as Record<
+      string,
+      unknown
+    >;
+    task.result = {
+      ...taskResult,
+      chatRun: {
+        ...chatRun,
+        socialRequestDraft: {
+          ...chatDraft,
+          socialRequestId: 301,
+        },
+      },
+      activityDraft: {
+        ...activityDraft,
+        socialRequestId: 301,
+      },
+    };
+    task.memory = {
+      ...memory,
+      socialAgentChat: {
+        ...socialAgentChat,
+        socialRequestDraft: {
+          ...memoryDraft,
+          socialRequestId: 301,
+        },
+      },
+    };
+    await taskRepo.save(task);
 
     const publish = await service.routeMessage(7, {
       taskId: result.taskId,
@@ -1691,6 +1785,46 @@ describe('SocialAgentChat acceptance flow', () => {
       expect.any(Object),
       expect.any(Number),
     );
+    const publishTask = (await taskRepo.findOne()) as AgentTask;
+    const publishTaskResult = publishTask.result ?? {};
+    const publishChatRun = (publishTaskResult.chatRun ?? {}) as Record<
+      string,
+      unknown
+    >;
+    const publishActivityDraft = (publishTaskResult.activityDraft ??
+      {}) as Record<string, unknown>;
+    const publishChatDraft = (publishChatRun.socialRequestDraft ??
+      {}) as Record<string, unknown>;
+    const publishMemory = (publishTask.memory ?? {}) as Record<string, unknown>;
+    const publishSocialAgentChat = (publishMemory.socialAgentChat ??
+      {}) as Record<string, unknown>;
+    const publishMemoryDraft = (publishSocialAgentChat.socialRequestDraft ??
+      {}) as Record<string, unknown>;
+    publishTask.result = {
+      ...publishTaskResult,
+      chatRun: {
+        ...publishChatRun,
+        socialRequestDraft: {
+          ...publishChatDraft,
+          socialRequestId: 301,
+        },
+      },
+      activityDraft: {
+        ...publishActivityDraft,
+        socialRequestId: 301,
+      },
+    };
+    publishTask.memory = {
+      ...publishMemory,
+      socialAgentChat: {
+        ...publishSocialAgentChat,
+        socialRequestDraft: {
+          ...publishMemoryDraft,
+          socialRequestId: 301,
+        },
+      },
+    };
+    await taskRepo.save(publishTask);
 
     const publishCard = publish.cards?.[0];
     const publishAction = publishCard?.actions?.find(

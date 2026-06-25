@@ -287,6 +287,38 @@ describe('SocialAgentSessionRestoreService', () => {
     });
   });
 
+  it('does not restore dismissed social intent cards or candidates', async () => {
+    const dismissedTask = makeTask({
+      status: AgentTaskStatus.AwaitingConfirmation,
+      statusReason: 'social_intent_publish_dismissed',
+      result: {
+        publishSocialRequest: {
+          status: 'dismissed',
+          publishStatus: 'dismissed',
+        },
+      },
+      memory: {
+        socialAgentChat: {
+          publishStatus: 'dismissed',
+        },
+      },
+    });
+    const { service } = makeHarness({ task: dismissedTask });
+
+    const snapshot = await service.buildSessionSnapshot({
+      ownerUserId: 7,
+      task: dismissedTask,
+      visibleStepLabel: (_, label) => label,
+    });
+
+    expect(snapshot).toMatchObject({
+      hasSession: false,
+      activeTaskId: null,
+      result: null,
+      messages: [],
+    });
+  });
+
   it('does not restore stale feedback-only tasks into the chat shell', async () => {
     const staleTask = makeTask({
       status: AgentTaskStatus.AwaitingFeedback,
