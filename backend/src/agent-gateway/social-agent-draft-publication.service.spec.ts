@@ -65,6 +65,12 @@ function makeHarness(initialTask = makeTask(), options: HarnessOptions = {}) {
   };
   const txUserSocialRequestRepo = {
     createQueryBuilder: jest.fn(() => publishRequestQuery),
+    create: jest.fn((input: Record<string, unknown>) => ({
+      ...defaultUserSocialRequest,
+      ...input,
+      id: 301,
+    })),
+    save: jest.fn((input: UserSocialRequest) => Promise.resolve(input)),
   };
   const taskRepo = {
     findOne: jest.fn().mockImplementation(() => Promise.resolve(task)),
@@ -722,25 +728,46 @@ describe('SocialAgentDraftPublicationService', () => {
     );
   });
 
-  it('requires a socialRequestId from the publish output or draft metadata', async () => {
-    const { executor, service } = makeHarness();
-    executor.executeToolAction.mockResolvedValueOnce({
-      id: 'action_create_social_request_publish_1',
-      toolName: SocialAgentToolName.CreateSocialRequest,
-      status: 'succeeded',
-      output: { synced: true },
-      error: null,
-    } as never);
+  it('stages a private social request when publish payload lacks socialRequestId', async () => {
+    const { executor, service, task, txUserSocialRequestRepo } = makeHarness();
 
-    await expect(
-      service.publishDraft(7, 101, {
-        type: SocialRequestType.RunningPartner,
-        rawText: '今晚青岛轻松跑步',
+    const result = await service.publishDraft(7, 101, {
+      type: SocialRequestType.RunningPartner,
+      rawText: '今晚青岛轻松跑步',
+      title: '今晚青岛轻松跑步',
+      visibility: SocialRequestVisibility.Private,
+      status: UserSocialRequestStatus.Draft,
+    });
+
+    expect(txUserSocialRequestRepo.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: 7,
         title: '今晚青岛轻松跑步',
-        visibility: SocialRequestVisibility.Private,
         status: UserSocialRequestStatus.Draft,
+        visibility: SocialRequestVisibility.Private,
       }),
-    ).rejects.toThrow('发布约练缺少 socialRequestId');
+    );
+    expect(executor.executeToolAction).toHaveBeenCalledWith(
+      101,
+      SocialAgentToolName.CreateSocialRequest,
+      expect.objectContaining({
+        socialRequestId: 301,
+        mode: 'publish',
+        publish: true,
+      }),
+      7,
+    );
+    expect(result).toMatchObject({
+      success: true,
+      socialRequestId: 301,
+      publicIntentId: 'social_request_301',
+    });
+    expect(task.result).toMatchObject({
+      chatRun: {
+        socialRequestId: 301,
+        socialRequestDraft: expect.objectContaining({ socialRequestId: 301 }),
+      },
+    });
   });
 
   it('fails publish when the public intent cannot be read back from Discover', async () => {

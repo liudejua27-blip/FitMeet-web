@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Optional } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 
@@ -9,6 +9,7 @@ import type { SocialAgentIntentRouterResult } from './social-agent-intent-router
 import { recordSocialAgentPendingAction } from './social-agent-memory.util';
 import { SocialAgentCandidateActionService } from './social-agent-candidate-action.service';
 import { SocialAgentMetricsService } from './social-agent-metrics.service';
+import { SocialAgentDraftPublicationService } from './social-agent-draft-publication.service';
 import type { SocialAgentActionApprovalRuntimeContext } from './social-agent-candidate-action-approval.presenter';
 import { hasExplicitPublishSideEffectIntent } from './social-agent-social-intent-gate';
 import {
@@ -47,6 +48,8 @@ export class SocialAgentRouteActionTurnService {
     private readonly taskRepo: Repository<AgentTask>,
     private readonly candidateActions: SocialAgentCandidateActionService,
     private readonly metrics: SocialAgentMetricsService,
+    @Optional()
+    private readonly draftPublication?: SocialAgentDraftPublicationService,
   ) {}
 
   async handle(
@@ -110,8 +113,17 @@ export class SocialAgentRouteActionTurnService {
           ],
         };
       }
-      rememberSocialAgentOpportunityDraft(input.task, publishDraft.draft);
-      await this.taskRepo.save(input.task);
+      const staged = this.draftPublication
+        ? await this.draftPublication.stagePrivateDraftForPublish(
+            input.ownerUserId,
+            input.task.id,
+            publishDraft.draft,
+          )
+        : null;
+      const task = input.task;
+      const draft = staged?.draft ?? publishDraft.draft;
+      rememberSocialAgentOpportunityDraft(task, draft);
+      await this.taskRepo.save(task);
       return {
         handled: true,
         assistantMessage:
@@ -119,8 +131,8 @@ export class SocialAgentRouteActionTurnService {
         pendingApproval: null,
         cards: [
           buildSocialAgentPublishConfirmationCard({
-            task: input.task,
-            draft: publishDraft.draft,
+            task,
+            draft,
           }),
         ],
       };

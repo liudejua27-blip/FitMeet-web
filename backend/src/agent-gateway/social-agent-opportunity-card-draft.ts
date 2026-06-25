@@ -162,6 +162,10 @@ export function buildSocialAgentPublishConfirmationCard(input: {
     '不会公开精确位置、联系方式或私密资料。';
   const capacityLabel = text(draft.capacityLabel) || '找 1 人';
   const published = input.published === true;
+  const socialRequestId =
+    input.socialRequestId ??
+    positiveNumber(record(draft).socialRequestId) ??
+    positiveNumber(record(draft.metadata).socialRequestId);
   const discoverHref =
     text(input.discoverHref) ||
     (input.publicIntentId
@@ -170,7 +174,7 @@ export function buildSocialAgentPublishConfirmationCard(input: {
 
   return {
     id: published
-      ? `activity_plan:${task.id}:published:${input.publicIntentId ?? input.socialRequestId ?? 'ok'}`
+      ? `activity_plan:${task.id}:published:${input.publicIntentId ?? socialRequestId ?? 'ok'}`
       : `activity_plan:${task.id}:publish_confirmation`,
     type: published ? 'activity_status' : 'activity_plan',
     schemaVersion: 'fitmeet.tool-ui.v1',
@@ -199,7 +203,7 @@ export function buildSocialAgentPublishConfirmationCard(input: {
       publishPolicy: 'confirm_before_public_publish',
       approvalPolicy: published ? '已由你确认发布' : '发布到发现前必须由你确认',
       publicIntentId: input.publicIntentId ?? null,
-      socialRequestId: input.socialRequestId ?? null,
+      socialRequestId: socialRequestId ?? null,
       discoverHref,
       publicIntentHref: input.publicIntentHref ?? null,
       autoPublished: published,
@@ -229,6 +233,7 @@ export function buildSocialAgentPublishConfirmationCard(input: {
         safetyBoundary,
         capacityLabel,
         publicIntentId: input.publicIntentId ?? null,
+        socialRequestId: socialRequestId ?? null,
         discoverHref,
         publicIntentHref: input.publicIntentHref ?? null,
         autoPublished: published,
@@ -250,7 +255,7 @@ export function buildSocialAgentPublishConfirmationCard(input: {
               taskId: task.id,
               socialRequestDraft: draft,
               publicIntentId: input.publicIntentId ?? null,
-              socialRequestId: input.socialRequestId ?? null,
+              socialRequestId: socialRequestId ?? null,
               discoverHref,
               sideEffect: 'edit_draft_only',
             },
@@ -267,6 +272,7 @@ export function buildSocialAgentPublishConfirmationCard(input: {
             payload: {
               taskId: task.id,
               socialRequestDraft: draft,
+              socialRequestId: socialRequestId ?? null,
               actionType: 'publish_social_request',
               sideEffect: 'publish_social_request',
               approvalRequired: true,
@@ -290,6 +296,7 @@ export function buildSocialAgentPublishConfirmationCard(input: {
             payload: {
               taskId: task.id,
               socialRequestDraft: draft,
+              socialRequestId: socialRequestId ?? null,
               sideEffect: 'edit_draft_only',
             },
           },
@@ -303,6 +310,7 @@ export function buildSocialAgentPublishConfirmationCard(input: {
             payload: {
               taskId: task.id,
               socialRequestDraft: draft,
+              socialRequestId: socialRequestId ?? null,
               privateMatchMode: true,
               publicDiscoverPublishSkipped: true,
               sourceAction: 'activity.skip_publish',
@@ -569,6 +577,11 @@ function uniqueStrings(values: Array<string | null | undefined>): string[] {
   return Array.from(
     new Set(values.map((value) => text(value)).filter(Boolean)),
   ).slice(0, 20);
+}
+
+function positiveNumber(value: unknown): number | null {
+  const number = Number(value);
+  return Number.isFinite(number) && number > 0 ? number : null;
 }
 
 function record(value: unknown): Record<string, unknown> {

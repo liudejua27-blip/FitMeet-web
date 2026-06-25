@@ -165,6 +165,28 @@ function makeHarness(options: Record<string, unknown> = {}) {
       }),
     ),
   };
+  const defaultPublicIntent = {
+    id: 'social_request_301',
+    userId: 7,
+    linkedSocialRequestId: 301,
+    mode: 'public',
+    title: '青岛大学晚跑步搭子',
+    description: '今天晚上在青岛大学附近轻松跑步，先站内沟通。',
+    city: '青岛',
+    loc: '青岛大学附近',
+    requestType: 'running',
+    socialGoal: '找 1 人一起跑步',
+    interestTags: ['跑步'],
+    radiusKm: 3,
+    timePreference: '今天晚上',
+    locationPreference: '青岛大学附近',
+    matchedCount: 0,
+    status: 'active',
+    metadata: { sourceVersion: 'source-v1' },
+    createdAt: new Date('2026-01-01T00:00:00.000Z'),
+    updatedAt: new Date('2026-01-01T00:00:00.000Z'),
+  };
+  let latestPublicIntent: Record<string, unknown> = defaultPublicIntent;
   const executor = {
     resolveCandidateTargetUser: jest.fn((input: Record<string, unknown>) => {
       const candidate =
@@ -218,17 +240,54 @@ function makeHarness(options: Record<string, unknown> = {}) {
           toolName === SocialAgentToolName.CreateSocialRequest &&
           input.mode === 'publish'
         ) {
+          const socialRequestId = Number(input.socialRequestId ?? 301);
+          const publicIntentId = `social_request_${socialRequestId}`;
+          latestPublicIntent = {
+            ...defaultPublicIntent,
+            id: publicIntentId,
+            linkedSocialRequestId: socialRequestId,
+            title: input.title ?? defaultPublicIntent.title,
+            description: input.description ?? defaultPublicIntent.description,
+            city: input.city ?? defaultPublicIntent.city,
+            loc:
+              input.locationName ??
+              input.locationPreference ??
+              defaultPublicIntent.loc,
+            requestType:
+              input.activityType ??
+              input.type ??
+              defaultPublicIntent.requestType,
+            socialGoal:
+              input.socialGoal ?? input.title ?? defaultPublicIntent.socialGoal,
+            interestTags: Array.isArray(input.interestTags)
+              ? input.interestTags
+              : defaultPublicIntent.interestTags,
+            radiusKm: input.radiusKm ?? defaultPublicIntent.radiusKm,
+            timePreference:
+              input.timePreference ?? defaultPublicIntent.timePreference,
+            locationPreference:
+              input.locationName ??
+              input.locationPreference ??
+              defaultPublicIntent.locationPreference,
+            status: 'active',
+            mode: 'public',
+            metadata: {
+              sourceVersion: 'source-v1',
+            },
+            updatedAt: new Date('2026-01-01T00:00:01.000Z'),
+          };
           return {
             id: 'action_create_social_request_publish_1',
             toolName,
             status: 'succeeded',
             output: {
-              id: 301,
-              socialRequestId: 301,
-              publicIntentId: 'social_request_301',
+              id: socialRequestId,
+              socialRequestId,
+              publicIntentId,
               synced: true,
+              publicIntent: latestPublicIntent,
               socialRequest: {
-                id: 301,
+                id: socialRequestId,
                 status: UserSocialRequestStatus.Matching,
               },
             },
@@ -403,27 +462,7 @@ function makeHarness(options: Record<string, unknown> = {}) {
     getPendingForTask: jest.fn().mockResolvedValue([]),
   };
   const publicIntentRepo = {
-    publicIntent: {
-      id: 'social_request_301',
-      userId: 7,
-      linkedSocialRequestId: 301,
-      mode: 'public',
-      title: '青岛大学晚跑步搭子',
-      description: '今天晚上在青岛大学附近轻松跑步，先站内沟通。',
-      city: '青岛',
-      loc: '青岛大学附近',
-      requestType: 'running',
-      socialGoal: '找 1 人一起跑步',
-      interestTags: ['跑步'],
-      radiusKm: 3,
-      timePreference: '今天晚上',
-      locationPreference: '青岛大学附近',
-      matchedCount: 0,
-      status: 'active',
-      metadata: { sourceVersion: 'source-v1' },
-      createdAt: new Date('2026-01-01T00:00:00.000Z'),
-      updatedAt: new Date('2026-01-01T00:00:00.000Z'),
-    },
+    publicIntent: latestPublicIntent,
     createQueryBuilder: jest.fn().mockReturnValue({
       setLock: jest.fn().mockReturnThis(),
       where: jest.fn().mockReturnThis(),
@@ -431,55 +470,13 @@ function makeHarness(options: Record<string, unknown> = {}) {
       orderBy: jest.fn().mockReturnThis(),
       take: jest.fn().mockReturnThis(),
       getMany: jest.fn().mockResolvedValue([]),
-      getOne: jest.fn().mockResolvedValue({
-        id: 'social_request_301',
-        userId: 7,
-        linkedSocialRequestId: 301,
-        mode: 'public',
-        title: '青岛大学晚跑步搭子',
-        description: '今天晚上在青岛大学附近轻松跑步，先站内沟通。',
-        city: '青岛',
-        loc: '青岛大学附近',
-        requestType: 'running',
-        socialGoal: '找 1 人一起跑步',
-        interestTags: ['跑步'],
-        radiusKm: 3,
-        timePreference: '今天晚上',
-        locationPreference: '青岛大学附近',
-        matchedCount: 0,
-        status: 'active',
-        metadata: { sourceVersion: 'source-v1' },
-        createdAt: new Date('2026-01-01T00:00:00.000Z'),
-        updatedAt: new Date('2026-01-01T00:00:00.000Z'),
-      }),
+      getOne: jest.fn(() => Promise.resolve(latestPublicIntent)),
     }),
     findOne: jest
       .fn()
       .mockImplementation(({ where }: { where?: { id?: string } }) =>
         Promise.resolve(
-          where?.id
-            ? {
-                id: where.id,
-                userId: 7,
-                linkedSocialRequestId: 301,
-                mode: 'public',
-                title: '青岛大学晚跑步搭子',
-                description: '今天晚上在青岛大学附近轻松跑步，先站内沟通。',
-                city: '青岛',
-                loc: '青岛大学附近',
-                requestType: 'running',
-                socialGoal: '找 1 人一起跑步',
-                interestTags: ['跑步'],
-                radiusKm: 3,
-                timePreference: '今天晚上',
-                locationPreference: '青岛大学附近',
-                matchedCount: 0,
-                status: 'active',
-                metadata: { sourceVersion: 'source-v1' },
-                createdAt: new Date('2026-01-01T00:00:00.000Z'),
-                updatedAt: new Date('2026-01-01T00:00:00.000Z'),
-              }
-            : null,
+          where?.id ? { ...latestPublicIntent, id: where.id } : null,
         ),
       ),
     save: jest.fn((input) => Promise.resolve(input)),
@@ -499,6 +496,7 @@ function makeHarness(options: Record<string, unknown> = {}) {
   };
   const userSocialRequestRepo = {
     createQueryBuilder: jest.fn(() => userSocialRequestQuery),
+    create: jest.fn((input) => ({ ...userSocialRequest, ...input, id: 301 })),
     findOne: jest.fn().mockResolvedValue(userSocialRequest),
     save: jest.fn((input) => Promise.resolve(input)),
   };
@@ -648,13 +646,6 @@ function makeHarness(options: Record<string, unknown> = {}) {
       sessionAssembler,
       longTermMemory as never,
     );
-  const actionTurns =
-    (options.actionTurns as SocialAgentRouteActionTurnService | undefined) ??
-    new SocialAgentRouteActionTurnService(
-      taskRepo as never,
-      candidateActions as never,
-      metrics as never,
-    );
   const draftPublication =
     (options.draftPublication as
       | SocialAgentDraftPublicationService
@@ -680,6 +671,14 @@ function makeHarness(options: Record<string, unknown> = {}) {
       } as never,
       userSocialRequestRepo as never,
       matchingJobRepo as never,
+    );
+  const actionTurns =
+    (options.actionTurns as SocialAgentRouteActionTurnService | undefined) ??
+    new SocialAgentRouteActionTurnService(
+      taskRepo as never,
+      candidateActions as never,
+      metrics as never,
+      draftPublication as never,
     );
   const draftSearch =
     (options.draftSearch as SocialAgentDraftSearchService | undefined) ??
@@ -2013,6 +2012,7 @@ describe('SocialAgentChat acceptance flow', () => {
           activityType: '散步',
           time: '8.27 下午六点',
           locationName: '青岛中山公园',
+          socialRequestId: 301,
           publishStatus: 'draft',
           safetyBoundary: expect.stringContaining('公共场所'),
         }),
@@ -2020,6 +2020,12 @@ describe('SocialAgentChat acceptance flow', () => {
           expect.objectContaining({
             schemaAction: 'publish_to_discover',
             requiresConfirmation: true,
+            payload: expect.objectContaining({
+              socialRequestId: 301,
+              socialRequestDraft: expect.objectContaining({
+                socialRequestId: 301,
+              }),
+            }),
           }),
           expect.objectContaining({
             schemaAction: 'activity.skip_publish',
@@ -2035,6 +2041,51 @@ describe('SocialAgentChat acceptance flow', () => {
       SocialAgentToolName.SearchMatches,
       expect.any(Object),
       expect.any(Number),
+    );
+
+    const publishAction = second.cards?.[0]?.actions?.find(
+      (action) => action.schemaAction === 'publish_to_discover',
+    );
+    expect(publishAction).toBeTruthy();
+
+    const published = await service.performCardAction(
+      7,
+      second.taskId as number,
+      {
+        action: 'publish_to_discover',
+        payload: {
+          ...(publishAction?.payload as Record<string, unknown>),
+          confirmedPublish: true,
+          approved: true,
+          confirmed: true,
+        },
+      },
+    );
+
+    expect(published.assistantMessage).toContain('已发布到发现页');
+    expect(published.cards).toEqual([
+      expect.objectContaining({
+        schemaType: 'social_match.activity',
+        status: 'completed',
+        data: expect.objectContaining({
+          publicIntentId: 'social_request_301',
+          socialRequestId: 301,
+          discoverHref: '/discover?publicIntentId=social_request_301',
+          publicIntentHref: '/public-intent/social_request_301',
+          publishStatus: 'published',
+        }),
+      }),
+    ]);
+    expect(executor.executeToolAction).toHaveBeenCalledWith(
+      second.taskId,
+      SocialAgentToolName.CreateSocialRequest,
+      expect.objectContaining({
+        socialRequestId: 301,
+        mode: 'publish',
+        publish: true,
+        syncPublicIntent: true,
+      }),
+      7,
     );
   });
 
