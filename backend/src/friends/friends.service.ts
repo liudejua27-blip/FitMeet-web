@@ -65,6 +65,10 @@ export class FriendsService {
             followingId,
             ...(options.metadata ?? {}),
           },
+          request: {
+            followerId,
+            followingId,
+          },
         },
         () => this.ensureFollowingOnce(followerId, followingId),
       );

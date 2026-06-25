@@ -76,6 +76,18 @@ export class SocialAgentDraftPublicationService {
             source: 'social_agent_draft_publication',
             socialRequestId,
           },
+          request: {
+            socialRequestId,
+            city: draft.city ?? null,
+            activityType: draft.activityType ?? null,
+            title: draft.title ?? null,
+            timeStart: draft.timeStart ?? null,
+            timeEnd: draft.timeEnd ?? null,
+            lat: draft.lat ?? null,
+            lng: draft.lng ?? null,
+            radiusKm: draft.radiusKm ?? null,
+            safetyRequirement: draft.safetyRequirement ?? null,
+          },
         },
         () => this.publishDraftOnce(ownerUserId, taskId, draft),
       );

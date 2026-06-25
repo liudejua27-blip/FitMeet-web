@@ -764,6 +764,10 @@ export class AgentApprovalDispatcherService {
           followingId,
           source: 'approval_dispatch',
         },
+        request: {
+          followerId,
+          followingId,
+        },
       },
       run,
     );

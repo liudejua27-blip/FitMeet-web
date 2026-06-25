@@ -260,6 +260,13 @@ export class MessagesService {
             source: options.source ?? 'user',
             senderType: options.senderType ?? 'user',
           },
+          request: {
+            conversationId,
+            senderId,
+            text,
+            source: options.source ?? 'user',
+            senderType: options.senderType ?? 'user',
+          },
         },
         () => this.sendMessageOnce(conversationId, senderId, text, options),
       );
@@ -522,6 +529,10 @@ export class MessagesService {
             userId,
             otherUserId,
             source: options.metadata?.source ?? null,
+          },
+          request: {
+            userId,
+            otherUserId,
           },
         },
         () => this.startConversationOnce(userId, otherUserId, options),
@@ -940,6 +951,7 @@ export class MessagesService {
           resourceType: 'conversation',
           resourceId: conversationId,
           metadata: { conversationId, agentId, source: 'fitmeet_agent' },
+          request: { conversationId, agentId, text },
         },
         () => this.sendAgentReplyOnce(conversationId, agentId, text, options),
       );
