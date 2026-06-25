@@ -2,6 +2,8 @@ import { useEffect } from 'react';
 import { useLocation } from 'react-router-dom';
 
 const introSelectors = [
+  '.fitmeet-website .fm-enterprise-hero-system__copy > *',
+  '.fitmeet-website .fm-enterprise-hero-system__visual',
   '.fitmeet-website .fm-hero__copy > *',
   '.fitmeet-website .fm-hero__visual',
   '.fitmeet-website .fm-social-hero-visual',
@@ -40,6 +42,7 @@ const revealSelectors = [
 ].join(',');
 
 const ambientSelectors = [
+  '.fitmeet-website .fm-product-proof-visual',
   '.fitmeet-website .fm-world-story img',
   '.fitmeet-website .website-hero__visual',
   '[data-testid="assistant-ui-composer"] button[type="submit"]',

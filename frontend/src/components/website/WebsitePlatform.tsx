@@ -1,21 +1,11 @@
 import { type FormEvent, type ReactNode, useEffect, useMemo, useState } from 'react';
 import clsx from 'clsx';
-import {
-  Activity,
-  Download,
-  HeartHandshake,
-  type LucideIcon,
-  MapPin,
-  MessageCircle,
-  ShieldCheck,
-  Sparkles,
-  Smartphone,
-  UsersRound,
-} from 'lucide-react';
 import { Link, useLocation } from 'react-router-dom';
 import { waitlistApi, type WaitlistDeviceType } from '../../api/waitlistApi';
 import { SiteLink } from '../navigation/SiteLink';
-import { useCinematicMotion } from './useCinematicMotion';
+import { EnterpriseHero } from './hero/EnterpriseHero';
+import { EnterpriseHeroVisual } from './hero/EnterpriseHeroVisual';
+import { websiteHeroConfig } from './hero/hero-config';
 
 const SITE_URL = 'https://ourfitmeet.cn';
 const ICP_TEXT = import.meta.env.VITE_ICP_TEXT || '鲁ICP备2026015946号-2';
@@ -29,12 +19,6 @@ export type WebsitePage =
   | 'safety'
   | 'about'
   | 'demo';
-
-type Action = {
-  label: string;
-  to: string;
-  variant?: 'primary' | 'secondary';
-};
 
 const navItems = [
   { to: '/', label: '首页' },
@@ -232,41 +216,7 @@ function WebsiteNavbar() {
 function HomePage() {
   return (
     <>
-      <section className="fm-hero fm-enterprise-hero">
-        <div className="fm-hero__copy">
-          <span className="fm-eyebrow">Demand Flow Social</span>
-          <h1>
-            <span>说出需求，</span>
-            <span>匹配合适的人</span>
-          </h1>
-          <p>从刷信息流，变成让 Agent 理解你想认识什么样的人，再把约练、交友和搭子需求变成可确认的真实连接。</p>
-          <div className="fm-actions">
-            <Link to="/agent" className="fm-button fm-button--primary">
-              让 Agent 帮我匹配
-            </Link>
-            <SiteLink to="/discover" className="fm-button fm-button--ghost">
-              查看发现页
-            </SiteLink>
-          </div>
-          <div className="fm-hero__trust" aria-label="FitMeet 安全原则">
-            <span>需求先行</span>
-            <span>兴趣匹配</span>
-            <span>确认后发布</span>
-          </div>
-        </div>
-        <div className="fm-hero__visual" aria-label="FitMeet Social World App 互动主视觉">
-          <CinematicShowcase
-            alt="FitMeet Social World 深色手机产品阵列"
-            imageSrc="/images/fitmeet/cinematic/social-world-dark-phones.png"
-            variant="home"
-            cards={[
-              { label: '需求理解', body: '目标、爱好和边界先对齐', icon: Sparkles },
-              { label: '发布到发现', body: '确认后同步真实新卡', icon: MapPin },
-              { label: '站内连接', body: '邀请和私信都可控', icon: MessageCircle },
-            ]}
-          />
-        </div>
-      </section>
+      <WebsiteHero name="home" />
 
       <Section
         label="Context"
@@ -351,15 +301,7 @@ function HomePage() {
 function FeaturesPage() {
   return (
     <>
-      <PageHero
-        title="FitMeet 怎样把需求变成匹配。"
-        body="用户不需要先刷大量陌生人。先说目标，Agent 再把兴趣、爱好、时间、地点和安全边界整理成可发布、可匹配、可继续沟通的需求卡。"
-        actions={[
-          { label: '进入发现', to: '/discover', variant: 'primary' },
-          { label: '体验 Agent', to: '/agent' },
-        ]}
-        visual={<FeaturesProductVisual />}
-      />
+      <WebsiteHero name="features" />
       <Section
         label="Product"
         title="围绕约练、交友和搭子，把一次社交拆成可执行步骤。"
@@ -426,15 +368,7 @@ function AgentConversionBand() {
 function SafetyCenterPage() {
   return (
     <>
-      <PageHero
-        title="Safety Center"
-        body="真实世界社交的安全，不是一个设置页，而是一整套默认机制：隐私、确认、审计、撤回、举报和数据删除。"
-        actions={[
-          { label: '体验免登录 Demo', to: '/demo', variant: 'primary' },
-          { label: '预约 App Beta', to: '/download#waitlist' },
-        ]}
-        visual={<SafetyProductVisual />}
-      />
+      <WebsiteHero name="safety" />
       <Section label="安全机制" title="每个关键动作都要可解释、可确认、可追溯。">
         <div className="fm-safety-grid">
           {safetyItems.map(([title, body]) => (
@@ -470,15 +404,7 @@ function SafetyCenterPage() {
 function DownloadPage() {
   return (
     <>
-      <PageHero
-        title="下载 Social World App。"
-        body="移动端承载完整需求闭环：Agent 发起需求、确认发布、发现页匹配、消息推进、个人信息和安全边界管理。"
-        actions={[
-          { label: '预约 Beta', to: '#waitlist', variant: 'primary' },
-          { label: '先体验 Agent', to: '/agent' },
-        ]}
-        visual={<DownloadProductVisual />}
-      />
+      <WebsiteHero name="download" />
       <Section label="Download" title="iOS、Android 和 Web 发现页先放在同一个下载入口。">
         <div className="fm-download-options">
           {downloadOptions.map(([title, body]) => (
@@ -494,7 +420,9 @@ function DownloadPage() {
         <PhonePreview />
       </Section>
       <Section label="核心截图" title="把复杂匹配能力压缩成三个真实场景。">
-        <AppScenesVisual />
+        <div className="fm-section-product-visual">
+          <EnterpriseHeroVisual variant="features" />
+        </div>
       </Section>
       <WaitlistSection />
     </>
@@ -504,14 +432,7 @@ function DownloadPage() {
 function AboutContactPage() {
   return (
     <>
-      <PageHero
-        title="我们在做一个更真实的 Social World。"
-        body="FitMeet 希望让社交从刷信息流回到真实生活：用户表达需求，Agent 帮助匹配，确认后再进入发现和消息。"
-        actions={[
-          { label: '联系合作', to: '#contact', variant: 'primary' },
-          { label: '下载 App', to: '/download' },
-        ]}
-      />
+      <WebsiteHero name="about" />
       <Section label="Vision" title="不是让用户停留更久，而是让合适的人更自然见面。">
         <div className="fm-about-values">
           {[
@@ -559,105 +480,6 @@ function AboutContactPage() {
   );
 }
 
-function FeaturesProductVisual() {
-  return (
-    <CinematicShowcase
-      alt="FitMeet 产品功能深色手机阵列"
-      imageSrc="/images/fitmeet/cinematic/smart-social-matching-dark.png"
-      variant="features"
-      cards={[
-        { label: '需求卡片', body: '约练、交友、搭子', icon: Activity },
-        { label: 'AI 匹配', body: '兴趣和边界都对齐', icon: Sparkles },
-        { label: '确认动作', body: '发布和邀请先确认', icon: UsersRound },
-      ]}
-    />
-  );
-}
-
-function SafetyProductVisual() {
-  return (
-    <CinematicShowcase
-      alt="FitMeet 安全和全球连接深色产品视觉"
-      imageSrc="/images/fitmeet/cinematic/global-safety-network-dark.png"
-      variant="safety"
-      cards={[
-        { label: '安全确认', body: '发布、邀请、位置都可控', icon: ShieldCheck },
-        { label: '真实连接', body: '从线上回到真实生活', icon: HeartHandshake },
-        { label: '边界清晰', body: '站内先聊，不暴露手机号', icon: MessageCircle },
-      ]}
-    />
-  );
-}
-
-function DownloadProductVisual() {
-  return (
-    <CinematicShowcase
-      alt="FitMeet 下载页面深色 App 展示"
-      imageSrc="/images/fitmeet/cinematic/download-messages-dark.png"
-      variant="download"
-      cards={[
-        { label: '下载 Beta', body: 'iOS 与 Android 预约', icon: Download },
-        { label: '消息闭环', body: '邀请、私信、回复集中处理', icon: MessageCircle },
-        { label: '需求发现', body: '公开卡片进入发现', icon: Smartphone },
-      ]}
-    />
-  );
-}
-
-function AppScenesVisual() {
-  return (
-    <CinematicShowcase
-      alt="FitMeet App 三个核心场景深色产品截图"
-      imageSrc="/images/fitmeet/cinematic/social-world-dark-phones.png"
-      variant="wide"
-      cards={[
-        { label: '发现', body: '确认后的公开需求', icon: MapPin },
-        { label: '匹配', body: 'Agent 推荐合适对象', icon: Sparkles },
-        { label: '沟通', body: '邀请和私信再确认', icon: MessageCircle },
-      ]}
-    />
-  );
-}
-
-function CinematicShowcase({
-  alt,
-  cards,
-  imageSrc,
-  variant,
-}: {
-  alt: string;
-  cards: Array<{ body: string; icon: LucideIcon; label: string }>;
-  imageSrc: string;
-  variant: 'home' | 'features' | 'safety' | 'download' | 'wide';
-}) {
-  const scopeRef = useCinematicMotion<HTMLDivElement>();
-
-  return (
-    <figure ref={scopeRef} className={clsx('fm-cinematic-showcase', `fm-cinematic-showcase--${variant}`)}>
-      <div className="fm-cinematic-showcase__beams" aria-hidden="true">
-        <span data-cinematic-beam />
-        <span data-cinematic-beam />
-        <span data-cinematic-beam />
-      </div>
-      <picture className="fm-cinematic-showcase__media" data-cinematic-media>
-        <img src={imageSrc} alt={alt} width="1600" height="900" loading="lazy" decoding="async" />
-      </picture>
-      <div className="fm-cinematic-showcase__veil" aria-hidden="true" />
-      <div className="fm-cinematic-showcase__cards" aria-label="FitMeet 关键能力">
-        {cards.map(({ body, icon: Icon, label }, index) => (
-          <article key={label} data-cinematic-float className={`is-card-${index + 1}`}>
-            <span>
-              <Icon size={18} aria-hidden="true" />
-            </span>
-            <strong>{label}</strong>
-            <small>{body}</small>
-          </article>
-        ))}
-      </div>
-    </figure>
-  );
-}
-
 function PublicDemoPage() {
   const [step, setStep] = useState(0);
   const demoSteps = useMemo(
@@ -684,14 +506,7 @@ function PublicDemoPage() {
 
   return (
     <>
-      <PageHero
-        title="30 秒理解 FitMeet"
-        body="不用登录。走完一次需求输入、Agent 生成卡片、用户确认、发现页匹配和安全边界，就能理解 FitMeet 的产品核心。"
-        actions={[
-          { label: '开始 Demo', to: '#demo-flow', variant: 'primary' },
-          { label: '进入 Agent', to: '/agent' },
-        ]}
-      />
+      <WebsiteHero name="demo" />
       <section id="demo-flow" className="fm-demo">
         <div className="fm-demo__rail">
           {demoSteps.map((item, index) => (
@@ -831,54 +646,21 @@ function WaitlistSection() {
   );
 }
 
-function PageHero({
-  actions,
-  body,
-  title,
-  visual,
-}: {
-  actions: Action[];
-  body: string;
-  title: string;
-  visual?: ReactNode;
-}) {
-  return (
-    <section className={clsx('fm-page-hero', visual && 'fm-page-hero--visual')}>
-      <div className="fm-page-hero__copy">
-        <h1>{title}</h1>
-        <p>{body}</p>
-        <div className="fm-actions">
-          {actions.map((action) => (
-            <ActionLink
-              key={action.label}
-              to={action.to}
-              className={clsx(
-                'fm-button',
-                action.variant === 'primary' ? 'fm-button--primary' : 'fm-button--ghost',
-              )}
-              label={action.label}
-            />
-          ))}
-        </div>
-      </div>
-      {visual ? <div className="fm-page-hero__visual">{visual}</div> : null}
-    </section>
-  );
-}
+function WebsiteHero({ name }: { name: keyof typeof websiteHeroConfig }) {
+  const config = websiteHeroConfig[name];
+  const layout = 'layout' in config ? config.layout : undefined;
+  const visual = 'visual' in config ? config.visual : undefined;
 
-function ActionLink({
-  className,
-  label,
-  to,
-}: {
-  className: string;
-  label: string;
-  to: string;
-}) {
   return (
-    <SiteLink to={to} className={className}>
-      {label}
-    </SiteLink>
+    <EnterpriseHero
+      actions={config.actions}
+      description={config.description}
+      eyebrow={config.eyebrow}
+      layout={layout}
+      proofItems={config.proofItems}
+      title={config.title}
+      visual={visual ? <EnterpriseHeroVisual variant={visual} /> : undefined}
+    />
   );
 }
 
