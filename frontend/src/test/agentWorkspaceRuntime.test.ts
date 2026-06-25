@@ -18,6 +18,7 @@ import {
   messagesFromSessionSnapshot,
   recoveryFromUserFacingResponse,
   responseHasCheckpointRuntime,
+  responseAwaitsOpportunityClarification,
   intentForPrompt,
   resolveIntentFromStreamEvent,
   sanitizeStoredThreadMessage,
@@ -1967,9 +1968,25 @@ describe('agent workspace runtime fallback boundaries', () => {
     expect(continuesOpportunityClarification('可以，帮我找人')).toBe(true);
     expect(continuesOpportunityClarification('可以，帮我看看')).toBe(true);
     expect(continuesOpportunityClarification('那就看看')).toBe(true);
+    expect(continuesOpportunityClarification('按默认安全设置处理')).toBe(true);
     expect(continuesOpportunityClarification('为什么你没懂我的意思')).toBe(false);
     expect(continuesOpportunityClarification('帮我找一下设置入口')).toBe(false);
     expect(continuesOpportunityClarification('我想找回之前的聊天记录')).toBe(false);
+  });
+
+  it('recognizes publish slot clarification replies that mention safety boundary', () => {
+    expect(
+      responseAwaitsOpportunityClarification({
+        assistantMessage:
+          '发布约练卡前我先一次性确认：还差 安全边界。你可以一句话补齐；如果安全边界不确定，可以说“按默认安全设置处理”。',
+        assistantMessageSource: 'deterministic',
+        cards: [],
+        candidateGroups: [],
+        nextActions: [],
+        profileUpdates: [],
+        taskId: 101,
+      } as unknown as UserFacingAgentResponse),
+    ).toBe(true);
   });
 
   it('lets replay.summary replace old process nodes instead of accumulating a timeline', () => {

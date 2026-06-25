@@ -88,6 +88,30 @@ describe('social agent opportunity card draft', () => {
     });
   });
 
+  it('parses the real publish wording and accepts default safety settings wording', () => {
+    const task = {
+      id: 78,
+      ownerUserId: 7,
+      goal: '帮我发布一个约练卡片，8.27日下午六点青岛中山公园找一个散步的搭子',
+      memory: {},
+    } as unknown as AgentTask;
+
+    const result = buildSocialAgentOpportunityDraftFromTask(
+      task,
+      '按默认安全设置处理',
+    );
+
+    expect(result).toMatchObject({
+      ready: true,
+      draft: {
+        city: '青岛',
+        activityType: '散步',
+        timePreference: '8.27日下午六点',
+        locationName: '青岛中山公园',
+      },
+    });
+  });
+
   it('uses current task slots for city, activity, time, and location instead of default fallbacks', () => {
     const task = {
       id: 77,

@@ -8,6 +8,7 @@ import type { CreateSocialRequestDto } from '../social-requests/dto/create-socia
 import type { AgentTask } from './entities/agent-task.entity';
 import type { FitMeetAlphaCard } from './fitmeet-alpha-agent.types';
 import { readSocialAgentTaskMemory } from './social-agent-memory.util';
+import { readSocialAgentOpportunityDraftClarification } from './social-agent-opportunity-draft-memory';
 
 export type SocialAgentOpportunityDraft = CreateSocialRequestDto & {
   locationName: string;
@@ -31,7 +32,13 @@ export function buildSocialAgentOpportunityDraftFromTask(
   const taskMemory = readSocialAgentTaskMemory(task);
   const slots = taskMemory.taskSlots ?? {};
   const slotSummary = taskMemory.taskSlotSummary ?? {};
-  const sourceText = [message, task.goal, taskMemory.currentGoal]
+  const pendingDraft = readSocialAgentOpportunityDraftClarification(task);
+  const sourceText = [
+    message,
+    task.goal,
+    taskMemory.currentGoal,
+    pendingDraft?.sourceText,
+  ]
     .map((item) => cleanDisplayText(item, ''))
     .filter(Boolean)
     .join(' ');
@@ -74,7 +81,7 @@ export function buildSocialAgentOpportunityDraftFromTask(
     return {
       ready: false,
       missing,
-      assistantMessage: `发布约练卡前我先一次性确认：还差 ${missing.join('、')}。你可以一句话补齐；如果安全边界不确定，可以说“按安全默认值处理”。补齐后我会先生成一张可确认的约练卡；确认前不会公开，也不会推荐候选。`,
+      assistantMessage: `发布约练卡前我先一次性确认：还差 ${missing.join('、')}。你可以一句话补齐；如果安全边界不确定，可以说“按默认安全设置处理”或“按安全默认值处理”。补齐后我会先生成一张可确认的约练卡；确认前不会公开，也不会推荐候选。`,
     };
   }
 
@@ -367,16 +374,31 @@ function canonicalActivity(value: string): string {
 }
 
 function inferTime(value: string): string {
-  const match = cleanDisplayText(value, '').match(
-    /(今天晚上|今天早上|今天上午|今天下午|今晚|明天上午|明天下午|明天晚上|周末上午|周末下午|周末晚上|周末|工作日晚间|早上|上午|下午|晚上|中午|[0-9一二三四五六七八九十]+点)/i,
-  );
+  const source = cleanDisplayText(value, '');
+  const match =
+    source.match(
+      /(\d{1,2}[./月]\d{1,2}日?\s*(?:今天|明天|后天|周[一二三四五六日天]|周末)?\s*(?:早上|上午|中午|下午|晚上|今晚)?\s*(?:\d{1,2}|[一二两三四五六七八九十]+)(?::\d{2})?\s*点?(?:半|左右)?)/i,
+    ) ??
+    source.match(
+      /((?:今天|明天|后天|周[一二三四五六日天]|周末)?\s*(?:早上|上午|中午|下午|晚上|今晚)?\s*(?:\d{1,2}|[一二两三四五六七八九十]+)(?::\d{2})?\s*点(?:半|左右)?)/i,
+    ) ??
+    source.match(/(\d{1,2}:\d{2})/) ??
+    source.match(
+      /(今天晚上|今天早上|今天上午|今天下午|今晚|明天上午|明天下午|明天晚上|周末上午|周末下午|周末晚上|周末|工作日晚间|早上|上午|下午|晚上|中午)/i,
+    );
   return match?.[1] ? cleanDisplayText(match[1], '') : '';
 }
 
 function inferLocation(value: string): string {
-  const match = cleanDisplayText(value, '').match(
-    /((?:青岛大学|崂山区|市南区|市北区|李沧区|黄岛区|朝阳公园|奥帆中心|五四广场|大学|公园|体育馆|健身房|校区|商场|书店|咖啡店)(?:附近|周边)?)/i,
+  const source = cleanDisplayText(value, '');
+  const cityVenue = source.match(
+    /((?:青岛|上海|北京|深圳|广州|杭州|成都|武汉|南京)[\u4e00-\u9fa5A-Za-z0-9·-]{0,16}(?:公园|广场|体育馆|健身房|大学|校区|商场|书店|咖啡店|中心)(?:附近|周边)?)/i,
   );
+  const match =
+    cityVenue ??
+    source.match(
+      /((?:青岛大学|崂山区|市南区|市北区|李沧区|黄岛区|朝阳公园|中山公园|奥帆中心|五四广场|大学|公园|体育馆|健身房|校区|商场|书店|咖啡店)(?:附近|周边)?)/i,
+    );
   return match?.[1] ? cleanDisplayText(match[1], '') : '';
 }
 
@@ -422,7 +444,7 @@ function inferSafetyBoundary(value: string): string {
 
 function allowsDefaultSafetyBoundary(value: string): boolean {
   const source = cleanDisplayText(value, '');
-  return /(按安全默认值处理|按默认安全边界|默认安全边界|由你按安全默认值|安全默认值|按平台安全默认)/i.test(
+  return /(按安全默认值处理|按默认安全设置处理|默认安全设置|按默认安全边界|默认安全边界|由你按安全默认值|安全默认值|按平台安全默认|按平台默认安全规则|使用默认安全方案|默认就行|安全方面按常规处理)/i.test(
     source,
   );
 }

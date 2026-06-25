@@ -15,7 +15,11 @@ import {
   buildSocialAgentOpportunityDraftFromTask,
   buildSocialAgentPublishConfirmationCard,
 } from './social-agent-opportunity-card-draft';
-import { rememberSocialAgentOpportunityDraft } from './social-agent-opportunity-draft-memory';
+import {
+  readSocialAgentOpportunityDraftClarification,
+  rememberSocialAgentOpportunityDraft,
+  rememberSocialAgentOpportunityDraftClarification,
+} from './social-agent-opportunity-draft-memory';
 
 type HandleRouteActionTurnInput = {
   ownerUserId: number;
@@ -47,7 +51,9 @@ export class SocialAgentRouteActionTurnService {
     input: HandleRouteActionTurnInput,
   ): Promise<HandleRouteActionTurnResult> {
     this.assertNotAborted(input.signal);
-    if (input.route.intent !== 'action_request') {
+    const pendingOpportunityDraft =
+      readSocialAgentOpportunityDraftClarification(input.task);
+    if (input.route.intent !== 'action_request' && !pendingOpportunityDraft) {
       return {
         handled: false,
         assistantMessage: input.assistantMessage,
@@ -55,12 +61,27 @@ export class SocialAgentRouteActionTurnService {
       };
     }
 
-    if (this.isPublishToDiscoverIntent(input.message)) {
+    if (
+      this.isPublishToDiscoverIntent(input.message) ||
+      pendingOpportunityDraft
+    ) {
       const publishDraft = buildSocialAgentOpportunityDraftFromTask(
         input.task,
         input.message,
       );
       if (!publishDraft.ready) {
+        rememberSocialAgentOpportunityDraftClarification(input.task, {
+          missing: publishDraft.missing,
+          sourceText: [
+            input.message,
+            input.task.goal,
+            pendingOpportunityDraft?.sourceText,
+          ]
+            .map((item) => (typeof item === 'string' ? item.trim() : ''))
+            .filter(Boolean)
+            .join(' '),
+        });
+        await this.taskRepo.save(input.task);
         return {
           handled: true,
           assistantMessage: publishDraft.assistantMessage,
