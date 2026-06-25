@@ -6,13 +6,18 @@ import {
   Optional,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { EntityManager, Repository } from 'typeorm';
 
 import {
   cleanDisplayText,
   sanitizeForDisplay,
 } from '../common/display-text.util';
 import { CreateSocialRequestDto } from '../social-requests/dto/create-social-request.dto';
+import {
+  SocialRequestVisibility,
+  UserSocialRequest,
+  UserSocialRequestStatus,
+} from '../social-requests/social-request.entity';
 import {
   AgentTask,
   AgentTaskEvent,
@@ -36,6 +41,23 @@ import { SocialRequestStatus } from './entities/social-request.entity';
 import { AgentSideEffectLedgerService } from './agent-side-effect-ledger.service';
 import { assertSocialAgentOpportunityPublishable } from './social-agent-opportunity-production-guard';
 import { MatchingJobService } from './matching-job.service';
+import { MatchingJob, MatchingJobStatus } from './entities/matching-job.entity';
+
+type DismissDraftContext = {
+  action: string;
+  cardId: string;
+  existingDraft: Record<string, unknown>;
+  publicIntentId: string | null;
+  socialRequestId: number | null;
+};
+
+type DismissPersistenceResult = {
+  cancelledMatchingJobIds: number[];
+  publicIntentIds: string[];
+  publicIntentsTombstoned: number;
+  socialRequestDismissed: boolean;
+  socialRequestId: number | null;
+};
 
 @Injectable()
 export class SocialAgentDraftPublicationService {
@@ -56,6 +78,12 @@ export class SocialAgentDraftPublicationService {
     private readonly sideEffectLedger?: AgentSideEffectLedgerService,
     @Optional()
     private readonly matchingJobs?: MatchingJobService,
+    @Optional()
+    @InjectRepository(UserSocialRequest)
+    private readonly userSocialRequestRepo?: Repository<UserSocialRequest>,
+    @Optional()
+    @InjectRepository(MatchingJob)
+    private readonly matchingJobRepo?: Repository<MatchingJob>,
   ) {}
 
   async publishDraft(
@@ -114,10 +142,129 @@ export class SocialAgentDraftPublicationService {
     payload: Record<string, unknown> = {},
   ): Promise<Record<string, unknown>> {
     const task = await this.assertTaskOwner(taskId, ownerUserId);
+    const context = this.buildDismissDraftContext(task, payload);
+    const idempotencyKey = this.dismissIdempotencyKey(taskId, payload, context);
+    if (this.sideEffectLedger) {
+      const { result, reused } = await this.sideEffectLedger.run(
+        {
+          ownerUserId,
+          agentTaskId: taskId,
+          actionType: 'dismiss_social_request_publish',
+          idempotencyKey,
+          resourceType: context.socialRequestId
+            ? 'social_request'
+            : context.publicIntentId
+              ? 'public_social_intent'
+              : 'agent_task',
+          resourceId:
+            context.socialRequestId ?? context.publicIntentId ?? taskId,
+          metadata: {
+            source: 'social_agent_draft_publication',
+            action: context.action,
+            socialRequestId: context.socialRequestId,
+            publicIntentId: context.publicIntentId,
+          },
+          request: {
+            action: context.action,
+            cardId: context.cardId || null,
+            socialRequestId: context.socialRequestId,
+            publicIntentId: context.publicIntentId,
+          },
+        },
+        () => this.dismissDraftOnce(ownerUserId, taskId, payload),
+      );
+      if (reused) {
+        this.logger.log({
+          event: 'social_agent.dismiss_publish.reused_side_effect',
+          taskId,
+          idempotencyKey,
+          socialRequestId: context.socialRequestId,
+          publicIntentId: context.publicIntentId,
+        });
+      }
+      return result;
+    }
+    return this.dismissDraftOnce(ownerUserId, taskId, payload);
+  }
+
+  private async dismissDraftOnce(
+    ownerUserId: number,
+    taskId: number,
+    payload: Record<string, unknown> = {},
+  ): Promise<Record<string, unknown>> {
+    if (this.canPersistDismissal()) {
+      return this.dismissDraftWithTransaction(ownerUserId, taskId, payload);
+    }
+
+    const task = await this.assertTaskOwner(taskId, ownerUserId);
+    const context = this.buildDismissDraftContext(task, payload);
     const now = new Date().toISOString();
+    this.applyDismissalToTask(task, payload, context, now, {
+      cancelledMatchingJobIds: [],
+      publicIntentIds: context.publicIntentId ? [context.publicIntentId] : [],
+      publicIntentsTombstoned: 0,
+      socialRequestDismissed: false,
+      socialRequestId: context.socialRequestId,
+    });
+    await this.taskRepo.save(task);
+    await this.writeDismissEvent(task, payload, context, {
+      cancelledMatchingJobIds: [],
+      publicIntentIds: context.publicIntentId ? [context.publicIntentId] : [],
+      publicIntentsTombstoned: 0,
+      socialRequestDismissed: false,
+      socialRequestId: context.socialRequestId,
+    });
+    return this.dismissResponse(taskId, context, {
+      cancelledMatchingJobIds: [],
+      publicIntentIds: context.publicIntentId ? [context.publicIntentId] : [],
+      publicIntentsTombstoned: 0,
+      socialRequestDismissed: false,
+      socialRequestId: context.socialRequestId,
+    });
+  }
+
+  private async dismissDraftWithTransaction(
+    ownerUserId: number,
+    taskId: number,
+    payload: Record<string, unknown>,
+  ): Promise<Record<string, unknown>> {
+    return this.taskRepo.manager.transaction(async (manager) => {
+      const task = await manager.getRepository(AgentTask).findOne({
+        where: { id: taskId, ownerUserId },
+        lock: { mode: 'pessimistic_write' },
+      });
+      if (!task) {
+        throw new NotFoundException(`Social agent task ${taskId} not found`);
+      }
+      const context = this.buildDismissDraftContext(task, payload);
+      const now = new Date().toISOString();
+      const persistence = await this.persistDismissal(
+        manager,
+        ownerUserId,
+        context,
+        now,
+      );
+      this.applyDismissalToTask(task, payload, context, now, persistence);
+      await manager.getRepository(AgentTask).save(task);
+      await this.writeDismissEventInTransaction(
+        manager,
+        task,
+        payload,
+        context,
+        persistence,
+      );
+      return this.dismissResponse(taskId, context, persistence);
+    });
+  }
+
+  private buildDismissDraftContext(
+    task: AgentTask,
+    payload: Record<string, unknown>,
+  ): DismissDraftContext {
     const result = this.record(task.result);
     const chatRun = this.record(result.chatRun);
     const activityDraft = this.record(result.activityDraft);
+    const publishSocialRequest = this.record(result.publishSocialRequest);
     const memory = this.record(task.memory);
     const socialAgentChat = this.record(memory.socialAgentChat);
     const existingDraft = this.firstNonEmptyRecord(
@@ -129,12 +276,212 @@ export class SocialAgentDraftPublicationService {
     );
     const socialRequestId = this.number(
       payload.socialRequestId ??
+        payload.linkedSocialRequestId ??
         existingDraft.socialRequestId ??
-        this.record(existingDraft.metadata).socialRequestId,
+        this.record(existingDraft.metadata).socialRequestId ??
+        publishSocialRequest.socialRequestId ??
+        chatRun.socialRequestId ??
+        socialAgentChat.socialRequestId,
     );
+    const publicIntentId =
+      this.text(
+        payload.publicIntentId ??
+          existingDraft.publicIntentId ??
+          publishSocialRequest.publicIntentId ??
+          chatRun.publicIntentId ??
+          socialAgentChat.publicIntentId,
+      ) || null;
+    return {
+      action: cleanDisplayText(payload.action, 'social_intent.decline_publish'),
+      cardId: this.text(
+        payload.cardId ?? existingDraft.cardId ?? existingDraft.id,
+      ),
+      existingDraft,
+      publicIntentId,
+      socialRequestId,
+    };
+  }
+
+  private async persistDismissal(
+    manager: EntityManager,
+    ownerUserId: number,
+    context: DismissDraftContext,
+    now: string,
+  ): Promise<DismissPersistenceResult> {
+    const publicIntents = await this.lockPublicIntentsForDismissal(
+      manager,
+      context,
+    );
+    const publicIntentIds = publicIntents
+      .map((intent) => this.text(intent.id))
+      .filter(Boolean);
+    const socialRequestId =
+      context.socialRequestId ??
+      this.number(publicIntents[0]?.linkedSocialRequestId);
+
+    let socialRequestDismissed = false;
+    if (socialRequestId) {
+      const socialRequest = await manager
+        .getRepository(UserSocialRequest)
+        .createQueryBuilder('request')
+        .setLock('pessimistic_write')
+        .where('request.id = :socialRequestId', { socialRequestId })
+        .andWhere('request.userId = :ownerUserId', { ownerUserId })
+        .getOne();
+      if (!socialRequest) {
+        throw new BadRequestException(
+          '约练卡不存在或不属于当前用户，无法取消发布。',
+        );
+      }
+      socialRequest.status = UserSocialRequestStatus.Cancelled;
+      socialRequest.visibility = SocialRequestVisibility.Private;
+      socialRequest.agentAllowed = false;
+      socialRequest.metadata = {
+        ...(socialRequest.metadata ?? {}),
+        dismissed: true,
+        dismissedAt: now,
+        dismissedBy: 'user',
+        matchingStopped: true,
+        publishStatus: 'dismissed',
+        publicDiscoverPublishSkipped: true,
+        visibility: 'hidden',
+      };
+      await manager.getRepository(UserSocialRequest).save(socialRequest);
+      socialRequestDismissed = true;
+    }
+
+    for (const intent of publicIntents) {
+      intent.status = SocialRequestStatus.Inactive;
+      intent.candidateUserIds = [];
+      intent.matchedCount = 0;
+      intent.metadata = {
+        ...(intent.metadata ?? {}),
+        dismissed: true,
+        matchingStopped: true,
+        publishStatus: 'dismissed',
+        tombstoned: true,
+        tombstonedAt: now,
+        tombstonedBy: ownerUserId,
+        tombstoneReason: 'social_intent_publish_dismissed',
+      };
+      await manager.getRepository(PublicSocialIntent).save(intent);
+    }
+
+    const cancelledMatchingJobIds = await this.cancelMatchingJobsForDismissal(
+      manager,
+      {
+        publicIntentIds:
+          publicIntentIds.length > 0
+            ? publicIntentIds
+            : context.publicIntentId
+              ? [context.publicIntentId]
+              : [],
+        socialRequestId,
+        now,
+      },
+    );
+
+    return {
+      cancelledMatchingJobIds,
+      publicIntentIds,
+      publicIntentsTombstoned: publicIntents.length,
+      socialRequestDismissed,
+      socialRequestId,
+    };
+  }
+
+  private async lockPublicIntentsForDismissal(
+    manager: EntityManager,
+    context: DismissDraftContext,
+  ): Promise<PublicSocialIntent[]> {
+    const conditions: string[] = [];
+    const params: Record<string, unknown> = {};
+    if (context.publicIntentId) {
+      conditions.push('intent.id = :publicIntentId');
+      params.publicIntentId = context.publicIntentId;
+    }
+    if (context.socialRequestId) {
+      conditions.push('intent.linkedSocialRequestId = :socialRequestId');
+      params.socialRequestId = context.socialRequestId;
+    }
+    if (conditions.length === 0) return [];
+    return manager
+      .getRepository(PublicSocialIntent)
+      .createQueryBuilder('intent')
+      .setLock('pessimistic_write')
+      .where(`(${conditions.join(' OR ')})`, params)
+      .getMany();
+  }
+
+  private async cancelMatchingJobsForDismissal(
+    manager: EntityManager,
+    input: {
+      publicIntentIds: string[];
+      socialRequestId: number | null;
+      now: string;
+    },
+  ): Promise<number[]> {
+    if (!input.socialRequestId && input.publicIntentIds.length === 0) {
+      return [];
+    }
+    const rows: unknown = await manager.query(
+      `UPDATE "matching_jobs"
+       SET "status" = $1,
+           "completedAt" = $2,
+           "nextRunAt" = NULL,
+           "errorMessage" = $3,
+           "metadata" = COALESCE("metadata", '{}'::jsonb) || $4::jsonb,
+           "updatedAt" = $2
+       WHERE (
+           "linkedSocialRequestId" = $5
+           OR "publicIntentId" = ANY($6::varchar[])
+         )
+         AND "status" IN ($7, $8)
+       RETURNING "id"`,
+      [
+        MatchingJobStatus.Cancelled,
+        new Date(input.now),
+        'cancelled_by_user',
+        JSON.stringify({
+          cancelledAt: input.now,
+          cancelledBy: 'user',
+          cancelReason: 'social_intent_publish_dismissed',
+        }),
+        input.socialRequestId,
+        input.publicIntentIds,
+        MatchingJobStatus.Queued,
+        MatchingJobStatus.Running,
+      ],
+    );
+    if (!Array.isArray(rows)) return [];
+    const ids: number[] = [];
+    for (const row of rows) {
+      const id = this.number(this.record(row).id);
+      if (id) ids.push(id);
+    }
+    return ids;
+  }
+
+  private applyDismissalToTask(
+    task: AgentTask,
+    payload: Record<string, unknown>,
+    context: DismissDraftContext,
+    now: string,
+    persistence: DismissPersistenceResult,
+  ): void {
+    const result = this.record(task.result);
+    const chatRun = this.record(result.chatRun);
+    const memory = this.record(task.memory);
+    const socialAgentChat = this.record(memory.socialAgentChat);
+    const socialRequestId =
+      persistence.socialRequestId ?? context.socialRequestId;
+    const publicIntentIds = persistence.publicIntentIds;
     const dismissedDraft = {
-      ...existingDraft,
+      ...context.existingDraft,
       ...(socialRequestId ? { socialRequestId } : {}),
+      ...(context.publicIntentId
+        ? { publicIntentId: context.publicIntentId }
+        : {}),
       visibility: 'hidden',
       publishStatus: 'dismissed',
       dismissed: true,
@@ -144,8 +491,9 @@ export class SocialAgentDraftPublicationService {
       matchingStopped: true,
     };
 
-    task.status = AgentTaskStatus.AwaitingFeedback;
+    task.status = AgentTaskStatus.Cancelled;
     task.statusReason = 'social_intent_publish_dismissed';
+    task.completedAt = new Date(now);
     task.result = {
       ...result,
       chatRun: {
@@ -158,10 +506,11 @@ export class SocialAgentDraftPublicationService {
         publicDiscoverPublishSkipped: true,
         matchingStopped: true,
       },
-      activityDraft: dismissedDraft,
+      activityDraft: null,
       publishSocialRequest: {
         ...this.record(result.publishSocialRequest),
         ...(socialRequestId ? { socialRequestId } : {}),
+        publicIntentIds,
         status: 'dismissed',
         synced: false,
         publicIntentId: null,
@@ -169,6 +518,10 @@ export class SocialAgentDraftPublicationService {
         publicIntentHref: null,
         dismissedAt: now,
         dismissedBy: 'user',
+        dismissedDraft: sanitizeForDisplay(dismissedDraft),
+        cancelledMatchingJobIds: persistence.cancelledMatchingJobIds,
+        publicIntentsTombstoned: persistence.publicIntentsTombstoned,
+        socialRequestDismissed: persistence.socialRequestDismissed,
       },
     };
     task.memory = {
@@ -206,28 +559,90 @@ export class SocialAgentDraftPublicationService {
       waitingFor: 'user_next_message',
       lastCompletedStep: 'social_intent_publish_dismissed',
     });
-    await this.taskRepo.save(task);
+    void payload;
+  }
+
+  private async writeDismissEvent(
+    task: AgentTask,
+    payload: Record<string, unknown>,
+    context: DismissDraftContext,
+    persistence: DismissPersistenceResult,
+  ) {
     await this.writeEvent(
       task,
       AgentTaskEventType.Note,
       '用户取消发布约练卡',
       {
-        ...(socialRequestId ? { socialRequestId } : {}),
-        action: cleanDisplayText(
-          payload.action,
-          'social_intent.decline_publish',
-        ),
+        ...((persistence.socialRequestId ?? context.socialRequestId)
+          ? {
+              socialRequestId:
+                persistence.socialRequestId ?? context.socialRequestId,
+            }
+          : {}),
+        ...(context.publicIntentId
+          ? { publicIntentId: context.publicIntentId }
+          : {}),
+        action: cleanDisplayText(payload.action, context.action),
         status: 'dismissed',
         visibility: 'hidden',
         publicDiscoverPublishSkipped: true,
         matchingStopped: true,
+        cancelledMatchingJobIds: persistence.cancelledMatchingJobIds,
+        publicIntentIds: persistence.publicIntentIds,
+        publicIntentsTombstoned: persistence.publicIntentsTombstoned,
+        socialRequestDismissed: persistence.socialRequestDismissed,
       },
       AgentTaskEventActor.User,
     );
+  }
+
+  private async writeDismissEventInTransaction(
+    manager: EntityManager,
+    task: AgentTask,
+    payload: Record<string, unknown>,
+    context: DismissDraftContext,
+    persistence: DismissPersistenceResult,
+  ) {
+    await manager.getRepository(AgentTaskEvent).save(
+      manager.getRepository(AgentTaskEvent).create({
+        taskId: task.id,
+        ownerUserId: task.ownerUserId,
+        eventType: AgentTaskEventType.Note,
+        actor: AgentTaskEventActor.User,
+        summary: '用户取消发布约练卡',
+        payload: sanitizeForDisplay({
+          ...((persistence.socialRequestId ?? context.socialRequestId)
+            ? {
+                socialRequestId:
+                  persistence.socialRequestId ?? context.socialRequestId,
+              }
+            : {}),
+          ...(context.publicIntentId
+            ? { publicIntentId: context.publicIntentId }
+            : {}),
+          action: cleanDisplayText(payload.action, context.action),
+          status: 'dismissed',
+          visibility: 'hidden',
+          publicDiscoverPublishSkipped: true,
+          matchingStopped: true,
+          cancelledMatchingJobIds: persistence.cancelledMatchingJobIds,
+          publicIntentIds: persistence.publicIntentIds,
+          publicIntentsTombstoned: persistence.publicIntentsTombstoned,
+          socialRequestDismissed: persistence.socialRequestDismissed,
+        }) as Record<string, unknown>,
+      }),
+    );
+  }
+
+  private dismissResponse(
+    taskId: number,
+    context: DismissDraftContext,
+    persistence: DismissPersistenceResult,
+  ): Record<string, unknown> {
     return {
       success: true,
       taskId,
-      socialRequestId,
+      socialRequestId: persistence.socialRequestId ?? context.socialRequestId,
       status: 'dismissed',
       visibility: 'hidden',
       publishStatus: 'dismissed',
@@ -235,8 +650,21 @@ export class SocialAgentDraftPublicationService {
       discoverHref: null,
       publicIntentHref: null,
       matchingStopped: true,
+      cancelledMatchingJobIds: persistence.cancelledMatchingJobIds,
+      publicIntentIds: persistence.publicIntentIds,
+      publicIntentsTombstoned: persistence.publicIntentsTombstoned,
+      socialRequestDismissed: persistence.socialRequestDismissed,
       message: '已取消发布，这张约练卡不会出现在发现页，也不会继续匹配。',
     };
+  }
+
+  private canPersistDismissal(): boolean {
+    return Boolean(
+      this.userSocialRequestRepo &&
+      this.publicIntentRepo &&
+      this.matchingJobRepo &&
+      typeof this.taskRepo.manager?.transaction === 'function',
+    );
   }
 
   private async publishDraftOnce(
@@ -249,6 +677,7 @@ export class SocialAgentDraftPublicationService {
     const requestId = this.number(
       draft.socialRequestId ?? draft.metadata?.socialRequestId,
     );
+    await this.assertPublishRequestIsNotDismissed(ownerUserId, requestId);
     const dto = toSocialAgentPublishDto(task.id, draft);
     const publishAction = await this.executor.executeToolAction(
       taskId,
@@ -618,6 +1047,62 @@ export class SocialAgentDraftPublicationService {
     return `publish-social-request:${taskId}:${fingerprint || 'draft'}`;
   }
 
+  private dismissIdempotencyKey(
+    taskId: number,
+    payload: Record<string, unknown>,
+    context: DismissDraftContext,
+  ): string {
+    const explicit = cleanDisplayText(
+      payload.idempotencyKey ??
+        payload.clientActionId ??
+        this.record(payload.runtime).idempotencyKey,
+      '',
+    );
+    if (explicit) return explicit;
+    const target =
+      (context.socialRequestId
+        ? `social-request:${context.socialRequestId}`
+        : '') ||
+      (context.publicIntentId
+        ? `public-intent:${context.publicIntentId}`
+        : '') ||
+      (context.cardId ? `card:${context.cardId}` : '') ||
+      'current-draft';
+    return `dismiss-social-request:${taskId}:${this.stableKeySegment(target)}`;
+  }
+
+  private stableKeySegment(value: unknown): string {
+    return (
+      cleanDisplayText(value, 'current-draft')
+        .trim()
+        .toLowerCase()
+        .replace(/\s+/g, '-')
+        .replace(/[^a-z0-9:_-]+/g, '-')
+        .replace(/-+/g, '-')
+        .replace(/^-|-$/g, '')
+        .slice(0, 120) || 'current-draft'
+    );
+  }
+
+  private async assertPublishRequestIsNotDismissed(
+    ownerUserId: number,
+    socialRequestId: number | null,
+  ): Promise<void> {
+    if (!socialRequestId || !this.userSocialRequestRepo) return;
+    const request = await this.userSocialRequestRepo.findOne({
+      where: { id: socialRequestId, userId: ownerUserId },
+    });
+    if (!request) return;
+    const metadata = this.record(request.metadata);
+    if (
+      request.status === UserSocialRequestStatus.Cancelled ||
+      metadata.dismissed === true ||
+      this.text(metadata.publishStatus) === 'dismissed'
+    ) {
+      throw new BadRequestException('这张约练卡已取消发布，不能再次发布。');
+    }
+  }
+
   private async readPublishedPublicIntent(
     publicIntentId: string,
     expected: {
@@ -638,6 +1123,9 @@ export class SocialAgentDraftPublicationService {
     }
     if (readback.mode !== 'public') {
       throw new BadRequestException('发布约练读回的公开卡片不可见');
+    }
+    if (this.isTombstonedPublicIntent(readback)) {
+      throw new BadRequestException('发布约练读回的公开卡片已取消发布');
     }
     this.assertPublicIntentReadbackMatches(readback, expected);
     await this.assertDiscoverQueryCanReadIntent(publicIntentId);
@@ -711,6 +1199,7 @@ export class SocialAgentDraftPublicationService {
           SocialRequestStatus.Matched,
         ],
       })
+      .andWhere(`COALESCE(intent.metadata ->> 'tombstoned', 'false') <> 'true'`)
       .getOne();
     if (!intent) {
       throw new BadRequestException('发现页查询无法按 ID 读回公开卡片');
@@ -723,6 +1212,15 @@ export class SocialAgentDraftPublicationService {
       SocialRequestStatus.Searching,
       SocialRequestStatus.Matched,
     ].includes(status as SocialRequestStatus);
+  }
+
+  private isTombstonedPublicIntent(intent: PublicSocialIntent): boolean {
+    const metadata = this.record(intent.metadata);
+    return (
+      metadata.tombstoned === true ||
+      this.text(metadata.tombstoned) === 'true' ||
+      this.text(metadata.publishStatus) === 'dismissed'
+    );
   }
 
   private publicIntentExpiresAt(intent: PublicSocialIntent): Date | null {

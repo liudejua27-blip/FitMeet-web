@@ -1,16 +1,30 @@
 import {
   SocialRequestType,
   SocialRequestVisibility,
+  UserSocialRequest,
   UserSocialRequestStatus,
 } from '../social-requests/social-request.entity';
 import {
   AgentTask,
+  AgentTaskEvent,
   AgentTaskPermissionMode,
   AgentTaskStatus,
 } from './entities/agent-task.entity';
 import { SocialAgentDraftPublicationService } from './social-agent-draft-publication.service';
 import { SocialAgentToolName } from './social-agent-tool-executor.service';
-import { MatchingJobStatus } from './entities/matching-job.entity';
+import { MatchingJob, MatchingJobStatus } from './entities/matching-job.entity';
+import { PublicSocialIntent } from './entities/public-social-intent.entity';
+
+type HarnessOptions = {
+  matchingJobRepo?: Partial<Record<keyof MatchingJob, unknown>>;
+  sideEffectLedger?: {
+    run: jest.Mock;
+  };
+  taskManager?: Record<string, unknown>;
+  userSocialRequestRepo?: {
+    findOne?: jest.Mock;
+  };
+};
 
 function makeTask(overrides: Partial<AgentTask> = {}): AgentTask {
   return {
@@ -27,7 +41,7 @@ function makeTask(overrides: Partial<AgentTask> = {}): AgentTask {
   } as AgentTask;
 }
 
-function makeHarness(initialTask = makeTask()) {
+function makeHarness(initialTask = makeTask(), options: HarnessOptions = {}) {
   const savedEvents: Array<Record<string, unknown>> = [];
   let task = initialTask;
   const taskRepo = {
@@ -36,6 +50,7 @@ function makeHarness(initialTask = makeTask()) {
       task = input;
       return Promise.resolve(input);
     }),
+    manager: options.taskManager,
   };
   const eventRepo = {
     create: jest.fn((input: Record<string, unknown>) => input),
@@ -107,8 +122,10 @@ function makeHarness(initialTask = makeTask()) {
     executor as never,
     longTermMemory as never,
     publicIntentRepo as never,
-    undefined,
+    options.sideEffectLedger as never,
     matchingJobs as never,
+    options.userSocialRequestRepo as never,
+    options.matchingJobRepo as never,
   );
   return {
     eventRepo,
@@ -125,7 +142,258 @@ function makeHarness(initialTask = makeTask()) {
   };
 }
 
+function makeTransactionalHarness() {
+  const task = makeTask({
+    result: {
+      chatRun: {
+        socialRequestDraft: {
+          socialRequestId: 301,
+          publicIntentId: 'social_request_301',
+          title: '今晚青岛轻松跑步',
+        },
+      },
+    },
+    memory: {
+      socialAgentChat: {
+        socialRequestDraft: {
+          socialRequestId: 301,
+          publicIntentId: 'social_request_301',
+          title: '今晚青岛轻松跑步',
+        },
+      },
+    },
+  });
+  const userSocialRequest = {
+    id: 301,
+    userId: 7,
+    status: UserSocialRequestStatus.Draft,
+    visibility: SocialRequestVisibility.MatchedOnly,
+    agentAllowed: true,
+    metadata: {},
+  } as UserSocialRequest;
+  const publicIntent = {
+    id: 'social_request_301',
+    userId: 7,
+    linkedSocialRequestId: 301,
+    mode: 'public',
+    status: 'searching',
+    candidateUserIds: [11, 12],
+    matchedCount: 2,
+    metadata: { sourceVersion: 'source-v1' },
+  } as unknown as PublicSocialIntent;
+  const txTaskRepo = {
+    findOne: jest.fn().mockResolvedValue(task),
+    save: jest.fn().mockImplementation((input: AgentTask) => {
+      Object.assign(task, input);
+      return Promise.resolve(input);
+    }),
+  };
+  const txEventRepo = {
+    create: jest.fn((input: Record<string, unknown>) => input),
+    save: jest.fn((input: Record<string, unknown>) => Promise.resolve(input)),
+  };
+  const userRequestQuery = {
+    setLock: jest.fn().mockReturnThis(),
+    where: jest.fn().mockReturnThis(),
+    andWhere: jest.fn().mockReturnThis(),
+    getOne: jest.fn().mockResolvedValue(userSocialRequest),
+  };
+  const txUserSocialRequestRepo = {
+    createQueryBuilder: jest.fn(() => userRequestQuery),
+    save: jest.fn((input: UserSocialRequest) => Promise.resolve(input)),
+  };
+  const publicIntentQuery = {
+    setLock: jest.fn().mockReturnThis(),
+    where: jest.fn().mockReturnThis(),
+    getMany: jest.fn().mockResolvedValue([publicIntent]),
+  };
+  const txPublicIntentRepo = {
+    createQueryBuilder: jest.fn(() => publicIntentQuery),
+    save: jest.fn((input: PublicSocialIntent) => Promise.resolve(input)),
+  };
+  const manager = {
+    transaction: jest.fn(async (runner: (manager: never) => unknown) =>
+      runner(manager as never),
+    ),
+    getRepository: jest.fn((entity: unknown) => {
+      if (entity === AgentTask) return txTaskRepo;
+      if (entity === UserSocialRequest) return txUserSocialRequestRepo;
+      if (entity === PublicSocialIntent) return txPublicIntentRepo;
+      if (entity === AgentTaskEvent) return txEventRepo;
+      return {};
+    }),
+    query: jest.fn().mockResolvedValue([{ id: 9001 }, { id: 9002 }]),
+  };
+  const harness = makeHarness(task, {
+    matchingJobRepo: {},
+    taskManager: manager,
+    userSocialRequestRepo: { findOne: jest.fn() },
+  });
+  return {
+    ...harness,
+    manager,
+    publicIntent,
+    publicIntentQuery,
+    txEventRepo,
+    txPublicIntentRepo,
+    txTaskRepo,
+    txUserSocialRequestRepo,
+    userRequestQuery,
+    userSocialRequest,
+  };
+}
+
 describe('SocialAgentDraftPublicationService', () => {
+  it('dismisses a publish draft through one deterministic transaction', async () => {
+    const {
+      manager,
+      publicIntent,
+      service,
+      task,
+      txPublicIntentRepo,
+      txTaskRepo,
+      txUserSocialRequestRepo,
+      userSocialRequest,
+    } = makeTransactionalHarness();
+
+    const result = await service.dismissDraft(7, 101, {
+      action: 'social_intent.decline_publish',
+      socialRequestId: 301,
+      publicIntentId: 'social_request_301',
+    });
+
+    expect(manager.transaction).toHaveBeenCalledTimes(1);
+    expect(userSocialRequest).toMatchObject({
+      status: UserSocialRequestStatus.Cancelled,
+      visibility: SocialRequestVisibility.Private,
+      agentAllowed: false,
+      metadata: expect.objectContaining({
+        dismissed: true,
+        publishStatus: 'dismissed',
+        visibility: 'hidden',
+        publicDiscoverPublishSkipped: true,
+      }),
+    });
+    expect(txUserSocialRequestRepo.save).toHaveBeenCalledWith(
+      userSocialRequest,
+    );
+    expect(publicIntent).toMatchObject({
+      status: 'inactive',
+      candidateUserIds: [],
+      matchedCount: 0,
+      metadata: expect.objectContaining({
+        tombstoned: true,
+        tombstoneReason: 'social_intent_publish_dismissed',
+        publishStatus: 'dismissed',
+      }),
+    });
+    expect(txPublicIntentRepo.save).toHaveBeenCalledWith(publicIntent);
+    expect(manager.query).toHaveBeenCalledWith(
+      expect.stringContaining('UPDATE "matching_jobs"'),
+      expect.arrayContaining([
+        MatchingJobStatus.Cancelled,
+        expect.any(Date),
+        'cancelled_by_user',
+        expect.stringContaining('social_intent_publish_dismissed'),
+        301,
+        ['social_request_301'],
+        MatchingJobStatus.Queued,
+        MatchingJobStatus.Running,
+      ]),
+    );
+    expect(txTaskRepo.save).toHaveBeenCalledWith(task);
+    expect(task.status).toBe(AgentTaskStatus.Cancelled);
+    expect(task.statusReason).toBe('social_intent_publish_dismissed');
+    expect(task.result).toMatchObject({
+      activityDraft: null,
+      publishSocialRequest: {
+        socialRequestId: 301,
+        publicIntentIds: ['social_request_301'],
+        status: 'dismissed',
+        publicIntentId: null,
+        discoverHref: null,
+        publicIntentHref: null,
+        cancelledMatchingJobIds: [9001, 9002],
+        publicIntentsTombstoned: 1,
+        socialRequestDismissed: true,
+      },
+    });
+    expect(result).toMatchObject({
+      success: true,
+      socialRequestId: 301,
+      status: 'dismissed',
+      publicIntentId: null,
+      matchingStopped: true,
+      cancelledMatchingJobIds: [9001, 9002],
+      publicIntentIds: ['social_request_301'],
+      publicIntentsTombstoned: 1,
+      socialRequestDismissed: true,
+    });
+  });
+
+  it('uses a stable idempotency key for repeated publish dismiss clicks', async () => {
+    const sideEffectLedger = {
+      run: jest.fn(async (_input, operation) => ({
+        result: await operation(),
+        reused: false,
+      })),
+    };
+    const { service } = makeHarness(
+      makeTask({
+        result: {
+          chatRun: {
+            socialRequestDraft: {
+              socialRequestId: 301,
+              title: '今晚青岛轻松跑步',
+            },
+          },
+        },
+      }),
+      { sideEffectLedger },
+    );
+
+    await service.dismissDraft(7, 101, {
+      action: 'social_intent.dismiss',
+    });
+
+    expect(sideEffectLedger.run).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actionType: 'dismiss_social_request_publish',
+        idempotencyKey: 'dismiss-social-request:101:social-request:301',
+        resourceType: 'social_request',
+        resourceId: 301,
+      }),
+      expect.any(Function),
+    );
+  });
+
+  it('rejects publish when the underlying social request was dismissed', async () => {
+    const userSocialRequestRepo = {
+      findOne: jest.fn().mockResolvedValue({
+        id: 301,
+        userId: 7,
+        status: UserSocialRequestStatus.Cancelled,
+        visibility: SocialRequestVisibility.Private,
+        metadata: { publishStatus: 'dismissed' },
+      }),
+    };
+    const { executor, service } = makeHarness(makeTask(), {
+      userSocialRequestRepo,
+    });
+
+    await expect(
+      service.publishDraft(7, 101, {
+        socialRequestId: 301,
+        type: SocialRequestType.RunningPartner,
+        rawText: '今晚青岛轻松跑步',
+        title: '今晚青岛轻松跑步',
+        visibility: SocialRequestVisibility.Private,
+        status: UserSocialRequestStatus.Draft,
+      }),
+    ).rejects.toThrow('这张约练卡已取消发布，不能再次发布。');
+    expect(executor.executeToolAction).not.toHaveBeenCalled();
+  });
+
   it('publishes a staged social request only after explicit confirmation', async () => {
     const {
       executor,
