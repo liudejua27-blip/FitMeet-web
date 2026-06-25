@@ -58,6 +58,7 @@ describe('SocialProfileService', () => {
   let profileRepo: ReturnType<typeof mockRepo>;
   let proposalRepo: ReturnType<typeof mockRepo>;
   let delegateRepo: ReturnType<typeof mockRepo>;
+  let aiService: jest.Mocked<Pick<AIService, 'generateProfileQuestions'>>;
 
   beforeEach(async () => {
     profileRepo = mockRepo();
@@ -92,6 +93,7 @@ describe('SocialProfileService', () => {
     }).compile();
 
     service = module.get(SocialProfileService);
+    aiService = module.get(AIService);
   });
 
   it('persists visibility, AI card, and match signals instead of dropping them', async () => {
@@ -414,6 +416,7 @@ describe('SocialProfileService', () => {
         }),
       ]),
     );
+    expect(aiService.generateProfileQuestions).not.toHaveBeenCalled();
   });
 
   it('returns weighted completion, readiness, and authorization state', async () => {

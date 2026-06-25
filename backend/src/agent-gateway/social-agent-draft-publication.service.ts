@@ -15,7 +15,9 @@ import {
 } from '../common/display-text.util';
 import { CreateSocialRequestDto } from '../social-requests/dto/create-social-request.dto';
 import {
+  SocialRequestGenderPreference,
   SocialRequestVisibility,
+  SocialRequestSource,
   UserSocialRequest,
   UserSocialRequestStatus,
 } from '../social-requests/social-request.entity';
@@ -58,6 +60,12 @@ type DismissPersistenceResult = {
   publicIntentsTombstoned: number;
   socialRequestDismissed: boolean;
   socialRequestId: number | null;
+};
+
+type StagedSocialRequestDraft = {
+  task: AgentTask;
+  socialRequestId: number;
+  draft: CreateSocialRequestDto & { socialRequestId: number };
 };
 
 const SOCIAL_REQUEST_ADVISORY_LOCK_NAMESPACE = 1_782_160_006;
@@ -140,6 +148,68 @@ export class SocialAgentDraftPublicationService {
       });
     }
     return result;
+  }
+
+  async stagePrivateDraftForPublish<
+    T extends CreateSocialRequestDto & { socialRequestId?: number | null },
+  >(
+    ownerUserId: number,
+    taskId: number,
+    draft: T,
+  ): Promise<
+    StagedSocialRequestDraft & { draft: T & { socialRequestId: number } }
+  > {
+    this.assertRequiredStagingDependencies();
+    assertSocialAgentOpportunityPublishable(draft);
+    return this.taskRepo.manager.transaction(async (manager) => {
+      await this.lockTaskDraftAggregate(manager, taskId);
+      const task = await this.assertTaskOwnerInTransaction(
+        manager,
+        taskId,
+        ownerUserId,
+      );
+      const existingSocialRequestId = this.resolveKnownSocialRequestId(
+        task,
+        draft,
+      );
+      if (existingSocialRequestId) {
+        await this.assertOwnedSocialRequestExists(
+          manager,
+          ownerUserId,
+          existingSocialRequestId,
+          '约练卡不存在或不属于当前用户，无法继续发布。',
+        );
+        const stagedDraft = this.withSocialRequestId(
+          draft,
+          existingSocialRequestId,
+        );
+        this.rememberStagedSocialRequestDraft(
+          task,
+          stagedDraft,
+          existingSocialRequestId,
+        );
+        await manager.getRepository(AgentTask).save(task);
+        return {
+          task,
+          socialRequestId: existingSocialRequestId,
+          draft: stagedDraft,
+        };
+      }
+      const request = await this.createPrivateSocialRequestForDraft(
+        manager,
+        ownerUserId,
+        taskId,
+        draft,
+      );
+      const stagedDraft = this.withSocialRequestId(draft, request.id);
+      this.rememberStagedSocialRequestDraft(task, stagedDraft, request.id);
+      await manager.getRepository(AgentTask).save(task);
+      return {
+        task,
+        socialRequestId: request.id,
+        draft: stagedDraft,
+      };
+    });
   }
 
   async dismissDraft(
@@ -403,6 +473,90 @@ export class SocialAgentDraftPublicationService {
     ]);
   }
 
+  private async lockTaskDraftAggregate(
+    manager: EntityManager,
+    taskId: number,
+  ): Promise<void> {
+    await manager.query('SELECT pg_advisory_xact_lock($1, $2)', [
+      SOCIAL_REQUEST_ADVISORY_LOCK_NAMESPACE,
+      taskId,
+    ]);
+  }
+
+  private async assertTaskOwnerInTransaction(
+    manager: EntityManager,
+    taskId: number,
+    ownerUserId: number,
+  ): Promise<AgentTask> {
+    const task = await manager.getRepository(AgentTask).findOne({
+      where: { id: taskId, ownerUserId },
+    });
+    if (!task) throw new NotFoundException('Agent task not found');
+    return task;
+  }
+
+  private async createPrivateSocialRequestForDraft(
+    manager: EntityManager,
+    ownerUserId: number,
+    taskId: number,
+    draft: CreateSocialRequestDto & { socialRequestId?: number | null },
+  ): Promise<UserSocialRequest> {
+    const repo = manager.getRepository(UserSocialRequest);
+    const now = new Date().toISOString();
+    const metadata = {
+      ...(draft.metadata ?? {}),
+      agentTaskId: taskId,
+      source: 'social_agent_publish_draft',
+      publishStatus: 'draft',
+      visibility: 'private',
+      stagedForDiscover: true,
+      stagedAt: now,
+      timePreference: this.text(
+        draft.metadata?.timePreference ??
+          (draft as { timePreference?: unknown }).timePreference,
+      ),
+      locationPreference: this.text(
+        draft.metadata?.locationPreference ??
+          (draft as { locationName?: unknown }).locationName ??
+          (draft as { location?: unknown }).location,
+      ),
+      safetyBoundary: this.text(draft.metadata?.safetyBoundary),
+    };
+    const request = repo.create({
+      userId: ownerUserId,
+      agentId: null,
+      source: draft.source ?? SocialRequestSource.FitMeetAgent,
+      type: draft.type,
+      title: this.text(draft.title) || 'FitMeet 约练卡',
+      description: this.text(draft.description),
+      rawText: this.text(draft.rawText ?? draft.description ?? draft.title),
+      city: this.text(draft.city),
+      lat: this.number(draft.lat),
+      lng: this.number(draft.lng),
+      radiusKm: this.number(draft.radiusKm) || 5,
+      timeStart: this.dateOrNull(draft.timeStart),
+      timeEnd: this.dateOrNull(draft.timeEnd),
+      genderPreference:
+        draft.genderPreference ?? SocialRequestGenderPreference.Any,
+      ageMin: this.number(draft.ageMin),
+      ageMax: this.number(draft.ageMax),
+      interestTags: this.stringArray(draft.interestTags ?? draft.tags),
+      activityType: this.text(draft.activityType),
+      safetyRequirement: draft.safetyRequirement,
+      agentAllowed: true,
+      requireUserConfirmation: true,
+      status: UserSocialRequestStatus.Draft,
+      visibility: SocialRequestVisibility.Private,
+      metadata,
+      expiresAt: this.dateOrNull(draft.expiresAt),
+    });
+    const saved = await repo.save(request);
+    if (!saved.id) {
+      throw new BadRequestException('创建约练私密草稿失败');
+    }
+    return saved;
+  }
+
   private async persistDismissal(
     manager: EntityManager,
     ownerUserId: number,
@@ -550,6 +704,9 @@ export class SocialAgentDraftPublicationService {
        SET "status" = $1,
            "completedAt" = $2,
            "nextRunAt" = NULL,
+           "leaseOwner" = NULL,
+           "leaseExpiresAt" = NULL,
+           "lastHeartbeatAt" = NULL,
            "errorMessage" = $3,
            "metadata" = COALESCE("metadata", '{}'::jsonb) || $4::jsonb,
            "updatedAt" = $2
@@ -565,7 +722,7 @@ export class SocialAgentDraftPublicationService {
              AND "linkedSocialRequestId" = $5
            )
          )
-         AND "status" IN ($8, $9)
+         AND "status" IN ($8, $9, $10, $11)
        RETURNING "id"`,
       [
         MatchingJobStatus.Cancelled,
@@ -581,6 +738,8 @@ export class SocialAgentDraftPublicationService {
         input.ownerUserId,
         MatchingJobStatus.Queued,
         MatchingJobStatus.Running,
+        MatchingJobStatus.CandidatesReady,
+        MatchingJobStatus.NoCandidates,
       ],
     );
     if (!Array.isArray(rows)) return [];
@@ -1250,10 +1409,16 @@ export class SocialAgentDraftPublicationService {
     );
   }
 
-  private requireSocialRequestId(value: unknown, message: string): number {
-    const id = this.number(value);
-    if (!id) throw new BadRequestException(message);
-    return id;
+  private assertRequiredStagingDependencies(): void {
+    const missing: string[] = [];
+    if (!this.userSocialRequestRepo) missing.push('user_social_request_repo');
+    if (typeof this.taskRepo.manager?.transaction !== 'function') {
+      missing.push('database_transaction');
+    }
+    if (missing.length === 0) return;
+    throw new ServiceUnavailableException(
+      `Agent publish staging unavailable: ${missing.join(', ')}`,
+    );
   }
 
   private async resolvePublishSocialRequestId(
@@ -1266,14 +1431,112 @@ export class SocialAgentDraftPublicationService {
     );
     if (direct) return direct;
     const task = await this.assertTaskOwner(taskId, ownerUserId);
+    const known = this.resolveKnownSocialRequestId(task, draft);
+    if (known) return known;
     const context = this.buildDismissDraftContext(
       task,
       draft as unknown as Record<string, unknown>,
     );
-    return this.requireSocialRequestId(
-      context.socialRequestId,
-      '发布约练缺少 socialRequestId',
+    if (context.socialRequestId) return context.socialRequestId;
+    const staged = await this.stagePrivateDraftForPublish(
+      ownerUserId,
+      taskId,
+      draft,
     );
+    return staged.socialRequestId;
+  }
+
+  private resolveKnownSocialRequestId(
+    task: AgentTask,
+    draft: CreateSocialRequestDto & { socialRequestId?: number | null },
+  ): number | null {
+    const memory = this.record(task.memory);
+    const socialAgentChat = this.record(memory.socialAgentChat);
+    const shortTerm = this.record(memory.shortTerm);
+    const result = this.record(task.result);
+    const chatRun = this.record(result.chatRun);
+    const activityDraft = this.record(result.activityDraft);
+    return (
+      this.number(draft.socialRequestId) ??
+      this.number(draft.metadata?.socialRequestId) ??
+      this.number(this.record(chatRun.socialRequestDraft).socialRequestId) ??
+      this.number(
+        this.record(this.record(chatRun.socialRequestDraft).metadata)
+          .socialRequestId,
+      ) ??
+      this.number(
+        this.record(socialAgentChat.socialRequestDraft).socialRequestId,
+      ) ??
+      this.number(
+        this.record(this.record(socialAgentChat.socialRequestDraft).metadata)
+          .socialRequestId,
+      ) ??
+      this.number(activityDraft.socialRequestId) ??
+      this.number(chatRun.socialRequestId) ??
+      this.number(socialAgentChat.socialRequestId) ??
+      this.number(shortTerm.socialRequestId)
+    );
+  }
+
+  private withSocialRequestId<
+    T extends CreateSocialRequestDto & { socialRequestId?: number | null },
+  >(draft: T, socialRequestId: number): T & { socialRequestId: number } {
+    return {
+      ...draft,
+      socialRequestId,
+      metadata: {
+        ...(draft.metadata ?? {}),
+        socialRequestId,
+      },
+    } as T & { socialRequestId: number };
+  }
+
+  private rememberStagedSocialRequestDraft(
+    task: AgentTask,
+    draft: CreateSocialRequestDto & { socialRequestId: number },
+    socialRequestId: number,
+  ): void {
+    const now = new Date().toISOString();
+    const memory = this.record(task.memory);
+    const socialAgentChat = this.record(memory.socialAgentChat);
+    const shortTerm = this.record(memory.shortTerm);
+    const result = this.record(task.result);
+    const chatRun = this.record(result.chatRun);
+    const activityDraft = this.record(result.activityDraft);
+    task.memory = {
+      ...memory,
+      socialAgentChat: {
+        ...socialAgentChat,
+        socialRequestDraft: draft,
+        socialRequestId,
+        publishStatus: 'draft',
+        updatedAt: now,
+      },
+      shortTerm: {
+        ...shortTerm,
+        socialRequestDraft: draft,
+        socialRequestId,
+        publishStatus: 'draft',
+      },
+    };
+    task.result = {
+      ...result,
+      chatRun: {
+        ...chatRun,
+        socialRequestDraft: draft,
+        socialRequestId,
+        publishStatus: 'draft',
+      },
+      activityDraft: {
+        ...activityDraft,
+        ...draft,
+        socialRequestId,
+        visibility: 'draft',
+        publishStatus: 'draft',
+        autoPublished: false,
+        updatedAt: now,
+      },
+    };
   }
 
   private async assertPublishRequestCanProceed(
@@ -1558,6 +1821,20 @@ export class SocialAgentDraftPublicationService {
   private number(value: unknown): number | null {
     const num = Number(value);
     return Number.isFinite(num) && num > 0 ? num : null;
+  }
+
+  private stringArray(value: unknown): string[] {
+    if (!Array.isArray(value)) return [];
+    return Array.from(
+      new Set(value.map((item) => this.text(item)).filter(Boolean)),
+    ).slice(0, 20);
+  }
+
+  private dateOrNull(value: unknown): Date | null {
+    const text = this.text(value);
+    if (!text) return null;
+    const date = new Date(text);
+    return Number.isNaN(date.getTime()) ? null : date;
   }
 
   private pendingApprovalFromOutput(

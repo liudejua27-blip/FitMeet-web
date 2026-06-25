@@ -121,6 +121,7 @@ export class SocialAgentRouteContextService {
       candidateActions,
       candidateState: taskMemory.candidateState,
       activityState: taskMemory.activityState,
+      pendingOpportunityDraft: taskMemory.pendingOpportunityDraft,
       pendingActions: taskMemory.pendingActions,
       stableProfileFacts: taskMemory.stableProfileFacts,
       lastUserMessages: taskMemory.lastUserMessages,

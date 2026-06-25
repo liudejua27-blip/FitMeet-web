@@ -60,6 +60,58 @@ describe('SocialAgentTaskMemoryStateMachineService', () => {
     expect(result.slots.safety_boundary?.value).toContain('公共场所');
   });
 
+  it('parses production publish wording with dotted date and full city venue', () => {
+    const task = makeTask({
+      currentTask: { type: 'publish_social_request' },
+    });
+
+    const result = service.applyUserMessage(
+      task,
+      '帮我发布到发现一个约练卡片，8.27 下午六点青岛中山公园找一个散步的搭子，只在公共场所',
+    );
+
+    expect(result.missingRequired).toEqual([]);
+    expect(result.slots.time_window).toMatchObject({
+      value: '8.27 下午六点',
+      state: 'completed',
+    });
+    expect(result.slots.location_text).toMatchObject({
+      value: '青岛中山公园',
+      state: 'completed',
+    });
+    expect(result.slots.activity).toMatchObject({
+      value: '散步',
+      state: 'completed',
+    });
+    expect(result.slots.visibility).toMatchObject({
+      value: '可公开到发现',
+      state: 'completed',
+    });
+    expect(result.slots.safety_boundary?.value).toContain('公共场所');
+  });
+
+  it('does not overwrite a completed time slot with degree wording', () => {
+    const task = makeTask();
+    service.applyUserMessage(
+      task,
+      '周末下午，散步，崂山区青岛大学，第一次见面只接受公共场所',
+    );
+
+    service.applyUserMessage(task, '最好轻松一点');
+    service.applyUserMessage(task, '如果没有就扩大一点范围');
+    service.applyUserMessage(task, '开场白自然一点');
+
+    const slots = service.readSlots(task);
+    expect(slots.time_window).toMatchObject({
+      value: '周末下午',
+      state: 'completed',
+    });
+    expect(slots.location_text).toMatchObject({
+      value: '崂山区青岛大学',
+      state: 'completed',
+    });
+  });
+
   it('extracts public candidate preferences without making them required', () => {
     const task = makeTask();
 

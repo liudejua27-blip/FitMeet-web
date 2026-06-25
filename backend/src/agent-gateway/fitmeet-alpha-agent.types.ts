@@ -59,7 +59,10 @@ export type FitMeetAgentSchemaAction =
   | 'life_graph.accept_update'
   | 'life_graph.reject_update'
   | 'meet_loop.resume'
-  | 'meet_loop.reschedule';
+  | 'meet_loop.reschedule'
+  | 'slot_completion.use_default_safety'
+  | 'slot_completion.custom_safety'
+  | 'slot_completion.cancel';
 
 export interface FitMeetAlphaCardAction {
   id: string;
@@ -100,6 +103,7 @@ export interface FitMeetAlphaCard {
     | 'social_match.candidate'
     | 'social_match.activity'
     | 'social_match.empty'
+    | 'social_match.slot_completion'
     | 'profile.completion'
     | 'life_graph.diff'
     | 'meet_loop.timeline'

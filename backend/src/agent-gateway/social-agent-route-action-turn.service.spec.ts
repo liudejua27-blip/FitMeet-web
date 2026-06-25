@@ -56,12 +56,31 @@ function makeHarness() {
   const taskRepo = {
     save: jest.fn(async (task: AgentTask) => task),
   };
+  const draftPublication = {
+    stagePrivateDraftForPublish: jest.fn(
+      async (_ownerUserId: number, _taskId: number, draft) => ({
+        task: _taskId
+          ? makeTask({ id: _taskId, ownerUserId: _ownerUserId })
+          : makeTask(),
+        socialRequestId: 301,
+        draft: {
+          ...draft,
+          socialRequestId: 301,
+          metadata: {
+            ...(draft.metadata ?? {}),
+            socialRequestId: 301,
+          },
+        },
+      }),
+    ),
+  };
   const service = new SocialAgentRouteActionTurnService(
     taskRepo as never,
     candidateActions as never,
     metrics as never,
+    draftPublication as never,
   );
-  return { candidateActions, metrics, service, taskRepo };
+  return { candidateActions, draftPublication, metrics, service, taskRepo };
 }
 
 describe('SocialAgentRouteActionTurnService', () => {
@@ -133,7 +152,8 @@ describe('SocialAgentRouteActionTurnService', () => {
   });
 
   it('turns a natural-language publish request into a confirmable Discover publish card', async () => {
-    const { candidateActions, metrics, service, taskRepo } = makeHarness();
+    const { candidateActions, draftPublication, metrics, service, taskRepo } =
+      makeHarness();
     const task = makeTask({
       goal: '今晚青岛大学附近健身约练',
       memory: {
@@ -159,6 +179,15 @@ describe('SocialAgentRouteActionTurnService', () => {
 
     expect(candidateActions.createActionApproval).not.toHaveBeenCalled();
     expect(metrics.recordApproval).not.toHaveBeenCalled();
+    expect(draftPublication.stagePrivateDraftForPublish).toHaveBeenCalledWith(
+      7,
+      101,
+      expect.objectContaining({
+        activityType: '健身',
+        timePreference: '今晚',
+        locationName: '青岛大学附近',
+      }),
+    );
     expect(taskRepo.save).toHaveBeenCalledWith(task);
     expect(task.result).toMatchObject({
       chatRun: {
@@ -198,6 +227,7 @@ describe('SocialAgentRouteActionTurnService', () => {
             activityType: '健身',
             time: '今晚',
             locationName: '青岛大学附近',
+            socialRequestId: 301,
           }),
           actions: expect.arrayContaining([
             expect.objectContaining({
@@ -207,6 +237,7 @@ describe('SocialAgentRouteActionTurnService', () => {
               payload: expect.objectContaining({
                 taskId: 101,
                 socialRequestDraft: expect.objectContaining({
+                  socialRequestId: 301,
                   activityType: '健身',
                   timePreference: '今晚',
                   locationName: '青岛大学附近',
@@ -227,6 +258,121 @@ describe('SocialAgentRouteActionTurnService', () => {
           ]),
         }),
       ],
+    });
+  });
+
+  it('persists missing publish slots and resumes card generation from a non-action follow-up', async () => {
+    const { candidateActions, draftPublication, service, taskRepo } =
+      makeHarness();
+    const firstMessage =
+      '帮我发布一个约练卡片，8.27日下午六点青岛中山公园找一个散步的搭子';
+    const task = makeTask({
+      goal: firstMessage,
+      memory: {},
+      result: {},
+    });
+
+    const firstResult = await service.handle({
+      ownerUserId: 7,
+      task,
+      route: makeRoute(),
+      message: firstMessage,
+      assistantMessage: '我会先整理约练卡。',
+    });
+
+    expect(firstResult).toMatchObject({
+      handled: true,
+      assistantMessage: expect.stringContaining('还差 安全边界'),
+      cards: [
+        expect.objectContaining({
+          schemaType: 'social_match.slot_completion',
+          status: 'waiting_confirmation',
+          data: expect.objectContaining({
+            workflowState: 'COLLECTING_SLOTS',
+            waitingFor: 'safety_boundary',
+            missing: ['安全边界'],
+          }),
+          actions: expect.arrayContaining([
+            expect.objectContaining({
+              schemaAction: 'slot_completion.use_default_safety',
+              requiresConfirmation: false,
+            }),
+            expect.objectContaining({
+              schemaAction: 'slot_completion.custom_safety',
+              requiresConfirmation: false,
+            }),
+            expect.objectContaining({
+              schemaAction: 'slot_completion.cancel',
+              requiresConfirmation: false,
+            }),
+          ]),
+        }),
+      ],
+    });
+    expect(taskRepo.save).toHaveBeenCalledWith(task);
+    expect(task.memory).toMatchObject({
+      socialAgentChat: {
+        publishStatus: 'collecting_slots',
+        pendingOpportunityDraft: expect.objectContaining({
+          status: 'collecting_slots',
+          missing: ['安全边界'],
+          sourceText: expect.stringContaining('青岛中山公园'),
+        }),
+      },
+    });
+
+    const secondResult = await service.handle({
+      ownerUserId: 7,
+      task,
+      route: makeRoute({
+        intent: 'casual_chat',
+        shouldExecuteAction: false,
+        replyStrategy: 'direct_reply',
+      }),
+      message: '按默认安全设置处理',
+      assistantMessage: '好的，我按默认安全设置处理。',
+    });
+
+    expect(candidateActions.createActionApproval).not.toHaveBeenCalled();
+    expect(draftPublication.stagePrivateDraftForPublish).toHaveBeenCalledWith(
+      7,
+      101,
+      expect.objectContaining({
+        city: '青岛',
+        activityType: '散步',
+        locationName: '青岛中山公园',
+      }),
+    );
+    expect(secondResult).toMatchObject({
+      handled: true,
+      pendingApproval: null,
+      assistantMessage: expect.stringContaining('发布确认卡'),
+      cards: [
+        expect.objectContaining({
+          schemaType: 'social_match.activity',
+          status: 'waiting_confirmation',
+          data: expect.objectContaining({
+            city: '青岛',
+            activityType: '散步',
+            time: '8.27日下午六点',
+            locationName: '青岛中山公园',
+            socialRequestId: 301,
+          }),
+        }),
+      ],
+    });
+    expect(task.result).toMatchObject({
+      chatRun: {
+        socialRequestDraft: expect.objectContaining({
+          city: '青岛',
+          activityType: '散步',
+          timePreference: '8.27日下午六点',
+          locationName: '青岛中山公园',
+          socialRequestId: 301,
+        }),
+        pendingOpportunityDraft: null,
+        publishStatus: 'draft',
+      },
     });
   });
 

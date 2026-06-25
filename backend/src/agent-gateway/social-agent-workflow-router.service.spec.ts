@@ -189,6 +189,87 @@ describe('SocialAgentWorkflowRouterService', () => {
     expect(intentRouter.routeByRules).toHaveBeenCalledTimes(1);
   });
 
+  it('routes pending publish draft slot completion through the action workflow', () => {
+    const intentRouter = {
+      routeByRules: jest.fn(() =>
+        route({
+          intent: 'casual_chat',
+          shouldSearch: false,
+          shouldExecuteAction: false,
+          replyStrategy: 'conversational_answer',
+        }),
+      ),
+    };
+    const service = new SocialAgentWorkflowRouterService(intentRouter as never);
+
+    const decision = service.route({
+      message: '按默认安全设置处理',
+      taskContext: {
+        currentTask: {
+          waitingFor: 'opportunity_slot_completion',
+          awaitingSearchConfirmation: false,
+        },
+        pendingOpportunityDraft: {
+          status: 'collecting_slots',
+          missing: ['安全边界'],
+          sourceText: '8.27 下午六点青岛中山公园散步',
+        },
+      },
+      profile: {},
+      conversationHistory: [],
+      conversationIntent: 'conversation',
+    });
+
+    expect(decision).toMatchObject({
+      reason: 'publish_draft_slot_completion_workflow',
+      skipBrain: true,
+      route: {
+        intent: 'action_request',
+        shouldSearch: false,
+        shouldExecuteAction: true,
+        replyStrategy: 'execute_action',
+      },
+    });
+    expect(intentRouter.routeByRules).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps pending publish draft workflow questions as help instead of executing actions', () => {
+    const intentRouter = {
+      routeByRules: jest.fn(() =>
+        route({
+          intent: 'casual_chat',
+          shouldSearch: false,
+          shouldExecuteAction: false,
+          replyStrategy: 'conversational_answer',
+        }),
+      ),
+    };
+    const service = new SocialAgentWorkflowRouterService(intentRouter as never);
+
+    const decision = service.route({
+      message: '安全边界是什么意思？',
+      taskContext: {
+        currentTask: { waitingFor: 'opportunity_slot_completion' },
+        pendingOpportunityDraft: {
+          status: 'collecting_slots',
+          missing: ['安全边界'],
+        },
+      },
+      profile: {},
+      conversationHistory: [],
+      conversationIntent: 'conversation',
+    });
+
+    expect(decision).toMatchObject({
+      reason: 'publish_draft_slot_completion_workflow',
+      route: {
+        intent: 'workflow_help',
+        shouldExecuteAction: false,
+        replyStrategy: 'conversational_answer',
+      },
+    });
+  });
+
   it('does not route empty-candidate recovery copy without an empty-candidate context', () => {
     const intentRouter = {
       routeByRules: jest.fn(() => route()),

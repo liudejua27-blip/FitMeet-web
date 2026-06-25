@@ -23,4 +23,16 @@ export class UpdateProfilePrivacyDto {
   @IsOptional()
   @IsBoolean()
   agentCanStartChatAfterApproval?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  ownerConfirmed?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  matchingConsent?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  profileVisibilityConsent?: boolean;
 }

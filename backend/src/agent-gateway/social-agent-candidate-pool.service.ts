@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException, Optional } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { ObjectLiteral, Repository } from 'typeorm';
+import { EntityManager, ObjectLiteral, Repository } from 'typeorm';
 
 import { SocialActivity } from '../activities/entities/activity.entity';
 import { AiDelegateProfile } from '../ai-match/ai-delegate-profile.entity';
@@ -1273,18 +1273,22 @@ export class SocialAgentCandidatePoolService {
     });
   }
 
-  private async persistCandidateRows(
+  async persistCandidateRows(
     socialRequestId: number | null,
     candidates: CandidatePoolCandidate[],
+    manager?: EntityManager,
   ): Promise<void> {
     if (!socialRequestId) return;
+    const repo = manager
+      ? manager.getRepository(SocialRequestCandidate)
+      : this.candidateRepo;
     for (const candidate of candidates) {
-      const existing = await this.candidateRepo.findOne({
+      const existing = await repo.findOne({
         where: { socialRequestId, candidateUserId: candidate.candidateUserId },
       });
       const row =
         existing ??
-        this.candidateRepo.create({
+        repo.create({
           socialRequestId,
           candidateUserId: candidate.candidateUserId,
         });
@@ -1297,6 +1301,7 @@ export class SocialAgentCandidatePoolService {
         row,
         socialRequestId,
         candidate.candidateUserId,
+        repo,
       );
       applySavedSocialAgentCandidateRow({ candidate, saved, socialRequestId });
     }
@@ -1306,12 +1311,13 @@ export class SocialAgentCandidatePoolService {
     row: SocialRequestCandidate,
     socialRequestId: number,
     candidateUserId: number,
+    repo: Repository<SocialRequestCandidate> = this.candidateRepo,
   ): Promise<SocialRequestCandidate> {
     try {
-      return await this.candidateRepo.save(row);
+      return await repo.save(row);
     } catch (error) {
       if (!this.isUniqueConstraintViolation(error)) throw error;
-      const existing = await this.candidateRepo.findOne({
+      const existing = await repo.findOne({
         where: { socialRequestId, candidateUserId },
       });
       if (!existing) throw error;
