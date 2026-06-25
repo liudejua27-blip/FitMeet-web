@@ -228,10 +228,10 @@ async function insertDismissFixture(dataSource: DataSource) {
     `INSERT INTO "user_social_requests"
        ("userId", "source", "type", "title", "rawText", "city",
         "activityType", "status", "visibility", "metadata")
-     VALUES ($1, 'fitmeet_agent', 'running_partner', $2, $2, '青岛',
+     VALUES ($1, 'fitmeet_agent', 'running_partner', $2, $3, '青岛',
        'running', 'draft', 'matched_only', '{}'::jsonb)
      RETURNING "id"`,
-    [ownerUserId, '今晚青岛轻松跑步'],
+    [ownerUserId, '今晚青岛轻松跑步', '今晚青岛轻松跑步'],
   );
   const socialRequestId = Number(socialRequestRows[0].id);
   const publicIntentId = `social_request_${socialRequestId}`;
@@ -275,10 +275,16 @@ async function insertDismissFixture(dataSource: DataSource) {
        ("id", "userId", "linkedSocialRequestId", "requestType", "title",
         "description", "city", "loc", "socialGoal", "candidateUserIds",
         "matchedCount", "status", "metadata")
-     VALUES ($1, $2, $3, 'running_partner', $4, $4, '青岛', '五四广场',
+     VALUES ($1, $2, $3, 'running_partner', $4, $5, '青岛', '五四广场',
        'running_partner', '[11,12]'::jsonb, 2, 'searching',
        '{"sourceVersion":"source-v1"}'::jsonb)`,
-    [publicIntentId, ownerUserId, socialRequestId, '今晚青岛轻松跑步'],
+    [
+      publicIntentId,
+      ownerUserId,
+      socialRequestId,
+      '今晚青岛轻松跑步',
+      '今晚青岛轻松跑步',
+    ],
   );
 
   const matchingJobRows = await dataSource.query(
