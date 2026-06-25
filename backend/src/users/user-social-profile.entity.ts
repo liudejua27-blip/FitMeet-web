@@ -29,6 +29,14 @@ export class UserSocialProfile {
   @Column({ default: '' })
   nickname: string;
 
+  /** 首次建档选择的主要社交目的 */
+  @Column({ default: '' })
+  primaryPurpose: string;
+
+  /** 默认匹配距离，单位公里 */
+  @Column({ type: 'int', default: 20 })
+  defaultMatchRadiusKm: number;
+
   /** 年龄段，例如 '18-24' / '25-34' */
   @Column({ default: '' })
   ageRange: string;

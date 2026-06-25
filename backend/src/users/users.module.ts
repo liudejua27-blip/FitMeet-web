@@ -4,6 +4,7 @@ import { UsersController } from './users.controller';
 import { UsersService } from './users.service';
 import { SocialProfileService } from './social-profile.service';
 import { OnboardingService } from './onboarding.service';
+import { ApiIdempotencyRecord } from './api-idempotency-record.entity';
 import { User } from './user.entity';
 import { UserSocialProfile } from './user-social-profile.entity';
 import { MediaAsset } from './media-asset.entity';
@@ -20,6 +21,7 @@ import { AiDelegateProfile } from '../ai-match/ai-delegate-profile.entity';
     TypeOrmModule.forFeature([
       User,
       UserSocialProfile,
+      ApiIdempotencyRecord,
       MediaAsset,
       ProfileUpdateProposal,
       UserConsent,

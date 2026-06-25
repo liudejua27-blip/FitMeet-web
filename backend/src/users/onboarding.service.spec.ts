@@ -1,9 +1,11 @@
-import {
-  ConflictException,
-  ForbiddenException,
-  BadRequestException,
-} from '@nestjs/common';
+import { BadRequestException, ForbiddenException } from '@nestjs/common';
+import { ApiIdempotencyRecord } from './api-idempotency-record.entity';
+import { MediaAsset } from './media-asset.entity';
 import { OnboardingService } from './onboarding.service';
+import { UserConsent } from './user-consent.entity';
+import { UserProfilePhoto } from './user-profile-photo.entity';
+import { UserSocialProfile } from './user-social-profile.entity';
+import { User } from './user.entity';
 
 const TERMS_VERSION = '2026-01';
 const PRIVACY_VERSION = '2026-01';
@@ -14,7 +16,9 @@ type TestState = {
   assets: Array<Record<string, unknown>>;
   photos: Array<Record<string, unknown>>;
   consents: Array<Record<string, unknown>>;
+  idempotencyRecords: Array<Record<string, unknown>>;
   nextConsentId: number;
+  nextIdempotencyId: number;
   nextPhotoId: number;
 };
 
@@ -193,23 +197,37 @@ describe('OnboardingService', () => {
     );
   });
 
-  it('completes idempotently without duplicating active consents', async () => {
+  it('replays the original complete response for the same idempotency key and payload', async () => {
     const state = makeState();
     const { service } = makeService(state);
+    const dto = completeDto();
 
-    await service.complete(1, completeDto(), 'idem-7');
-    await service.complete(
-      1,
-      completeDto({ expectedProfileVersion: 1 }),
-      'idem-7',
-    );
+    const first = await service.complete(1, dto, 'idem-7');
+    const second = await service.complete(1, dto, 'idem-7');
 
+    expect(second).toEqual(first);
+    expect(state.profile?.profileVersion).toBe(1);
     expect(activeConsentCount(state, 'terms')).toBe(1);
     expect(activeConsentCount(state, 'privacy')).toBe(1);
     expect(activeConsentCount(state, 'adult_attestation')).toBe(1);
     expect(
       state.photos.filter((item) => item.status !== 'deleted'),
     ).toHaveLength(2);
+  });
+
+  it('rejects idempotency key reuse with a different payload', async () => {
+    const state = makeState();
+    const { service } = makeService(state);
+
+    await service.complete(1, completeDto(), 'idem-reused');
+
+    await expect(
+      service.complete(1, completeDto({ nickname: 'Zoe' }), 'idem-reused'),
+    ).rejects.toMatchObject({
+      response: expect.objectContaining({
+        code: 'IDEMPOTENCY_KEY_REUSED',
+      }),
+    });
   });
 
   it('restores onboarding status from persisted server state', async () => {
@@ -256,6 +274,88 @@ describe('OnboardingService', () => {
     expect(state.user.avatar).toBe('');
     expect(state.user.coverUrl).toBe('');
   });
+
+  it('persists primary purpose and distance preference on complete', async () => {
+    const state = makeState();
+    const { service } = makeService(state);
+
+    await service.complete(
+      1,
+      completeDto({ primaryPurpose: '认真交友', distanceKm: 12 }),
+      'idem-distance',
+    );
+
+    expect(state.profile?.primaryPurpose).toBe('认真交友');
+    expect(state.profile?.defaultMatchRadiusKm).toBe(12);
+    expect(state.profile?.relationshipGoals).toEqual(
+      expect.arrayContaining(['认真交友']),
+    );
+  });
+
+  it('rolls back complete writes when a later transaction step fails', async () => {
+    const state = makeState();
+    const { service, repos } = makeService(state);
+    repos.profileRepo.save.mockRejectedValueOnce(
+      new Error('profile save failed'),
+    );
+
+    await expect(
+      service.complete(1, completeDto(), 'idem-rollback'),
+    ).rejects.toThrow('profile save failed');
+
+    expect(state.user.onboardingCompletedAt).toBeNull();
+    expect(state.profile?.profileVersion).toBe(0);
+    expect(activeConsentCount(state, 'terms')).toBe(1);
+    expect(state.idempotencyRecords).toHaveLength(0);
+  });
+
+  it('serializes concurrent complete calls with the same idempotency key', async () => {
+    const state = makeState();
+    const { service } = makeService(state);
+    const dto = completeDto();
+
+    const [first, second] = await Promise.all([
+      service.complete(1, dto, 'idem-concurrent'),
+      service.complete(1, dto, 'idem-concurrent'),
+    ]);
+
+    expect(second).toEqual(first);
+    expect(state.profile?.profileVersion).toBe(1);
+    expect(state.idempotencyRecords).toHaveLength(1);
+  });
+
+  it('serializes concurrent photo replacement without mixing active sets', async () => {
+    const state = makeState({
+      assets: [
+        asset({ id: 100 }),
+        asset({ id: 101 }),
+        asset({ id: 102 }),
+        asset({ id: 103 }),
+      ],
+    });
+    const { service } = makeService(state);
+
+    await Promise.all([
+      service.replaceProfilePhotos(1, {
+        photos: [
+          { assetId: 100, isCover: true },
+          { assetId: 101, isCover: false },
+        ],
+      }),
+      service.replaceProfilePhotos(1, {
+        photos: [
+          { assetId: 102, isCover: true },
+          { assetId: 103, isCover: false },
+        ],
+      }),
+    ]);
+
+    const activeAssetIds = state.photos
+      .filter((item) => item.status !== 'deleted')
+      .map((item) => item.assetId)
+      .sort();
+    expect(activeAssetIds).toEqual([102, 103]);
+  });
 });
 
 function makeState(overrides: Partial<TestState> = {}): TestState {
@@ -274,6 +374,8 @@ function makeState(overrides: Partial<TestState> = {}): TestState {
     profile: {
       userId: 1,
       profileVersion: 0,
+      primaryPurpose: '找运动搭子',
+      defaultMatchRadiusKm: 8,
       relationshipGoals: ['找运动搭子'],
     },
     assets: [asset({ id: 100 }), asset({ id: 101 })],
@@ -290,7 +392,9 @@ function makeState(overrides: Partial<TestState> = {}): TestState {
         version: TERMS_VERSION,
       }),
     ],
+    idempotencyRecords: [],
     nextConsentId: 4,
+    nextIdempotencyId: 1,
     nextPhotoId: 20,
     ...overrides,
   };
@@ -382,22 +486,82 @@ function makeService(state: TestState) {
       return value;
     }),
   };
+  const idempotencyRepo = {
+    createQueryBuilder: jest.fn(() => idempotencyInsertBuilder(state)),
+    findOne: jest.fn(({ where }) => {
+      const found = state.idempotencyRecords.find(
+        (item) =>
+          item.ownerUserId === where.ownerUserId &&
+          item.scope === where.scope &&
+          item.idempotencyKey === where.idempotencyKey,
+      );
+      return found ? { ...found } : null;
+    }),
+    save: jest.fn((value) => {
+      const existing = state.idempotencyRecords.find(
+        (item) => item.id === value.id,
+      );
+      if (existing) Object.assign(existing, value);
+      else state.idempotencyRecords.push({ ...value });
+      return value;
+    }),
+  };
+  const reposByEntity = new Map<unknown, unknown>([
+    [User, userRepo],
+    [UserSocialProfile, profileRepo],
+    [MediaAsset, mediaRepo],
+    [UserProfilePhoto, photoRepo],
+    [UserConsent, consentRepo],
+    [ApiIdempotencyRecord, idempotencyRepo],
+  ]);
+  const manager = {
+    getRepository: jest.fn((entity) => reposByEntity.get(entity)),
+  };
+  let transactionChain = Promise.resolve();
+  const dataSource = {
+    transaction: jest.fn(async (callback) => {
+      const run = transactionChain.then(async () => {
+        const snapshot = cloneState(state);
+        try {
+          return await callback(manager);
+        } catch (error) {
+          restoreState(state, snapshot);
+          throw error;
+        }
+      });
+      transactionChain = run.then(
+        () => undefined,
+        () => undefined,
+      );
+      return run;
+    }),
+  };
 
   return {
     service: new OnboardingService(
+      dataSource as never,
       userRepo as never,
       profileRepo as never,
       mediaRepo as never,
       photoRepo as never,
       consentRepo as never,
     ),
-    repos: { userRepo, profileRepo, mediaRepo, photoRepo, consentRepo },
+    repos: {
+      userRepo,
+      profileRepo,
+      mediaRepo,
+      photoRepo,
+      consentRepo,
+      idempotencyRepo,
+      dataSource,
+    },
   };
 }
 
 function profilePhotoQueryBuilder(state: TestState) {
   const qb = {
     leftJoinAndMapOne: jest.fn(() => qb),
+    setLock: jest.fn(() => qb),
     where: jest.fn(() => qb),
     andWhere: jest.fn(() => qb),
     orderBy: jest.fn(() => qb),
@@ -418,6 +582,61 @@ function profilePhotoQueryBuilder(state: TestState) {
     ),
   };
   return qb;
+}
+
+function idempotencyInsertBuilder(state: TestState) {
+  let pendingValue: Record<string, unknown> | null = null;
+  const qb = {
+    insert: jest.fn(() => qb),
+    values: jest.fn((value) => {
+      pendingValue = value;
+      return qb;
+    }),
+    orIgnore: jest.fn(() => qb),
+    execute: jest.fn(() => {
+      if (!pendingValue) return { identifiers: [] };
+      const exists = state.idempotencyRecords.some(
+        (item) =>
+          item.ownerUserId === pendingValue?.ownerUserId &&
+          item.scope === pendingValue?.scope &&
+          item.idempotencyKey === pendingValue?.idempotencyKey,
+      );
+      if (!exists) {
+        state.idempotencyRecords.push({
+          id: state.nextIdempotencyId++,
+          ...pendingValue,
+        });
+      }
+      return { identifiers: [] };
+    }),
+  };
+  return qb;
+}
+
+function cloneState(state: TestState): TestState {
+  return {
+    user: { ...state.user },
+    profile: state.profile ? { ...state.profile } : null,
+    assets: state.assets.map((item) => ({ ...item })),
+    photos: state.photos.map((item) => ({ ...item })),
+    consents: state.consents.map((item) => ({ ...item })),
+    idempotencyRecords: state.idempotencyRecords.map((item) => ({ ...item })),
+    nextConsentId: state.nextConsentId,
+    nextIdempotencyId: state.nextIdempotencyId,
+    nextPhotoId: state.nextPhotoId,
+  };
+}
+
+function restoreState(state: TestState, snapshot: TestState) {
+  state.user = snapshot.user;
+  state.profile = snapshot.profile;
+  state.assets = snapshot.assets;
+  state.photos = snapshot.photos;
+  state.consents = snapshot.consents;
+  state.idempotencyRecords = snapshot.idempotencyRecords;
+  state.nextConsentId = snapshot.nextConsentId;
+  state.nextIdempotencyId = snapshot.nextIdempotencyId;
+  state.nextPhotoId = snapshot.nextPhotoId;
 }
 
 function idsFromFindOperator(value: unknown): number[] | undefined {
@@ -462,11 +681,15 @@ function completeDto(overrides: Record<string, unknown> = {}) {
 }
 
 function asset(overrides: Record<string, unknown> = {}) {
+  const id =
+    typeof overrides.id === 'number' || typeof overrides.id === 'string'
+      ? overrides.id
+      : 100;
   return {
     id: 100,
     ownerUserId: 1,
     purpose: 'profile_photo',
-    url: `https://cdn.fitmeet.test/${overrides.id ?? 100}.webp`,
+    url: `https://cdn.fitmeet.test/${id}.webp`,
     width: 640,
     height: 640,
     moderationStatus: 'approved',

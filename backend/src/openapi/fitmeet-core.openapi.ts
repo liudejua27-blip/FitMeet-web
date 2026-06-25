@@ -133,7 +133,7 @@ export const fitMeetCoreOpenApi = {
       'completeOnboarding',
       {
         requestSchema: ref('CompleteOnboardingRequest'),
-        responseSchema: ref('OnboardingStatusResponse'),
+        responseSchema: ref('CompleteOnboardingResponse'),
         parameters: [
           {
             name: 'Idempotency-Key',
@@ -688,6 +688,18 @@ export const fitMeetCoreOpenApi = {
           'consents',
         ],
       ),
+      CompleteOnboardingResponse: objectSchema({
+        version: { type: 'number' },
+        status: {
+          type: 'string',
+          enum: ['incomplete', 'pending_review', 'ready', 'restricted'],
+        },
+        canUseSocialActions: { type: 'boolean' },
+        requirements: ref('OnboardingRequirements'),
+        completion: ref('OnboardingCompletion'),
+        completedAt: { type: ['string', 'null'], format: 'date-time' },
+        idempotencyKey: { type: 'string' },
+      }),
       Message: objectSchema({
         id: { oneOf: [{ type: 'number' }, { type: 'string' }] },
         text: { type: 'string' },
@@ -862,6 +874,8 @@ export const fitMeetCoreOpenApi = {
         userId: { type: 'number' },
         profileVersion: { type: 'number' },
         purpose: { type: ['string', 'null'] },
+        primaryPurpose: { type: 'string' },
+        defaultMatchRadiusKm: { type: 'number' },
         interests: arraySchema({ type: 'string' }),
         updatedAt: { type: ['string', 'null'], format: 'date-time' },
       }),

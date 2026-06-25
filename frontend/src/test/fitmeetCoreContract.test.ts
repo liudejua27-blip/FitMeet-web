@@ -241,6 +241,9 @@ describe('fitMeetCoreEndpoints', () => {
     expect(requestContentTypes('/uploads/image', 'post')).toContain('multipart/form-data');
     expect(requestContentTypes('/uploads/video', 'post')).toContain('multipart/form-data');
     expect(requestContentTypes('/auth/login', 'post')).toContain('application/json');
+    expect(responseSchemaRef('/users/me/onboarding/complete', 'post', '201')).toBe(
+      '#/components/schemas/CompleteOnboardingResponse',
+    );
 
     for (const [path, item] of Object.entries(fitMeetCoreOpenApi.paths)) {
       const requiredPathParams = Array.from(path.matchAll(/\{([^/}]+)\}/g), (match) => match[1]);
@@ -401,6 +404,22 @@ function requestContentTypes(path: string, method: string): string[] {
   >;
   const operation = paths[path]?.[method];
   return Object.keys(operation?.requestBody?.content ?? {});
+}
+
+function responseSchemaRef(path: string, method: string, status: string): string | undefined {
+  const paths = fitMeetCoreOpenApi.paths as Record<
+    string,
+    Record<
+      string,
+      {
+        responses?: Record<
+          string,
+          { content?: { 'application/json'?: { schema?: { $ref?: string } } } }
+        >;
+      }
+    >
+  >;
+  return paths[path]?.[method]?.responses?.[status]?.content?.['application/json']?.schema?.$ref;
 }
 
 function normalizeTemplatePath(path: string): string {

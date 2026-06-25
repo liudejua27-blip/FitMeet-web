@@ -6,7 +6,9 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { In, IsNull, Repository } from 'typeorm';
+import { createHash } from 'crypto';
+import { DataSource, EntityManager, In, IsNull, Repository } from 'typeorm';
+import { ApiIdempotencyRecord } from './api-idempotency-record.entity';
 import { MediaAsset } from './media-asset.entity';
 import { UserConsent, UserConsentType } from './user-consent.entity';
 import { UserProfilePhoto } from './user-profile-photo.entity';
@@ -35,16 +37,56 @@ export type OnboardingMissingReason =
   | 'COVER_PHOTO_REQUIRED'
   | 'ACCOUNT_RESTRICTED';
 
+type OnboardingCompletion = {
+  missing: OnboardingMissingReason[];
+  approvedPhotoCount: number;
+  pendingPhotoCount: number;
+  rejectedPhotoCount: number;
+  hasCoverPhoto: boolean;
+  profileVersion: number;
+};
+
+type OnboardingStatusResponse = {
+  version: number;
+  status: OnboardingStatus;
+  canUseSocialActions: boolean;
+  requirements: {
+    minimumAge: number;
+    minimumApprovedPhotos: number;
+    minimumInterests: number;
+    termsVersion: string;
+    privacyVersion: string;
+  };
+  completion: OnboardingCompletion;
+  completedAt: Date | null;
+};
+
+type CompleteOnboardingResponse = OnboardingStatusResponse & {
+  idempotencyKey: string;
+};
+
+type OnboardingRepositories = {
+  userRepo: Repository<User>;
+  profileRepo: Repository<UserSocialProfile>;
+  mediaRepo: Repository<MediaAsset>;
+  photoRepo: Repository<UserProfilePhoto>;
+  consentRepo: Repository<UserConsent>;
+  idempotencyRepo?: Repository<ApiIdempotencyRecord>;
+};
+
 const ONBOARDING_VERSION = 1;
 const MINIMUM_AGE = 18;
 const MINIMUM_APPROVED_PHOTOS = 2;
 const MINIMUM_INTERESTS = 3;
 const TERMS_VERSION = '2026-01';
 const PRIVACY_VERSION = '2026-01';
+const COMPLETE_ONBOARDING_SCOPE = 'users.me.onboarding.complete';
+const IDEMPOTENCY_TTL_MS = 24 * 60 * 60 * 1000;
 
 @Injectable()
 export class OnboardingService {
   constructor(
+    private readonly dataSource: DataSource,
     @InjectRepository(User)
     private readonly userRepo: Repository<User>,
     @InjectRepository(UserSocialProfile)
@@ -57,12 +99,105 @@ export class OnboardingService {
     private readonly consentRepo: Repository<UserConsent>,
   ) {}
 
-  async getStatus(userId: number) {
+  async getStatus(userId: number): Promise<OnboardingStatusResponse> {
+    return this.getStatusWithRepos(userId, this.repos());
+  }
+
+  async listProfilePhotos(userId: number) {
+    const photos = await this.listProfilePhotoRows(userId, this.repos());
+    return photos.map((photo) => this.presentPhoto(photo));
+  }
+
+  async replaceProfilePhotos(userId: number, dto: UpdateProfilePhotosDto) {
+    return this.dataSource.transaction(async (manager) => {
+      const repos = this.repos(manager);
+      await this.requireUser(userId, repos, true);
+      await this.lockProfilePhotos(userId, repos.photoRepo);
+      return this.replaceProfilePhotosWithRepos(userId, dto, repos);
+    });
+  }
+
+  async deleteProfilePhoto(userId: number, photoId: number) {
+    return this.dataSource.transaction(async (manager) => {
+      const repos = this.repos(manager);
+      await this.requireUser(userId, repos, true);
+      const photo = await repos.photoRepo.findOne({ where: { id: photoId } });
+      if (!photo || photo.userId !== userId || photo.status === 'deleted') {
+        throw new NotFoundException('资料照片不存在');
+      }
+      photo.status = 'deleted';
+      await repos.photoRepo.save(photo);
+      await this.syncUserCover(userId, repos);
+      return { id: photo.id, status: photo.status };
+    });
+  }
+
+  async complete(
+    userId: number,
+    dto: CompleteOnboardingDto,
+    idempotencyKey?: string,
+  ): Promise<CompleteOnboardingResponse | Record<string, unknown>> {
+    const normalizedKey = idempotencyKey?.trim();
+    if (!normalizedKey) {
+      throw new BadRequestException('Idempotency-Key header is required');
+    }
+
+    const requestHash = this.hashRequest(dto);
+    return this.dataSource.transaction(async (manager) => {
+      const repos = this.repos(manager);
+      if (!repos.idempotencyRepo) {
+        throw new BadRequestException(
+          'Idempotency repository is not configured',
+        );
+      }
+
+      const idempotency = await this.claimIdempotencyRecord(
+        repos.idempotencyRepo,
+        userId,
+        normalizedKey,
+        requestHash,
+      );
+      if (idempotency.status === 'completed' && idempotency.responseBody) {
+        return idempotency.responseBody;
+      }
+      if (idempotency.status === 'failed' && idempotency.responseBody) {
+        throw new ConflictException(idempotency.responseBody);
+      }
+
+      try {
+        const response = await this.completeWithRepos(
+          userId,
+          dto,
+          normalizedKey,
+          repos,
+        );
+        idempotency.status = 'completed';
+        idempotency.responseStatus = 200;
+        idempotency.responseBody = response as unknown as Record<
+          string,
+          unknown
+        >;
+        await repos.idempotencyRepo.save(idempotency);
+        return response;
+      } catch (error) {
+        idempotency.status = 'failed';
+        idempotency.responseStatus = this.errorStatus(error);
+        idempotency.responseBody = this.errorBody(error);
+        await repos.idempotencyRepo.save(idempotency);
+        throw error;
+      }
+    });
+  }
+
+  private async getStatusWithRepos(
+    userId: number,
+    repos: OnboardingRepositories,
+  ): Promise<OnboardingStatusResponse> {
     const [user, profile, photos, consents] = await Promise.all([
-      this.requireUser(userId),
-      this.profileRepo.findOne({ where: { userId } }),
-      this.listProfilePhotoRows(userId),
-      this.consentRepo.find({ where: { userId, revokedAt: IsNull() } }),
+      this.requireUser(userId, repos),
+      repos.profileRepo.findOne({ where: { userId } }),
+      this.listProfilePhotoRows(userId, repos),
+      repos.consentRepo.find({ where: { userId, revokedAt: IsNull() } }),
     ]);
 
     const completion = this.computeCompletion(user, photos, consents, profile);
@@ -76,12 +211,11 @@ export class OnboardingService {
     };
   }
 
-  async listProfilePhotos(userId: number) {
-    const photos = await this.listProfilePhotoRows(userId);
-    return photos.map((photo) => this.presentPhoto(photo));
-  }
-
-  async replaceProfilePhotos(userId: number, dto: UpdateProfilePhotosDto) {
+  private async replaceProfilePhotosWithRepos(
+    userId: number,
+    dto: UpdateProfilePhotosDto,
+    repos: OnboardingRepositories,
+  ) {
     const inputs = dto.photos ?? [];
     if (inputs.length > 6) {
       throw new BadRequestException('最多只能设置 6 张资料照片');
@@ -94,7 +228,7 @@ export class OnboardingService {
       throw new BadRequestException('资料照片不能重复绑定同一个 assetId');
     }
 
-    const assets = await this.mediaRepo.find({ where: { id: In(assetIds) } });
+    const assets = await repos.mediaRepo.find({ where: { id: In(assetIds) } });
     const byId = new Map(assets.map((asset) => [asset.id, asset]));
     for (const input of inputs) {
       const asset = byId.get(input.assetId);
@@ -104,11 +238,11 @@ export class OnboardingService {
       }
     }
 
-    await this.photoRepo.update({ userId }, { status: 'deleted' });
+    await repos.photoRepo.update({ userId }, { status: 'deleted' });
 
     let coverAssigned = inputs.some((photo) => photo.isCover);
     const rows = inputs.map((input, index) =>
-      this.photoRepo.create({
+      repos.photoRepo.create({
         userId,
         assetId: input.assetId,
         sortOrder: input.sortOrder ?? index,
@@ -121,34 +255,24 @@ export class OnboardingService {
       coverAssigned = true;
     }
 
-    await this.photoRepo.save(rows);
-    await this.syncUserCover(userId);
-    return this.listProfilePhotos(userId);
+    await repos.photoRepo.save(rows);
+    await this.syncUserCover(userId, repos);
+    const photos = await this.listProfilePhotoRows(userId, repos);
+    return photos.map((photo) => this.presentPhoto(photo));
   }
 
-  async deleteProfilePhoto(userId: number, photoId: number) {
-    const photo = await this.photoRepo.findOne({ where: { id: photoId } });
-    if (!photo || photo.userId !== userId || photo.status === 'deleted') {
-      throw new NotFoundException('资料照片不存在');
-    }
-    photo.status = 'deleted';
-    await this.photoRepo.save(photo);
-    await this.syncUserCover(userId);
-    return { id: photo.id, status: photo.status };
-  }
-
-  async complete(
+  private async completeWithRepos(
     userId: number,
     dto: CompleteOnboardingDto,
-    idempotencyKey?: string,
-  ) {
-    if (!idempotencyKey?.trim()) {
-      throw new BadRequestException('Idempotency-Key header is required');
-    }
-
+    idempotencyKey: string,
+    repos: OnboardingRepositories,
+  ): Promise<CompleteOnboardingResponse> {
     const [user, profile] = await Promise.all([
-      this.requireUser(userId),
-      this.profileRepo.findOne({ where: { userId } }),
+      this.requireUser(userId, repos, true),
+      repos.profileRepo.findOne({
+        where: { userId },
+        lock: { mode: 'pessimistic_write' },
+      }),
     ]);
     if (
       typeof dto.expectedProfileVersion === 'number' &&
@@ -162,16 +286,14 @@ export class OnboardingService {
       });
     }
 
-    const photos = await this.photoRepo.find({
+    const photos = await repos.photoRepo.find({
       where: { userId, id: In(dto.photoIds) },
       order: { sortOrder: 'ASC', id: 'ASC' },
     });
-    if (photos.length !== dto.photoIds.length) {
-      throw new ConflictException(
-        this.requirementsError(['PROFILE_PHOTOS_REQUIRED']),
-      );
-    }
-    if (photos.some((photo) => photo.status === 'deleted')) {
+    if (
+      photos.length !== dto.photoIds.length ||
+      photos.some((photo) => photo.status === 'deleted')
+    ) {
       throw new ConflictException(
         this.requirementsError(['PROFILE_PHOTOS_REQUIRED']),
       );
@@ -182,9 +304,9 @@ export class OnboardingService {
         this.requirementsError(['COVER_PHOTO_REQUIRED']),
       );
     }
-    await this.ensurePhotoAssetsOwnedByUser(userId, photos);
+    await this.ensurePhotoAssetsOwnedByUser(userId, photos, repos);
 
-    const consents = await this.previewConsents(userId, dto);
+    const consents = await this.previewConsents(userId, dto, repos);
     const candidateUser = {
       ...user,
       name: dto.nickname,
@@ -192,11 +314,14 @@ export class OnboardingService {
       city: dto.city,
       interestTags: dto.interestTags,
     } as User;
+    const relationshipGoals = [
+      dto.primaryPurpose.trim(),
+      ...dto.purposes.map((purpose) => purpose.trim()),
+    ].filter(Boolean);
     const candidateProfile = {
-      relationshipGoals: [
-        dto.primaryPurpose.trim(),
-        ...dto.purposes.map((purpose) => purpose.trim()),
-      ].filter(Boolean),
+      primaryPurpose: dto.primaryPurpose.trim(),
+      defaultMatchRadiusKm: dto.distanceKm,
+      relationshipGoals,
     } as UserSocialProfile;
     const completion = this.computeCompletion(
       candidateUser,
@@ -206,21 +331,26 @@ export class OnboardingService {
     );
     const missing = new Set<OnboardingMissingReason>(completion.missing);
     if (!dto.primaryPurpose.trim()) missing.add('PRIMARY_PURPOSE_REQUIRED');
-    if (dto.consents.termsVersion !== TERMS_VERSION)
+    if (dto.consents.termsVersion !== TERMS_VERSION) {
       missing.add('TERMS_REQUIRED');
+    }
     if (dto.consents.privacyVersion !== PRIVACY_VERSION) {
       missing.add('PRIVACY_REQUIRED');
     }
-    if (!dto.consents.adultAttestation)
+    if (!dto.consents.adultAttestation) {
       missing.add('ADULT_ATTESTATION_REQUIRED');
+    }
     if (completion.pendingPhotoCount > 0) missing.add('PHOTO_REVIEW_PENDING');
+    if (!cover.isCover || cover.status !== 'approved') {
+      missing.add('COVER_PHOTO_REQUIRED');
+    }
 
     if (missing.size > 0) {
       throw new ConflictException(this.requirementsError([...missing]));
     }
 
-    await this.saveConsents(userId, dto);
-    await this.userRepo.update(userId, {
+    await this.saveConsents(userId, dto, repos);
+    await repos.userRepo.update(userId, {
       name: dto.nickname.trim(),
       dateOfBirth: dto.dateOfBirth,
       age: this.ageFromDateOfBirth(dto.dateOfBirth),
@@ -231,32 +361,44 @@ export class OnboardingService {
     });
     const savedProfile =
       profile ??
-      this.profileRepo.create({
+      repos.profileRepo.create({
         userId,
         profileVersion: 0,
       });
     savedProfile.nickname = dto.nickname.trim();
+    savedProfile.primaryPurpose = dto.primaryPurpose.trim();
+    savedProfile.defaultMatchRadiusKm = dto.distanceKm;
     savedProfile.city = dto.city.trim();
     savedProfile.interestTags = dto.interestTags;
-    savedProfile.relationshipGoals = candidateProfile.relationshipGoals;
+    savedProfile.relationshipGoals = relationshipGoals;
     savedProfile.profileVersion = savedProfile.profileVersion + 1;
-    await this.profileRepo.save(savedProfile);
+    await repos.profileRepo.save(savedProfile);
 
-    const status = await this.getStatus(userId);
+    const status = await this.getStatusWithRepos(userId, repos);
     return {
       ...status,
       idempotencyKey,
     };
   }
 
-  private async requireUser(userId: number) {
-    const user = await this.userRepo.findOne({ where: { id: userId } });
+  private async requireUser(
+    userId: number,
+    repos: OnboardingRepositories,
+    lock = false,
+  ) {
+    const user = await repos.userRepo.findOne({
+      where: { id: userId },
+      ...(lock ? { lock: { mode: 'pessimistic_write' as const } } : {}),
+    });
     if (!user) throw new NotFoundException('用户不存在');
     return user;
   }
 
-  private async listProfilePhotoRows(userId: number) {
-    return this.photoRepo
+  private async listProfilePhotoRows(
+    userId: number,
+    repos: OnboardingRepositories,
+  ) {
+    return repos.photoRepo
       .createQueryBuilder('photo')
       .leftJoinAndMapOne(
         'photo.asset',
@@ -296,7 +438,7 @@ export class OnboardingService {
     photos: UserProfilePhoto[],
     consents: UserConsent[],
     profile?: UserSocialProfile | null,
-  ) {
+  ): OnboardingCompletion {
     const missing: OnboardingMissingReason[] = [];
     const approvedPhotoCount = photos.filter(
       (photo) => photo.status === 'approved',
@@ -329,7 +471,7 @@ export class OnboardingService {
     }
     if (!user.name?.trim()) missing.push('NICKNAME_REQUIRED');
     if (!user.city?.trim()) missing.push('CITY_REQUIRED');
-    if ((profile?.relationshipGoals ?? []).filter(Boolean).length === 0) {
+    if (!profile?.primaryPurpose?.trim()) {
       missing.push('PRIMARY_PURPOSE_REQUIRED');
     }
     if ((user.interestTags ?? []).filter(Boolean).length < MINIMUM_INTERESTS) {
@@ -353,7 +495,7 @@ export class OnboardingService {
 
   private computeStatus(
     user: User,
-    completion: ReturnType<OnboardingService['computeCompletion']>,
+    completion: OnboardingCompletion,
   ): OnboardingStatus {
     if (completion.missing.includes('ACCOUNT_RESTRICTED')) return 'restricted';
     if (completion.missing.length === 0) return 'ready';
@@ -399,28 +541,32 @@ export class OnboardingService {
     );
   }
 
-  private async previewConsents(userId: number, dto: CompleteOnboardingDto) {
-    const existing = await this.consentRepo.find({
+  private async previewConsents(
+    userId: number,
+    dto: CompleteOnboardingDto,
+    repos: OnboardingRepositories,
+  ) {
+    const existing = await repos.consentRepo.find({
       where: { userId, revokedAt: IsNull() },
     });
     const now = new Date();
     return [
       ...existing,
-      this.consentRepo.create({
+      repos.consentRepo.create({
         userId,
         consentType: 'terms',
         version: dto.consents.termsVersion,
         acceptedAt: now,
         revokedAt: null,
       }),
-      this.consentRepo.create({
+      repos.consentRepo.create({
         userId,
         consentType: 'privacy',
         version: dto.consents.privacyVersion,
         acceptedAt: now,
         revokedAt: null,
       }),
-      this.consentRepo.create({
+      repos.consentRepo.create({
         userId,
         consentType: 'adult_attestation',
         version: TERMS_VERSION,
@@ -430,7 +576,11 @@ export class OnboardingService {
     ];
   }
 
-  private async saveConsents(userId: number, dto: CompleteOnboardingDto) {
+  private async saveConsents(
+    userId: number,
+    dto: CompleteOnboardingDto,
+    repos: OnboardingRepositories,
+  ) {
     const rows: Array<[UserConsentType, string]> = [
       ['terms', dto.consents.termsVersion],
       ['privacy', dto.consents.privacyVersion],
@@ -438,12 +588,12 @@ export class OnboardingService {
     ];
     const now = new Date();
     for (const [consentType, version] of rows) {
-      const existing = await this.consentRepo.findOne({
+      const existing = await repos.consentRepo.findOne({
         where: { userId, consentType, version, revokedAt: IsNull() },
       });
       if (existing) continue;
-      await this.consentRepo.save(
-        this.consentRepo.create({
+      await repos.consentRepo.save(
+        repos.consentRepo.create({
           userId,
           consentType,
           version,
@@ -457,8 +607,9 @@ export class OnboardingService {
   private async ensurePhotoAssetsOwnedByUser(
     userId: number,
     photos: UserProfilePhoto[],
+    repos: OnboardingRepositories,
   ) {
-    const assets = await this.mediaRepo.find({
+    const assets = await repos.mediaRepo.find({
       where: { id: In(photos.map((photo) => photo.assetId)) },
     });
     const byId = new Map(assets.map((asset) => [asset.id, asset]));
@@ -474,26 +625,138 @@ export class OnboardingService {
       }
       photo.status = this.statusFromAsset(asset);
     }
-    await this.photoRepo.save(photos);
+    await repos.photoRepo.save(photos);
   }
 
-  private async syncUserCover(userId: number) {
-    const photos = await this.listProfilePhotoRows(userId);
+  private async syncUserCover(userId: number, repos: OnboardingRepositories) {
+    const photos = await this.listProfilePhotoRows(userId, repos);
     const cover = photos.find(
       (photo) => photo.isCover && photo.status === 'approved',
     );
     if (cover?.asset?.url) {
-      await this.userRepo.update(userId, {
+      await repos.userRepo.update(userId, {
         avatar: cover.asset.url,
         coverUrl: cover.asset.url,
       });
       return;
     }
 
-    await this.userRepo.update(userId, {
+    await repos.userRepo.update(userId, {
       avatar: '',
       coverUrl: '',
     });
+  }
+
+  private repos(manager?: EntityManager): OnboardingRepositories {
+    if (!manager) {
+      return {
+        userRepo: this.userRepo,
+        profileRepo: this.profileRepo,
+        mediaRepo: this.mediaRepo,
+        photoRepo: this.photoRepo,
+        consentRepo: this.consentRepo,
+      };
+    }
+    return {
+      userRepo: manager.getRepository(User),
+      profileRepo: manager.getRepository(UserSocialProfile),
+      mediaRepo: manager.getRepository(MediaAsset),
+      photoRepo: manager.getRepository(UserProfilePhoto),
+      consentRepo: manager.getRepository(UserConsent),
+      idempotencyRepo: manager.getRepository(ApiIdempotencyRecord),
+    };
+  }
+
+  private async lockProfilePhotos(
+    userId: number,
+    photoRepo: Repository<UserProfilePhoto>,
+  ) {
+    await photoRepo
+      .createQueryBuilder('photo')
+      .setLock('pessimistic_write')
+      .where('photo.userId = :userId', { userId })
+      .getMany();
+  }
+
+  private async claimIdempotencyRecord(
+    idempotencyRepo: Repository<ApiIdempotencyRecord>,
+    userId: number,
+    idempotencyKey: string,
+    requestHash: string,
+  ) {
+    await idempotencyRepo
+      .createQueryBuilder()
+      .insert()
+      .values({
+        ownerUserId: userId,
+        scope: COMPLETE_ONBOARDING_SCOPE,
+        idempotencyKey,
+        requestHash,
+        status: 'processing',
+        responseStatus: null,
+        responseBody: null,
+        expiresAt: new Date(Date.now() + IDEMPOTENCY_TTL_MS),
+      })
+      .orIgnore()
+      .execute();
+
+    const record = await idempotencyRepo.findOne({
+      where: {
+        ownerUserId: userId,
+        scope: COMPLETE_ONBOARDING_SCOPE,
+        idempotencyKey,
+      },
+      lock: { mode: 'pessimistic_write' },
+    });
+    if (!record) {
+      throw new ConflictException({
+        code: 'IDEMPOTENCY_RECORD_UNAVAILABLE',
+        message: 'Idempotency record could not be acquired.',
+      });
+    }
+    if (record.requestHash !== requestHash) {
+      throw new ConflictException({
+        code: 'IDEMPOTENCY_KEY_REUSED',
+        message: 'Idempotency-Key was reused with a different request payload.',
+      });
+    }
+    return record;
+  }
+
+  private hashRequest(dto: CompleteOnboardingDto) {
+    return createHash('sha256')
+      .update(JSON.stringify(this.sortJson(dto)))
+      .digest('hex');
+  }
+
+  private sortJson(value: unknown): unknown {
+    if (Array.isArray(value)) return value.map((item) => this.sortJson(item));
+    if (!value || typeof value !== 'object') return value;
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>)
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([key, item]) => [key, this.sortJson(item)]),
+    );
+  }
+
+  private errorStatus(error: unknown) {
+    return typeof (error as { getStatus?: unknown }).getStatus === 'function'
+      ? (error as { getStatus: () => number }).getStatus()
+      : 500;
+  }
+
+  private errorBody(error: unknown) {
+    if (
+      typeof (error as { getResponse?: unknown }).getResponse === 'function'
+    ) {
+      const response = (error as { getResponse: () => unknown }).getResponse();
+      return typeof response === 'object' && response !== null
+        ? (response as Record<string, unknown>)
+        : { message: String(response) };
+    }
+    return {
+      message: error instanceof Error ? error.message : 'Unknown error',
+    };
   }
 
   private ageFromDateOfBirth(dateOfBirth: string) {

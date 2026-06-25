@@ -15,7 +15,7 @@ import { createHash } from 'crypto';
 import { Repository } from 'typeorm';
 import { ModerationService } from '../moderation/moderation.service';
 import { ensureUploadBaseDir, ensureUploadTempDir } from './upload-paths';
-import { MediaAsset } from '../users/media-asset.entity';
+import { MediaAsset, MediaModerationStatus } from '../users/media-asset.entity';
 
 const PLACEHOLDER_PATTERN =
   /^(|change_me.*|your-.*|replace-.*|.*_here|secret_key|password)$/i;
@@ -168,10 +168,13 @@ export class UploadsService implements OnModuleInit {
       const shouldModerateOssObject =
         this.storageProvider === 'aliyun-oss' &&
         this.moderationService.isAliyunImageModerationEnabled();
+      let moderationStatus: MediaModerationStatus =
+        this.defaultImageModerationStatus();
 
       if (!shouldModerateOssObject) {
         // Check the exact image bytes that will be stored.
         this.moderationService.checkImage(processedBuffer, file.originalname);
+        moderationStatus = this.mockApprovedImageModerationStatus();
       }
 
       // 3. Upload to configured object storage
@@ -186,6 +189,7 @@ export class UploadsService implements OnModuleInit {
               bucketName: this.bucketName,
               regionId: this.configService.get<string>('ALIYUN_OSS_REGION'),
             });
+            moderationStatus = 'approved';
           }
         } catch (error) {
           if (uploaded) {
@@ -202,6 +206,7 @@ export class UploadsService implements OnModuleInit {
           height: metadata.height || 0,
           storageKey: filename,
           sha256: this.hash(processedBuffer),
+          moderationStatus,
         });
       } else if (this.s3Client) {
         await this.uploadToS3(filename, processedBuffer, 'image/webp');
@@ -216,6 +221,7 @@ export class UploadsService implements OnModuleInit {
           height: metadata.height || 0,
           storageKey: filename,
           sha256: this.hash(processedBuffer),
+          moderationStatus,
         });
       } else {
         // Fallback to local storage logic (or keep it as legacy)
@@ -231,6 +237,7 @@ export class UploadsService implements OnModuleInit {
           height: metadata.height || 0,
           storageKey: filename,
           sha256: this.hash(processedBuffer),
+          moderationStatus,
         });
       }
     } catch (error) {
@@ -252,10 +259,17 @@ export class UploadsService implements OnModuleInit {
       height: number;
       storageKey: string;
       sha256: string;
+      moderationStatus: MediaModerationStatus;
     },
   ) {
     if (!ownerUserId) {
-      return { ...result, assetId: null, moderationStatus: 'approved' };
+      return {
+        assetId: null,
+        url: result.url,
+        width: result.width,
+        height: result.height,
+        moderationStatus: result.moderationStatus,
+      };
     }
 
     const asset = await this.mediaRepo.save(
@@ -268,7 +282,7 @@ export class UploadsService implements OnModuleInit {
         width: result.width,
         height: result.height,
         sha256: result.sha256,
-        moderationStatus: 'approved',
+        moderationStatus: result.moderationStatus,
         moderationReason: '',
       }),
     );
@@ -283,6 +297,21 @@ export class UploadsService implements OnModuleInit {
 
   private hash(buffer: Buffer) {
     return createHash('sha256').update(buffer).digest('hex');
+  }
+
+  private defaultImageModerationStatus(): MediaModerationStatus {
+    return 'pending';
+  }
+
+  private mockApprovedImageModerationStatus(): MediaModerationStatus {
+    if (
+      this.configService.get<string>('MEDIA_MODERATION_MODE') ===
+        'mock-approved' &&
+      !this.isProduction
+    ) {
+      return 'approved';
+    }
+    return 'pending';
   }
 
   /*
