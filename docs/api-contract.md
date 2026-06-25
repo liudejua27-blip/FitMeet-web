@@ -106,19 +106,58 @@ Discover:
 - `GET /public/social-intents`
 - `GET /public/social-intents/{id}`
 - `GET /public/social-intents/{id}/matches`
+- `POST /public/social-intents/{id}/applications`
+  - Requires `Idempotency-Key`.
+  - Creates a pending application only; pending applications do not open normal
+    chat.
+- `GET /public/social-intents/{id}/applications`
+- `GET /users/me/public-intent-applications?role=owner|applicant`
+- `POST /public-intent-applications/{id}/accept`
+  - Requires `Idempotency-Key`.
+  - Atomically accepts the application in PostgreSQL, updates intent capacity,
+    creates or reuses the linked meet, upserts active participants, grants open
+    contact permission, and writes `domain_outbox_events`.
+  - Returns `conversation.status = provisioning|ready`; Mongo conversation
+    creation happens only through outbox processing.
+- `POST /public-intent-applications/{id}/reject`
+  - Requires `Idempotency-Key`.
+- `POST /public-intent-applications/{id}/cancel`
+  - Requires `Idempotency-Key`.
 
 Messages:
 
 - `POST /messages/start`
+  - Requires `Idempotency-Key`.
+  - Requires `targetUserId`, `contextType`, and `contextId`.
+  - Returns `CONTACT_NOT_ALLOWED` unless an accepted friendship, accepted public
+    intent application, meet, or approved opener context grants permission.
 - `GET /messages/conversations`
 - `GET /messages/conversations/{conversationId}`
 - `POST /messages/conversations/{conversationId}/send`
+  - Rechecks conversation membership, onboarding readiness, contact permission,
+    opener state, and bidirectional block status on every send.
 - `POST /messages/public-intents/{id}/start`
+  - Compatibility path only; it may start a chat only when contact permission is
+    already open.
 - `GET /messages/unread`
 
 Friends:
 
 - `GET /friends`
+  - Returns active `friendships` only. `follow` is not a friendship and must not
+    be used as a fallback.
+- `DELETE /friends/{userId}`
+- `POST /connections/requests`
+  - Requires `Idempotency-Key`.
+- `GET /connections/requests?box=inbox|outbox&status=pending`
+- `POST /connections/requests/{id}/accept`
+  - Requires `Idempotency-Key`; accepted requests create friendship and grant
+    open contact permission.
+- `POST /connections/requests/{id}/reject`
+  - Requires `Idempotency-Key`.
+- `POST /connections/requests/{id}/cancel`
+  - Requires `Idempotency-Key`.
+- `GET /relationships/users/{userId}`
 - `POST /users/{id}/follow`
 - `GET /users/{id}/following`
 - `GET /following/ids`
@@ -185,6 +224,8 @@ Safety:
 
 - `POST /safety/reports`
 - `POST /safety/blocks/{id}`
+  - Immediately closes contact permission in both directions. Unblock does not
+    restore friendship, application, opener, or chat permissions automatically.
 - `DELETE /safety/blocks/{id}`
 - `GET /safety/blocks/ids`
 
@@ -210,6 +251,7 @@ Core contract drift is guarded by:
 
 ```bash
 pnpm --dir frontend test -- fitmeetCoreContract.test.ts
+pnpm --dir backend run test:e2e:contract
 ```
 
 This test imports `backend/src/openapi/fitmeet-core.openapi.ts` and compares the
@@ -217,6 +259,16 @@ OpenAPI path/method table with `frontend/src/api/fitmeetCoreContract.ts`.
 Frontend-only experimental Agent routes may remain in the registry, but every
 path in `fitMeetCoreEndpointMethods` must exist in OpenAPI with the exact same
 HTTP methods.
+
+Social Contact Loop V1 has a separate real-infrastructure integration check.
+It uses the local Docker Compose PostgreSQL, MongoDB, and Redis services; it
+calls HTTP controllers and only touches the database for fixture setup and final
+state assertions:
+
+```bash
+docker compose up -d postgres mongo redis
+pnpm --dir backend run test:e2e:integration
+```
 
 Deployment smoke should include:
 

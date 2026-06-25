@@ -264,6 +264,52 @@ export const fitMeetCoreOpenApi = {
       'getPublicSocialIntentMatches',
       { auth: false, responseSchema: ref('PublicSocialIntentMatchList') },
     ),
+    '/public/social-intents/{id}/applications': operations(
+      operation('post', 'discover', 'createPublicIntentApplication', {
+        requestSchema: ref('CreatePublicIntentApplicationRequest'),
+        responseSchema: ref('PublicIntentApplication'),
+        parameters: [idempotencyHeader()],
+      }),
+      operation('get', 'discover', 'listPublicIntentApplications', {
+        responseSchema: ref('PublicIntentApplicationList'),
+      }),
+    ),
+    '/users/me/public-intent-applications': path(
+      'get',
+      'discover',
+      'listMyPublicIntentApplications',
+      { responseSchema: ref('PublicIntentApplicationList') },
+    ),
+    '/public-intent-applications/{id}/accept': path(
+      'post',
+      'discover',
+      'acceptPublicIntentApplication',
+      {
+        requestSchema: ref('ResolvePublicIntentApplicationRequest'),
+        responseSchema: ref('AcceptPublicIntentApplicationResponse'),
+        parameters: [idempotencyHeader()],
+      },
+    ),
+    '/public-intent-applications/{id}/reject': path(
+      'post',
+      'discover',
+      'rejectPublicIntentApplication',
+      {
+        requestSchema: ref('ResolvePublicIntentApplicationRequest'),
+        responseSchema: ref('PublicIntentApplication'),
+        parameters: [idempotencyHeader()],
+      },
+    ),
+    '/public-intent-applications/{id}/cancel': path(
+      'post',
+      'discover',
+      'cancelPublicIntentApplication',
+      {
+        requestSchema: ref('ResolvePublicIntentApplicationRequest'),
+        responseSchema: ref('PublicIntentApplication'),
+        parameters: [idempotencyHeader()],
+      },
+    ),
     '/meets': operations(
       operation('get', 'meets', 'listMeets', {
         responseSchema: ref('MeetPage'),
@@ -285,6 +331,7 @@ export const fitMeetCoreOpenApi = {
     '/messages/start': path('post', 'messages', 'startConversation', {
       requestSchema: ref('StartConversationRequest'),
       responseSchema: ref('Conversation'),
+      parameters: [idempotencyHeader()],
     }),
     '/messages/conversations': path('get', 'messages', 'listConversations', {
       responseSchema: ref('ConversationPage'),
@@ -318,6 +365,57 @@ export const fitMeetCoreOpenApi = {
     '/friends': path('get', 'friends', 'listFriends', {
       responseSchema: ref('FriendPage'),
     }),
+    '/friends/{userId}': path('delete', 'friends', 'deleteFriend', {
+      responseSchema: ref('FriendDeleteResponse'),
+    }),
+    '/connections/requests': operations(
+      operation('post', 'friends', 'createConnectionRequest', {
+        requestSchema: ref('CreateConnectionRequest'),
+        responseSchema: ref('ConnectionRequest'),
+        parameters: [idempotencyHeader()],
+      }),
+      operation('get', 'friends', 'listConnectionRequests', {
+        responseSchema: ref('ConnectionRequestList'),
+      }),
+    ),
+    '/connections/requests/{id}/accept': path(
+      'post',
+      'friends',
+      'acceptConnectionRequest',
+      {
+        requestSchema: ref('ResolveConnectionRequest'),
+        responseSchema: ref('ConnectionRequest'),
+        parameters: [idempotencyHeader()],
+      },
+    ),
+    '/connections/requests/{id}/reject': path(
+      'post',
+      'friends',
+      'rejectConnectionRequest',
+      {
+        requestSchema: ref('ResolveConnectionRequest'),
+        responseSchema: ref('ConnectionRequest'),
+        parameters: [idempotencyHeader()],
+      },
+    ),
+    '/connections/requests/{id}/cancel': path(
+      'post',
+      'friends',
+      'cancelConnectionRequest',
+      {
+        requestSchema: ref('ResolveConnectionRequest'),
+        responseSchema: ref('ConnectionRequest'),
+        parameters: [idempotencyHeader()],
+      },
+    ),
+    '/relationships/users/{userId}': path(
+      'get',
+      'friends',
+      'getRelationshipState',
+      {
+        responseSchema: ref('RelationshipState'),
+      },
+    ),
     '/users/{id}/follow': path('post', 'friends', 'toggleFollow', {
       responseSchema: ref('FollowState'),
     }),
@@ -603,12 +701,45 @@ export const fitMeetCoreOpenApi = {
         candidateId: { oneOf: [{ type: 'number' }, { type: 'string' }] },
         message: { type: 'string' },
       }),
+      AcceptPublicIntentApplicationResponse: objectSchema({
+        applicationId: { type: 'number' },
+        status: { type: 'string', enum: ['accepted'] },
+        meetId: { type: ['number', 'null'] },
+        conversation: objectSchema({
+          status: { type: 'string', enum: ['provisioning', 'ready'] },
+          conversationId: { type: ['string', 'null'] },
+        }),
+      }),
+      ConnectionRequest: objectSchema({
+        id: { type: 'number' },
+        requesterId: { type: 'number' },
+        targetUserId: { type: 'number' },
+        status: {
+          type: 'string',
+          enum: ['pending', 'accepted', 'rejected', 'cancelled'],
+        },
+        message: { type: 'string' },
+        resolvedAt: { type: ['string', 'null'], format: 'date-time' },
+        createdAt: { type: 'string', format: 'date-time' },
+        updatedAt: { type: 'string', format: 'date-time' },
+      }),
+      ConnectionRequestList: arraySchema(ref('ConnectionRequest')),
       Conversation: objectSchema({
         id: { oneOf: [{ type: 'number' }, { type: 'string' }] },
         participants: arraySchema(ref('PublicUserProfile')),
         updatedAt: { type: 'string', format: 'date-time' },
       }),
       ConversationPage: pageSchema(ref('Conversation')),
+      CreateConnectionRequest: objectSchema(
+        {
+          targetUserId: { type: 'number' },
+          message: { type: 'string' },
+        },
+        ['targetUserId'],
+      ),
+      CreatePublicIntentApplicationRequest: objectSchema({
+        message: { type: 'string' },
+      }),
       CreateMeetRequest: objectSchema({
         title: { type: 'string' },
         activityType: { type: 'string' },
@@ -649,6 +780,10 @@ export const fitMeetCoreOpenApi = {
         following: { type: 'boolean' },
       }),
       FriendPage: pageSchema(ref('PublicUserProfile')),
+      FriendDeleteResponse: objectSchema({
+        removed: { type: 'boolean' },
+        friendship: { type: 'string', enum: ['none', 'removed'] },
+      }),
       IdListResponse: objectSchema({ ids: arraySchema({ type: 'number' }) }),
       Meet: objectSchema({
         id: { oneOf: [{ type: 'number' }, { type: 'string' }] },
@@ -771,7 +906,29 @@ export const fitMeetCoreOpenApi = {
         title: { type: 'string' },
         type: { type: 'string' },
         status: { type: 'string' },
+        capacityMin: { type: 'number' },
+        capacityMax: { type: 'number' },
+        acceptedCount: { type: 'number' },
+        applicationPolicy: { type: 'string' },
+        linkedMeetId: { type: ['number', 'null'] },
+        closesAt: { type: ['string', 'null'], format: 'date-time' },
       }),
+      PublicIntentApplication: objectSchema({
+        id: { type: 'number' },
+        publicIntentId: { type: 'string' },
+        ownerUserId: { type: 'number' },
+        applicantUserId: { type: 'number' },
+        status: {
+          type: 'string',
+          enum: ['pending', 'accepted', 'rejected', 'cancelled'],
+        },
+        message: { type: 'string' },
+        meetId: { type: ['number', 'null'] },
+        resolvedAt: { type: ['string', 'null'], format: 'date-time' },
+        createdAt: { type: 'string', format: 'date-time' },
+        updatedAt: { type: 'string', format: 'date-time' },
+      }),
+      PublicIntentApplicationList: arraySchema(ref('PublicIntentApplication')),
       PublicSocialIntentMatchList: objectSchema({
         data: arraySchema({ type: 'object', additionalProperties: true }),
       }),
@@ -815,9 +972,36 @@ export const fitMeetCoreOpenApi = {
       RefreshTokenRequest: objectSchema({ refresh_token: { type: 'string' } }, [
         'refresh_token',
       ]),
+      RelationshipState: objectSchema({
+        userId: { type: 'number' },
+        following: { type: 'boolean' },
+        friendship: { type: 'string', enum: ['none', 'active'] },
+        connectionRequest: {
+          type: 'string',
+          enum: ['none', 'pending_incoming', 'pending_outgoing', 'accepted'],
+        },
+        messagePermission: {
+          type: 'string',
+          enum: [
+            'none',
+            'opener_available',
+            'awaiting_reply',
+            'open',
+            'closed',
+          ],
+        },
+        conversationId: { type: ['string', 'null'] },
+        blocked: { type: 'boolean' },
+      }),
       ReminderPage: pageSchema({ type: 'object', additionalProperties: true }),
       ReminderPreferences: objectSchema({
         enabled: { type: 'boolean' },
+      }),
+      ResolveConnectionRequest: objectSchema({
+        reason: { type: 'string' },
+      }),
+      ResolvePublicIntentApplicationRequest: objectSchema({
+        reason: { type: 'string' },
       }),
       SafetyBlockActionResponse: objectSchema({
         targetUserId: { type: 'number' },
@@ -909,8 +1093,22 @@ export const fitMeetCoreOpenApi = {
         questions: arraySchema({ type: 'object', additionalProperties: true }),
       }),
       StartConversationRequest: objectSchema(
-        { otherUserId: { type: 'number' } },
-        ['otherUserId'],
+        {
+          targetUserId: { type: 'number' },
+          contextType: {
+            type: 'string',
+            enum: [
+              'agent_candidate',
+              'connection_request',
+              'public_intent_application',
+              'friendship',
+              'meet',
+            ],
+          },
+          contextId: { type: 'string' },
+          initialMessage: { type: 'string' },
+        },
+        ['targetUserId', 'contextType', 'contextId'],
       ),
       StreamResponse: objectSchema({
         stream: { type: 'string' },
@@ -1041,6 +1239,8 @@ function operation(
         description: status === '204' ? 'No content' : 'Successful response',
         ...(status === '204' ? {} : { content: jsonContent(schema) }),
       },
+      '403': { $ref: '#/components/responses/ErrorResponse' },
+      '409': { $ref: '#/components/responses/ErrorResponse' },
       default: { $ref: '#/components/responses/ErrorResponse' },
     },
   };
@@ -1063,6 +1263,15 @@ function typedContent(contentType: RequestContentType, schema: JsonSchema) {
     [contentType]: {
       schema,
     },
+  };
+}
+
+function idempotencyHeader(): OpenApiParameter {
+  return {
+    name: 'Idempotency-Key',
+    in: 'header',
+    required: true,
+    schema: { type: 'string' },
   };
 }
 

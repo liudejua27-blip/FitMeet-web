@@ -206,6 +206,7 @@ import { SafetyModule } from '../safety/safety.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { FriendsModule } from '../friends/friends.module';
 import { SocialRequestsModule } from '../social-requests/social-requests.module';
+import { SocialLoopModule } from '../social-loop/social-loop.module';
 import { UserSocialRequest } from '../social-requests/social-request.entity';
 import { SocialRequestCandidate } from '../match/social-request-candidate.entity';
 import { Follow } from '../friends/follow.entity';
@@ -226,6 +227,7 @@ import { AdminRbacModule } from '../admin-rbac/admin-rbac.module';
     FriendsModule,
     RealtimeModule,
     UsersModule,
+    SocialLoopModule,
     LifeGraphModule,
     forwardRef(() => ActivitiesModule),
     forwardRef(() => SocialRequestsModule),

@@ -3,6 +3,7 @@ import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { MatchService } from '../match/match.service';
 import { SocialRequestCandidateStatus } from '../match/social-request-candidate.entity';
 import { MessagesService } from '../messages/messages.service';
+import { ContactPolicyService } from '../social-loop/contact-policy.service';
 import { AgentTask } from './entities/agent-task.entity';
 import {
   buildSocialAgentMessageDedupeKey,
@@ -49,6 +50,7 @@ export class SocialAgentMessageToolService {
     private readonly confirmationPolicy: SocialAgentConfirmationPolicyService,
     private readonly toolInput: SocialAgentToolInputParserService,
     private readonly taskMemory: SocialAgentTaskMemoryService,
+    private readonly contactPolicy: ContactPolicyService,
   ) {}
 
   async sendMessage(
@@ -95,35 +97,50 @@ export class SocialAgentMessageToolService {
           'targetUserId or conversationId is required',
         );
       }
+      const contactContext = this.candidateContactContext(task, input);
+      await this.contactPolicy.reserveOpener(
+        task.ownerUserId,
+        targetUserId,
+        contactContext,
+      );
       const conversation = await this.messages.startConversation(
         task.ownerUserId,
         targetUserId,
-        buildSocialAgentConversationOptions(task, stepId, {
-          targetUserId,
-          candidateRecordId: this.toolInput.number(input.candidateRecordId),
-          socialRequestId: this.toolInput.number(
-            input.socialRequestId ?? input.requestId,
-          ),
-          toolName: SocialAgentToolName.SendMessage,
-        }),
+        {
+          ...buildSocialAgentConversationOptions(task, stepId, {
+            targetUserId,
+            candidateRecordId: this.toolInput.number(input.candidateRecordId),
+            socialRequestId: this.toolInput.number(
+              input.socialRequestId ?? input.requestId,
+            ),
+            toolName: SocialAgentToolName.SendMessage,
+          }),
+          contactContext,
+        },
       );
       conversationId = conversation.conversationId;
     }
 
+    const contactContext = targetUserId
+      ? this.candidateContactContext(task, input)
+      : null;
     const message = await this.messages.sendMessage(
       conversationId,
       task.ownerUserId,
       text,
-      buildSocialAgentMessageSendOptions(
-        task,
-        stepId,
-        input,
-        (toolName, currentInput) =>
-          this.confirmationPolicy.canRunAsConfirmedUserAction(
-            toolName,
-            currentInput,
-          ),
-      ),
+      {
+        ...buildSocialAgentMessageSendOptions(
+          task,
+          stepId,
+          input,
+          (toolName, currentInput) =>
+            this.confirmationPolicy.canRunAsConfirmedUserAction(
+              toolName,
+              currentInput,
+            ),
+        ),
+        contactContext,
+      },
     );
     const output = this.toolInput.asRecord(message);
     const candidate = await this.markCandidateMessaged(task, input);
@@ -310,5 +327,21 @@ export class SocialAgentMessageToolService {
       );
       return null;
     }
+  }
+
+  private candidateContactContext(
+    task: AgentTask,
+    input: Record<string, unknown>,
+  ) {
+    const candidateRecordId = this.toolInput.number(input.candidateRecordId);
+    const targetUserId = this.toolInput.number(
+      input.targetUserId ?? input.toUserId ?? input.candidateUserId,
+    );
+    return {
+      contextType: 'agent_candidate' as const,
+      contextId: candidateRecordId
+        ? String(candidateRecordId)
+        : `task:${task.id}:target:${targetUserId ?? 'unknown'}`,
+    };
   }
 }

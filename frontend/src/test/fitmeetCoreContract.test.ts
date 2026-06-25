@@ -31,6 +31,21 @@ describe('fitMeetCoreEndpoints', () => {
     expect(fitMeetCoreEndpoints.discover.publicSocialIntentMatches('intent:city run')).toBe(
       '/public/social-intents/intent%3Acity%20run/matches',
     );
+    expect(fitMeetCoreEndpoints.discover.publicSocialIntentApplications('intent:city run')).toBe(
+      '/public/social-intents/intent%3Acity%20run/applications',
+    );
+    expect(fitMeetCoreEndpoints.discover.myPublicIntentApplications).toBe(
+      '/users/me/public-intent-applications',
+    );
+    expect(fitMeetCoreEndpoints.discover.acceptPublicIntentApplication(42)).toBe(
+      '/public-intent-applications/42/accept',
+    );
+    expect(fitMeetCoreEndpoints.discover.rejectPublicIntentApplication('app:42')).toBe(
+      '/public-intent-applications/app%3A42/reject',
+    );
+    expect(fitMeetCoreEndpoints.discover.cancelPublicIntentApplication('app:42')).toBe(
+      '/public-intent-applications/app%3A42/cancel',
+    );
     expect(fitMeetCoreEndpoints.messages.startConversation).toBe('/messages/start');
     expect(fitMeetCoreEndpoints.messages.getConversations).toBe('/messages/conversations');
     expect(fitMeetCoreEndpoints.messages.getConversationMessages('conv-123')).toBe(
@@ -49,6 +64,21 @@ describe('fitMeetCoreEndpoints', () => {
       '/messages/public-intents/intent%3Acity%20run/start',
     );
     expect(fitMeetCoreEndpoints.messages.getUnreadCount).toBe('/messages/unread');
+    expect(fitMeetCoreEndpoints.friends.deleteFriend('user:42')).toBe('/friends/user%3A42');
+    expect(fitMeetCoreEndpoints.friends.createConnectionRequest).toBe('/connections/requests');
+    expect(fitMeetCoreEndpoints.friends.listConnectionRequests).toBe('/connections/requests');
+    expect(fitMeetCoreEndpoints.friends.acceptConnectionRequest(42)).toBe(
+      '/connections/requests/42/accept',
+    );
+    expect(fitMeetCoreEndpoints.friends.rejectConnectionRequest('req:42')).toBe(
+      '/connections/requests/req%3A42/reject',
+    );
+    expect(fitMeetCoreEndpoints.friends.cancelConnectionRequest('req:42')).toBe(
+      '/connections/requests/req%3A42/cancel',
+    );
+    expect(fitMeetCoreEndpoints.friends.relationshipState('user:42')).toBe(
+      '/relationships/users/user%3A42',
+    );
     expect(fitMeetCoreEndpoints.friends.followUser('user:42')).toBe('/users/user%3A42/follow');
     expect(fitMeetCoreEndpoints.friends.isFollowing('user:42')).toBe('/users/user%3A42/following');
     expect(fitMeetCoreEndpoints.friends.followingIds).toBe('/following/ids');
@@ -233,6 +263,12 @@ describe('fitMeetCoreEndpoints', () => {
     expect(openApiMethods['/users/me/profile-photos']).toEqual(['get', 'put']);
     expect(openApiMethods['/users/me/profile-photos/{photoId}']).toEqual(['delete']);
     expect(openApiMethods['/users/me/social-profile/privacy']).toEqual(['get', 'patch']);
+    expect(openApiMethods['/public/social-intents/{id}/applications']).toEqual(['get', 'post']);
+    expect(openApiMethods['/public-intent-applications/{id}/accept']).toEqual(['post']);
+    expect(openApiMethods['/connections/requests']).toEqual(['get', 'post']);
+    expect(openApiMethods['/connections/requests/{id}/accept']).toEqual(['post']);
+    expect(openApiMethods['/relationships/users/{userId}']).toEqual(['get']);
+    expect(openApiMethods['/friends/{userId}']).toEqual(['delete']);
     expect(openApiMethods['/users/{id}/follow']).toEqual(['post']);
     expect(openApiMethods['/safety/blocks/{id}']).toEqual(['delete', 'post']);
   });

@@ -85,6 +85,24 @@ export class PublicSocialIntent {
   @Column({ default: 0 })
   matchedCount: number;
 
+  @Column({ type: 'int', default: 1 })
+  capacityMin: number;
+
+  @Column({ type: 'int', default: 1 })
+  capacityMax: number;
+
+  @Column({ type: 'int', default: 0 })
+  acceptedCount: number;
+
+  @Column({ type: 'varchar', length: 32, default: 'approval_required' })
+  applicationPolicy: 'approval_required' | 'auto_accept';
+
+  @Column({ type: 'int', nullable: true })
+  linkedMeetId: number | null;
+
+  @Column({ type: 'timestamptz', nullable: true })
+  closesAt: Date | null;
+
   @Column({
     type: 'enum',
     enum: SocialRequestStatus,

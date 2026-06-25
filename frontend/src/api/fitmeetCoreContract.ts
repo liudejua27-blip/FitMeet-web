@@ -57,9 +57,29 @@ export const fitMeetCoreEndpoints = {
     publicSocialIntent: (id: string) => `/public/social-intents/${encodeURIComponent(id)}` as const,
     publicSocialIntentMatches: (id: string) =>
       `/public/social-intents/${encodeURIComponent(id)}/matches` as const,
+    publicSocialIntentApplications: (id: string) =>
+      `/public/social-intents/${encodeURIComponent(id)}/applications` as const,
+    myPublicIntentApplications: '/users/me/public-intent-applications',
+    acceptPublicIntentApplication: (id: number | string) =>
+      `/public-intent-applications/${encodeURIComponent(String(id))}/accept` as const,
+    rejectPublicIntentApplication: (id: number | string) =>
+      `/public-intent-applications/${encodeURIComponent(String(id))}/reject` as const,
+    cancelPublicIntentApplication: (id: number | string) =>
+      `/public-intent-applications/${encodeURIComponent(String(id))}/cancel` as const,
   },
   friends: {
     list: '/friends',
+    deleteFriend: (id: number | string) => `/friends/${encodeURIComponent(String(id))}` as const,
+    createConnectionRequest: '/connections/requests',
+    listConnectionRequests: '/connections/requests',
+    acceptConnectionRequest: (id: number | string) =>
+      `/connections/requests/${encodeURIComponent(String(id))}/accept` as const,
+    rejectConnectionRequest: (id: number | string) =>
+      `/connections/requests/${encodeURIComponent(String(id))}/reject` as const,
+    cancelConnectionRequest: (id: number | string) =>
+      `/connections/requests/${encodeURIComponent(String(id))}/cancel` as const,
+    relationshipState: (id: number | string) =>
+      `/relationships/users/${encodeURIComponent(String(id))}` as const,
     followUser: (id: number | string) => `/users/${encodeURIComponent(String(id))}/follow` as const,
     isFollowing: (id: number | string) =>
       `/users/${encodeURIComponent(String(id))}/following` as const,
@@ -269,6 +289,11 @@ export const fitMeetCoreEndpointTemplates = {
     publicSocialIntents: '/public/social-intents',
     publicSocialIntent: '/public/social-intents/{id}',
     publicSocialIntentMatches: '/public/social-intents/{id}/matches',
+    publicSocialIntentApplications: '/public/social-intents/{id}/applications',
+    myPublicIntentApplications: '/users/me/public-intent-applications',
+    acceptPublicIntentApplication: '/public-intent-applications/{id}/accept',
+    rejectPublicIntentApplication: '/public-intent-applications/{id}/reject',
+    cancelPublicIntentApplication: '/public-intent-applications/{id}/cancel',
   },
   messages: {
     startConversation: '/messages/start',
@@ -339,6 +364,13 @@ export const fitMeetCoreEndpointTemplates = {
   },
   friends: {
     list: '/friends',
+    deleteFriend: '/friends/{userId}',
+    createConnectionRequest: '/connections/requests',
+    listConnectionRequests: '/connections/requests',
+    acceptConnectionRequest: '/connections/requests/{id}/accept',
+    rejectConnectionRequest: '/connections/requests/{id}/reject',
+    cancelConnectionRequest: '/connections/requests/{id}/cancel',
+    relationshipState: '/relationships/users/{userId}',
     followUser: '/users/{id}/follow',
     isFollowing: '/users/{id}/following',
     followingIds: '/following/ids',
@@ -419,6 +451,11 @@ export const fitMeetCoreEndpointMethods = {
   '/public/social-intents': ['get'],
   '/public/social-intents/{id}': ['get'],
   '/public/social-intents/{id}/matches': ['get'],
+  '/public/social-intents/{id}/applications': ['get', 'post'],
+  '/users/me/public-intent-applications': ['get'],
+  '/public-intent-applications/{id}/accept': ['post'],
+  '/public-intent-applications/{id}/reject': ['post'],
+  '/public-intent-applications/{id}/cancel': ['post'],
   '/meets': ['get', 'post'],
   '/meets/{id}': ['get'],
   '/meets/{id}/join': ['post'],
@@ -430,6 +467,12 @@ export const fitMeetCoreEndpointMethods = {
   '/messages/public-intents/{id}/start': ['post'],
   '/messages/unread': ['get'],
   '/friends': ['get'],
+  '/friends/{userId}': ['delete'],
+  '/connections/requests': ['get', 'post'],
+  '/connections/requests/{id}/accept': ['post'],
+  '/connections/requests/{id}/reject': ['post'],
+  '/connections/requests/{id}/cancel': ['post'],
+  '/relationships/users/{userId}': ['get'],
   '/users/{id}/follow': ['post'],
   '/users/{id}/following': ['get'],
   '/following/ids': ['get'],

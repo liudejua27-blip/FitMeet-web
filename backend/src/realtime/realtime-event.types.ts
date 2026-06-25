@@ -10,6 +10,7 @@ export const REALTIME_EVENT_TYPES = [
   'message:read',
   'conversation:created',
   'conversation:updated',
+  'conversation.ready',
   'friend:request',
   'friend:accepted',
   'friend:rejected',
