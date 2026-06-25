@@ -27,6 +27,7 @@ const headless = process.env.STAGING_E2E_HEADLESS !== 'false';
 const allowRemote = process.env.FITMEET_AGENT_BROWSER_QA_ALLOW_REMOTE === 'true';
 const profileSetupMode = process.env.STAGING_E2E_PROFILE_SETUP || 'api';
 const requireCandidate = process.env.STAGING_E2E_REQUIRE_CANDIDATE !== 'false';
+const stopAfterPublish = process.env.STAGING_E2E_STOP_AFTER_PUBLISH === 'true';
 const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
 const evidenceFile = path.join(outputDir, `agent-public-loop-${timestamp}.json`);
 const markdownFile = path.join(outputDir, `agent-public-loop-${timestamp}.md`);
@@ -403,6 +404,20 @@ async function main() {
     state.ids.publicIntentId = publicIntentId;
     state.ids.socialRequestId = socialRequestId;
     await verifyDiscover(publicIntentId);
+
+    if (stopAfterPublish) {
+      record('stopped after publish for fault-injection matching job seed', {
+        taskId,
+        publicIntentId,
+        socialRequestId,
+      });
+      await context.close();
+      state.finishedAt = new Date().toISOString();
+      state.result = 'PASS';
+      await writeEvidence();
+      console.log(`[staging-e2e] PASS ${markdownFile}`);
+      return;
+    }
 
     await waitForCandidates(page, taskId, authA.access_token);
     await screenshot(page, '06-candidates-or-empty');
