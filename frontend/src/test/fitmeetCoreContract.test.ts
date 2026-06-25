@@ -15,6 +15,12 @@ describe('fitMeetCoreEndpoints', () => {
     expect(fitMeetCoreEndpoints.users.getPublicUser('user:42')).toBe('/users/user%3A42');
     expect(fitMeetCoreEndpoints.users.updateProfile).toBe('/users/profile');
     expect(fitMeetCoreEndpoints.users.updateLocation).toBe('/users/me/location');
+    expect(fitMeetCoreEndpoints.onboarding.status).toBe('/users/me/onboarding-status');
+    expect(fitMeetCoreEndpoints.onboarding.complete).toBe('/users/me/onboarding/complete');
+    expect(fitMeetCoreEndpoints.onboarding.profilePhotos).toBe('/users/me/profile-photos');
+    expect(fitMeetCoreEndpoints.onboarding.deleteProfilePhoto('photo:42')).toBe(
+      '/users/me/profile-photos/photo%3A42',
+    );
     expect(fitMeetCoreEndpoints.socialProfile.current).toBe('/users/me/social-profile');
     expect(fitMeetCoreEndpoints.socialProfile.privacy).toBe('/users/me/social-profile/privacy');
     expect(fitMeetCoreEndpoints.uploads.image).toBe('/uploads/image');
@@ -222,6 +228,10 @@ describe('fitMeetCoreEndpoints', () => {
 
     expect(openApiMethods).toEqual(registryMethods);
     expect(openApiMethods['/users/me/social-profile']).toEqual(['get', 'put']);
+    expect(openApiMethods['/users/me/onboarding-status']).toEqual(['get']);
+    expect(openApiMethods['/users/me/onboarding/complete']).toEqual(['post']);
+    expect(openApiMethods['/users/me/profile-photos']).toEqual(['get', 'put']);
+    expect(openApiMethods['/users/me/profile-photos/{photoId}']).toEqual(['delete']);
     expect(openApiMethods['/users/me/social-profile/privacy']).toEqual(['get', 'patch']);
     expect(openApiMethods['/users/{id}/follow']).toEqual(['post']);
     expect(openApiMethods['/safety/blocks/{id}']).toEqual(['delete', 'post']);
@@ -280,6 +290,10 @@ describe('fitMeetCoreEndpoints', () => {
       {
         built: fitMeetCoreEndpoints.users.getPublicUser('user:42'),
         template: fitMeetCoreEndpointTemplates.users.getPublicUser,
+      },
+      {
+        built: fitMeetCoreEndpoints.onboarding.deleteProfilePhoto('photo:42'),
+        template: fitMeetCoreEndpointTemplates.onboarding.deleteProfilePhoto,
       },
       {
         built: fitMeetCoreEndpoints.friends.followUser('user:42'),
@@ -401,5 +415,6 @@ function normalizeBuiltPath(path: string): string {
     .replace(/\/sar%3Acity%20run(?=\/|$)/g, '/:param')
     .replace(/\/intent%3Acity%20run(?=\/|$)/g, '/:param')
     .replace(/\/rem%3A101(?=\/|$)/g, '/:param')
+    .replace(/\/photo%3A42(?=\/|$)/g, '/:param')
     .replace(/\/user%3A42(?=\/|$)/g, '/:param');
 }

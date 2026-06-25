@@ -29,10 +29,16 @@ export const fitMeetCoreEndpoints = {
     getProfile: '/auth/profile',
   },
   users: {
-    getPublicUser: (id: number | string) =>
-      `/users/${encodeURIComponent(String(id))}` as const,
+    getPublicUser: (id: number | string) => `/users/${encodeURIComponent(String(id))}` as const,
     updateProfile: '/users/profile',
     updateLocation: '/users/me/location',
+  },
+  onboarding: {
+    status: '/users/me/onboarding-status',
+    complete: '/users/me/onboarding/complete',
+    profilePhotos: '/users/me/profile-photos',
+    deleteProfilePhoto: (photoId: number | string) =>
+      `/users/me/profile-photos/${encodeURIComponent(String(photoId))}` as const,
   },
   socialProfile: {
     current: '/users/me/social-profile',
@@ -214,8 +220,7 @@ export const fitMeetCoreEndpoints = {
   },
   safety: {
     createReport: '/safety/reports',
-    blockUser: (id: number | string) =>
-      `/safety/blocks/${encodeURIComponent(String(id))}` as const,
+    blockUser: (id: number | string) => `/safety/blocks/${encodeURIComponent(String(id))}` as const,
     unblockUser: (id: number | string) =>
       `/safety/blocks/${encodeURIComponent(String(id))}` as const,
     blockedIds: '/safety/blocks/ids',
@@ -241,6 +246,12 @@ export const fitMeetCoreEndpointTemplates = {
     getPublicUser: '/users/{id}',
     updateProfile: '/users/profile',
     updateLocation: '/users/me/location',
+  },
+  onboarding: {
+    status: '/users/me/onboarding-status',
+    complete: '/users/me/onboarding/complete',
+    profilePhotos: '/users/me/profile-photos',
+    deleteProfilePhoto: '/users/me/profile-photos/{photoId}',
   },
   socialProfile: {
     current: '/users/me/social-profile',
@@ -391,6 +402,10 @@ export const fitMeetCoreEndpointMethods = {
   '/users/{id}': ['get'],
   '/users/profile': ['put'],
   '/users/me/location': ['put'],
+  '/users/me/onboarding-status': ['get'],
+  '/users/me/onboarding/complete': ['post'],
+  '/users/me/profile-photos': ['get', 'put'],
+  '/users/me/profile-photos/{photoId}': ['delete'],
   '/users/me/social-profile': ['get', 'put'],
   '/users/me/social-profile/questions': ['get'],
   '/users/me/social-profile/answers': ['post'],
@@ -461,6 +476,9 @@ export type FitMeetCoreStaticEndpoint =
   | (typeof fitMeetCoreEndpoints.auth)[keyof typeof fitMeetCoreEndpoints.auth]
   | (typeof fitMeetCoreEndpoints.users)['updateProfile']
   | (typeof fitMeetCoreEndpoints.users)['updateLocation']
+  | (typeof fitMeetCoreEndpoints.onboarding)['status']
+  | (typeof fitMeetCoreEndpoints.onboarding)['complete']
+  | (typeof fitMeetCoreEndpoints.onboarding)['profilePhotos']
   | (typeof fitMeetCoreEndpoints.socialProfile)[keyof typeof fitMeetCoreEndpoints.socialProfile]
   | (typeof fitMeetCoreEndpoints.discover)['publicSocialIntents']
   | (typeof fitMeetCoreEndpoints.messages)['startConversation']

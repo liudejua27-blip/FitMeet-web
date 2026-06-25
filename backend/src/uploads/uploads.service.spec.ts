@@ -118,8 +118,16 @@ function makeService(env: Record<string, string>) {
     checkImage: jest.fn(),
     checkOssImage: jest.fn(),
   };
+  const mediaRepo = {
+    create: jest.fn((value) => value),
+    save: jest.fn((value) => ({ id: 1, ...value })),
+  };
 
-  return new UploadsService(configService as never, moderationService as never);
+  return new UploadsService(
+    configService as never,
+    moderationService as never,
+    mediaRepo as never,
+  );
 }
 
 function writeTempUpload(fileName: string) {

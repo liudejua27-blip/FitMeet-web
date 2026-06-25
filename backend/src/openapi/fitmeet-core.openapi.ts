@@ -48,6 +48,7 @@ export const fitMeetCoreOpenApi = {
     { name: 'system' },
     { name: 'auth' },
     { name: 'users' },
+    { name: 'onboarding' },
     { name: 'social-profile' },
     { name: 'discover' },
     { name: 'messages' },
@@ -118,6 +119,46 @@ export const fitMeetCoreOpenApi = {
       requestSchema: ref('UpdateLocationRequest'),
       responseSchema: ref('ActionAccepted'),
     }),
+    '/users/me/onboarding-status': path(
+      'get',
+      'onboarding',
+      'getOnboardingStatus',
+      {
+        responseSchema: ref('OnboardingStatusResponse'),
+      },
+    ),
+    '/users/me/onboarding/complete': path(
+      'post',
+      'onboarding',
+      'completeOnboarding',
+      {
+        requestSchema: ref('CompleteOnboardingRequest'),
+        responseSchema: ref('OnboardingStatusResponse'),
+        parameters: [
+          {
+            name: 'Idempotency-Key',
+            in: 'header',
+            required: true,
+            schema: { type: 'string' },
+          },
+        ],
+      },
+    ),
+    '/users/me/profile-photos': operations(
+      operation('get', 'onboarding', 'listProfilePhotos', {
+        responseSchema: ref('ProfilePhotoList'),
+      }),
+      operation('put', 'onboarding', 'replaceProfilePhotos', {
+        requestSchema: ref('UpdateProfilePhotosRequest'),
+        responseSchema: ref('ProfilePhotoList'),
+      }),
+    ),
+    '/users/me/profile-photos/{photoId}': path(
+      'delete',
+      'onboarding',
+      'deleteProfilePhoto',
+      { responseSchema: ref('ProfilePhotoDeleteResponse') },
+    ),
     '/users/me/social-profile': operations(
       operation('get', 'social-profile', 'getSocialProfile', {
         responseSchema: ref('SocialProfile'),
@@ -620,6 +661,33 @@ export const fitMeetCoreOpenApi = {
       }),
       MeetPage: pageSchema(ref('Meet')),
       MeetRecordPage: pageSchema(ref('Meet')),
+      CompleteOnboardingRequest: objectSchema(
+        {
+          expectedProfileVersion: { type: 'number' },
+          nickname: { type: 'string' },
+          dateOfBirth: { type: 'string', format: 'date' },
+          city: { type: 'string' },
+          primaryPurpose: { type: 'string' },
+          purposes: arraySchema({ type: 'string' }),
+          interestTags: arraySchema({ type: 'string' }),
+          distanceKm: { type: 'number' },
+          photoIds: arraySchema({ type: 'number' }),
+          coverPhotoId: { type: 'number' },
+          consents: ref('OnboardingConsentsRequest'),
+        },
+        [
+          'nickname',
+          'dateOfBirth',
+          'city',
+          'primaryPurpose',
+          'purposes',
+          'interestTags',
+          'distanceKm',
+          'photoIds',
+          'coverPhotoId',
+          'consents',
+        ],
+      ),
       Message: objectSchema({
         id: { oneOf: [{ type: 'number' }, { type: 'string' }] },
         text: { type: 'string' },
@@ -635,6 +703,57 @@ export const fitMeetCoreOpenApi = {
         },
         ['total', 'page', 'lastPage'],
       ),
+      OnboardingCompletion: objectSchema({
+        missing: arraySchema(ref('OnboardingMissingReason')),
+        approvedPhotoCount: { type: 'number' },
+        pendingPhotoCount: { type: 'number' },
+        rejectedPhotoCount: { type: 'number' },
+        hasCoverPhoto: { type: 'boolean' },
+        profileVersion: { type: 'number' },
+      }),
+      OnboardingConsentsRequest: objectSchema(
+        {
+          termsVersion: { type: 'string' },
+          privacyVersion: { type: 'string' },
+          adultAttestation: { type: 'boolean' },
+        },
+        ['termsVersion', 'privacyVersion', 'adultAttestation'],
+      ),
+      OnboardingMissingReason: {
+        type: 'string',
+        enum: [
+          'TERMS_REQUIRED',
+          'PRIVACY_REQUIRED',
+          'ADULT_ATTESTATION_REQUIRED',
+          'BIRTH_DATE_REQUIRED',
+          'NICKNAME_REQUIRED',
+          'CITY_REQUIRED',
+          'PRIMARY_PURPOSE_REQUIRED',
+          'INTERESTS_REQUIRED',
+          'PROFILE_PHOTOS_REQUIRED',
+          'PHOTO_REVIEW_PENDING',
+          'COVER_PHOTO_REQUIRED',
+          'ACCOUNT_RESTRICTED',
+        ],
+      },
+      OnboardingRequirements: objectSchema({
+        minimumAge: { type: 'number' },
+        minimumApprovedPhotos: { type: 'number' },
+        minimumInterests: { type: 'number' },
+        termsVersion: { type: 'string' },
+        privacyVersion: { type: 'string' },
+      }),
+      OnboardingStatusResponse: objectSchema({
+        version: { type: 'number' },
+        status: {
+          type: 'string',
+          enum: ['incomplete', 'pending_review', 'ready', 'restricted'],
+        },
+        canUseSocialActions: { type: 'boolean' },
+        requirements: ref('OnboardingRequirements'),
+        completion: ref('OnboardingCompletion'),
+        completedAt: { type: ['string', 'null'], format: 'date-time' },
+      }),
       PublicSocialIntent: objectSchema({
         id: { oneOf: [{ type: 'number' }, { type: 'string' }] },
         title: { type: 'string' },
@@ -651,6 +770,36 @@ export const fitMeetCoreOpenApi = {
         avatar: { type: ['string', 'null'] },
         city: { type: ['string', 'null'] },
       }),
+      ProfilePhoto: objectSchema({
+        id: { type: 'number' },
+        assetId: { type: 'number' },
+        url: { type: 'string' },
+        sortOrder: { type: 'number' },
+        isCover: { type: 'boolean' },
+        status: {
+          type: 'string',
+          enum: ['pending', 'approved', 'rejected', 'deleted'],
+        },
+        moderationStatus: {
+          type: 'string',
+          enum: ['pending', 'approved', 'rejected', 'unknown'],
+        },
+        width: { type: 'number' },
+        height: { type: 'number' },
+      }),
+      ProfilePhotoDeleteResponse: objectSchema({
+        id: { type: 'number' },
+        status: { type: 'string', enum: ['deleted'] },
+      }),
+      ProfilePhotoInput: objectSchema(
+        {
+          assetId: { type: 'number' },
+          sortOrder: { type: 'number' },
+          isCover: { type: 'boolean' },
+        },
+        ['assetId'],
+      ),
+      ProfilePhotoList: arraySchema(ref('ProfilePhoto')),
       RefreshTokenRequest: objectSchema({ refresh_token: { type: 'string' } }, [
         'refresh_token',
       ]),
@@ -768,6 +917,12 @@ export const fitMeetCoreOpenApi = {
         avatar: { type: 'string' },
         city: { type: 'string' },
       }),
+      UpdateProfilePhotosRequest: objectSchema(
+        {
+          photos: arraySchema(ref('ProfilePhotoInput')),
+        },
+        ['photos'],
+      ),
       UpdateSocialProfilePrivacyRequest: objectSchema({
         profileVisibility: { type: 'string' },
         matchingEnabled: { type: 'boolean' },
@@ -782,7 +937,7 @@ export const fitMeetCoreOpenApi = {
       }),
       UploadImageResponse: objectSchema({
         url: { type: 'string' },
-        assetId: { type: ['string', 'null'] },
+        assetId: { oneOf: [{ type: 'number' }, { type: 'null' }] },
         width: { type: ['number', 'null'] },
         height: { type: ['number', 'null'] },
         moderationStatus: {

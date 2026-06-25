@@ -38,6 +38,9 @@ export class User {
   @Column({ default: 0 })
   age: number;
 
+  @Column({ type: 'date', nullable: true })
+  dateOfBirth: string | null;
+
   @Column({ default: '' })
   city: string;
 
@@ -98,6 +101,12 @@ export class User {
    *  counterpart). Driver of "可信社交" badge on profile. */
   @Column({ type: 'int', default: 0 })
   socialTrustCount: number;
+
+  @Column({ type: 'timestamptz', nullable: true })
+  onboardingCompletedAt: Date | null;
+
+  @Column({ type: 'int', default: 0 })
+  onboardingVersion: number;
 
   @CreateDateColumn()
   createdAt: Date;

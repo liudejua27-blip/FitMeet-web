@@ -39,6 +39,11 @@ Core auth/profile endpoints:
 - `GET /users/{id}`
 - `PUT /users/profile`
 - `PUT /users/me/location`
+- `GET /users/me/onboarding-status`
+- `POST /users/me/onboarding/complete`
+- `GET /users/me/profile-photos`
+- `PUT /users/me/profile-photos`
+- `DELETE /users/me/profile-photos/{photoId}`
 - `GET /users/me/social-profile`
 - `PUT /users/me/social-profile`
 - `GET /users/me/social-profile/questions`
@@ -126,6 +131,22 @@ Meets:
 - `POST /meets/{id}/join`
 - `GET /meets/records/me`
 
+Onboarding and profile gate:
+
+- `GET /users/me/onboarding-status`
+- `POST /users/me/onboarding/complete`
+  - Requires `Idempotency-Key`.
+  - Returns stable `ONBOARDING_REQUIREMENTS_NOT_MET` errors when the user has
+    not accepted current terms/privacy, is under age, has fewer than 3
+    interests, has fewer than 2 approved photos, has pending review photos, or
+    has no approved cover photo.
+- `GET /users/me/profile-photos`
+- `PUT /users/me/profile-photos`
+  - Accepts uploaded `assetId` values only; clients must not hard-code remote
+    photo URLs into profile state.
+  - Supports 2-6 final onboarding photos, with one approved cover photo.
+- `DELETE /users/me/profile-photos/{photoId}`
+
 Social Agent chat and workspace:
 
 - `POST /social-agent/chat/run`
@@ -170,6 +191,8 @@ Safety:
 Uploads:
 
 - `POST /uploads/image`
+  - Returns `assetId`, `url`, dimensions, and `moderationStatus`; onboarding
+    binds profile photos by `assetId`.
 - `POST /uploads/video`
 
 Waitlist:
