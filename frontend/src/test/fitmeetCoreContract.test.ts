@@ -16,9 +16,7 @@ describe('fitMeetCoreEndpoints', () => {
     expect(fitMeetCoreEndpoints.users.updateProfile).toBe('/users/profile');
     expect(fitMeetCoreEndpoints.users.updateLocation).toBe('/users/me/location');
     expect(fitMeetCoreEndpoints.socialProfile.current).toBe('/users/me/social-profile');
-    expect(fitMeetCoreEndpoints.socialProfile.privacy).toBe(
-      '/users/me/social-profile/privacy',
-    );
+    expect(fitMeetCoreEndpoints.socialProfile.privacy).toBe('/users/me/social-profile/privacy');
     expect(fitMeetCoreEndpoints.uploads.image).toBe('/uploads/image');
     expect(fitMeetCoreEndpoints.discover.publicSocialIntents).toBe('/public/social-intents');
     expect(fitMeetCoreEndpoints.discover.publicSocialIntent('intent:city run')).toBe(
@@ -45,19 +43,11 @@ describe('fitMeetCoreEndpoints', () => {
       '/messages/public-intents/intent%3Acity%20run/start',
     );
     expect(fitMeetCoreEndpoints.messages.getUnreadCount).toBe('/messages/unread');
-    expect(fitMeetCoreEndpoints.friends.followUser('user:42')).toBe(
-      '/users/user%3A42/follow',
-    );
-    expect(fitMeetCoreEndpoints.friends.isFollowing('user:42')).toBe(
-      '/users/user%3A42/following',
-    );
+    expect(fitMeetCoreEndpoints.friends.followUser('user:42')).toBe('/users/user%3A42/follow');
+    expect(fitMeetCoreEndpoints.friends.isFollowing('user:42')).toBe('/users/user%3A42/following');
     expect(fitMeetCoreEndpoints.friends.followingIds).toBe('/following/ids');
-    expect(fitMeetCoreEndpoints.safety.blockUser('user:42')).toBe(
-      '/safety/blocks/user%3A42',
-    );
-    expect(fitMeetCoreEndpoints.safety.unblockUser('user:42')).toBe(
-      '/safety/blocks/user%3A42',
-    );
+    expect(fitMeetCoreEndpoints.safety.blockUser('user:42')).toBe('/safety/blocks/user%3A42');
+    expect(fitMeetCoreEndpoints.safety.unblockUser('user:42')).toBe('/safety/blocks/user%3A42');
     expect(fitMeetCoreEndpoints.safety.blockedIds).toBe('/safety/blocks/ids');
     expect(fitMeetCoreEndpoints.socialAgentChat.session).toBe('/social-agent/chat/session');
     expect(fitMeetCoreEndpoints.socialAgentChat.run).toBe('/social-agent/chat/run');
@@ -237,6 +227,34 @@ describe('fitMeetCoreEndpoints', () => {
     expect(openApiMethods['/safety/blocks/{id}']).toEqual(['delete', 'post']);
   });
 
+  it('keeps OpenAPI request bodies and path parameters structurally valid', () => {
+    expect(requestContentTypes('/uploads/image', 'post')).toContain('multipart/form-data');
+    expect(requestContentTypes('/uploads/video', 'post')).toContain('multipart/form-data');
+    expect(requestContentTypes('/auth/login', 'post')).toContain('application/json');
+
+    for (const [path, item] of Object.entries(fitMeetCoreOpenApi.paths)) {
+      const requiredPathParams = Array.from(path.matchAll(/\{([^/}]+)\}/g), (match) => match[1]);
+      if (requiredPathParams.length === 0) continue;
+
+      for (const method of Object.keys(item)) {
+        const operation = item[method as keyof typeof item] as {
+          parameters?: Array<{ name?: string; in?: string; required?: boolean }>;
+        };
+        for (const paramName of requiredPathParams) {
+          expect(operation.parameters).toEqual(
+            expect.arrayContaining([
+              expect.objectContaining({
+                name: paramName,
+                in: 'path',
+                required: true,
+              }),
+            ]),
+          );
+        }
+      }
+    }
+  });
+
   it('normalizes dynamic endpoint builders back to their OpenAPI templates', () => {
     const examples = [
       {
@@ -360,6 +378,15 @@ describe('fitMeetCoreEndpoints', () => {
 
 function flattenEndpointTemplates(): string[] {
   return Object.values(fitMeetCoreEndpointTemplates).flatMap((group) => Object.values(group));
+}
+
+function requestContentTypes(path: string, method: string): string[] {
+  const paths = fitMeetCoreOpenApi.paths as Record<
+    string,
+    Record<string, { requestBody?: { content?: Record<string, unknown> } }>
+  >;
+  const operation = paths[path]?.[method];
+  return Object.keys(operation?.requestBody?.content ?? {});
 }
 
 function normalizeTemplatePath(path: string): string {

@@ -1,15 +1,38 @@
 type HttpMethod = 'get' | 'post' | 'put' | 'patch' | 'delete';
 type JsonSchema = Record<string, unknown>;
+type RequestContentType = 'application/json' | 'multipart/form-data';
+type OpenApiParameter = {
+  name: string;
+  in: 'path' | 'header';
+  required: boolean;
+  schema: JsonSchema;
+};
+type OpenApiOperation = {
+  tags: string[];
+  operationId: string;
+  summary?: string;
+  security?: Array<Record<string, unknown[]>>;
+  parameters?: OpenApiParameter[];
+  requestBody?: {
+    required: boolean;
+    content: Record<string, { schema: JsonSchema }>;
+  };
+  responses: Record<string, unknown>;
+};
+type OperationPathItem = Partial<Record<HttpMethod, OpenApiOperation>>;
 
 type OperationOptions = {
   summary?: string;
   requestSchema?: JsonSchema;
+  requestContentType?: RequestContentType;
   responseSchema?: JsonSchema;
+  parameters?: OpenApiParameter[];
   auth?: boolean;
   status?: '200' | '201' | '204';
 };
 
-const bearerSecurity = [{ bearerAuth: [] }];
+const httpMethods = ['get', 'post', 'put', 'patch', 'delete'] as const;
+const bearerSecurity: Array<Record<string, unknown[]>> = [{ bearerAuth: [] }];
 
 export const fitMeetCoreOpenApi = {
   openapi: '3.1.0',
@@ -37,7 +60,7 @@ export const fitMeetCoreOpenApi = {
     { name: 'waitlist' },
     { name: 'admin' },
   ],
-  paths: {
+  paths: withPathParameters({
     '/health': path('get', 'system', 'getHealth', {
       auth: false,
       responseSchema: ref('SystemHealth'),
@@ -176,14 +199,24 @@ export const fitMeetCoreOpenApi = {
         responseSchema: ref('SocialProfile'),
       },
     ),
-    '/public/social-intents': path('get', 'discover', 'listPublicSocialIntents', {
-      auth: false,
-      responseSchema: ref('PublicSocialIntentPage'),
-    }),
-    '/public/social-intents/{id}': path('get', 'discover', 'getPublicSocialIntent', {
-      auth: false,
-      responseSchema: ref('PublicSocialIntent'),
-    }),
+    '/public/social-intents': path(
+      'get',
+      'discover',
+      'listPublicSocialIntents',
+      {
+        auth: false,
+        responseSchema: ref('PublicSocialIntentPage'),
+      },
+    ),
+    '/public/social-intents/{id}': path(
+      'get',
+      'discover',
+      'getPublicSocialIntent',
+      {
+        auth: false,
+        responseSchema: ref('PublicSocialIntent'),
+      },
+    ),
     '/public/social-intents/{id}/matches': path(
       'get',
       'discover',
@@ -191,13 +224,17 @@ export const fitMeetCoreOpenApi = {
       { auth: false, responseSchema: ref('PublicSocialIntentMatchList') },
     ),
     '/meets': operations(
-      operation('get', 'meets', 'listMeets', { responseSchema: ref('MeetPage') }),
+      operation('get', 'meets', 'listMeets', {
+        responseSchema: ref('MeetPage'),
+      }),
       operation('post', 'meets', 'createMeet', {
         requestSchema: ref('CreateMeetRequest'),
         responseSchema: ref('Meet'),
       }),
     ),
-    '/meets/{id}': path('get', 'meets', 'getMeet', { responseSchema: ref('Meet') }),
+    '/meets/{id}': path('get', 'meets', 'getMeet', {
+      responseSchema: ref('Meet'),
+    }),
     '/meets/{id}/join': path('post', 'meets', 'joinMeet', {
       responseSchema: ref('MeetJoinResponse'),
     }),
@@ -211,13 +248,23 @@ export const fitMeetCoreOpenApi = {
     '/messages/conversations': path('get', 'messages', 'listConversations', {
       responseSchema: ref('ConversationPage'),
     }),
-    '/messages/conversations/{conversationId}': path('get', 'messages', 'listMessages', {
-      responseSchema: ref('MessagePage'),
-    }),
-    '/messages/conversations/{conversationId}/send': path('post', 'messages', 'sendMessage', {
-      requestSchema: ref('SendMessageRequest'),
-      responseSchema: ref('Message'),
-    }),
+    '/messages/conversations/{conversationId}': path(
+      'get',
+      'messages',
+      'listMessages',
+      {
+        responseSchema: ref('MessagePage'),
+      },
+    ),
+    '/messages/conversations/{conversationId}/send': path(
+      'post',
+      'messages',
+      'sendMessage',
+      {
+        requestSchema: ref('SendMessageRequest'),
+        responseSchema: ref('Message'),
+      },
+    ),
     '/messages/public-intents/{id}/start': path(
       'post',
       'messages',
@@ -239,28 +286,44 @@ export const fitMeetCoreOpenApi = {
     '/following/ids': path('get', 'friends', 'getFollowingIds', {
       responseSchema: ref('IdListResponse'),
     }),
-    '/social-agent/chat/session': path('get', 'social-agent', 'restoreChatSession', {
-      responseSchema: ref('SocialAgentSession'),
-    }),
+    '/social-agent/chat/session': path(
+      'get',
+      'social-agent',
+      'restoreChatSession',
+      {
+        responseSchema: ref('SocialAgentSession'),
+      },
+    ),
     '/social-agent/chat/run': path('post', 'social-agent', 'runChat', {
       requestSchema: ref('SocialAgentRunRequest'),
       responseSchema: ref('SocialAgentRunResponse'),
     }),
-    '/social-agent/chat/run-async': path('post', 'social-agent', 'runChatAsync', {
-      requestSchema: ref('SocialAgentRunRequest'),
-      responseSchema: ref('SocialAgentAsyncRunResponse'),
-    }),
+    '/social-agent/chat/run-async': path(
+      'post',
+      'social-agent',
+      'runChatAsync',
+      {
+        requestSchema: ref('SocialAgentRunRequest'),
+        responseSchema: ref('SocialAgentAsyncRunResponse'),
+      },
+    ),
     '/social-agent/chat/messages/stream': path(
       'post',
       'social-agent',
       'streamChatMessage',
-      { requestSchema: ref('SocialAgentMessageRequest'), responseSchema: ref('StreamResponse') },
+      {
+        requestSchema: ref('SocialAgentMessageRequest'),
+        responseSchema: ref('StreamResponse'),
+      },
     ),
     '/social-agent/chat/route-message/stream': path(
       'post',
       'social-agent',
       'streamRoutedChatMessage',
-      { requestSchema: ref('SocialAgentMessageRequest'), responseSchema: ref('StreamResponse') },
+      {
+        requestSchema: ref('SocialAgentMessageRequest'),
+        responseSchema: ref('StreamResponse'),
+      },
     ),
     '/social-agent/chat/tasks/{taskId}/session': path(
       'get',
@@ -272,7 +335,10 @@ export const fitMeetCoreOpenApi = {
       'post',
       'social-agent',
       'streamTaskMessage',
-      { requestSchema: ref('SocialAgentMessageRequest'), responseSchema: ref('StreamResponse') },
+      {
+        requestSchema: ref('SocialAgentMessageRequest'),
+        responseSchema: ref('StreamResponse'),
+      },
     ),
     '/social-agent/chat/tasks/{taskId}/publish-social-request': path(
       'post',
@@ -319,21 +385,36 @@ export const fitMeetCoreOpenApi = {
       'forkCheckpoint',
       { responseSchema: ref('StreamResponse') },
     ),
-    '/social-agent/tasks/current': path('get', 'social-agent', 'getCurrentTask', {
-      responseSchema: ref('SocialAgentTask'),
-    }),
+    '/social-agent/tasks/current': path(
+      'get',
+      'social-agent',
+      'getCurrentTask',
+      {
+        responseSchema: ref('SocialAgentTask'),
+      },
+    ),
     '/social-agent/tasks/{taskId}/timeline': path(
       'get',
       'social-agent',
       'getTaskTimeline',
       { responseSchema: ref('SocialAgentTimeline') },
     ),
-    '/social-agent/tasks/{taskId}/events': path('get', 'social-agent', 'getTaskEvents', {
-      responseSchema: ref('SocialAgentEventPage'),
-    }),
-    '/social-agent/tasks/{taskId}/replan': path('post', 'social-agent', 'replanTask', {
-      responseSchema: ref('ActionAccepted'),
-    }),
+    '/social-agent/tasks/{taskId}/events': path(
+      'get',
+      'social-agent',
+      'getTaskEvents',
+      {
+        responseSchema: ref('SocialAgentEventPage'),
+      },
+    ),
+    '/social-agent/tasks/{taskId}/replan': path(
+      'post',
+      'social-agent',
+      'replanTask',
+      {
+        responseSchema: ref('ActionAccepted'),
+      },
+    ),
     '/social-agent/reminders': path('get', 'social-agent', 'listReminders', {
       responseSchema: ref('ReminderPage'),
     }),
@@ -370,15 +451,30 @@ export const fitMeetCoreOpenApi = {
     '/social-agent/l5/dashboard': path('get', 'admin', 'getAgentL5Dashboard', {
       responseSchema: ref('AdminDashboard'),
     }),
-    '/social-agent/l5/replay-samples': path('get', 'admin', 'listAgentL5ReplaySamples', {
-      responseSchema: ref('AdminListResponse'),
-    }),
-    '/social-agent/l5/subagent-memory': path('get', 'admin', 'listSubagentMemory', {
-      responseSchema: ref('AdminListResponse'),
-    }),
-    '/social-agent/l5/meet-loop-states': path('get', 'admin', 'listMeetLoopStates', {
-      responseSchema: ref('AdminListResponse'),
-    }),
+    '/social-agent/l5/replay-samples': path(
+      'get',
+      'admin',
+      'listAgentL5ReplaySamples',
+      {
+        responseSchema: ref('AdminListResponse'),
+      },
+    ),
+    '/social-agent/l5/subagent-memory': path(
+      'get',
+      'admin',
+      'listSubagentMemory',
+      {
+        responseSchema: ref('AdminListResponse'),
+      },
+    ),
+    '/social-agent/l5/meet-loop-states': path(
+      'get',
+      'admin',
+      'listMeetLoopStates',
+      {
+        responseSchema: ref('AdminListResponse'),
+      },
+    ),
     '/safety/reports': path('post', 'safety', 'createReport', {
       requestSchema: ref('CreateReportRequest'),
       responseSchema: ref('SafetyReport'),
@@ -396,10 +492,12 @@ export const fitMeetCoreOpenApi = {
     }),
     '/uploads/image': path('post', 'uploads', 'uploadImage', {
       requestSchema: ref('UploadImageRequest'),
+      requestContentType: 'multipart/form-data',
       responseSchema: ref('UploadImageResponse'),
     }),
     '/uploads/video': path('post', 'uploads', 'uploadVideo', {
       requestSchema: ref('UploadVideoRequest'),
+      requestContentType: 'multipart/form-data',
       responseSchema: ref('UploadVideoResponse'),
     }),
     '/waitlist': path('post', 'waitlist', 'joinWaitlist', {
@@ -410,7 +508,7 @@ export const fitMeetCoreOpenApi = {
     '/waitlist/admin/entries': path('get', 'admin', 'listWaitlistEntries', {
       responseSchema: ref('WaitlistEntryPage'),
     }),
-  },
+  }),
   components: {
     securitySchemes: {
       bearerAuth: {
@@ -427,7 +525,10 @@ export const fitMeetCoreOpenApi = {
       AdminDashboard: objectSchema({
         generatedAt: { type: 'string', format: 'date-time' },
       }),
-      AdminListResponse: arraySchema({ type: 'object', additionalProperties: true }),
+      AdminListResponse: arraySchema({
+        type: 'object',
+        additionalProperties: true,
+      }),
       AgentCheckpoint: objectSchema({
         id: { oneOf: [{ type: 'string' }, { type: 'number' }] },
         taskId: { oneOf: [{ type: 'string' }, { type: 'number' }] },
@@ -566,7 +667,9 @@ export const fitMeetCoreOpenApi = {
         status: { type: 'string' },
       }),
       SendMessageRequest: objectSchema({ text: { type: 'string' } }, ['text']),
-      SensitiveTagActionRequest: objectSchema({ tag: { type: 'string' } }, ['tag']),
+      SensitiveTagActionRequest: objectSchema({ tag: { type: 'string' } }, [
+        'tag',
+      ]),
       SensitiveTagList: objectSchema({ tags: arraySchema({ type: 'string' }) }),
       SmsSendRequest: objectSchema({ phone: { type: 'string' } }, ['phone']),
       SmsVerifyRequest: objectSchema(
@@ -578,7 +681,10 @@ export const fitMeetCoreOpenApi = {
         runId: { type: 'string' },
         status: { type: 'string' },
       }),
-      SocialAgentEventPage: pageSchema({ type: 'object', additionalProperties: true }),
+      SocialAgentEventPage: pageSchema({
+        type: 'object',
+        additionalProperties: true,
+      }),
       SocialAgentMessageRequest: objectSchema({ message: { type: 'string' } }, [
         'message',
       ]),
@@ -591,7 +697,9 @@ export const fitMeetCoreOpenApi = {
         status: { type: 'string' },
       }),
       SocialAgentSession: objectSchema({
-        taskId: { oneOf: [{ type: 'number' }, { type: 'string' }, { type: 'null' }] },
+        taskId: {
+          oneOf: [{ type: 'number' }, { type: 'string' }, { type: 'null' }],
+        },
         messages: arraySchema({ type: 'object', additionalProperties: true }),
       }),
       SocialAgentTask: objectSchema({
@@ -637,9 +745,10 @@ export const fitMeetCoreOpenApi = {
       SocialProfileQuestionList: objectSchema({
         questions: arraySchema({ type: 'object', additionalProperties: true }),
       }),
-      StartConversationRequest: objectSchema({ otherUserId: { type: 'number' } }, [
-        'otherUserId',
-      ]),
+      StartConversationRequest: objectSchema(
+        { otherUserId: { type: 'number' } },
+        ['otherUserId'],
+      ),
       StreamResponse: objectSchema({
         stream: { type: 'string' },
       }),
@@ -693,11 +802,14 @@ export const fitMeetCoreOpenApi = {
         email: { type: 'string' },
       }),
       WaitlistEntryPage: pageSchema(ref('WaitlistEntry')),
-      WaitlistRequest: objectSchema({ email: { type: 'string', format: 'email' } }, [
-        'email',
-      ]),
+      WaitlistRequest: objectSchema(
+        { email: { type: 'string', format: 'email' } },
+        ['email'],
+      ),
       WechatLoginRequest: objectSchema({ code: { type: 'string' } }, ['code']),
-      WechatLoginUrlResponse: objectSchema({ url: { type: 'string' } }, ['url']),
+      WechatLoginUrlResponse: objectSchema({ url: { type: 'string' } }, [
+        'url',
+      ]),
     },
     responses: {
       ErrorResponse: {
@@ -717,8 +829,15 @@ function path(
   return operation(method, tag, operationId, options);
 }
 
-function operations(...items: Array<Record<HttpMethod, unknown>>) {
-  return Object.assign({}, ...items);
+function operations(...items: OperationPathItem[]): OperationPathItem {
+  const result: OperationPathItem = {};
+  for (const item of items) {
+    for (const method of httpMethods) {
+      const op = item[method];
+      if (op) result[method] = op;
+    }
+  }
+  return result;
 }
 
 function operation(
@@ -727,31 +846,39 @@ function operation(
   operationId: string,
   options: OperationOptions = {},
 ) {
-  const status = options.status ?? (method === 'post' ? '201' : method === 'delete' ? '200' : '200');
+  const status =
+    options.status ??
+    (method === 'post' ? '201' : method === 'delete' ? '200' : '200');
   const schema = options.responseSchema ?? ref('ActionAccepted');
-  return {
-    [method]: {
-      tags: [tag],
-      operationId,
-      ...(options.summary ? { summary: options.summary } : {}),
-      ...(options.auth === false ? { security: [] } : { security: bearerSecurity }),
-      ...(options.requestSchema
-        ? {
-            requestBody: {
-              required: true,
-              content: jsonContent(options.requestSchema),
-            },
-          }
-        : {}),
-      responses: {
-        [status]: {
-          description: status === '204' ? 'No content' : 'Successful response',
-          ...(status === '204' ? {} : { content: jsonContent(schema) }),
-        },
-        default: { $ref: '#/components/responses/ErrorResponse' },
+  const contentType = options.requestContentType ?? 'application/json';
+  const operationObject: OpenApiOperation = {
+    tags: [tag],
+    operationId,
+    ...(options.summary ? { summary: options.summary } : {}),
+    ...(options.auth === false
+      ? { security: [] }
+      : { security: bearerSecurity }),
+    ...(options.parameters ? { parameters: options.parameters } : {}),
+    ...(options.requestSchema
+      ? {
+          requestBody: {
+            required: true,
+            content: typedContent(contentType, options.requestSchema),
+          },
+        }
+      : {}),
+    responses: {
+      [status]: {
+        description: status === '204' ? 'No content' : 'Successful response',
+        ...(status === '204' ? {} : { content: jsonContent(schema) }),
       },
+      default: { $ref: '#/components/responses/ErrorResponse' },
     },
-  } as Record<HttpMethod, unknown>;
+  };
+
+  return {
+    [method]: operationObject,
+  };
 }
 
 function ref(name: string) {
@@ -759,11 +886,46 @@ function ref(name: string) {
 }
 
 function jsonContent(schema: JsonSchema) {
+  return typedContent('application/json', schema);
+}
+
+function typedContent(contentType: RequestContentType, schema: JsonSchema) {
   return {
-    'application/json': {
+    [contentType]: {
       schema,
     },
   };
+}
+
+function withPathParameters<T extends Record<string, OperationPathItem>>(
+  paths: T,
+): T {
+  for (const route of Object.keys(paths) as Array<keyof T & string>) {
+    const params = pathParameters(route);
+    if (params.length === 0) continue;
+
+    const pathItem = paths[route];
+    for (const method of httpMethods) {
+      const op = pathItem[method];
+      if (!op) continue;
+      const existing = op.parameters ?? [];
+      const existingNames = new Set(existing.map((param) => param.name));
+      op.parameters = [
+        ...params.filter((param) => !existingNames.has(param.name)),
+        ...existing,
+      ];
+    }
+  }
+  return paths;
+}
+
+function pathParameters(route: string): OpenApiParameter[] {
+  return Array.from(route.matchAll(/\{([^/}]+)\}/g), (match) => ({
+    name: match[1],
+    in: 'path' as const,
+    required: true,
+    schema: { type: 'string' },
+  }));
 }
 
 function objectSchema(
