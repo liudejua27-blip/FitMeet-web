@@ -1071,6 +1071,9 @@ const LOW_RISK_VISIBLE_SCHEMA_ACTIONS = new Set<ToolUISchemaAction>([
   'social_intent.dismiss',
   'opener.regenerate',
   'opener.reject',
+  'slot_completion.use_default_safety',
+  'slot_completion.custom_safety',
+  'slot_completion.cancel',
 ]);
 
 const LOW_RISK_VISIBLE_RAW_ACTIONS = new Set([

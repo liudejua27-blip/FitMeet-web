@@ -35,6 +35,9 @@ export const TOOL_UI_SCHEMA_ACTIONS = [
   'meet_loop.reschedule',
   'safety.approve',
   'safety.reject',
+  'slot_completion.use_default_safety',
+  'slot_completion.custom_safety',
+  'slot_completion.cancel',
 ] as const satisfies readonly ToolUISchemaAction[];
 
 export const TOOL_UI_CARD_ACTION_COPY: Record<ToolUISchemaAction, ToolUICardActionCopy> = {
@@ -177,5 +180,20 @@ export const TOOL_UI_CARD_ACTION_COPY: Record<ToolUISchemaAction, ToolUICardActi
     busy: '正在取消',
     done: '已取消',
     result: '已取消，不会继续执行相关高风险动作。',
+  },
+  'slot_completion.use_default_safety': {
+    busy: '正在补齐安全设置',
+    done: '已补齐安全设置',
+    result: '已按默认安全设置继续生成约练卡。',
+  },
+  'slot_completion.custom_safety': {
+    busy: '正在准备自定义边界',
+    done: '请补充边界',
+    result: '请直接输入你的安全边界，我会继续生成约练卡。',
+  },
+  'slot_completion.cancel': {
+    busy: '正在取消',
+    done: '已取消',
+    result: '已取消这次约练卡草稿，不会发布到发现页。',
   },
 };

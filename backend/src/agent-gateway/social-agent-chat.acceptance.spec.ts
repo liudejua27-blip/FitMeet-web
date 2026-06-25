@@ -64,6 +64,7 @@ import { SocialAgentRouteSearchTurnService } from './social-agent-route-search-t
 import { SocialAgentRouteActionTurnService } from './social-agent-route-action-turn.service';
 import { SocialAgentRouteDecisionService } from './social-agent-route-decision.service';
 import { FitMeetAlphaAgentSdkService } from './fitmeet-alpha-agent-sdk.service';
+import { SocialAgentWorkflowRouterService } from './social-agent-workflow-router.service';
 
 function makeTask(overrides: Partial<AgentTask> = {}): AgentTask {
   return {
@@ -536,6 +537,7 @@ function makeHarness(options: Record<string, unknown> = {}) {
   };
   const metrics = {
     recordIntent: jest.fn(),
+    recordWorkflowRoute: jest.fn(),
     recordAction: jest.fn(),
     recordQueuedRun: jest.fn(),
     recordApproval: jest.fn(),
@@ -740,6 +742,9 @@ function makeHarness(options: Record<string, unknown> = {}) {
       rag as never,
       options.memoryContext as never,
     );
+  const workflowRouter =
+    (options.workflowRouter as SocialAgentWorkflowRouterService | undefined) ??
+    new SocialAgentWorkflowRouterService(intentRouter);
   const routeDecisions =
     (options.routeDecisions as SocialAgentRouteDecisionService | undefined) ??
     new SocialAgentRouteDecisionService(
@@ -752,6 +757,10 @@ function makeHarness(options: Record<string, unknown> = {}) {
       taskLifecycle as never,
       routeContext as never,
       options.brain as never,
+      undefined,
+      undefined,
+      undefined,
+      workflowRouter,
     );
   const mainAgentTurn =
     (options.mainAgentTurn as SocialAgentMainAgentTurnService | undefined) ??
@@ -1919,6 +1928,108 @@ describe('SocialAgentChat acceptance flow', () => {
 
     await flushAsync();
 
+    expect(executor.executeToolAction).not.toHaveBeenCalledWith(
+      expect.any(Number),
+      SocialAgentToolName.SearchMatches,
+      expect.any(Object),
+      expect.any(Number),
+    );
+  });
+
+  it('continues a two-turn publish draft after the user fills the safety boundary with defaults', async () => {
+    const { service, approvals, executor, taskRepo } = makeHarness();
+
+    const first = await service.routeMessage(7, {
+      message: '帮我发布约练卡片，8.27 下午六点青岛中山公园找一个散步的搭子',
+    });
+
+    expect(first).toMatchObject({
+      intent: 'action_request',
+      action: 'await_confirmation',
+      shouldQueueRun: false,
+      runMode: null,
+      pendingApproval: null,
+    });
+    expect(first.assistantMessage).toContain('安全边界');
+    expect(first.cards).toEqual([
+      expect.objectContaining({
+        schemaType: 'social_match.slot_completion',
+        status: 'waiting_confirmation',
+        data: expect.objectContaining({
+          workflowState: 'COLLECTING_SLOTS',
+          waitingFor: 'safety_boundary',
+          missing: ['安全边界'],
+        }),
+        actions: expect.arrayContaining([
+          expect.objectContaining({
+            schemaAction: 'slot_completion.use_default_safety',
+            requiresConfirmation: false,
+          }),
+          expect.objectContaining({
+            schemaAction: 'slot_completion.custom_safety',
+            requiresConfirmation: false,
+          }),
+          expect.objectContaining({
+            schemaAction: 'slot_completion.cancel',
+            requiresConfirmation: false,
+          }),
+        ]),
+      }),
+    ]);
+
+    const taskAfterFirst = (await taskRepo.findOne()) as AgentTask;
+    expect(taskAfterFirst.memory).toMatchObject({
+      socialAgentChat: {
+        publishStatus: 'collecting_slots',
+        pendingOpportunityDraft: expect.objectContaining({
+          status: 'collecting_slots',
+          sourceText: expect.stringContaining('青岛中山公园'),
+        }),
+      },
+    });
+
+    const second = await service.routeMessage(7, {
+      taskId: first.taskId,
+      message: '按默认安全设置处理',
+    });
+
+    expect(second).toMatchObject({
+      intent: 'action_request',
+      action: 'await_confirmation',
+      shouldQueueRun: false,
+      runMode: null,
+      pendingApproval: null,
+      taskId: first.taskId,
+    });
+    expect(second.assistantMessage).toContain('发布确认卡');
+    expect(second.cards).toEqual([
+      expect.objectContaining({
+        schemaType: 'social_match.activity',
+        status: 'waiting_confirmation',
+        data: expect.objectContaining({
+          schemaName: 'OpportunityCard',
+          opportunityCard: true,
+          city: '青岛',
+          activityType: '散步',
+          time: '8.27 下午六点',
+          locationName: '青岛中山公园',
+          publishStatus: 'draft',
+          safetyBoundary: expect.stringContaining('公共场所'),
+        }),
+        actions: expect.arrayContaining([
+          expect.objectContaining({
+            schemaAction: 'publish_to_discover',
+            requiresConfirmation: true,
+          }),
+          expect.objectContaining({
+            schemaAction: 'activity.skip_publish',
+            requiresConfirmation: false,
+          }),
+        ]),
+      }),
+    ]);
+    expect(approvals.create).not.toHaveBeenCalled();
+    await flushAsync();
     expect(executor.executeToolAction).not.toHaveBeenCalledWith(
       expect.any(Number),
       SocialAgentToolName.SearchMatches,

@@ -14,8 +14,10 @@ import { hasExplicitPublishSideEffectIntent } from './social-agent-social-intent
 import {
   buildSocialAgentOpportunityDraftFromTask,
   buildSocialAgentPublishConfirmationCard,
+  buildSocialAgentSlotCompletionCard,
 } from './social-agent-opportunity-card-draft';
 import {
+  clearSocialAgentOpportunityDraftClarification,
   readSocialAgentOpportunityDraftClarification,
   rememberSocialAgentOpportunityDraft,
   rememberSocialAgentOpportunityDraftClarification,
@@ -65,6 +67,19 @@ export class SocialAgentRouteActionTurnService {
       this.isPublishToDiscoverIntent(input.message) ||
       pendingOpportunityDraft
     ) {
+      if (
+        pendingOpportunityDraft &&
+        this.isCancelPendingOpportunityDraft(input.message)
+      ) {
+        clearSocialAgentOpportunityDraftClarification(input.task);
+        await this.taskRepo.save(input.task);
+        return {
+          handled: true,
+          assistantMessage: '已取消这次约练卡草稿，不会发布到发现页。',
+          pendingApproval: null,
+          cards: [],
+        };
+      }
       const publishDraft = buildSocialAgentOpportunityDraftFromTask(
         input.task,
         input.message,
@@ -86,7 +101,13 @@ export class SocialAgentRouteActionTurnService {
           handled: true,
           assistantMessage: publishDraft.assistantMessage,
           pendingApproval: null,
-          cards: [],
+          cards: [
+            buildSocialAgentSlotCompletionCard({
+              task: input.task,
+              missing: publishDraft.missing,
+              sourceText: pendingOpportunityDraft?.sourceText ?? input.message,
+            }),
+          ],
         };
       }
       rememberSocialAgentOpportunityDraft(input.task, publishDraft.draft);
@@ -152,6 +173,12 @@ export class SocialAgentRouteActionTurnService {
 
   private isPublishToDiscoverIntent(message: string): boolean {
     return hasExplicitPublishSideEffectIntent(message);
+  }
+
+  private isCancelPendingOpportunityDraft(message: string): boolean {
+    return /(取消|不用了|算了|先不发布|暂不发布|不要发布|不发了|取消这次)/i.test(
+      message,
+    );
   }
 
   private withApprovalCopy(input: {

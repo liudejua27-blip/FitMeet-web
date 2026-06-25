@@ -689,6 +689,7 @@ export function isSocialSurfaceCard(card: { type?: string; schemaType?: string; 
     schemaType === 'social_match.candidate' ||
     schemaType === 'social_match.activity' ||
     schemaType === 'social_match.empty' ||
+    schemaType === 'social_match.slot_completion' ||
     schemaType === 'meet_loop.timeline' ||
     schemaType === 'life_graph.diff' ||
     isApprovalCard(card)

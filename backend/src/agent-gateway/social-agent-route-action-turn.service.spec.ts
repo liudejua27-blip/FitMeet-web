@@ -250,8 +250,32 @@ describe('SocialAgentRouteActionTurnService', () => {
 
     expect(firstResult).toMatchObject({
       handled: true,
-      cards: [],
       assistantMessage: expect.stringContaining('还差 安全边界'),
+      cards: [
+        expect.objectContaining({
+          schemaType: 'social_match.slot_completion',
+          status: 'waiting_confirmation',
+          data: expect.objectContaining({
+            workflowState: 'COLLECTING_SLOTS',
+            waitingFor: 'safety_boundary',
+            missing: ['安全边界'],
+          }),
+          actions: expect.arrayContaining([
+            expect.objectContaining({
+              schemaAction: 'slot_completion.use_default_safety',
+              requiresConfirmation: false,
+            }),
+            expect.objectContaining({
+              schemaAction: 'slot_completion.custom_safety',
+              requiresConfirmation: false,
+            }),
+            expect.objectContaining({
+              schemaAction: 'slot_completion.cancel',
+              requiresConfirmation: false,
+            }),
+          ]),
+        }),
+      ],
     });
     expect(taskRepo.save).toHaveBeenCalledWith(task);
     expect(task.memory).toMatchObject({
