@@ -209,6 +209,8 @@ function checkStagingValidationScripts() {
   const faultPath = path.join(rootDir, 'scripts/staging-fault-injection.sh');
   const rollbackPath = path.join(rootDir, 'scripts/rollback-staging-ecs.sh');
   const e2ePath = path.join(rootDir, 'frontend/scripts/qa-agent-public-loop-staging.mjs');
+  const composePath = path.join(rootDir, 'docker-compose.prod.yml');
+  const stagingNginxPath = path.join(rootDir, 'nginx/nginx.staging.conf');
   const files = [deployPath, faultPath, rollbackPath];
   const failures = [];
 
@@ -224,6 +226,10 @@ function checkStagingValidationScripts() {
   const faultText = fs.readFileSync(faultPath, 'utf8');
   const rollbackText = fs.readFileSync(rollbackPath, 'utf8');
   const e2eText = fs.readFileSync(e2ePath, 'utf8');
+  const composeText = fs.readFileSync(composePath, 'utf8');
+  const stagingNginxText = fs.existsSync(stagingNginxPath)
+    ? fs.readFileSync(stagingNginxPath, 'utf8')
+    : '';
 
   if (deployText.includes('docker-compose.resolved.yml')) {
     failures.push('deploy-staging-safe-ecs.sh must not write full docker compose resolved config evidence.');
@@ -236,6 +242,28 @@ function checkStagingValidationScripts() {
   }
   if (!deployText.includes('environment, env_file, labels, volumes and secrets are intentionally omitted')) {
     failures.push('deploy-staging-safe-ecs.sh must document that full compose environment values are omitted.');
+  }
+  for (const [label, text] of [
+    ['deploy-staging-safe-ecs.sh', deployText],
+    ['verify-staging.sh', fs.readFileSync(path.join(rootDir, 'scripts/verify-staging.sh'), 'utf8')],
+    ['staging-fault-injection.sh', faultText],
+    ['rollback-staging-ecs.sh', rollbackText],
+  ]) {
+    if (!text.includes('https://staging.ourfitmeet.cn')) {
+      failures.push(`${label} must default or document the canonical staging domain.`);
+    }
+  }
+  if (!deployText.includes('NGINX_CONF_FILE="${NGINX_CONF_FILE:-./nginx/nginx.staging.conf}"')) {
+    failures.push('deploy-staging-safe-ecs.sh must default to nginx/nginx.staging.conf.');
+  }
+  if (!composeText.includes('${NGINX_CONF_FILE:-./nginx/nginx.conf}:/etc/nginx/nginx.conf:ro')) {
+    failures.push('docker-compose.prod.yml must allow staging to select nginx/nginx.staging.conf without changing production defaults.');
+  }
+  if (!stagingNginxText.includes('server_name staging.ourfitmeet.cn;')) {
+    failures.push('nginx/nginx.staging.conf must serve staging.ourfitmeet.cn.');
+  }
+  if (stagingNginxText.includes('server_name www.ourfitmeet.cn') || stagingNginxText.includes('https://www.ourfitmeet.cn')) {
+    failures.push('nginx/nginx.staging.conf must not route staging traffic to the production www domain.');
   }
 
   if (!faultText.includes('trap cleanup EXIT ERR INT TERM')) {

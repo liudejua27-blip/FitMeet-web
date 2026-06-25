@@ -5,8 +5,9 @@ APP_DIR="${APP_DIR:-/opt/fitmeet-staging}"
 COMPOSE_FILE="${COMPOSE_FILE:-docker-compose.prod.yml}"
 ENV_FILE="${ENV_FILE:-.env.production}"
 PNPM_VERSION="${PNPM_VERSION:-10.30.3}"
-PUBLIC_BASE_URL="${PUBLIC_BASE_URL:-}"
+PUBLIC_BASE_URL="${PUBLIC_BASE_URL:-https://staging.ourfitmeet.cn}"
 PUBLIC_API_BASE_URL="${PUBLIC_API_BASE_URL:-}"
+NGINX_CONF_FILE="${NGINX_CONF_FILE:-./nginx/nginx.staging.conf}"
 RUN_DB_MIGRATIONS="${RUN_DB_MIGRATIONS:-true}"
 RUN_STAGING_VERIFY="${RUN_STAGING_VERIFY:-true}"
 RUN_STAGING_E2E="${RUN_STAGING_E2E:-false}"
@@ -25,10 +26,11 @@ and run destructive validation without changing production defaults.
 
 Required environment:
   APP_DIR=/opt/fitmeet-staging
-  PUBLIC_BASE_URL=https://staging.example.com
-  PUBLIC_API_BASE_URL=https://staging.example.com/api
 
 Optional environment:
+  PUBLIC_BASE_URL=https://staging.ourfitmeet.cn Default staging Web origin.
+  PUBLIC_API_BASE_URL=https://staging.ourfitmeet.cn/api Default derived from PUBLIC_BASE_URL.
+  NGINX_CONF_FILE=./nginx/nginx.staging.conf Default staging nginx server_name.
   RUN_DB_MIGRATIONS=true|false          Default true.
   RUN_STAGING_VERIFY=true|false         Default true.
   RUN_STAGING_E2E=true|false            Default false.
@@ -182,8 +184,10 @@ fi
 cd "$APP_DIR"
 [[ -f "$COMPOSE_FILE" ]] || fail "Missing ${APP_DIR}/${COMPOSE_FILE}"
 [[ -f "$ENV_FILE" ]] || fail "Missing ${APP_DIR}/${ENV_FILE}"
+[[ -f "$NGINX_CONF_FILE" ]] || fail "Missing staging NGINX_CONF_FILE: ${APP_DIR}/${NGINX_CONF_FILE}"
 [[ -d "nginx/ssl" ]] || fail "Missing ${APP_DIR}/nginx/ssl"
 
+export NGINX_CONF_FILE
 export COMPOSE_PARALLEL_LIMIT
 COMPOSE=(docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE")
 timestamp="$(date -u '+%Y%m%dT%H%M%SZ')"
@@ -206,6 +210,7 @@ export FITMEET_RELEASE_SOURCE="$release_source"
   printf -- '- release.builtAt: `%s`\n' "${release_built_at:-unknown}"
   printf -- '- PUBLIC_BASE_URL: `%s`\n' "$PUBLIC_BASE_URL"
   printf -- '- PUBLIC_API_BASE_URL: `%s`\n' "$PUBLIC_API_BASE_URL"
+  printf -- '- NGINX_CONF_FILE: `%s`\n' "$NGINX_CONF_FILE"
   printf -- '- COMPOSE_PARALLEL_LIMIT: `%s`\n' "$COMPOSE_PARALLEL_LIMIT"
   printf '\n## Redacted Env Keys\n\n```text\n'
   redact_env_file "$ENV_FILE"

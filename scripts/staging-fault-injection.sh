@@ -4,7 +4,7 @@ set -euo pipefail
 APP_DIR="${APP_DIR:-$(pwd)}"
 COMPOSE_FILE="${COMPOSE_FILE:-docker-compose.prod.yml}"
 ENV_FILE="${ENV_FILE:-.env.production}"
-BASE_URL="${BASE_URL:-}"
+BASE_URL="${BASE_URL:-https://staging.ourfitmeet.cn}"
 API_BASE_URL="${API_BASE_URL:-${BASE_URL%/}/api}"
 EXPECTED_RELEASE_COMMIT="${EXPECTED_RELEASE_COMMIT:-}"
 STAGING_EVIDENCE_DIR="${STAGING_EVIDENCE_DIR:-artifacts/staging/fault-injection/$(date -u '+%Y%m%dT%H%M%SZ')}"

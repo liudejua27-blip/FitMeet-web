@@ -5,11 +5,45 @@ tests alone. Use an isolated staging host and staging-only data services.
 
 ## Required Staging Resources
 
-- Staging Web domain, for example `https://staging.example.com`
-- Staging API origin, for example `https://staging.example.com/api`
+- Staging Web domain: `https://staging.ourfitmeet.cn`
+- Staging API origin: `https://staging.ourfitmeet.cn/api`
 - Independent PostgreSQL, Redis, MongoDB, object storage, SSL files, and QA users
 - Two QA accounts that can be reset or safely mutated by staging tests
 - Current `main` release zip, sha256 file, and installer
+
+## Domain And TLS
+
+`staging.ourfitmeet.cn` is the canonical staging host for this project. DNS is
+managed by AliDNS (`vip1.alidns.com` / `vip2.alidns.com`). Before deploying,
+create an AliDNS `A` record for `staging.ourfitmeet.cn` that points to the
+isolated staging ECS public IP, or a `CNAME` to a staging load balancer. Do not
+point this record at the production ECS instance.
+
+The staging ECS host must mount an SSL certificate for `staging.ourfitmeet.cn`
+as:
+
+```text
+nginx/ssl/fullchain.pem
+nginx/ssl/privkey.pem
+```
+
+The staging deploy script defaults `NGINX_CONF_FILE` to
+`./nginx/nginx.staging.conf`, whose `server_name` is
+`staging.ourfitmeet.cn`. Production deploys still default to
+`./nginx/nginx.conf` and `www.ourfitmeet.cn`.
+
+On the staging ECS host, `.env.production` must use staging origins, not the
+production template values:
+
+```dotenv
+BASE_URL=https://staging.ourfitmeet.cn
+FRONTEND_BASE_URL=https://staging.ourfitmeet.cn
+PUBLIC_BASE_URL=https://staging.ourfitmeet.cn
+PUBLIC_API_BASE_URL=https://staging.ourfitmeet.cn/api
+ALLOWED_ORIGINS=https://staging.ourfitmeet.cn
+WECHAT_REDIRECT_URI=https://staging.ourfitmeet.cn/api/auth/wechat/callback
+NGINX_CONF_FILE=./nginx/nginx.staging.conf
+```
 
 Never point these scripts at:
 
@@ -32,8 +66,6 @@ TARGET_DIR=/opt/fitmeet-staging \
 bash ./fitmeet-ecs-install-release.sh --install
 
 cd /opt/fitmeet-staging
-PUBLIC_BASE_URL=https://staging.example.com \
-PUBLIC_API_BASE_URL=https://staging.example.com/api \
 RUN_STAGING_VERIFY=true \
 RUN_STAGING_E2E=false \
 bash ./scripts/deploy-staging-safe-ecs.sh
@@ -58,10 +90,10 @@ After the basic deploy is healthy:
 
 ```bash
 cd /opt/fitmeet-staging
-PUBLIC_BASE_URL=https://staging.example.com \
-PUBLIC_API_BASE_URL=https://staging.example.com/api \
-BASE_URL=https://staging.example.com \
-API_BASE_URL=https://staging.example.com/api \
+PUBLIC_BASE_URL=https://staging.ourfitmeet.cn \
+PUBLIC_API_BASE_URL=https://staging.ourfitmeet.cn/api \
+BASE_URL=https://staging.ourfitmeet.cn \
+API_BASE_URL=https://staging.ourfitmeet.cn/api \
 FITMEET_AGENT_BROWSER_QA_ALLOW_REMOTE=true \
 STAGING_USER_A_EMAIL='qa-a@example.com' \
 STAGING_USER_A_PASSWORD='...' \
@@ -96,8 +128,8 @@ Only run on isolated staging:
 
 ```bash
 cd /opt/fitmeet-staging
-BASE_URL=https://staging.example.com \
-API_BASE_URL=https://staging.example.com/api \
+BASE_URL=https://staging.ourfitmeet.cn \
+API_BASE_URL=https://staging.ourfitmeet.cn/api \
 RUN_DESTRUCTIVE_FAULTS=true \
 bash ./scripts/staging-fault-injection.sh
 ```
@@ -135,8 +167,8 @@ If validation fails after installing a release:
 ```bash
 cd /opt/fitmeet-staging
 APP_DIR=/opt/fitmeet-staging \
-PUBLIC_BASE_URL=https://staging.example.com \
-PUBLIC_API_BASE_URL=https://staging.example.com/api \
+PUBLIC_BASE_URL=https://staging.ourfitmeet.cn \
+PUBLIC_API_BASE_URL=https://staging.ourfitmeet.cn/api \
 ROLLBACK_SOURCE=/opt/fitmeet-staging.backup.<timestamp> \
 ROLLBACK_DB_BACKUP_REF=backup/staging-before-<timestamp>.sql \
 ROLLBACK_MIGRATION_COMPATIBILITY_ACK=true \

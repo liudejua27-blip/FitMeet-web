@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-BASE_URL="${BASE_URL:-}"
+BASE_URL="${BASE_URL:-https://staging.ourfitmeet.cn}"
 API_BASE_URL="${API_BASE_URL:-}"
 EXPECTED_RELEASE_COMMIT="${EXPECTED_RELEASE_COMMIT:-}"
 RUN_STAGING_E2E="${RUN_STAGING_E2E:-false}"
@@ -18,8 +18,8 @@ Runs the non-production staging gate:
   3. optional staging fault injection harness
 
 Environment:
-  BASE_URL=https://staging.example.com
-  API_BASE_URL=https://staging.example.com/api
+  BASE_URL=https://staging.ourfitmeet.cn
+  API_BASE_URL=https://staging.ourfitmeet.cn/api
   EXPECTED_RELEASE_COMMIT=<sha>
   RUN_STAGING_E2E=true
   RUN_STAGING_FAULT_INJECTION=true
