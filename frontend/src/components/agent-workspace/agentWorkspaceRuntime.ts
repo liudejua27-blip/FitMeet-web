@@ -289,6 +289,9 @@ export function continuesOpportunityClarification(prompt: string) {
   const normalized = prompt.trim().toLowerCase();
   if (!normalized || cancelsOpportunityClarification(normalized)) return false;
   if (intentForPrompt(normalized) === 'social') return true;
+  if (/(默认安全设置|安全默认值|默认安全边界|默认安全|安全方案|常规处理)/.test(normalized)) {
+    return true;
+  }
   if (
     /(为什么|怎么|如何|功能|入口|设置|客服|找回|聊天记录|历史消息|隐私政策|规则|说明|你是不是|没懂|什么意思|解释一下|介绍一下)/.test(
       normalized,
@@ -326,7 +329,7 @@ export function continuesOpportunityClarification(prompt: string) {
 export function responseAwaitsOpportunityClarification(response: UserFacingAgentResponse) {
   return (
     response.cards.length === 0 &&
-    /为了只推荐安全、合适的机会|还差.{0,24}(城市|时间|运动强度|社交边界)/.test(
+    /为了只推荐安全、合适的机会|发布约练卡前我先一次性确认|补齐后我会先生成一张可确认的约练卡|还差.{0,32}(城市|活动|时间|地点|运动强度|社交边界|安全边界)/.test(
       response.assistantMessage,
     )
   );

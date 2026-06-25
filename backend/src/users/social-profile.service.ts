@@ -367,27 +367,7 @@ export class SocialProfileService {
       ({ key }) => !this.hasValue(profile, key as keyof UserSocialProfile),
     );
     const completion = this.getCompletionFromProfile(profile);
-    const aiQuestions = await this.ai.generateProfileQuestions({
-      missingKeys: missing.map((item) => item.key),
-      contextSummary: this.buildInterviewContext(profile),
-    });
-    const bankByKey = new Map(missing.map((item) => [item.key, item]));
-    const selected: ProfileInterviewQuestion[] = aiQuestions.flatMap((item) => {
-      const fromBank = bankByKey.get(item.key);
-      if (!fromBank) return [];
-      return [
-        {
-          ...fromBank,
-          question: item.question || fromBank.question,
-          type: item.type || fromBank.type,
-        },
-      ];
-    });
-    const seen = new Set(selected.map((item) => item.key));
-    const questions = [
-      ...selected,
-      ...missing.filter((item) => !seen.has(item.key)),
-    ].slice(0, 12);
+    const questions = missing.slice(0, 12);
     const privacyBoundary = missing.find(
       (item) => item.key === 'privacyBoundary',
     );

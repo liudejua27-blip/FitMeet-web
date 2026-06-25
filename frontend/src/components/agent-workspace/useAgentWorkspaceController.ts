@@ -315,7 +315,6 @@ export function useAgentWorkspaceController(view: AgentView) {
     }
     if (profileCompletionBootstrapRef.current === userKey && !explicitProfileIntent) return;
     if (messages.some(messageHasProfileCompletionCard)) return;
-    if (messages.length > 0 && !explicitProfileIntent) return;
 
     let cancelled = false;
     profileCompletionBootstrapRef.current = userKey;
@@ -333,7 +332,6 @@ export function useAgentWorkspaceController(view: AgentView) {
         });
         setMessages((current) => {
           if (current.some(messageHasProfileCompletionCard)) return current;
-          if (current.length > 0 && !explicitProfileIntent) return current;
           return [
             ...current,
             {

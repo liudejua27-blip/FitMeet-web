@@ -230,6 +230,85 @@ describe('SocialAgentRouteActionTurnService', () => {
     });
   });
 
+  it('persists missing publish slots and resumes card generation from a non-action follow-up', async () => {
+    const { candidateActions, service, taskRepo } = makeHarness();
+    const firstMessage =
+      '帮我发布一个约练卡片，8.27日下午六点青岛中山公园找一个散步的搭子';
+    const task = makeTask({
+      goal: firstMessage,
+      memory: {},
+      result: {},
+    });
+
+    const firstResult = await service.handle({
+      ownerUserId: 7,
+      task,
+      route: makeRoute(),
+      message: firstMessage,
+      assistantMessage: '我会先整理约练卡。',
+    });
+
+    expect(firstResult).toMatchObject({
+      handled: true,
+      cards: [],
+      assistantMessage: expect.stringContaining('还差 安全边界'),
+    });
+    expect(taskRepo.save).toHaveBeenCalledWith(task);
+    expect(task.memory).toMatchObject({
+      socialAgentChat: {
+        publishStatus: 'collecting_slots',
+        pendingOpportunityDraft: expect.objectContaining({
+          status: 'collecting_slots',
+          missing: ['安全边界'],
+          sourceText: expect.stringContaining('青岛中山公园'),
+        }),
+      },
+    });
+
+    const secondResult = await service.handle({
+      ownerUserId: 7,
+      task,
+      route: makeRoute({
+        intent: 'casual_chat',
+        shouldExecuteAction: false,
+        replyStrategy: 'direct_reply',
+      }),
+      message: '按默认安全设置处理',
+      assistantMessage: '好的，我按默认安全设置处理。',
+    });
+
+    expect(candidateActions.createActionApproval).not.toHaveBeenCalled();
+    expect(secondResult).toMatchObject({
+      handled: true,
+      pendingApproval: null,
+      assistantMessage: expect.stringContaining('发布确认卡'),
+      cards: [
+        expect.objectContaining({
+          schemaType: 'social_match.activity',
+          status: 'waiting_confirmation',
+          data: expect.objectContaining({
+            city: '青岛',
+            activityType: '散步',
+            time: '8.27日下午六点',
+            locationName: '青岛中山公园',
+          }),
+        }),
+      ],
+    });
+    expect(task.result).toMatchObject({
+      chatRun: {
+        socialRequestDraft: expect.objectContaining({
+          city: '青岛',
+          activityType: '散步',
+          timePreference: '8.27日下午六点',
+          locationName: '青岛中山公园',
+        }),
+        pendingOpportunityDraft: null,
+        publishStatus: 'draft',
+      },
+    });
+  });
+
   it('passes hydrated runtime context into approval creation and stores non-sensitive telemetry', async () => {
     const { candidateActions, service } = makeHarness();
     const task = makeTask();
