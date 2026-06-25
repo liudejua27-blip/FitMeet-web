@@ -204,8 +204,86 @@ function checkDeployScripts() {
   }
 }
 
+function checkStagingValidationScripts() {
+  const deployPath = path.join(rootDir, 'scripts/deploy-staging-safe-ecs.sh');
+  const faultPath = path.join(rootDir, 'scripts/staging-fault-injection.sh');
+  const rollbackPath = path.join(rootDir, 'scripts/rollback-staging-ecs.sh');
+  const e2ePath = path.join(rootDir, 'frontend/scripts/qa-agent-public-loop-staging.mjs');
+  const files = [deployPath, faultPath, rollbackPath];
+  const failures = [];
+
+  for (const file of files) {
+    try {
+      execFileSync('bash', ['-n', file], { stdio: 'pipe' });
+    } catch (error) {
+      failures.push(`shell syntax check failed for ${path.relative(rootDir, file)}: ${error.message}`);
+    }
+  }
+
+  const deployText = fs.readFileSync(deployPath, 'utf8');
+  const faultText = fs.readFileSync(faultPath, 'utf8');
+  const rollbackText = fs.readFileSync(rollbackPath, 'utf8');
+  const e2eText = fs.readFileSync(e2ePath, 'utf8');
+
+  if (deployText.includes('docker-compose.resolved.yml')) {
+    failures.push('deploy-staging-safe-ecs.sh must not write full docker compose resolved config evidence.');
+  }
+  if (!deployText.includes('docker-compose.summary.json')) {
+    failures.push('deploy-staging-safe-ecs.sh must write a sanitized docker compose summary.');
+  }
+  if (!deployText.includes("test: service.healthcheck.test ? '[redacted]' : null")) {
+    failures.push('deploy-staging-safe-ecs.sh must redact healthcheck test commands because they can contain secrets.');
+  }
+  if (!deployText.includes('environment, env_file, labels, volumes and secrets are intentionally omitted')) {
+    failures.push('deploy-staging-safe-ecs.sh must document that full compose environment values are omitted.');
+  }
+
+  if (!faultText.includes('trap cleanup EXIT ERR INT TERM')) {
+    failures.push('staging-fault-injection.sh must install cleanup trap for EXIT/ERR/INT/TERM.');
+  }
+  for (const required of [
+    'unpause redis',
+    'unpause mongo',
+    'docker rm -f "$worker_peer_name"',
+    'create_matching_job_seed',
+    'matching-job-seed.ids',
+    'wait_for_matching_job_status "$job_id" \'^running$\'',
+    'assert_matching_job_completed_once',
+    'duplicateCandidateRows',
+  ]) {
+    if (!faultText.includes(required)) {
+      failures.push(`staging-fault-injection.sh missing safety check: ${required}`);
+    }
+  }
+
+  if (rollbackText.includes('find "$BACKUP_ROOT"')) {
+    failures.push('rollback-staging-ecs.sh must not auto-select the latest backup.');
+  }
+  for (const required of [
+    'ROLLBACK_SOURCE',
+    'ROLLBACK_DB_BACKUP_REF',
+    'ROLLBACK_MIGRATION_COMPATIBILITY_ACK',
+    'This script restores code files only',
+  ]) {
+    if (!rollbackText.includes(required)) {
+      failures.push(`rollback-staging-ecs.sh missing explicit rollback guard: ${required}`);
+    }
+  }
+
+  if (!e2eText.includes('STAGING_E2E_STOP_AFTER_PUBLISH')) {
+    failures.push('qa-agent-public-loop-staging.mjs must support stop-after-publish seed mode for fault injection.');
+  }
+
+  if (failures.length > 0) {
+    for (const failure of failures) fail(failure);
+    return;
+  }
+  ok('staging validation scripts enforce sanitized evidence, cleanup, active matching-job lease recovery, and explicit rollback source');
+}
+
 checkTypeormColumnTypes();
 checkComposeDependencies();
 checkDeployScripts();
+checkStagingValidationScripts();
 
 if (process.exitCode) process.exit(process.exitCode);

@@ -79,6 +79,68 @@ read_release_field() {
     "$field" "$fallback"
 }
 
+write_sanitized_compose_summary() {
+  local output="$1"
+  local tmp
+  tmp="$(mktemp)"
+  if ! "${COMPOSE[@]}" config --format json >"$tmp"; then
+    rm -f "$tmp"
+    fail "docker compose config failed."
+  fi
+  if ! node - "$tmp" "$output" <<'NODE'
+const fs = require('fs');
+
+const input = process.argv[2];
+const output = process.argv[3];
+const doc = JSON.parse(fs.readFileSync(input, 'utf8'));
+const services = Object.entries(doc.services || {})
+  .sort(([a], [b]) => a.localeCompare(b))
+  .map(([name, service]) => ({
+    name,
+    image: typeof service.image === 'string' ? service.image : null,
+    ports: Array.isArray(service.ports)
+      ? service.ports.map((port) => {
+          if (typeof port === 'string') return port;
+          return {
+            target: port.target ?? null,
+            published: port.published ?? null,
+            protocol: port.protocol ?? null,
+            mode: port.mode ?? null,
+          };
+        })
+      : [],
+    healthcheck: service.healthcheck
+      ? {
+          test: service.healthcheck.test ? '[redacted]' : null,
+          interval: service.healthcheck.interval ?? null,
+          timeout: service.healthcheck.timeout ?? null,
+          retries: service.healthcheck.retries ?? null,
+          start_period: service.healthcheck.start_period ?? null,
+        }
+      : null,
+  }));
+
+fs.writeFileSync(
+  output,
+  `${JSON.stringify(
+    {
+      generatedAt: new Date().toISOString(),
+      note:
+        'Sanitized docker compose summary. Full environment, env_file, labels, volumes and secrets are intentionally omitted.',
+      services,
+    },
+    null,
+    2,
+  )}\n`,
+);
+NODE
+  then
+    rm -f "$tmp"
+    fail "Failed to write sanitized docker compose summary."
+  fi
+  rm -f "$tmp"
+}
+
 wait_for_service_healthy() {
   local service="$1"
   local deadline=$((SECONDS + DEPLOY_HEALTH_TIMEOUT_SECONDS))
@@ -150,8 +212,8 @@ export FITMEET_RELEASE_SOURCE="$release_source"
   printf '```\n'
 } >"${evidence_dir}/deploy-summary.md"
 
-step "Render docker compose config"
-"${COMPOSE[@]}" config >"${evidence_dir}/docker-compose.resolved.yml"
+step "Record sanitized docker compose summary"
+write_sanitized_compose_summary "${evidence_dir}/docker-compose.summary.json"
 
 step "Stop API, worker, and nginx to release memory"
 "${COMPOSE[@]}" stop nginx backend subagent-worker >/dev/null 2>&1 || true
@@ -211,7 +273,7 @@ fi
   printf 'Use this if staging validation fails after deploy:\n\n'
   printf '```bash\n'
   printf 'cd %q\n' "$APP_DIR"
-  printf 'APP_DIR=%q PUBLIC_BASE_URL=%q PUBLIC_API_BASE_URL=%q bash ./scripts/rollback-staging-ecs.sh\n' "$APP_DIR" "$PUBLIC_BASE_URL" "$PUBLIC_API_BASE_URL"
+  printf 'APP_DIR=%q PUBLIC_BASE_URL=%q PUBLIC_API_BASE_URL=%q ROLLBACK_SOURCE=/opt/fitmeet-staging.backup.<timestamp> ROLLBACK_DB_BACKUP_REF=backup/staging-before-%s.sql ROLLBACK_MIGRATION_COMPATIBILITY_ACK=true bash ./scripts/rollback-staging-ecs.sh\n' "$APP_DIR" "$PUBLIC_BASE_URL" "$PUBLIC_API_BASE_URL" "$timestamp"
   printf '```\n'
 } >>"${evidence_dir}/deploy-summary.md"
 
