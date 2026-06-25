@@ -24,26 +24,46 @@ describe('SocialAgentMatchingJobProcessorService', () => {
       MatchingJobStatus.CandidatesReady,
     );
 
-    expect(harness.matchingJobs.markCompleted).toHaveBeenCalledWith(
-      9001,
-      1,
-      expect.objectContaining({
-        candidateCount: 1,
-        publicIntentId: 'social_request_301',
-        socialRequestId: 301,
-      }),
-      'worker-a',
+    expect(harness.candidatePool.searchSocial).toHaveBeenCalledWith(
+      expect.objectContaining({ persistCandidates: false }),
+    );
+    expect(harness.candidatePool.persistCandidateRows).toHaveBeenCalledWith(
+      301,
+      [expect.objectContaining({ candidateUserId: 8 })],
+      harness.manager,
+    );
+    expect(harness.manager.query).toHaveBeenCalledWith(
+      expect.stringContaining('UPDATE "matching_jobs"'),
+      expect.arrayContaining([
+        MatchingJobStatus.CandidatesReady,
+        1,
+        expect.any(String),
+      ]),
     );
     expect(harness.taskRepo.save).toHaveBeenCalledWith(
       expect.objectContaining({
         status: AgentTaskStatus.AwaitingConfirmation,
         statusReason: 'matching_job_candidates_ready',
+        result: expect.objectContaining({
+          cards: expect.arrayContaining([
+            expect.objectContaining({ type: 'candidate_card' }),
+          ]),
+        }),
       }),
     );
     expect(harness.eventRepo.create).toHaveBeenCalledWith(
       expect.objectContaining({
         actor: AgentTaskEventActor.Agent,
         eventType: AgentTaskEventType.SocialAgentCandidatesReturned,
+      }),
+    );
+    expect(harness.realtime.emitAgentEvent).toHaveBeenCalledWith(
+      7,
+      'agent:candidates',
+      expect.objectContaining({
+        taskId: 101,
+        candidateCount: 1,
+        matchingJobStatus: MatchingJobStatus.CandidatesReady,
       }),
     );
   });
@@ -55,19 +75,37 @@ describe('SocialAgentMatchingJobProcessorService', () => {
       MatchingJobStatus.NoCandidates,
     );
 
-    expect(harness.matchingJobs.markCompleted).toHaveBeenCalledWith(
-      9001,
-      0,
-      expect.objectContaining({
-        candidateCount: 0,
-      }),
-      'worker-a',
+    expect(harness.manager.query).toHaveBeenCalledWith(
+      expect.stringContaining('UPDATE "matching_jobs"'),
+      expect.arrayContaining([MatchingJobStatus.NoCandidates, 0]),
     );
     expect(harness.taskRepo.save).toHaveBeenCalledWith(
       expect.objectContaining({
         status: AgentTaskStatus.WaitingResult,
         statusReason: 'matching_job_no_candidates',
       }),
+    );
+  });
+
+  it('does not mark the job completed when task/event writeback fails', async () => {
+    const harness = makeHarness({
+      candidates: [makeCandidate()],
+      eventSaveError: new Error('event_write_failed'),
+    });
+
+    await expect(harness.service.processClaimedJob(makeJob())).resolves.toBe(
+      MatchingJobStatus.FailedRetryable,
+    );
+
+    expect(harness.manager.query).not.toHaveBeenCalledWith(
+      expect.stringContaining('UPDATE "matching_jobs"'),
+      expect.arrayContaining([MatchingJobStatus.CandidatesReady]),
+    );
+    expect(harness.matchingJobs.markFailed).toHaveBeenCalledWith(
+      9001,
+      expect.any(Error),
+      true,
+      'worker-a',
     );
   });
 
@@ -96,19 +134,12 @@ function makeHarness(
   options: {
     candidates?: unknown[];
     publicIntent?: Record<string, unknown>;
+    eventSaveError?: Error;
   } = {},
 ) {
   const publicIntent = options.publicIntent ?? makePublicIntent();
   const matchingJobs = {
-    markCompleted: jest.fn(async (id, count) => ({
-      ...makeJob(),
-      id,
-      status:
-        count > 0
-          ? MatchingJobStatus.CandidatesReady
-          : MatchingJobStatus.NoCandidates,
-      candidateCount: count,
-    })),
+    extendLease: jest.fn(async () => makeJob()),
     markFailed: jest.fn(async () => ({
       ...makeJob(),
       status: MatchingJobStatus.FailedRetryable,
@@ -134,6 +165,7 @@ function makeHarness(
       debugReasons: null,
       debug: {},
     })),
+    persistCandidateRows: jest.fn(async () => undefined),
   };
   const task = {
     id: 101,
@@ -151,10 +183,69 @@ function makeHarness(
   const taskRepo = {
     findOne: jest.fn(async () => task),
     save: jest.fn(async (value) => value),
+    manager: {} as Record<string, unknown>,
   };
   const eventRepo = {
     create: jest.fn((value) => value),
-    save: jest.fn(async (value) => value),
+    save: jest.fn(async (value) => {
+      if (options.eventSaveError) throw options.eventSaveError;
+      return value;
+    }),
+  };
+  const realtime = { emitAgentEvent: jest.fn() };
+  const publicIntentSave = jest.fn(async (value) => value);
+  const manager = {
+    query: jest.fn(async (sql: string, params?: unknown[]) => {
+      if (/SELECT pg_advisory_xact_lock/.test(sql)) return [];
+      if (/FROM "matching_jobs"/.test(sql) && /FOR UPDATE/.test(sql)) {
+        return [makeJob()];
+      }
+      if (/UPDATE "matching_jobs"/.test(sql)) {
+        return [
+          {
+            ...makeJob(),
+            status: params?.[0] as MatchingJobStatus,
+            candidateCount: params?.[1] as number,
+            result:
+              typeof params?.[2] === 'string' ? JSON.parse(params[2]) : {},
+            completedAt: params?.[3] as Date,
+            leaseOwner: null,
+            leaseExpiresAt: null,
+            lastHeartbeatAt: null,
+          },
+        ];
+      }
+      return [];
+    }),
+    getRepository: jest.fn((entity: unknown) => {
+      const name = (entity as { name?: string }).name;
+      if (name === 'PublicSocialIntent') {
+        return {
+          save: publicIntentSave,
+          createQueryBuilder: jest.fn(() => queryBuilder(publicIntent)),
+        };
+      }
+      if (name === 'UserSocialRequest') {
+        return {
+          createQueryBuilder: jest.fn(() => queryBuilder(makeSocialRequest())),
+        };
+      }
+      if (name === 'AgentTask') {
+        return {
+          save: taskRepo.save,
+          createQueryBuilder: jest.fn(() => queryBuilder(task)),
+        };
+      }
+      if (name === 'AgentTaskEvent') {
+        return eventRepo;
+      }
+      return {};
+    }),
+  };
+  taskRepo.manager = {
+    transaction: jest.fn(async (run: (manager: unknown) => Promise<unknown>) =>
+      run(manager),
+    ),
   };
   const publicIntentRepo = {
     findOne: jest.fn(async () => publicIntent),
@@ -196,8 +287,37 @@ function makeHarness(
       eventRepo as never,
       publicIntentRepo as never,
       userSocialRequestRepo as never,
+      realtime as never,
     ),
+    manager,
     taskRepo,
+    realtime,
+  };
+}
+
+function queryBuilder(result: unknown) {
+  return {
+    setLock: jest.fn().mockReturnThis(),
+    where: jest.fn().mockReturnThis(),
+    andWhere: jest.fn().mockReturnThis(),
+    getOne: jest.fn(async () => result),
+  };
+}
+
+function makeSocialRequest() {
+  return {
+    id: 301,
+    userId: 7,
+    title: '青岛羽毛球',
+    description: '周末下午公开场所',
+    rawText: '周末下午找羽毛球搭子',
+    city: '青岛',
+    activityType: 'badminton',
+    interestTags: ['羽毛球'],
+    status: UserSocialRequestStatus.Matching,
+    visibility: SocialRequestVisibility.Public,
+    metadata: {},
+    expiresAt: new Date(Date.now() + 60 * 60 * 1000),
   };
 }
 

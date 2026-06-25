@@ -159,6 +159,50 @@ export class MatchingJobService {
     });
   }
 
+  async extendLease(input: {
+    jobId: number;
+    leaseOwner: string;
+    leaseMs?: number;
+  }): Promise<MatchingJob> {
+    const leaseOwner = this.requiredText(
+      input.leaseOwner,
+      'matching_job_lease_owner_required',
+    );
+    const leaseMs = Math.max(
+      5_000,
+      Math.min(Math.floor(input.leaseMs ?? 60_000), 15 * 60_000),
+    );
+    const now = new Date();
+    const leaseExpiresAt = new Date(Date.now() + leaseMs);
+    const rows = await this.queryRows<MatchingJob>(
+      this.repo.manager,
+      `UPDATE "matching_jobs"
+       SET "leaseExpiresAt" = $1,
+           "lastHeartbeatAt" = $2,
+           "updatedAt" = $2,
+           "metadata" = COALESCE("metadata", '{}'::jsonb) || $3::jsonb
+       WHERE "id" = $4
+         AND "status" = $5
+         AND "leaseOwner" = $6
+       RETURNING *`,
+      [
+        leaseExpiresAt,
+        now,
+        JSON.stringify({
+          leaseOwner,
+          leaseExtendedAt: now.toISOString(),
+          leaseExpiresAt: leaseExpiresAt.toISOString(),
+        }),
+        input.jobId,
+        MatchingJobStatus.Running,
+        leaseOwner,
+      ],
+    );
+    const claimed = rows[0];
+    if (!claimed) throw new BadRequestException('matching_job_lease_lost');
+    return claimed;
+  }
+
   async markCompleted(
     jobId: number,
     candidateCount: number,

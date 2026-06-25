@@ -18,6 +18,7 @@ import {
   createAgentRecoveryFromError,
   createCheckpointAvailableRecovery,
   decorateAssistantBranches,
+  assistantMessageForUserFacingResult,
   findTaskId,
   intentForReplayTrace,
   intentForRestoredResponse,
@@ -134,6 +135,126 @@ export function useAgentWorkspaceController(view: AgentView) {
   const { agentAdapter, isRealAgent } = useAgentAdapterRuntime();
   const currentUserId = user?.id ?? null;
   const canonicalActiveThreadId = socialCodexThreadIdOrExisting(activeThreadId, activeTaskId);
+
+  const refreshMatchingSnapshot = useCallback(
+    async (taskId: number | null | undefined) => {
+      if (!isRealAgent || !isLoggedIn || !taskId) return;
+      try {
+        const restored = await agentAdapter.restoreSession(taskId);
+        if (!restored?.response) return;
+        const response = sanitizeRestoredResponse(restored.response);
+        if (!restoredResponseHasUsefulSurface(response)) return;
+        const restoredTaskId = restored.taskId ?? findTaskId(response) ?? taskId;
+        const conversationIntent = intentForRestoredResponse(response, 'social');
+        const assistantMessage = assistantMessageForUserFacingResult(
+          response,
+          '我已经更新了当前约练进度。',
+        );
+        setActiveTaskId(restoredTaskId);
+        setActiveTaskStatus(restored.taskStatus ?? null);
+        setUserResult(response);
+        setRecovery(null);
+        setMessages((current) => {
+          const existingIndex = [...current]
+            .reverse()
+            .findIndex(
+              (message) =>
+                message.role === 'assistant' &&
+                (message.taskId === restoredTaskId ||
+                  findTaskId(message.result ?? null) === restoredTaskId),
+            );
+          const message = {
+            id: nextId('assistant'),
+            role: 'assistant' as const,
+            status: 'done' as const,
+            content: assistantMessage,
+            result: response,
+            taskId: restoredTaskId,
+            conversationIntent,
+            showSocialResult: conversationIntent !== 'conversation',
+            surfaceKind: 'answer' as const,
+            assistantMessageSource: response.assistantMessageSource,
+            branchable: false,
+          };
+          if (existingIndex < 0) return [...current, message];
+          const index = current.length - 1 - existingIndex;
+          return [
+            ...current.slice(0, index),
+            {
+              ...current[index],
+              content: assistantMessage || current[index].content,
+              status: 'done',
+              result: response,
+              taskId: restoredTaskId,
+              conversationIntent,
+              showSocialResult: conversationIntent !== 'conversation',
+              surfaceKind: 'answer',
+              assistantMessageSource: response.assistantMessageSource,
+              branchable: false,
+            },
+            ...current.slice(index + 1),
+          ];
+        });
+      } catch {
+        // The normal session restore path remains the source of truth; realtime
+        // refresh must not interrupt the current chat when a transient request fails.
+      }
+    },
+    [
+      agentAdapter,
+      isLoggedIn,
+      isRealAgent,
+      setActiveTaskId,
+      setActiveTaskStatus,
+      setMessages,
+      setRecovery,
+      setUserResult,
+    ],
+  );
+
+  useEffect(() => {
+    if (!isRealAgent || !isLoggedIn || shellView !== 'chat') return undefined;
+    const onRealtime = (event: Event) => {
+      const detail = (event as CustomEvent).detail as
+        | { eventType?: string; payload?: Record<string, unknown> }
+        | undefined;
+      if (detail?.eventType !== 'agent:candidates') return;
+      const eventTaskId = numberFromUnknown(detail.payload?.taskId);
+      if (activeTaskId && eventTaskId && eventTaskId !== activeTaskId) return;
+      void refreshMatchingSnapshot(eventTaskId ?? activeTaskId);
+    };
+    window.addEventListener('fitmeet:realtime', onRealtime);
+    return () => window.removeEventListener('fitmeet:realtime', onRealtime);
+  }, [
+    activeTaskId,
+    isLoggedIn,
+    isRealAgent,
+    refreshMatchingSnapshot,
+    shellView,
+  ]);
+
+  useEffect(() => {
+    if (!isRealAgent || !isLoggedIn || shellView !== 'chat') return undefined;
+    if (!activeTaskId || !shouldPollMatchingSnapshot(userResult, activeTaskStatus)) {
+      return undefined;
+    }
+    let cancelled = false;
+    const interval = window.setInterval(() => {
+      if (!cancelled) void refreshMatchingSnapshot(activeTaskId);
+    }, 5000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, [
+    activeTaskId,
+    activeTaskStatus,
+    isLoggedIn,
+    isRealAgent,
+    refreshMatchingSnapshot,
+    shellView,
+    userResult,
+  ]);
   const { refreshLatestCheckpointRecovery } = useAgentSessionRestore({
     agentAdapter,
     isRealAgent,
@@ -551,6 +672,37 @@ function messageHasProfileCompletionCard(message: { result?: UserFacingAgentResp
       (card) => card.type === 'profile_completion' || card.schemaType === 'profile.completion',
     ),
   );
+}
+
+function shouldPollMatchingSnapshot(
+  response: UserFacingAgentResponse | null,
+  taskStatus: string | null,
+) {
+  if (!response) return false;
+  if (response.publicLoop?.stage === 'dismissed') return false;
+  if (response.publicLoop?.stage === 'candidates_recommended') return false;
+  if (response.workflow?.state === 'CANDIDATES_READY') return false;
+  const normalizedTaskStatus = (taskStatus ?? '').trim().toLowerCase();
+  if (normalizedTaskStatus === 'cancelled' || normalizedTaskStatus === 'failed') return false;
+  const matchingJobStatus = response.cards
+    .map((card) => {
+      const matchingJob = isRecord(card.data?.matchingJob) ? card.data.matchingJob : null;
+      return card.data?.matchingJobStatus ?? matchingJob?.status;
+    })
+    .find((value) => typeof value === 'string');
+  if (matchingJobStatus === 'queued' || matchingJobStatus === 'running') return true;
+  if (response.publicLoop?.stage === 'discover_visible') return true;
+  if (response.workflow?.state === 'DISCOVER_VISIBLE') return true;
+  return /正在匹配|正在筛选|等待匹配/.test(response.assistantMessage);
+}
+
+function numberFromUnknown(value: unknown): number | null {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) && numeric > 0 ? numeric : null;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 function buildProfileCompletionBootstrapResponse(input: {

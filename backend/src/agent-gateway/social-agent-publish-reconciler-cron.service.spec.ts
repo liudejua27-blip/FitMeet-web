@@ -3,9 +3,13 @@ import { AgentTaskStatus } from './entities/agent-task.entity';
 
 describe('SocialAgentPublishReconcilerCronService', () => {
   function makeRepo(tasks: Array<Record<string, unknown>>) {
+    const queue = [...tasks];
     return {
       manager: {
-        query: jest.fn().mockResolvedValue(tasks),
+        query: jest.fn(async () => {
+          const next = queue.shift();
+          return next ? [next] : [];
+        }),
       },
     };
   }
@@ -40,8 +44,16 @@ describe('SocialAgentPublishReconcilerCronService', () => {
       needsRepair: 1,
       failed: 0,
     });
-    expect(reconciler.reconcileTask).toHaveBeenCalledWith(7, 101);
-    expect(reconciler.reconcileTask).toHaveBeenCalledWith(7, 102);
+    expect(reconciler.reconcileTask).toHaveBeenCalledWith(
+      7,
+      101,
+      expect.any(String),
+    );
+    expect(reconciler.reconcileTask).toHaveBeenCalledWith(
+      7,
+      102,
+      expect.any(String),
+    );
     expect(repo.manager.query).toHaveBeenCalledWith(
       expect.stringContaining('FOR UPDATE SKIP LOCKED'),
       expect.arrayContaining([
@@ -70,7 +82,7 @@ describe('SocialAgentPublishReconcilerCronService', () => {
       reconciler as never,
     );
 
-    await expect(service.reconcileDuePublishedTasks()).resolves.toEqual({
+    await expect(service.reconcileDuePublishedTasks(2)).resolves.toEqual({
       scanned: 2,
       visible: 1,
       needsRepair: 0,

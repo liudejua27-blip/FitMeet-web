@@ -1,6 +1,11 @@
-import { Injectable, NotFoundException, Optional } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  Optional,
+  ServiceUnavailableException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { EntityManager, Repository } from 'typeorm';
 
 import {
   SocialRequestVisibility,
@@ -12,6 +17,8 @@ import { MatchingJob, MatchingJobStatus } from './entities/matching-job.entity';
 import { PublicSocialIntent } from './entities/public-social-intent.entity';
 import { SocialRequestStatus } from './entities/social-request.entity';
 import { MatchingJobService } from './matching-job.service';
+
+const SOCIAL_REQUEST_ADVISORY_LOCK_NAMESPACE = 1_782_160_006;
 
 type PublishReconcileContext = {
   publicIntentId: string | null;
@@ -46,83 +53,121 @@ export class SocialAgentPublishReconcilerService {
     private readonly matchingJobRepo?: Repository<MatchingJob>,
   ) {}
 
-  async reconcileTask(ownerUserId: number, taskId: number) {
-    const task = await this.taskRepo.findOne({ where: { id: taskId } });
-    if (!task || task.ownerUserId !== ownerUserId) {
-      throw new NotFoundException('Agent task not found');
-    }
-    const context = this.publishContextFromTask(task);
-    if (!context.publicIntentId || !this.publicIntentRepo) {
-      await this.markNeedsRepair(
-        task,
-        'publish_reconcile_missing_public_intent',
-      );
-      return {
-        status: 'needs_repair',
-        taskId,
-        publicIntentId: context.publicIntentId ?? null,
-      };
-    }
-
-    const intent = await this.publicIntentRepo.findOne({
-      where: { id: context.publicIntentId },
-    });
-    const validation = await this.validatePublicIntent({
-      ownerUserId,
-      context,
-      intent,
-    });
-    if (!validation.ok) {
-      if (validation.cancelMatching) {
-        await this.cancelErroneousMatchingJobs({
-          ownerUserId,
-          publicIntentId: context.publicIntentId,
-          socialRequestId: context.socialRequestId,
-          reason: validation.reason,
-        });
+  async reconcileTask(
+    ownerUserId: number,
+    taskId: number,
+    leaseOwner?: string,
+  ) {
+    this.assertRequiredPersistenceDependencies();
+    return this.taskRepo.manager.transaction(async (manager) => {
+      const task = await manager
+        .getRepository(AgentTask)
+        .createQueryBuilder('task')
+        .setLock('pessimistic_write')
+        .where('task.id = :taskId', { taskId })
+        .andWhere('task.ownerUserId = :ownerUserId', { ownerUserId })
+        .getOne();
+      if (!task) {
+        throw new NotFoundException('Agent task not found');
       }
-      await this.markNeedsRepair(task, validation.reason);
+      if (leaseOwner && !this.taskHasPublishReconcileLease(task, leaseOwner)) {
+        return {
+          status: 'lease_lost',
+          taskId,
+          publicIntentId: this.publishContextFromTask(task).publicIntentId,
+        };
+      }
+
+      const context = this.publishContextFromTask(task);
+      if (!context.publicIntentId) {
+        await this.markNeedsRepair(
+          task,
+          'publish_reconcile_missing_public_intent',
+          manager,
+        );
+        return {
+          status: 'needs_repair',
+          taskId,
+          publicIntentId: null,
+        };
+      }
+
+      const intent = await manager
+        .getRepository(PublicSocialIntent)
+        .createQueryBuilder('intent')
+        .setLock('pessimistic_write')
+        .where('intent.id = :publicIntentId', {
+          publicIntentId: context.publicIntentId,
+        })
+        .getOne();
+      const lockSocialRequestId =
+        context.socialRequestId ?? this.number(intent?.linkedSocialRequestId);
+      if (lockSocialRequestId) {
+        await this.lockSocialRequestAggregate(manager, lockSocialRequestId);
+      }
+      const validation = await this.validatePublicIntent({
+        ownerUserId,
+        context,
+        intent,
+        manager,
+      });
+      if (!validation.ok) {
+        if (validation.cancelMatching) {
+          await this.cancelErroneousMatchingJobs({
+            ownerUserId,
+            publicIntentId: context.publicIntentId,
+            socialRequestId: context.socialRequestId,
+            reason: validation.reason,
+            manager,
+          });
+        }
+        await this.markNeedsRepair(task, validation.reason, manager);
+        return {
+          status: 'needs_repair',
+          taskId,
+          publicIntentId: context.publicIntentId,
+        };
+      }
+
+      const matchingJob = await this.ensureMatchingJobInTransaction(manager, {
+        ownerUserId,
+        taskId,
+        publicIntentId: context.publicIntentId,
+        socialRequestId:
+          validation.socialRequestId ?? context.socialRequestId ?? null,
+        sourceVersion: validation.sourceVersion,
+        discoverHref: `/discover?publicIntentId=${encodeURIComponent(
+          context.publicIntentId,
+        )}`,
+        publicIntentHref: `/public-intent/${encodeURIComponent(
+          context.publicIntentId,
+        )}`,
+      });
+      task.statusReason = 'publish_reconcile_public_intent_visible';
+      task.result = {
+        ...(task.result ?? {}),
+        publishReconcile: {
+          status: 'visible',
+          publicIntentId: context.publicIntentId,
+          sourceVersion: validation.sourceVersion,
+          matchingJobId: matchingJob?.id ?? context.matchingJobId ?? null,
+          checkedAt: new Date().toISOString(),
+        },
+      };
+      await manager.getRepository(AgentTask).save(task);
       return {
-        status: 'needs_repair',
+        status: 'visible',
         taskId,
         publicIntentId: context.publicIntentId,
       };
-    }
-
-    const matchingJob = await this.ensureMatchingJob({
-      ownerUserId,
-      taskId,
-      publicIntentId: context.publicIntentId,
-      socialRequestId:
-        validation.socialRequestId ?? context.socialRequestId ?? null,
-      sourceVersion: validation.sourceVersion,
-      discoverHref: `/discover?publicIntentId=${encodeURIComponent(
-        context.publicIntentId,
-      )}`,
-      publicIntentHref: `/public-intent/${encodeURIComponent(
-        context.publicIntentId,
-      )}`,
     });
-    task.statusReason = 'publish_reconcile_public_intent_visible';
-    task.result = {
-      ...(task.result ?? {}),
-      publishReconcile: {
-        status: 'visible',
-        publicIntentId: context.publicIntentId,
-        sourceVersion: validation.sourceVersion,
-        matchingJobId: matchingJob?.id ?? context.matchingJobId ?? null,
-        checkedAt: new Date().toISOString(),
-      },
-    };
-    await this.taskRepo.save(task);
-    return {
-      status: 'visible',
-      taskId,
-      publicIntentId: context.publicIntentId,
-    };
   }
 
-  private async markNeedsRepair(task: AgentTask, reason: string) {
+  private async markNeedsRepair(
+    task: AgentTask,
+    reason: string,
+    manager: EntityManager = this.taskRepo.manager,
+  ) {
     task.status = AgentTaskStatus.AwaitingConfirmation;
     task.statusReason = reason;
     task.result = {
@@ -133,7 +178,7 @@ export class SocialAgentPublishReconcilerService {
         checkedAt: new Date().toISOString(),
       },
     };
-    await this.taskRepo.save(task);
+    await manager.getRepository(AgentTask).save(task);
   }
 
   private publishContextFromTask(task: AgentTask): PublishReconcileContext {
@@ -166,8 +211,9 @@ export class SocialAgentPublishReconcilerService {
     ownerUserId: number;
     context: PublishReconcileContext;
     intent: PublicSocialIntent | null;
+    manager: EntityManager;
   }): Promise<PublishIntentValidation> {
-    const { ownerUserId, context, intent } = input;
+    const { ownerUserId, context, intent, manager } = input;
     if (!intent) return this.invalid('publish_reconcile_readback_failed');
     if (intent.userId !== null && intent.userId !== ownerUserId) {
       return this.invalid('publish_reconcile_owner_mismatch', true);
@@ -181,9 +227,12 @@ export class SocialAgentPublishReconcilerService {
       return this.invalid('publish_reconcile_linked_request_mismatch', true);
     }
     const socialRequest = socialRequestId
-      ? await this.userSocialRequestRepo?.findOne({
-          where: { id: socialRequestId },
-        })
+      ? await manager
+          .getRepository(UserSocialRequest)
+          .createQueryBuilder('request')
+          .setLock('pessimistic_write')
+          .where('request.id = :socialRequestId', { socialRequestId })
+          .getOne()
       : null;
     if (!socialRequest) {
       return this.invalid('publish_reconcile_missing_social_request');
@@ -207,7 +256,7 @@ export class SocialAgentPublishReconcilerService {
     if (context.sourceVersion && context.sourceVersion !== sourceVersion) {
       return this.invalid('publish_reconcile_source_version_mismatch', true);
     }
-    const visible = await this.discoverQueryCanReadIntent(intent.id);
+    const visible = await this.discoverQueryCanReadIntent(intent.id, manager);
     if (!visible) {
       return this.invalid('publish_reconcile_discover_query_failed');
     }
@@ -233,31 +282,59 @@ export class SocialAgentPublishReconcilerService {
     };
   }
 
-  private async ensureMatchingJob(input: {
-    ownerUserId: number;
-    taskId: number;
-    publicIntentId: string;
-    socialRequestId: number | null;
-    sourceVersion: string;
-    discoverHref: string;
-    publicIntentHref: string;
-  }): Promise<MatchingJob | null> {
-    if (!this.matchingJobs) return null;
-    const { job } = await this.matchingJobs.enqueue({
-      ownerUserId: input.ownerUserId,
-      linkedSocialRequestId: input.socialRequestId,
-      publicIntentId: input.publicIntentId,
-      sourceVersion: input.sourceVersion,
-      idempotencyKey: `matching-job:${input.publicIntentId}:${input.sourceVersion}`,
-      metadata: {
-        taskId: input.taskId,
-        socialRequestId: input.socialRequestId,
-        discoverHref: input.discoverHref,
-        publicIntentHref: input.publicIntentHref,
-        source: 'publish_reconciler',
-      },
-    });
-    return job;
+  private async ensureMatchingJobInTransaction(
+    manager: EntityManager,
+    input: {
+      ownerUserId: number;
+      taskId: number;
+      publicIntentId: string;
+      socialRequestId: number | null;
+      sourceVersion: string;
+      discoverHref: string;
+      publicIntentHref: string;
+    },
+  ): Promise<MatchingJob | null> {
+    const metadata = {
+      taskId: input.taskId,
+      socialRequestId: input.socialRequestId,
+      discoverHref: input.discoverHref,
+      publicIntentHref: input.publicIntentHref,
+      source: 'publish_reconciler',
+    };
+    const idempotencyKey = `matching-job:${input.publicIntentId}:${input.sourceVersion}`;
+    const now = new Date();
+    const inserted = await this.queryRows<MatchingJob>(
+      manager,
+      `INSERT INTO "matching_jobs"
+        ("publicIntentId", "ownerUserId", "linkedSocialRequestId",
+         "sourceVersion", "idempotencyKey", "status", "attemptCount",
+         "candidateCount", "errorMessage", "result", "metadata",
+         "nextRunAt", "startedAt", "completedAt", "createdAt", "updatedAt")
+       VALUES ($1, $2, $3, $4, $5, $6, 0, 0, '', '{}'::jsonb,
+         $7::jsonb, $8, NULL, NULL, $8, $8)
+       ON CONFLICT ("idempotencyKey") DO NOTHING
+       RETURNING *`,
+      [
+        input.publicIntentId,
+        input.ownerUserId,
+        input.socialRequestId,
+        input.sourceVersion,
+        idempotencyKey,
+        MatchingJobStatus.Queued,
+        JSON.stringify(metadata),
+        now,
+      ],
+    );
+    if (inserted[0]) return inserted[0];
+    const existing = await this.queryRows<MatchingJob>(
+      manager,
+      `SELECT *
+       FROM "matching_jobs"
+       WHERE "idempotencyKey" = $1
+       FOR UPDATE`,
+      [idempotencyKey],
+    );
+    return existing[0] ?? null;
   }
 
   private async cancelErroneousMatchingJobs(input: {
@@ -265,9 +342,10 @@ export class SocialAgentPublishReconcilerService {
     publicIntentId: string | null;
     socialRequestId: number | null;
     reason: string;
+    manager?: EntityManager;
   }): Promise<void> {
-    if (!this.matchingJobRepo) return;
-    await this.matchingJobRepo.manager.query(
+    const manager = input.manager ?? this.matchingJobRepo!.manager;
+    await manager.query(
       `UPDATE "matching_jobs"
        SET "status" = $1,
            "completedAt" = $2,
@@ -299,9 +377,12 @@ export class SocialAgentPublishReconcilerService {
     );
   }
 
-  private async discoverQueryCanReadIntent(publicIntentId: string) {
-    if (!this.publicIntentRepo) return false;
-    const intent = await this.publicIntentRepo
+  private async discoverQueryCanReadIntent(
+    publicIntentId: string,
+    manager: EntityManager = this.taskRepo.manager,
+  ) {
+    const intent = await manager
+      .getRepository(PublicSocialIntent)
       .createQueryBuilder('intent')
       .where('intent.id = :publicIntentId', { publicIntentId })
       .andWhere('intent.mode = :mode', { mode: 'public' })
@@ -315,6 +396,60 @@ export class SocialAgentPublishReconcilerService {
       .andWhere(`COALESCE(intent.metadata ->> 'tombstoned', 'false') <> 'true'`)
       .getOne();
     return Boolean(intent);
+  }
+
+  private assertRequiredPersistenceDependencies(): void {
+    const missing: string[] = [];
+    if (!this.publicIntentRepo) missing.push('public_social_intent_repo');
+    if (!this.userSocialRequestRepo) missing.push('user_social_request_repo');
+    if (!this.matchingJobs) missing.push('matching_job_service');
+    if (!this.matchingJobRepo) missing.push('matching_job_repo');
+    if (missing.length > 0) {
+      throw new ServiceUnavailableException({
+        code: 'publish_reconcile_persistence_unavailable',
+        missing,
+      });
+    }
+  }
+
+  private async lockSocialRequestAggregate(
+    manager: EntityManager,
+    socialRequestId: number,
+  ): Promise<void> {
+    await manager.query('SELECT pg_advisory_xact_lock($1, $2)', [
+      SOCIAL_REQUEST_ADVISORY_LOCK_NAMESPACE,
+      socialRequestId,
+    ]);
+  }
+
+  private taskHasPublishReconcileLease(
+    task: AgentTask,
+    leaseOwner: string,
+  ): boolean {
+    const publishReconcile = this.record(
+      this.record(task.result).publishReconcile,
+    );
+    return (
+      this.text(publishReconcile.status) === 'running' &&
+      this.text(publishReconcile.leaseOwner) === leaseOwner
+    );
+  }
+
+  private async queryRows<T>(
+    manager: Pick<EntityManager, 'query'>,
+    query: string,
+    parameters: unknown[] = [],
+  ): Promise<T[]> {
+    const rows: unknown = await manager.query(query, parameters);
+    if (
+      Array.isArray(rows) &&
+      rows.length === 2 &&
+      Array.isArray(rows[0]) &&
+      typeof rows[1] === 'number'
+    ) {
+      return rows[0] as T[];
+    }
+    return Array.isArray(rows) ? (rows as T[]) : [];
   }
 
   private isCancelled(

@@ -1,11 +1,17 @@
-import { BadRequestException, Injectable, Logger } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  Logger,
+  Optional,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { EntityManager, Repository } from 'typeorm';
 
 import {
   cleanDisplayText,
   sanitizeForDisplay,
 } from '../common/display-text.util';
+import { RealtimeEventService } from '../realtime/realtime-event.service';
 import {
   SocialRequestVisibility,
   UserSocialRequest,
@@ -31,6 +37,9 @@ import {
   type CandidatePoolSearchResult,
   SocialAgentCandidatePoolService,
 } from './social-agent-candidate-pool.service';
+import { buildSocialAgentCandidateDetailCard } from './social-agent-card-action.presenter';
+
+const SOCIAL_REQUEST_ADVISORY_LOCK_NAMESPACE = 1_782_160_006;
 
 type MatchingJobProcessorSummary = {
   claimed: number;
@@ -46,6 +55,18 @@ type JobValidationResult = {
   socialRequest: UserSocialRequest;
   publicIntent: PublicSocialIntent;
   sourceVersion: string;
+};
+
+type FinalizedMatchingJob = {
+  job: MatchingJob;
+  ownerUserId: number;
+  taskId: number | null;
+  publicIntentId: string;
+  socialRequestId: number;
+  candidates: SocialAgentChatCandidate[];
+  candidateCount: number;
+  emptyReason: string | null;
+  message: string | null;
 };
 
 class CancelMatchingJobError extends Error {
@@ -79,6 +100,8 @@ export class SocialAgentMatchingJobProcessorService {
     private readonly publicIntentRepo: Repository<PublicSocialIntent>,
     @InjectRepository(UserSocialRequest)
     private readonly userSocialRequestRepo: Repository<UserSocialRequest>,
+    @Optional()
+    private readonly realtime?: RealtimeEventService,
   ) {}
 
   async processDueJobs(input: {
@@ -87,23 +110,39 @@ export class SocialAgentMatchingJobProcessorService {
     leaseMs?: number;
     maxAttempts?: number;
   }): Promise<MatchingJobProcessorSummary> {
-    const claimed = await this.matchingJobs.claimDueJobs({
-      workerId: input.workerId,
-      limit: input.limit,
-      leaseMs: input.leaseMs,
-    });
+    const limit = Math.max(1, Math.min(Math.floor(input.limit ?? 10), 100));
     const summary: MatchingJobProcessorSummary = {
-      claimed: claimed.length,
+      claimed: 0,
       candidatesReady: 0,
       noCandidates: 0,
       cancelled: 0,
       failedRetryable: 0,
       failedFinal: 0,
     };
-    for (const job of claimed) {
-      const status = await this.processClaimedJob(job, {
-        maxAttempts: input.maxAttempts,
+    for (let index = 0; index < limit; index += 1) {
+      const [job] = await this.matchingJobs.claimDueJobs({
+        workerId: input.workerId,
+        limit: 1,
+        leaseMs: input.leaseMs,
       });
+      if (!job) break;
+      summary.claimed += 1;
+      let status: MatchingJobStatus;
+      try {
+        status = await this.processClaimedJob(job, {
+          maxAttempts: input.maxAttempts,
+          leaseMs: input.leaseMs,
+        });
+      } catch (error) {
+        summary.failedRetryable += 1;
+        this.logger.warn({
+          event: 'social_agent.matching_job.unhandled_failure',
+          jobId: job.id,
+          publicIntentId: job.publicIntentId,
+          message: error instanceof Error ? error.message : String(error),
+        });
+        continue;
+      }
       if (status === MatchingJobStatus.CandidatesReady) {
         summary.candidatesReady += 1;
       } else if (status === MatchingJobStatus.NoCandidates) {
@@ -121,48 +160,37 @@ export class SocialAgentMatchingJobProcessorService {
 
   async processClaimedJob(
     job: ClaimedMatchingJob,
-    options: { maxAttempts?: number } = {},
+    options: { maxAttempts?: number; leaseMs?: number } = {},
   ): Promise<MatchingJobStatus> {
+    const heartbeat = this.startLeaseHeartbeat(job, options.leaseMs);
     try {
       const validation = await this.validateJob(job);
       const searchResult = await this.searchCandidates(job, validation);
-      await this.validateJob(job);
-      const candidates = searchResult.candidates.map((candidate) =>
-        toSocialAgentChatCandidate(
-          this.taskIdFromJob(job) ?? 0,
-          validation.socialRequest.id,
-          candidate as never,
-        ),
-      );
-      const completed = await this.matchingJobs.markCompleted(
-        job.id,
-        candidates.length,
-        {
-          candidates: sanitizeForDisplay(candidates),
-          candidateCount: candidates.length,
-          emptyReason: searchResult.emptyReason,
-          message: searchResult.message,
-          publicIntentId: job.publicIntentId,
-          socialRequestId: validation.socialRequest.id,
-          debugReasons: sanitizeForDisplay(searchResult.debugReasons),
-        },
-        job.leaseOwner,
-      );
-      await this.writeTaskResult({
-        job: completed,
+      const finalized = await this.finalizeSearchResult({
+        job,
         validation,
-        candidates,
         searchResult,
       });
-      return completed.status;
+      this.emitMatchingResult(finalized);
+      return finalized.job.status;
     } catch (error) {
       if (error instanceof CancelMatchingJobError) {
-        const cancelled = await this.matchingJobs.cancelClaimed(
-          job.id,
-          job.leaseOwner,
-          error.message,
-        );
-        return cancelled.status;
+        try {
+          const cancelled = await this.matchingJobs.cancelClaimed(
+            job.id,
+            job.leaseOwner,
+            error.message,
+          );
+          return cancelled.status;
+        } catch (cancelError) {
+          if (
+            cancelError instanceof Error &&
+            cancelError.message.includes('matching_job_lease_lost')
+          ) {
+            return MatchingJobStatus.Cancelled;
+          }
+          throw cancelError;
+        }
       }
       const retryable = this.shouldRetry(job, error, options.maxAttempts);
       const failed = await this.matchingJobs.markFailed(
@@ -179,7 +207,33 @@ export class SocialAgentMatchingJobProcessorService {
         message: error instanceof Error ? error.message : String(error),
       });
       return failed.status;
+    } finally {
+      clearInterval(heartbeat);
     }
+  }
+
+  private startLeaseHeartbeat(
+    job: ClaimedMatchingJob,
+    leaseMs = 60_000,
+  ): NodeJS.Timeout {
+    const safeLeaseMs = Math.max(5_000, Math.floor(leaseMs || 60_000));
+    const intervalMs = Math.max(1_000, Math.floor(safeLeaseMs / 3));
+    return setInterval(() => {
+      void this.matchingJobs
+        .extendLease({
+          jobId: job.id,
+          leaseOwner: job.leaseOwner,
+          leaseMs: safeLeaseMs,
+        })
+        .catch((error) => {
+          this.logger.warn({
+            event: 'social_agent.matching_job.heartbeat_failed',
+            jobId: job.id,
+            publicIntentId: job.publicIntentId,
+            message: error instanceof Error ? error.message : String(error),
+          });
+        });
+    }, intervalMs);
   }
 
   private async searchCandidates(
@@ -228,7 +282,7 @@ export class SocialAgentMatchingJobProcessorService {
           ? metadata.acceptsStrangers
           : null,
       limit: 10,
-      persistCandidates: true,
+      persistCandidates: false,
     });
   }
 
@@ -302,18 +356,186 @@ export class SocialAgentMatchingJobProcessorService {
     };
   }
 
-  private async writeTaskResult(input: {
-    job: MatchingJob;
+  private async finalizeSearchResult(input: {
+    job: ClaimedMatchingJob;
     validation: JobValidationResult;
-    candidates: SocialAgentChatCandidate[];
     searchResult: CandidatePoolSearchResult;
-  }): Promise<void> {
-    const taskId = this.taskIdFromJob(input.job);
-    if (!taskId) return;
-    const task = await this.taskRepo.findOne({
-      where: { id: taskId, ownerUserId: input.validation.ownerUserId },
+  }): Promise<FinalizedMatchingJob> {
+    return this.taskRepo.manager.transaction(async (manager) => {
+      await this.lockSocialRequestAggregate(
+        manager,
+        input.validation.socialRequest.id,
+      );
+      const lockedJob = await this.lockClaimedMatchingJob(
+        manager,
+        input.job.id,
+        input.job.leaseOwner,
+      );
+      const intent = await manager
+        .getRepository(PublicSocialIntent)
+        .createQueryBuilder('intent')
+        .setLock('pessimistic_write')
+        .where('intent.id = :publicIntentId', {
+          publicIntentId: lockedJob.publicIntentId,
+        })
+        .getOne();
+      const linkedSocialRequestId =
+        this.number(intent?.linkedSocialRequestId) ??
+        this.number(lockedJob.linkedSocialRequestId);
+      const socialRequest = linkedSocialRequestId
+        ? await manager
+            .getRepository(UserSocialRequest)
+            .createQueryBuilder('request')
+            .setLock('pessimistic_write')
+            .where('request.id = :socialRequestId', {
+              socialRequestId: linkedSocialRequestId,
+            })
+            .getOne()
+        : null;
+      const validation = this.validateLockedJob({
+        job: lockedJob,
+        intent,
+        socialRequest,
+      });
+      await this.assertDiscoverQueryCanReadIntent(intent!.id, manager);
+
+      const candidateRows = input.searchResult.candidates;
+      await this.candidatePool.persistCandidateRows(
+        validation.socialRequest.id,
+        candidateRows,
+        manager,
+      );
+      const taskId = this.taskIdFromJob(lockedJob);
+      const candidates = candidateRows.map((candidate) =>
+        toSocialAgentChatCandidate(
+          taskId ?? 0,
+          validation.socialRequest.id,
+          candidate as never,
+        ),
+      );
+      const candidateCount = candidates.length;
+      const completedAt = new Date();
+      const status =
+        candidateCount > 0
+          ? MatchingJobStatus.CandidatesReady
+          : MatchingJobStatus.NoCandidates;
+      const resultPayload = {
+        candidates: sanitizeForDisplay(candidates),
+        candidateCount,
+        emptyReason: input.searchResult.emptyReason,
+        message: input.searchResult.message,
+        publicIntentId: lockedJob.publicIntentId,
+        socialRequestId: validation.socialRequest.id,
+        debugReasons: sanitizeForDisplay(input.searchResult.debugReasons),
+      };
+      const completedJob = {
+        ...lockedJob,
+        status,
+        candidateCount,
+        result: resultPayload,
+        completedAt,
+        leaseOwner: null,
+        leaseExpiresAt: null,
+        lastHeartbeatAt: null,
+      } as MatchingJob;
+
+      const task = taskId
+        ? await manager
+            .getRepository(AgentTask)
+            .createQueryBuilder('task')
+            .setLock('pessimistic_write')
+            .where('task.id = :taskId', { taskId })
+            .andWhere('task.ownerUserId = :ownerUserId', {
+              ownerUserId: validation.ownerUserId,
+            })
+            .getOne()
+        : null;
+      if (task) {
+        await this.writeTaskResultInTransaction(manager, {
+          task,
+          job: completedJob,
+          validation,
+          candidates,
+          searchResult: input.searchResult,
+        });
+      }
+
+      validation.publicIntent.candidateUserIds = candidates
+        .map((candidate) => candidate.candidateUserId ?? candidate.userId)
+        .filter((value): value is number => typeof value === 'number');
+      validation.publicIntent.matchedCount = candidateCount;
+      validation.publicIntent.status =
+        candidateCount > 0
+          ? SocialRequestStatus.Matched
+          : SocialRequestStatus.Searching;
+      validation.publicIntent.metadata = {
+        ...(validation.publicIntent.metadata ?? {}),
+        matchingJobId: lockedJob.id,
+        matchingJobStatus: status,
+        candidateCount,
+        matchedCount: candidateCount,
+        matchedAt: completedAt.toISOString(),
+      };
+      await manager
+        .getRepository(PublicSocialIntent)
+        .save(validation.publicIntent);
+
+      const updated = await this.queryRows<MatchingJob>(
+        manager,
+        `UPDATE "matching_jobs"
+         SET "status" = $1,
+             "candidateCount" = $2,
+             "result" = $3::jsonb,
+             "errorMessage" = '',
+             "nextRunAt" = NULL,
+             "leaseOwner" = NULL,
+             "leaseExpiresAt" = NULL,
+             "lastHeartbeatAt" = NULL,
+             "completedAt" = $4,
+             "updatedAt" = $4
+         WHERE "id" = $5
+           AND "status" = $6
+           AND "leaseOwner" = $7
+         RETURNING *`,
+        [
+          status,
+          candidateCount,
+          JSON.stringify(resultPayload),
+          completedAt,
+          lockedJob.id,
+          MatchingJobStatus.Running,
+          input.job.leaseOwner,
+        ],
+      );
+      const finalized = updated[0];
+      if (!finalized) throw new BadRequestException('matching_job_lease_lost');
+      return {
+        job: finalized,
+        ownerUserId: validation.ownerUserId,
+        taskId,
+        publicIntentId: validation.publicIntent.id,
+        socialRequestId: validation.socialRequest.id,
+        candidates,
+        candidateCount,
+        emptyReason: input.searchResult.emptyReason ?? null,
+        message: input.searchResult.message ?? null,
+      };
     });
-    if (!task) return;
+  }
+
+  private async writeTaskResultInTransaction(
+    manager: EntityManager,
+    input: {
+      task: AgentTask;
+      job: MatchingJob;
+      validation: JobValidationResult;
+      candidates: SocialAgentChatCandidate[];
+      searchResult: CandidatePoolSearchResult;
+    },
+  ): Promise<void> {
+    const taskId = this.taskIdFromJob(input.job);
+    if (!taskId) throw new BadRequestException('matching_job_task_id_missing');
+    const task = input.task;
     const now = new Date().toISOString();
     const result = this.record(task.result);
     const memory = this.record(task.memory);
@@ -328,6 +550,12 @@ export class SocialAgentMatchingJobProcessorService {
       socialAgentChat,
     });
     const candidateCount = input.candidates.length;
+    const candidateCards = input.candidates.map((candidate) =>
+      buildSocialAgentCandidateDetailCard({
+        taskId,
+        candidate: sanitizeForDisplay(candidate) as Record<string, unknown>,
+      }),
+    );
     task.status =
       candidateCount > 0
         ? AgentTaskStatus.AwaitingConfirmation
@@ -358,6 +586,7 @@ export class SocialAgentMatchingJobProcessorService {
         matchingJobStatus: input.job.status,
         refreshedAt: now,
         statusReason: task.statusReason,
+        cards: candidateCards,
       },
       matchingJob: {
         id: input.job.id,
@@ -367,6 +596,7 @@ export class SocialAgentMatchingJobProcessorService {
         candidateCount,
         completedAt: input.job.completedAt,
       },
+      cards: candidateCards,
     };
     task.memory = {
       ...memory,
@@ -386,9 +616,9 @@ export class SocialAgentMatchingJobProcessorService {
         updatedAt: now,
       },
     };
-    await this.taskRepo.save(task);
-    await this.eventRepo.save(
-      this.eventRepo.create({
+    await manager.getRepository(AgentTask).save(task);
+    await manager.getRepository(AgentTaskEvent).save(
+      manager.getRepository(AgentTaskEvent).create({
         taskId: task.id,
         ownerUserId: task.ownerUserId,
         actor: AgentTaskEventActor.Agent,
@@ -448,7 +678,9 @@ export class SocialAgentMatchingJobProcessorService {
       publishStatus: 'published',
       visibility: 'public',
       autoPublished: true,
-      matchingJobId: this.number(input.chatRun.matchingJobId),
+      matchingJobId:
+        this.number(input.chatRun.matchingJobId) ??
+        this.number(input.socialAgentChat.matchingJobId),
       sourceVersion: input.validation.sourceVersion,
     };
   }
@@ -463,8 +695,14 @@ export class SocialAgentMatchingJobProcessorService {
     return (job.attemptCount ?? 1) < Math.max(1, maxAttempts);
   }
 
-  private async assertDiscoverQueryCanReadIntent(publicIntentId: string) {
-    const intent = await this.publicIntentRepo
+  private async assertDiscoverQueryCanReadIntent(
+    publicIntentId: string,
+    manager?: EntityManager,
+  ) {
+    const repo = manager
+      ? manager.getRepository(PublicSocialIntent)
+      : this.publicIntentRepo;
+    const intent = await repo
       .createQueryBuilder('intent')
       .where('intent.id = :publicIntentId', { publicIntentId })
       .andWhere('intent.mode = :mode', { mode: 'public' })
@@ -480,6 +718,122 @@ export class SocialAgentMatchingJobProcessorService {
     if (!intent) {
       throw new BadRequestException('matching_job_discover_readback_failed');
     }
+  }
+
+  private async lockSocialRequestAggregate(
+    manager: EntityManager,
+    socialRequestId: number,
+  ): Promise<void> {
+    await manager.query('SELECT pg_advisory_xact_lock($1, $2)', [
+      SOCIAL_REQUEST_ADVISORY_LOCK_NAMESPACE,
+      socialRequestId,
+    ]);
+  }
+
+  private async lockClaimedMatchingJob(
+    manager: EntityManager,
+    jobId: number,
+    leaseOwner: string,
+  ): Promise<MatchingJob> {
+    const rows = await this.queryRows<MatchingJob>(
+      manager,
+      `SELECT *
+       FROM "matching_jobs"
+       WHERE "id" = $1
+       FOR UPDATE`,
+      [jobId],
+    );
+    const job = rows[0];
+    if (
+      !job ||
+      job.status !== MatchingJobStatus.Running ||
+      job.leaseOwner !== leaseOwner
+    ) {
+      throw new BadRequestException('matching_job_lease_lost');
+    }
+    return job;
+  }
+
+  private validateLockedJob(input: {
+    job: MatchingJob;
+    intent: PublicSocialIntent | null;
+    socialRequest: UserSocialRequest | null;
+  }): JobValidationResult {
+    const { job, intent, socialRequest } = input;
+    if (!intent) {
+      throw new BadRequestException('matching_job_public_intent_missing');
+    }
+    if (!socialRequest) {
+      throw new BadRequestException('matching_job_social_request_missing');
+    }
+    const linkedSocialRequestId =
+      this.number(intent.linkedSocialRequestId) ??
+      this.number(job.linkedSocialRequestId);
+    if (!linkedSocialRequestId) {
+      throw new FinalMatchingJobError(
+        'matching_job_public_intent_missing_linked_request',
+      );
+    }
+    if (
+      job.linkedSocialRequestId &&
+      intent.linkedSocialRequestId !== job.linkedSocialRequestId
+    ) {
+      throw new FinalMatchingJobError(
+        'matching_job_linked_social_request_mismatch',
+      );
+    }
+    const ownerUserId =
+      this.number(job.ownerUserId) ??
+      this.number(intent.userId) ??
+      socialRequest.userId;
+    if (intent.userId !== null && intent.userId !== ownerUserId) {
+      throw new FinalMatchingJobError(
+        'matching_job_public_intent_owner_mismatch',
+      );
+    }
+    if (socialRequest.userId !== ownerUserId) {
+      throw new FinalMatchingJobError(
+        'matching_job_social_request_owner_mismatch',
+      );
+    }
+    if (job.ownerUserId !== null && job.ownerUserId !== ownerUserId) {
+      throw new FinalMatchingJobError('matching_job_owner_mismatch');
+    }
+    if (this.isDismissedOrInactive(intent, socialRequest)) {
+      throw new CancelMatchingJobError('matching_job_public_intent_cancelled');
+    }
+    if (this.isExpired(intent, socialRequest)) {
+      throw new CancelMatchingJobError('matching_job_public_intent_expired');
+    }
+    const sourceVersion = this.publicIntentSourceVersion(intent);
+    if (!sourceVersion) {
+      throw new FinalMatchingJobError(
+        'matching_job_public_intent_missing_source_version',
+      );
+    }
+    if (sourceVersion !== job.sourceVersion) {
+      throw new FinalMatchingJobError('matching_job_source_version_mismatch');
+    }
+    return { ownerUserId, publicIntent: intent, socialRequest, sourceVersion };
+  }
+
+  private emitMatchingResult(result: FinalizedMatchingJob): void {
+    if (!this.realtime || !result.taskId) return;
+    this.realtime.emitAgentEvent(result.ownerUserId, 'agent:candidates', {
+      taskId: result.taskId,
+      publicIntentId: result.publicIntentId,
+      socialRequestId: result.socialRequestId,
+      matchingJobId: result.job.id,
+      matchingJobStatus: result.job.status,
+      candidateCount: result.candidateCount,
+      candidates: sanitizeForDisplay(result.candidates),
+      emptyReason: result.emptyReason,
+      message: result.message,
+      publicLoopStage:
+        result.candidateCount > 0
+          ? 'candidates_recommended'
+          : 'discover_visible',
+    });
   }
 
   private isDismissedOrInactive(
@@ -538,6 +892,23 @@ export class SocialAgentMatchingJobProcessorService {
       if (Object.keys(record).length > 0) return record;
     }
     return {};
+  }
+
+  private async queryRows<T>(
+    manager: Pick<EntityManager, 'query'>,
+    query: string,
+    parameters: unknown[] = [],
+  ): Promise<T[]> {
+    const rows: unknown = await manager.query(query, parameters);
+    if (
+      Array.isArray(rows) &&
+      rows.length === 2 &&
+      Array.isArray(rows[0]) &&
+      typeof rows[1] === 'number'
+    ) {
+      return rows[0] as T[];
+    }
+    return Array.isArray(rows) ? (rows as T[]) : [];
   }
 
   private record(value: unknown): Record<string, unknown> {

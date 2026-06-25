@@ -550,6 +550,9 @@ export class SocialAgentDraftPublicationService {
        SET "status" = $1,
            "completedAt" = $2,
            "nextRunAt" = NULL,
+           "leaseOwner" = NULL,
+           "leaseExpiresAt" = NULL,
+           "lastHeartbeatAt" = NULL,
            "errorMessage" = $3,
            "metadata" = COALESCE("metadata", '{}'::jsonb) || $4::jsonb,
            "updatedAt" = $2
@@ -565,7 +568,7 @@ export class SocialAgentDraftPublicationService {
              AND "linkedSocialRequestId" = $5
            )
          )
-         AND "status" IN ($8, $9)
+         AND "status" IN ($8, $9, $10, $11)
        RETURNING "id"`,
       [
         MatchingJobStatus.Cancelled,
@@ -581,6 +584,8 @@ export class SocialAgentDraftPublicationService {
         input.ownerUserId,
         MatchingJobStatus.Queued,
         MatchingJobStatus.Running,
+        MatchingJobStatus.CandidatesReady,
+        MatchingJobStatus.NoCandidates,
       ],
     );
     if (!Array.isArray(rows)) return [];

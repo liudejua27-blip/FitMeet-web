@@ -50,19 +50,23 @@ export class SocialAgentPublishReconcilerCronService {
   async reconcileDuePublishedTasks(
     limit = 25,
   ): Promise<PublishReconcileCronSummary> {
-    const tasks = await this.claimDuePublishedTasks(limit);
     const summary: PublishReconcileCronSummary = {
-      scanned: tasks.length,
+      scanned: 0,
       visible: 0,
       needsRepair: 0,
       failed: 0,
     };
 
-    for (const task of tasks) {
+    const scanLimit = Math.max(1, Math.min(Math.floor(limit), 100));
+    for (let index = 0; index < scanLimit; index += 1) {
+      const [task] = await this.claimDuePublishedTasks(1);
+      if (!task) break;
+      summary.scanned += 1;
       try {
         const result = await this.reconciler.reconcileTask(
           task.ownerUserId,
           task.id,
+          this.workerId,
         );
         if (result.status === 'visible') summary.visible += 1;
         else summary.needsRepair += 1;
