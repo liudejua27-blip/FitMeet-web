@@ -30,6 +30,7 @@ import {
   publicText,
   readStoredAgentThread,
   responseFromSessionSnapshot,
+  responseAwaitsOpportunityClarification,
   restoredResponseHasUsefulSurface,
   sanitizeRestoredResponse,
   shouldFetchCheckpointRecovery,
@@ -136,6 +137,12 @@ export function useAgentWorkspaceController(view: AgentView) {
   const currentUserId = user?.id ?? null;
   const canonicalActiveThreadId = socialCodexThreadIdOrExisting(activeThreadId, activeTaskId);
 
+  useEffect(() => {
+    pendingOpportunityClarificationRef.current = Boolean(
+      userResult && responseAwaitsOpportunityClarification(userResult),
+    );
+  }, [pendingOpportunityClarificationRef, userResult]);
+
   const refreshMatchingSnapshot = useCallback(
     async (taskId: number | null | undefined) => {
       if (!isRealAgent || !isLoggedIn || !taskId) return;
@@ -225,13 +232,7 @@ export function useAgentWorkspaceController(view: AgentView) {
     };
     window.addEventListener('fitmeet:realtime', onRealtime);
     return () => window.removeEventListener('fitmeet:realtime', onRealtime);
-  }, [
-    activeTaskId,
-    isLoggedIn,
-    isRealAgent,
-    refreshMatchingSnapshot,
-    shellView,
-  ]);
+  }, [activeTaskId, isLoggedIn, isRealAgent, refreshMatchingSnapshot, shellView]);
 
   useEffect(() => {
     if (!isRealAgent || !isLoggedIn || shellView !== 'chat') return undefined;
