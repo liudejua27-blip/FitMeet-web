@@ -13,6 +13,7 @@
     "check:prod-build": "node scripts/check-prod-build.mjs",
     "check:discover-entrypoints": "node scripts/audit-discover-entrypoints.mjs",
     "qa:agent-chat:production": "node scripts/qa-agent-chat-production.mjs",
+    "qa:agent-chat:staging": "node scripts/qa-agent-public-loop-staging.mjs",
     "lint": "eslint .",
     "preview": "vite preview",
     "test": "vitest run",
