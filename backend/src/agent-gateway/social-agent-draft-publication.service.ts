@@ -32,8 +32,10 @@ import {
   SocialAgentToolName,
 } from './social-agent-tool-executor.service';
 import { PublicSocialIntent } from './entities/public-social-intent.entity';
+import { SocialRequestStatus } from './entities/social-request.entity';
 import { AgentSideEffectLedgerService } from './agent-side-effect-ledger.service';
 import { assertSocialAgentOpportunityPublishable } from './social-agent-opportunity-production-guard';
+import { MatchingJobService } from './matching-job.service';
 
 @Injectable()
 export class SocialAgentDraftPublicationService {
@@ -52,6 +54,8 @@ export class SocialAgentDraftPublicationService {
     private readonly publicIntentRepo?: Repository<PublicSocialIntent>,
     @Optional()
     private readonly sideEffectLedger?: AgentSideEffectLedgerService,
+    @Optional()
+    private readonly matchingJobs?: MatchingJobService,
   ) {}
 
   async publishDraft(
@@ -341,16 +345,27 @@ export class SocialAgentDraftPublicationService {
     const publicIntentReadback = await this.readPublishedPublicIntent(
       publicIntentId,
       {
+        ownerUserId,
         socialRequestId,
         draft,
         publicIntent,
       },
     );
+    const sourceVersion = this.publicIntentSourceVersion(publicIntentReadback);
     const discoverHref = this.discoverHref(publicIntentId, socialRequestId);
     const publicIntentHref = this.publicIntentHref(
       publicIntentId,
       socialRequestId,
     );
+    const matchingJob = await this.enqueueMatchingJob({
+      ownerUserId,
+      taskId,
+      socialRequestId,
+      publicIntentId,
+      sourceVersion,
+      discoverHref,
+      publicIntentHref,
+    });
     const socialRequest = this.isRecord(output.socialRequest)
       ? output.socialRequest
       : output;
@@ -367,6 +382,9 @@ export class SocialAgentDraftPublicationService {
         status: 'published',
         toolName: SocialAgentToolName.CreateSocialRequest,
         toolCallId: publishAction.id,
+        matchingJobId: matchingJob.id,
+        matchingJobStatus: matchingJob.status,
+        sourceVersion,
       },
     );
     this.rememberShortTermStep(
@@ -382,6 +400,9 @@ export class SocialAgentDraftPublicationService {
       publicIntentHref,
       socialRequestId,
       publishStatus: 'published',
+      matchingJobId: matchingJob.id,
+      matchingJobStatus: matchingJob.status,
+      sourceVersion,
     });
     const memory = this.record(task.memory);
     const socialAgentChat = this.record(memory.socialAgentChat);
@@ -407,6 +428,9 @@ export class SocialAgentDraftPublicationService {
                 publicIntentHref,
                 publishStatus: 'published',
                 visibility: 'public',
+                matchingJobId: matchingJob.id,
+                matchingJobStatus: matchingJob.status,
+                sourceVersion,
                 publishedAt,
               }
             : socialAgentChat.socialRequestDraft,
@@ -415,6 +439,9 @@ export class SocialAgentDraftPublicationService {
         discoverHref,
         publicIntentHref,
         publishStatus: 'published',
+        matchingJobId: matchingJob.id,
+        matchingJobStatus: matchingJob.status,
+        sourceVersion,
         updatedAt: publishedAt,
       },
     };
@@ -435,6 +462,9 @@ export class SocialAgentDraftPublicationService {
                 publicIntentHref,
                 publishStatus: 'published',
                 visibility: 'public',
+                matchingJobId: matchingJob.id,
+                matchingJobStatus: matchingJob.status,
+                sourceVersion,
                 publishedAt,
               }
             : chatRun.socialRequestDraft,
@@ -443,6 +473,9 @@ export class SocialAgentDraftPublicationService {
         discoverHref,
         publicIntentHref,
         publishStatus: 'published',
+        matchingJobId: matchingJob.id,
+        matchingJobStatus: matchingJob.status,
+        sourceVersion,
       },
       activityDraft: {
         ...activityDraft,
@@ -453,6 +486,9 @@ export class SocialAgentDraftPublicationService {
         publishStatus: 'published',
         visibility: 'public',
         autoPublished: true,
+        matchingJobId: matchingJob.id,
+        matchingJobStatus: matchingJob.status,
+        sourceVersion,
         publishedAt,
       },
       publishSocialRequest: {
@@ -463,14 +499,16 @@ export class SocialAgentDraftPublicationService {
         status: 'published',
         synced: true,
         toolCallId: publishAction.id,
+        matchingJob: this.serializeMatchingJob(matchingJob),
+        sourceVersion,
       },
     };
     transitionSocialAgentState(task, 'message_action', {
       objective: 'meet_loop',
-      nextStep: 'Discover 已可见，可以继续推荐候选。',
-      shouldSearchNow: true,
+      nextStep: 'Discover 已可见，已创建候选匹配任务。',
+      shouldSearchNow: false,
       awaitingSearchConfirmation: false,
-      waitingFor: 'post_publish_candidate_search',
+      waitingFor: 'matching_job',
       lastCompletedStep: 'published_to_discover',
     });
     await this.taskRepo.save(task);
@@ -488,14 +526,62 @@ export class SocialAgentDraftPublicationService {
       synced: true,
       toolCallId: publishAction.id,
       socialRequest: sanitizeForDisplay(socialRequest),
+      matchingJob: this.serializeMatchingJob(matchingJob),
+      sourceVersion,
       publicIntent: publicIntentReadback
         ? sanitizeForDisplay({
             id: publicIntentReadback.id,
             status: publicIntentReadback.status,
             mode: publicIntentReadback.mode,
             title: publicIntentReadback.title,
+            sourceVersion,
           })
         : undefined,
+    };
+  }
+
+  private async enqueueMatchingJob(input: {
+    ownerUserId: number;
+    taskId: number;
+    socialRequestId: number;
+    publicIntentId: string;
+    sourceVersion: string;
+    discoverHref: string;
+    publicIntentHref: string;
+  }) {
+    if (!this.matchingJobs) {
+      throw new BadRequestException('发布约练缺少候选匹配任务队列能力');
+    }
+    const { job } = await this.matchingJobs.enqueue({
+      ownerUserId: input.ownerUserId,
+      linkedSocialRequestId: input.socialRequestId,
+      publicIntentId: input.publicIntentId,
+      sourceVersion: input.sourceVersion,
+      idempotencyKey: `matching-job:${input.publicIntentId}:${input.sourceVersion}`,
+      metadata: {
+        taskId: input.taskId,
+        socialRequestId: input.socialRequestId,
+        discoverHref: input.discoverHref,
+        publicIntentHref: input.publicIntentHref,
+        source: 'publish_to_discover',
+      },
+    });
+    return job;
+  }
+
+  private serializeMatchingJob(job: {
+    id: number;
+    status: string;
+    publicIntentId: string;
+    sourceVersion: string;
+    candidateCount: number;
+  }) {
+    return {
+      id: job.id,
+      status: job.status,
+      publicIntentId: job.publicIntentId,
+      sourceVersion: job.sourceVersion,
+      candidateCount: job.candidateCount,
     };
   }
 
@@ -535,11 +621,12 @@ export class SocialAgentDraftPublicationService {
   private async readPublishedPublicIntent(
     publicIntentId: string,
     expected: {
+      ownerUserId: number;
       socialRequestId: number;
       draft: CreateSocialRequestDto & { socialRequestId?: number | null };
       publicIntent: Record<string, unknown>;
     },
-  ): Promise<PublicSocialIntent | null> {
+  ): Promise<PublicSocialIntent> {
     if (!this.publicIntentRepo) {
       throw new BadRequestException('发布约练缺少发现页读回校验能力');
     }
@@ -553,23 +640,34 @@ export class SocialAgentDraftPublicationService {
       throw new BadRequestException('发布约练读回的公开卡片不可见');
     }
     this.assertPublicIntentReadbackMatches(readback, expected);
+    await this.assertDiscoverQueryCanReadIntent(publicIntentId);
     return readback;
   }
 
   private assertPublicIntentReadbackMatches(
     readback: PublicSocialIntent,
     expected: {
+      ownerUserId: number;
       socialRequestId: number;
       draft: CreateSocialRequestDto & { socialRequestId?: number | null };
       publicIntent: Record<string, unknown>;
     },
   ): void {
-    if (
-      typeof readback.linkedSocialRequestId === 'number' &&
-      readback.linkedSocialRequestId > 0 &&
-      readback.linkedSocialRequestId !== expected.socialRequestId
-    ) {
+    if (readback.userId !== expected.ownerUserId) {
+      throw new BadRequestException('发布约练读回的公开卡片归属用户不一致');
+    }
+    if (readback.linkedSocialRequestId !== expected.socialRequestId) {
       throw new BadRequestException('发布约练读回的公开卡片关联需求不一致');
+    }
+    if (!this.isDiscoverablePublicIntentStatus(readback.status)) {
+      throw new BadRequestException('发布约练读回的公开卡片状态不可发现');
+    }
+    const expiresAt = this.publicIntentExpiresAt(readback);
+    if (expiresAt && expiresAt.getTime() <= Date.now()) {
+      throw new BadRequestException('发布约练读回的公开卡片已过期');
+    }
+    if (!this.publicIntentSourceVersion(readback)) {
+      throw new BadRequestException('发布约练读回缺少 sourceVersion');
     }
     this.assertMatchingPublicText({
       label: '标题',
@@ -598,6 +696,49 @@ export class SocialAgentDraftPublicationService {
         this.record(expected.draft.metadata).locationPreference,
       ],
     });
+  }
+
+  private async assertDiscoverQueryCanReadIntent(publicIntentId: string) {
+    if (!this.publicIntentRepo) return;
+    const intent = await this.publicIntentRepo
+      .createQueryBuilder('intent')
+      .where('intent.id = :publicIntentId', { publicIntentId })
+      .andWhere('intent.mode = :mode', { mode: 'public' })
+      .andWhere('intent.status IN (:...statuses)', {
+        statuses: [
+          SocialRequestStatus.Active,
+          SocialRequestStatus.Searching,
+          SocialRequestStatus.Matched,
+        ],
+      })
+      .getOne();
+    if (!intent) {
+      throw new BadRequestException('发现页查询无法按 ID 读回公开卡片');
+    }
+  }
+
+  private isDiscoverablePublicIntentStatus(status: unknown): boolean {
+    return [
+      SocialRequestStatus.Active,
+      SocialRequestStatus.Searching,
+      SocialRequestStatus.Matched,
+    ].includes(status as SocialRequestStatus);
+  }
+
+  private publicIntentExpiresAt(intent: PublicSocialIntent): Date | null {
+    const expiresAt = this.text(this.record(intent.metadata).expiresAt);
+    if (!expiresAt) return null;
+    const date = new Date(expiresAt);
+    return Number.isNaN(date.getTime()) ? null : date;
+  }
+
+  private publicIntentSourceVersion(intent: PublicSocialIntent): string {
+    const metadataVersion = this.text(
+      this.record(intent.metadata).sourceVersion,
+    );
+    if (metadataVersion) return metadataVersion.slice(0, 128);
+    if (intent.updatedAt instanceof Date) return intent.updatedAt.toISOString();
+    return '';
   }
 
   private assertMatchingPublicText(input: {
@@ -629,6 +770,10 @@ export class SocialAgentDraftPublicationService {
       .trim()
       .toLowerCase();
     return text || null;
+  }
+
+  private text(value: unknown): string {
+    return cleanDisplayText(value, '').trim();
   }
 
   private async assertTaskOwner(

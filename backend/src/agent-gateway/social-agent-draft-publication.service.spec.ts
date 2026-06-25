@@ -10,6 +10,7 @@ import {
 } from './entities/agent-task.entity';
 import { SocialAgentDraftPublicationService } from './social-agent-draft-publication.service';
 import { SocialAgentToolName } from './social-agent-tool-executor.service';
+import { MatchingJobStatus } from './entities/matching-job.entity';
 
 function makeTask(overrides: Partial<AgentTask> = {}): AgentTask {
   return {
@@ -67,9 +68,37 @@ function makeHarness(initialTask = makeTask()) {
   const publicIntentRepo = {
     findOne: jest.fn().mockResolvedValue({
       id: 'social_request_301',
+      userId: 7,
+      linkedSocialRequestId: 301,
       mode: 'public',
       status: 'searching',
       title: '今晚青岛轻松跑步',
+      metadata: { sourceVersion: 'source-v1' },
+    }),
+    createQueryBuilder: jest.fn(() => ({
+      where: jest.fn().mockReturnThis(),
+      andWhere: jest.fn().mockReturnThis(),
+      getOne: jest.fn().mockResolvedValue({
+        id: 'social_request_301',
+        userId: 7,
+        linkedSocialRequestId: 301,
+        mode: 'public',
+        status: 'searching',
+        title: '今晚青岛轻松跑步',
+        metadata: { sourceVersion: 'source-v1' },
+      }),
+    })),
+  };
+  const matchingJobs = {
+    enqueue: jest.fn().mockResolvedValue({
+      job: {
+        id: 9001,
+        publicIntentId: 'social_request_301',
+        sourceVersion: 'source-v1',
+        status: MatchingJobStatus.Queued,
+        candidateCount: 0,
+      },
+      reused: false,
     }),
   };
   const service = new SocialAgentDraftPublicationService(
@@ -78,12 +107,15 @@ function makeHarness(initialTask = makeTask()) {
     executor as never,
     longTermMemory as never,
     publicIntentRepo as never,
+    undefined,
+    matchingJobs as never,
   );
   return {
     eventRepo,
     executor,
     longTermMemory,
     publicIntentRepo,
+    matchingJobs,
     savedEvents,
     service,
     taskRepo,
@@ -98,6 +130,7 @@ describe('SocialAgentDraftPublicationService', () => {
     const {
       executor,
       longTermMemory,
+      matchingJobs,
       publicIntentRepo,
       savedEvents,
       service,
@@ -141,6 +174,14 @@ describe('SocialAgentDraftPublicationService', () => {
       status: 'published',
       taskStatus: AgentTaskStatus.Succeeded,
       synced: true,
+      sourceVersion: 'source-v1',
+      matchingJob: {
+        id: 9001,
+        status: MatchingJobStatus.Queued,
+        publicIntentId: 'social_request_301',
+        sourceVersion: 'source-v1',
+        candidateCount: 0,
+      },
       toolCallId: 'action_create_social_request_publish_1',
       socialRequest: { id: 301, status: UserSocialRequestStatus.Matching },
       publicIntent: {
@@ -148,8 +189,18 @@ describe('SocialAgentDraftPublicationService', () => {
         status: 'searching',
         mode: 'public',
         title: '今晚青岛轻松跑步',
+        sourceVersion: 'source-v1',
       },
     });
+    expect(matchingJobs.enqueue).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ownerUserId: 7,
+        linkedSocialRequestId: 301,
+        publicIntentId: 'social_request_301',
+        sourceVersion: 'source-v1',
+        idempotencyKey: 'matching-job:social_request_301:source-v1',
+      }),
+    );
     expect(publicIntentRepo.findOne).toHaveBeenCalledWith({
       where: { id: 'social_request_301' },
     });
@@ -161,6 +212,9 @@ describe('SocialAgentDraftPublicationService', () => {
         discoverHref: '/discover?publicIntentId=social_request_301',
         publicIntentHref: '/public-intent/social_request_301',
         publishStatus: 'published',
+        matchingJobId: 9001,
+        matchingJobStatus: MatchingJobStatus.Queued,
+        sourceVersion: 'source-v1',
       },
       activityDraft: {
         socialRequestId: 301,
@@ -170,6 +224,9 @@ describe('SocialAgentDraftPublicationService', () => {
         publishStatus: 'published',
         visibility: 'public',
         autoPublished: true,
+        matchingJobId: 9001,
+        matchingJobStatus: MatchingJobStatus.Queued,
+        sourceVersion: 'source-v1',
       },
       publishSocialRequest: {
         socialRequestId: 301,
@@ -178,6 +235,14 @@ describe('SocialAgentDraftPublicationService', () => {
         publicIntentHref: '/public-intent/social_request_301',
         status: 'published',
         synced: true,
+        matchingJob: {
+          id: 9001,
+          status: MatchingJobStatus.Queued,
+          publicIntentId: 'social_request_301',
+          sourceVersion: 'source-v1',
+          candidateCount: 0,
+        },
+        sourceVersion: 'source-v1',
       },
     });
     expect(task.memory).toMatchObject({
@@ -187,10 +252,13 @@ describe('SocialAgentDraftPublicationService', () => {
         discoverHref: '/discover?publicIntentId=social_request_301',
         publicIntentHref: '/public-intent/social_request_301',
         publishStatus: 'published',
+        matchingJobId: 9001,
+        matchingJobStatus: MatchingJobStatus.Queued,
+        sourceVersion: 'source-v1',
       },
       taskMemory: {
         currentTask: {
-          waitingFor: 'post_publish_candidate_search',
+          waitingFor: 'matching_job',
           lastCompletedStep: 'published_to_discover',
         },
       },
@@ -201,6 +269,9 @@ describe('SocialAgentDraftPublicationService', () => {
         discoverHref: '/discover?publicIntentId=social_request_301',
         publicIntentHref: '/public-intent/social_request_301',
         publishStatus: 'published',
+        matchingJobId: 9001,
+        matchingJobStatus: MatchingJobStatus.Queued,
+        sourceVersion: 'source-v1',
       },
     });
     expect(savedEvents).toEqual(
@@ -344,9 +415,12 @@ describe('SocialAgentDraftPublicationService', () => {
     const { publicIntentRepo, service } = makeHarness();
     publicIntentRepo.findOne.mockResolvedValueOnce({
       id: 'social_request_301',
+      userId: 7,
+      linkedSocialRequestId: 301,
       mode: 'private',
       status: 'searching',
       title: '今晚青岛轻松跑步',
+      metadata: { sourceVersion: 'source-v1' },
     });
 
     await expect(
@@ -365,9 +439,12 @@ describe('SocialAgentDraftPublicationService', () => {
     const { publicIntentRepo, service } = makeHarness();
     publicIntentRepo.findOne.mockResolvedValueOnce({
       id: 'social_request_301',
+      userId: 7,
+      linkedSocialRequestId: 301,
       mode: 'public',
       status: 'searching',
       title: '明天北京篮球搭子',
+      metadata: { sourceVersion: 'source-v1' },
     });
 
     await expect(
@@ -386,10 +463,12 @@ describe('SocialAgentDraftPublicationService', () => {
     const { publicIntentRepo, service } = makeHarness();
     publicIntentRepo.findOne.mockResolvedValueOnce({
       id: 'social_request_301',
+      userId: 7,
       linkedSocialRequestId: 999,
       mode: 'public',
       status: 'searching',
       title: '今晚青岛轻松跑步',
+      metadata: { sourceVersion: 'source-v1' },
     });
 
     await expect(

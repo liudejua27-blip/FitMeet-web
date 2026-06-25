@@ -850,6 +850,16 @@ describe('SocialAgentCardActionRouterService', () => {
       status: 'published',
       synced: true,
       publicIntentId: 'public-intent:walk-qdu',
+      discoverHref: '/discover?publicIntentId=public-intent%3Awalk-qdu',
+      publicIntentHref: '/public-intent/public-intent%3Awalk-qdu',
+      sourceVersion: 'source-v1',
+      matchingJob: {
+        id: 9001,
+        publicIntentId: 'public-intent:walk-qdu',
+        sourceVersion: 'source-v1',
+        status: 'queued',
+        candidateCount: 0,
+      },
     });
 
     const rawActions = [
@@ -882,22 +892,7 @@ describe('SocialAgentCardActionRouterService', () => {
       );
     }
 
-    expect(handleMessage).toHaveBeenCalledTimes(1);
-    expect(handleMessage).toHaveBeenCalledWith(
-      expect.objectContaining({
-        taskId: 101,
-        conversationIntent: 'social',
-        message: expect.stringContaining('这张约练卡已发布到发现页'),
-        idempotencyKey:
-          'post-publish-candidate-search:101:public-intent:walk-qdu',
-        clientContext: expect.objectContaining({
-          source: 'publish_to_discover_followup',
-          conversationIntent: 'social',
-        }),
-      }),
-      undefined,
-      undefined,
-    );
+    expect(handleMessage).not.toHaveBeenCalled();
     expect(
       candidateActions.performCandidatePreferenceAction,
     ).toHaveBeenCalledWith(
@@ -953,12 +948,14 @@ describe('SocialAgentCardActionRouterService', () => {
     );
     expect(results[4].pendingApproval).toBeNull();
     expect(results[4].assistantMessage).toContain('已发布到发现页');
-    expect(results[4].assistantMessage).toContain('fallback handled');
     expect(results[4].cards?.[0]?.data).toEqual(
       expect.objectContaining({
         publicIntentId: 'public-intent:walk-qdu',
         discoverHref: '/discover?publicIntentId=public-intent%3Awalk-qdu',
         publicIntentHref: '/public-intent/public-intent%3Awalk-qdu',
+        matchingJobId: 9001,
+        matchingJobStatus: 'queued',
+        sourceVersion: 'source-v1',
       }),
     );
     expect(executeCalls.map((call) => call.goal)).toEqual([
@@ -970,7 +967,7 @@ describe('SocialAgentCardActionRouterService', () => {
     ]);
   });
 
-  it('continues matching after a successful Discover publish and keeps the published card first', async () => {
+  it('enqueues matching after a successful Discover publish without natural-language reroute', async () => {
     const { draftPublication, handleMessage, service } = makeHarness();
     draftPublication.publishDraft.mockResolvedValue({
       success: true,
@@ -980,30 +977,15 @@ describe('SocialAgentCardActionRouterService', () => {
       publicIntentId: 'public-intent:walk-qdu',
       discoverHref: '/discover?publicIntentId=public-intent%3Awalk-qdu',
       publicIntentHref: '/public-intent/public-intent%3Awalk-qdu',
+      sourceVersion: 'source-v1',
+      matchingJob: {
+        id: 9001,
+        publicIntentId: 'public-intent:walk-qdu',
+        sourceVersion: 'source-v1',
+        status: 'queued',
+        candidateCount: 0,
+      },
     });
-    handleMessage.mockResolvedValue(
-      routeResult({
-        intent: 'social_search' as never,
-        action: 'queue_search',
-        shouldSearch: true,
-        shouldQueueRun: false,
-        runMode: 'initial',
-        assistantMessage: '已根据这张卡找到 2 个适合先轻松跑步的人。',
-        cards: [
-          {
-            id: 'candidate-card-chen',
-            type: 'candidate_card',
-            schemaVersion: 'fitmeet.tool-ui.v1',
-            schemaType: 'social_match.candidate',
-            title: '陈砚',
-            body: '适合从一次轻松晨跑开始。',
-            status: 'ready',
-            data: { candidateRecordId: 501, candidateUserId: 22 },
-            actions: [],
-          },
-        ],
-      }),
-    );
 
     const result = await service.perform({
       ownerUserId: 7,
@@ -1037,28 +1019,10 @@ describe('SocialAgentCardActionRouterService', () => {
         status: 'matching',
       }),
     );
-    expect(handleMessage).toHaveBeenCalledWith(
-      expect.objectContaining({
-        taskId: 101,
-        conversationIntent: 'social',
-        idempotencyKey:
-          'post-publish-candidate-search:101:public-intent:walk-qdu',
-        message: expect.stringContaining('不要再次生成约练卡'),
-        clientContext: expect.objectContaining({
-          threadId: 'agent-task:101',
-          source: 'publish_to_discover_followup',
-        }),
-      }),
-      undefined,
-      undefined,
-    );
-    expect(result.intent).toBe('social_search');
+    expect(handleMessage).not.toHaveBeenCalled();
+    expect(result.intent).toBe('action_request');
     expect(result.assistantMessage).toContain('已发布到发现页');
-    expect(result.assistantMessage).toContain('找到 2 个');
-    expect(result.cards?.map((card) => card.title)).toEqual([
-      '已发布到发现',
-      '陈砚',
-    ]);
+    expect(result.cards?.map((card) => card.title)).toEqual(['已发布到发现']);
     expect(result.cards?.[0]).toEqual(
       expect.objectContaining({
         schemaType: 'social_match.activity',
@@ -1066,7 +1030,19 @@ describe('SocialAgentCardActionRouterService', () => {
         data: expect.objectContaining({
           publicIntentId: 'public-intent:walk-qdu',
           discoverHref: '/discover?publicIntentId=public-intent%3Awalk-qdu',
+          matchingJobId: 9001,
+          matchingJobStatus: 'queued',
+          sourceVersion: 'source-v1',
         }),
+      }),
+    );
+    expect(result.publicLoop).toEqual(
+      expect.objectContaining({
+        stage: 'discover_visible',
+        publicIntentId: 'public-intent:walk-qdu',
+        discoverHref: '/discover?publicIntentId=public-intent%3Awalk-qdu',
+        publicIntentHref: '/public-intent/public-intent%3Awalk-qdu',
+        requiredConfirmation: false,
       }),
     );
   });

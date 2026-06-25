@@ -20,7 +20,6 @@ import { SocialAgentLifeGraphCardActionService } from './social-agent-life-graph
 import { SocialAgentMeetLoopService } from './social-agent-meet-loop.service';
 import { SocialAgentDraftPublicationService } from './social-agent-draft-publication.service';
 import { SocialAgentMetricsService } from './social-agent-metrics.service';
-import { cleanDisplayText } from '../common/display-text.util';
 
 type HandleMessage = (
   body: SocialAgentRouteMessageBody,
@@ -583,6 +582,9 @@ export class SocialAgentCardActionRouterService {
     emit?: StreamEmit,
     options?: SocialAgentStreamOptions,
   ): Promise<SocialAgentIntentRouteResult> {
+    void handleMessage;
+    void emit;
+    void options;
     const payload = this.record(body.payload);
     const confirmed =
       payload.confirmedPublish === true ||
@@ -828,6 +830,7 @@ export class SocialAgentCardActionRouterService {
         : socialRequestId
           ? `/discover?socialRequestId=${encodeURIComponent(String(socialRequestId))}`
           : '/discover');
+    const matchingJob = this.record(result.matchingJob);
     const publishedCard: NonNullable<
       SocialAgentIntentRouteResult['cards']
     >[number] = {
@@ -847,6 +850,9 @@ export class SocialAgentCardActionRouterService {
         messagesHref: null,
         autoPublished: true,
         publishStatus: 'published',
+        matchingJobId: this.number(matchingJob.id) || null,
+        matchingJobStatus: this.text(matchingJob.status) || null,
+        sourceVersion: this.text(result.sourceVersion) || null,
       },
       actions: [
         {
@@ -879,145 +885,7 @@ export class SocialAgentCardActionRouterService {
         requiredConfirmation: false,
       },
     });
-    const matchResult = await this.runPostPublishCandidateSearch({
-      taskId,
-      body,
-      payload,
-      publicIntentId,
-      socialRequestId,
-      discoverHref,
-      publicIntentHref,
-      handleMessage,
-      emit,
-      options,
-    });
-    if (!matchResult) return publishResult;
-    return this.mergePublishAndMatchResults(publishResult, matchResult);
-  }
-
-  private async runPostPublishCandidateSearch(input: {
-    taskId: number;
-    body: SocialAgentCardActionBody;
-    payload: Record<string, unknown>;
-    publicIntentId: string;
-    socialRequestId: number | null;
-    discoverHref: string;
-    publicIntentHref: string | null;
-    handleMessage: HandleMessage;
-    emit?: StreamEmit;
-    options?: SocialAgentStreamOptions;
-  }): Promise<SocialAgentIntentRouteResult | null> {
-    try {
-      return await input.handleMessage(
-        {
-          taskId: input.taskId,
-          conversationIntent: 'social',
-          idempotencyKey: this.postPublishSearchIdempotencyKey(input),
-          message: this.postPublishSearchMessage(input),
-          clientContext: {
-            ...(input.body.clientContext ?? {}),
-            source: 'publish_to_discover_followup',
-            threadId:
-              this.text(input.body.clientContext?.threadId) ||
-              `agent-task:${input.taskId}`,
-            conversationIntent: 'social',
-          },
-        },
-        input.emit,
-        input.options,
-      );
-    } catch {
-      return null;
-    }
-  }
-
-  private postPublishSearchMessage(input: {
-    payload: Record<string, unknown>;
-    publicIntentId: string;
-    socialRequestId: number | null;
-    discoverHref: string;
-    publicIntentHref: string | null;
-  }): string {
-    const title = this.text(
-      input.payload.title ?? input.payload.opportunityTitle,
-    );
-    const activityType = this.text(
-      input.payload.activityType ?? input.payload.activity,
-    );
-    const time = this.text(
-      input.payload.timePreference ??
-        input.payload.timeWindow ??
-        input.payload.time,
-    );
-    const location = this.text(
-      input.payload.locationPreference ??
-        input.payload.locationText ??
-        input.payload.location,
-    );
-    const city = this.text(input.payload.city);
-    const details = [title, city, time, location, activityType]
-      .map((value) => value.trim())
-      .filter(Boolean);
-    return [
-      '这张约练卡已发布到发现页。',
-      details.length ? `沿用这张卡的信息：${details.join('，')}。` : '',
-      input.publicIntentId ? `publicIntentId=${input.publicIntentId}。` : '',
-      input.socialRequestId ? `socialRequestId=${input.socialRequestId}。` : '',
-      input.discoverHref ? `discoverHref=${input.discoverHref}。` : '',
-      input.publicIntentHref ? `详情页=${input.publicIntentHref}。` : '',
-      '请直接基于这张已发布的约练卡继续匹配候选，不要再次生成约练卡或重复要求发布确认。',
-    ]
-      .filter(Boolean)
-      .join(' ');
-  }
-
-  private postPublishSearchIdempotencyKey(input: {
-    taskId: number;
-    publicIntentId: string;
-    socialRequestId: number | null;
-  }): string {
-    const target =
-      input.publicIntentId ||
-      (input.socialRequestId ? String(input.socialRequestId) : 'published');
-    return `post-publish-candidate-search:${input.taskId}:${target}`;
-  }
-
-  private mergePublishAndMatchResults(
-    publishResult: SocialAgentIntentRouteResult,
-    matchResult: SocialAgentIntentRouteResult,
-  ): SocialAgentIntentRouteResult {
-    const publishMessage = cleanDisplayText(publishResult.assistantMessage, '');
-    const matchMessage = cleanDisplayText(matchResult.assistantMessage, '');
-    return {
-      ...matchResult,
-      taskId: matchResult.taskId ?? publishResult.taskId,
-      assistantMessage: [publishMessage, matchMessage]
-        .filter(Boolean)
-        .join('\n'),
-      savedContext: true,
-      cards: [...(publishResult.cards ?? []), ...(matchResult.cards ?? [])],
-      pendingApproval:
-        matchResult.pendingApproval ?? publishResult.pendingApproval ?? null,
-      publicLoop: {
-        stage: 'candidates_recommended',
-        publicIntentId:
-          publishResult.publicLoop?.publicIntentId ??
-          matchResult.publicLoop?.publicIntentId ??
-          null,
-        discoverHref:
-          publishResult.publicLoop?.discoverHref ??
-          matchResult.publicLoop?.discoverHref ??
-          null,
-        publicIntentHref:
-          publishResult.publicLoop?.publicIntentHref ??
-          matchResult.publicLoop?.publicIntentHref ??
-          null,
-        messagesHref: matchResult.publicLoop?.messagesHref ?? null,
-        requiredConfirmation: Boolean(
-          matchResult.publicLoop?.requiredConfirmation,
-        ),
-      },
-    };
+    return publishResult;
   }
 
   private publishDraftFromPayload(

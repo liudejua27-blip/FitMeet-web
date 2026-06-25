@@ -884,6 +884,12 @@ export class AgentGatewayService {
     query.andWhere('intent.mode = :mode', { mode: 'public' });
     this.excludeInternalPublicIntentFixtures(query);
 
+    if (normalized.publicIntentId) {
+      query.andWhere('intent.id = :publicIntentId', {
+        publicIntentId: normalized.publicIntentId,
+      });
+    }
+
     if (normalized.city) {
       query.andWhere('LOWER(intent.city) LIKE LOWER(:city)', {
         city: `%${normalized.city}%`,
@@ -930,6 +936,7 @@ export class AgentGatewayService {
           q: normalized.q,
           city: normalized.city,
           requestType: normalized.requestType,
+          publicIntentId: normalized.publicIntentId,
           status: normalized.status ?? 'discoverable',
           statuses: normalized.statuses,
         },
