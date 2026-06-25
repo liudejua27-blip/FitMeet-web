@@ -4,10 +4,12 @@ import {
   SocialRequestSafety,
   SocialRequestType,
   SocialRequestVisibility,
+  UserSocialRequest,
   UserSocialRequestStatus,
 } from '../social-requests/social-request.entity';
 import {
   AgentTask,
+  AgentTaskEvent,
   AgentTaskEventType,
   AgentTaskPermissionMode,
   AgentTaskStatus,
@@ -18,6 +20,7 @@ import { SocialAgentChatLlmService } from './social-agent-chat-llm.service';
 import { SocialAgentChatDeepSeekClientService } from './social-agent-chat-deepseek-client.service';
 import { SocialAgentCandidateActionService } from './social-agent-candidate-action.service';
 import { SocialAgentDraftPublicationService } from './social-agent-draft-publication.service';
+import { PublicSocialIntent } from './entities/public-social-intent.entity';
 import { SocialAgentDraftSearchService } from './social-agent-draft-search.service';
 import { SocialAgentRecommendationResultService } from './social-agent-recommendation-result.service';
 import { SocialAgentActivitySearchService } from './social-agent-activity-search.service';
@@ -61,6 +64,7 @@ import { SocialAgentRouteSearchTurnService } from './social-agent-route-search-t
 import { SocialAgentRouteActionTurnService } from './social-agent-route-action-turn.service';
 import { SocialAgentRouteDecisionService } from './social-agent-route-decision.service';
 import { FitMeetAlphaAgentSdkService } from './fitmeet-alpha-agent-sdk.service';
+import { SocialAgentWorkflowRouterService } from './social-agent-workflow-router.service';
 
 function makeTask(overrides: Partial<AgentTask> = {}): AgentTask {
   return {
@@ -161,6 +165,28 @@ function makeHarness(options: Record<string, unknown> = {}) {
       }),
     ),
   };
+  const defaultPublicIntent = {
+    id: 'social_request_301',
+    userId: 7,
+    linkedSocialRequestId: 301,
+    mode: 'public',
+    title: '青岛大学晚跑步搭子',
+    description: '今天晚上在青岛大学附近轻松跑步，先站内沟通。',
+    city: '青岛',
+    loc: '青岛大学附近',
+    requestType: 'running',
+    socialGoal: '找 1 人一起跑步',
+    interestTags: ['跑步'],
+    radiusKm: 3,
+    timePreference: '今天晚上',
+    locationPreference: '青岛大学附近',
+    matchedCount: 0,
+    status: 'active',
+    metadata: { sourceVersion: 'source-v1' },
+    createdAt: new Date('2026-01-01T00:00:00.000Z'),
+    updatedAt: new Date('2026-01-01T00:00:00.000Z'),
+  };
+  let latestPublicIntent: Record<string, unknown> = defaultPublicIntent;
   const executor = {
     resolveCandidateTargetUser: jest.fn((input: Record<string, unknown>) => {
       const candidate =
@@ -214,17 +240,54 @@ function makeHarness(options: Record<string, unknown> = {}) {
           toolName === SocialAgentToolName.CreateSocialRequest &&
           input.mode === 'publish'
         ) {
+          const socialRequestId = Number(input.socialRequestId ?? 301);
+          const publicIntentId = `social_request_${socialRequestId}`;
+          latestPublicIntent = {
+            ...defaultPublicIntent,
+            id: publicIntentId,
+            linkedSocialRequestId: socialRequestId,
+            title: input.title ?? defaultPublicIntent.title,
+            description: input.description ?? defaultPublicIntent.description,
+            city: input.city ?? defaultPublicIntent.city,
+            loc:
+              input.locationName ??
+              input.locationPreference ??
+              defaultPublicIntent.loc,
+            requestType:
+              input.activityType ??
+              input.type ??
+              defaultPublicIntent.requestType,
+            socialGoal:
+              input.socialGoal ?? input.title ?? defaultPublicIntent.socialGoal,
+            interestTags: Array.isArray(input.interestTags)
+              ? input.interestTags
+              : defaultPublicIntent.interestTags,
+            radiusKm: input.radiusKm ?? defaultPublicIntent.radiusKm,
+            timePreference:
+              input.timePreference ?? defaultPublicIntent.timePreference,
+            locationPreference:
+              input.locationName ??
+              input.locationPreference ??
+              defaultPublicIntent.locationPreference,
+            status: 'active',
+            mode: 'public',
+            metadata: {
+              sourceVersion: 'source-v1',
+            },
+            updatedAt: new Date('2026-01-01T00:00:01.000Z'),
+          };
           return {
             id: 'action_create_social_request_publish_1',
             toolName,
             status: 'succeeded',
             output: {
-              id: 301,
-              socialRequestId: 301,
-              publicIntentId: 'social_request_301',
+              id: socialRequestId,
+              socialRequestId,
+              publicIntentId,
               synced: true,
+              publicIntent: latestPublicIntent,
               socialRequest: {
-                id: 301,
+                id: socialRequestId,
                 status: UserSocialRequestStatus.Matching,
               },
             },
@@ -399,85 +462,68 @@ function makeHarness(options: Record<string, unknown> = {}) {
     getPendingForTask: jest.fn().mockResolvedValue([]),
   };
   const publicIntentRepo = {
-    publicIntent: {
-      id: 'social_request_301',
-      userId: 7,
-      linkedSocialRequestId: 301,
-      mode: 'public',
-      title: '青岛大学晚跑步搭子',
-      description: '今天晚上在青岛大学附近轻松跑步，先站内沟通。',
-      city: '青岛',
-      loc: '青岛大学附近',
-      requestType: 'running',
-      socialGoal: '找 1 人一起跑步',
-      interestTags: ['跑步'],
-      radiusKm: 3,
-      timePreference: '今天晚上',
-      locationPreference: '青岛大学附近',
-      matchedCount: 0,
-      status: 'active',
-      metadata: { sourceVersion: 'source-v1' },
-      createdAt: new Date('2026-01-01T00:00:00.000Z'),
-      updatedAt: new Date('2026-01-01T00:00:00.000Z'),
-    },
+    publicIntent: latestPublicIntent,
     createQueryBuilder: jest.fn().mockReturnValue({
+      setLock: jest.fn().mockReturnThis(),
       where: jest.fn().mockReturnThis(),
       andWhere: jest.fn().mockReturnThis(),
       orderBy: jest.fn().mockReturnThis(),
       take: jest.fn().mockReturnThis(),
       getMany: jest.fn().mockResolvedValue([]),
-      getOne: jest.fn().mockResolvedValue({
-        id: 'social_request_301',
-        userId: 7,
-        linkedSocialRequestId: 301,
-        mode: 'public',
-        title: '青岛大学晚跑步搭子',
-        description: '今天晚上在青岛大学附近轻松跑步，先站内沟通。',
-        city: '青岛',
-        loc: '青岛大学附近',
-        requestType: 'running',
-        socialGoal: '找 1 人一起跑步',
-        interestTags: ['跑步'],
-        radiusKm: 3,
-        timePreference: '今天晚上',
-        locationPreference: '青岛大学附近',
-        matchedCount: 0,
-        status: 'active',
-        metadata: { sourceVersion: 'source-v1' },
-        createdAt: new Date('2026-01-01T00:00:00.000Z'),
-        updatedAt: new Date('2026-01-01T00:00:00.000Z'),
-      }),
+      getOne: jest.fn(() => Promise.resolve(latestPublicIntent)),
     }),
     findOne: jest
       .fn()
       .mockImplementation(({ where }: { where?: { id?: string } }) =>
         Promise.resolve(
-          where?.id
-            ? {
-                id: where.id,
-                userId: 7,
-                linkedSocialRequestId: 301,
-                mode: 'public',
-                title: '青岛大学晚跑步搭子',
-                description: '今天晚上在青岛大学附近轻松跑步，先站内沟通。',
-                city: '青岛',
-                loc: '青岛大学附近',
-                requestType: 'running',
-                socialGoal: '找 1 人一起跑步',
-                interestTags: ['跑步'],
-                radiusKm: 3,
-                timePreference: '今天晚上',
-                locationPreference: '青岛大学附近',
-                matchedCount: 0,
-                status: 'active',
-                metadata: { sourceVersion: 'source-v1' },
-                createdAt: new Date('2026-01-01T00:00:00.000Z'),
-                updatedAt: new Date('2026-01-01T00:00:00.000Z'),
-              }
-            : null,
+          where?.id ? { ...latestPublicIntent, id: where.id } : null,
         ),
       ),
+    save: jest.fn((input) => Promise.resolve(input)),
   };
+  const userSocialRequest = {
+    id: 301,
+    userId: 7,
+    status: UserSocialRequestStatus.Draft,
+    visibility: SocialRequestVisibility.Private,
+    metadata: {},
+  };
+  const userSocialRequestQuery = {
+    setLock: jest.fn().mockReturnThis(),
+    where: jest.fn().mockReturnThis(),
+    andWhere: jest.fn().mockReturnThis(),
+    getOne: jest.fn().mockResolvedValue(userSocialRequest),
+  };
+  const userSocialRequestRepo = {
+    createQueryBuilder: jest.fn(() => userSocialRequestQuery),
+    create: jest.fn((input) => ({ ...userSocialRequest, ...input, id: 301 })),
+    findOne: jest.fn().mockResolvedValue(userSocialRequest),
+    save: jest.fn((input) => Promise.resolve(input)),
+  };
+  const matchingJobRepo = {
+    findOne: jest.fn().mockResolvedValue(null),
+    save: jest.fn((input) => Promise.resolve(input)),
+  };
+  const sideEffectLedger = {
+    run: jest.fn(async (_input, operation) => ({
+      result: await operation(),
+      reused: false,
+    })),
+  };
+  const transactionManager = {
+    query: jest.fn().mockResolvedValue([]),
+    transaction: jest.fn(async (runner: (manager: never) => unknown) =>
+      runner(transactionManager as never),
+    ),
+    getRepository: jest.fn((entity: unknown) => {
+      if (entity === AgentTask) return taskRepo;
+      if (entity === AgentTaskEvent) return eventRepo;
+      if (entity === UserSocialRequest) return userSocialRequestRepo;
+      if (entity === PublicSocialIntent) return publicIntentRepo;
+      return {};
+    }),
+  };
+  (taskRepo as { manager?: unknown }).manager = transactionManager;
   const candidatePool = {
     searchActivity: jest.fn().mockResolvedValue({
       activityResults: [],
@@ -489,6 +535,7 @@ function makeHarness(options: Record<string, unknown> = {}) {
   };
   const metrics = {
     recordIntent: jest.fn(),
+    recordWorkflowRoute: jest.fn(),
     recordAction: jest.fn(),
     recordQueuedRun: jest.fn(),
     recordApproval: jest.fn(),
@@ -599,13 +646,6 @@ function makeHarness(options: Record<string, unknown> = {}) {
       sessionAssembler,
       longTermMemory as never,
     );
-  const actionTurns =
-    (options.actionTurns as SocialAgentRouteActionTurnService | undefined) ??
-    new SocialAgentRouteActionTurnService(
-      taskRepo as never,
-      candidateActions as never,
-      metrics as never,
-    );
   const draftPublication =
     (options.draftPublication as
       | SocialAgentDraftPublicationService
@@ -616,7 +656,7 @@ function makeHarness(options: Record<string, unknown> = {}) {
       executor as never,
       longTermMemory as never,
       publicIntentRepo as never,
-      undefined,
+      sideEffectLedger as never,
       {
         enqueue: jest.fn().mockResolvedValue({
           job: {
@@ -629,6 +669,16 @@ function makeHarness(options: Record<string, unknown> = {}) {
           reused: false,
         }),
       } as never,
+      userSocialRequestRepo as never,
+      matchingJobRepo as never,
+    );
+  const actionTurns =
+    (options.actionTurns as SocialAgentRouteActionTurnService | undefined) ??
+    new SocialAgentRouteActionTurnService(
+      taskRepo as never,
+      candidateActions as never,
+      metrics as never,
+      draftPublication as never,
     );
   const draftSearch =
     (options.draftSearch as SocialAgentDraftSearchService | undefined) ??
@@ -691,6 +741,9 @@ function makeHarness(options: Record<string, unknown> = {}) {
       rag as never,
       options.memoryContext as never,
     );
+  const workflowRouter =
+    (options.workflowRouter as SocialAgentWorkflowRouterService | undefined) ??
+    new SocialAgentWorkflowRouterService(intentRouter);
   const routeDecisions =
     (options.routeDecisions as SocialAgentRouteDecisionService | undefined) ??
     new SocialAgentRouteDecisionService(
@@ -703,6 +756,10 @@ function makeHarness(options: Record<string, unknown> = {}) {
       taskLifecycle as never,
       routeContext as never,
       options.brain as never,
+      undefined,
+      undefined,
+      undefined,
+      workflowRouter,
     );
   const mainAgentTurn =
     (options.mainAgentTurn as SocialAgentMainAgentTurnService | undefined) ??
@@ -1583,7 +1640,7 @@ describe('SocialAgentChat acceptance flow', () => {
   });
 
   it('turns the tested QDU running-partner request into a publishable draft card, not candidate cards', async () => {
-    const { service, executor } = makeHarness();
+    const { service, executor, taskRepo } = makeHarness();
 
     const result = await service.routeMessage(7, {
       message:
@@ -1637,6 +1694,51 @@ describe('SocialAgentChat acceptance flow', () => {
       expect.any(Object),
       expect.any(Number),
     );
+    const task = (await taskRepo.findOne()) as AgentTask;
+    const taskResult = task.result ?? {};
+    const chatRun = (taskResult.chatRun ?? {}) as Record<string, unknown>;
+    const activityDraft = (taskResult.activityDraft ?? {}) as Record<
+      string,
+      unknown
+    >;
+    const chatDraft = (chatRun.socialRequestDraft ?? {}) as Record<
+      string,
+      unknown
+    >;
+    const memory = (task.memory ?? {}) as Record<string, unknown>;
+    const socialAgentChat = (memory.socialAgentChat ?? {}) as Record<
+      string,
+      unknown
+    >;
+    const memoryDraft = (socialAgentChat.socialRequestDraft ?? {}) as Record<
+      string,
+      unknown
+    >;
+    task.result = {
+      ...taskResult,
+      chatRun: {
+        ...chatRun,
+        socialRequestDraft: {
+          ...chatDraft,
+          socialRequestId: 301,
+        },
+      },
+      activityDraft: {
+        ...activityDraft,
+        socialRequestId: 301,
+      },
+    };
+    task.memory = {
+      ...memory,
+      socialAgentChat: {
+        ...socialAgentChat,
+        socialRequestDraft: {
+          ...memoryDraft,
+          socialRequestId: 301,
+        },
+      },
+    };
+    await taskRepo.save(task);
 
     const publish = await service.routeMessage(7, {
       taskId: result.taskId,
@@ -1691,6 +1793,46 @@ describe('SocialAgentChat acceptance flow', () => {
       expect.any(Object),
       expect.any(Number),
     );
+    const publishTask = (await taskRepo.findOne()) as AgentTask;
+    const publishTaskResult = publishTask.result ?? {};
+    const publishChatRun = (publishTaskResult.chatRun ?? {}) as Record<
+      string,
+      unknown
+    >;
+    const publishActivityDraft = (publishTaskResult.activityDraft ??
+      {}) as Record<string, unknown>;
+    const publishChatDraft = (publishChatRun.socialRequestDraft ??
+      {}) as Record<string, unknown>;
+    const publishMemory = (publishTask.memory ?? {}) as Record<string, unknown>;
+    const publishSocialAgentChat = (publishMemory.socialAgentChat ??
+      {}) as Record<string, unknown>;
+    const publishMemoryDraft = (publishSocialAgentChat.socialRequestDraft ??
+      {}) as Record<string, unknown>;
+    publishTask.result = {
+      ...publishTaskResult,
+      chatRun: {
+        ...publishChatRun,
+        socialRequestDraft: {
+          ...publishChatDraft,
+          socialRequestId: 301,
+        },
+      },
+      activityDraft: {
+        ...publishActivityDraft,
+        socialRequestId: 301,
+      },
+    };
+    publishTask.memory = {
+      ...publishMemory,
+      socialAgentChat: {
+        ...publishSocialAgentChat,
+        socialRequestDraft: {
+          ...publishMemoryDraft,
+          socialRequestId: 301,
+        },
+      },
+    };
+    await taskRepo.save(publishTask);
 
     const publishCard = publish.cards?.[0];
     const publishAction = publishCard?.actions?.find(
@@ -1790,6 +1932,160 @@ describe('SocialAgentChat acceptance flow', () => {
       SocialAgentToolName.SearchMatches,
       expect.any(Object),
       expect.any(Number),
+    );
+  });
+
+  it('continues a two-turn publish draft after the user fills the safety boundary with defaults', async () => {
+    const { service, approvals, executor, taskRepo } = makeHarness();
+
+    const first = await service.routeMessage(7, {
+      message: '帮我发布约练卡片，8.27 下午六点青岛中山公园找一个散步的搭子',
+    });
+
+    expect(first).toMatchObject({
+      intent: 'action_request',
+      action: 'await_confirmation',
+      shouldQueueRun: false,
+      runMode: null,
+      pendingApproval: null,
+    });
+    expect(first.assistantMessage).toContain('安全边界');
+    expect(first.cards).toEqual([
+      expect.objectContaining({
+        schemaType: 'social_match.slot_completion',
+        status: 'waiting_confirmation',
+        data: expect.objectContaining({
+          workflowState: 'COLLECTING_SLOTS',
+          waitingFor: 'safety_boundary',
+          missing: ['安全边界'],
+        }),
+        actions: expect.arrayContaining([
+          expect.objectContaining({
+            schemaAction: 'slot_completion.use_default_safety',
+            requiresConfirmation: false,
+          }),
+          expect.objectContaining({
+            schemaAction: 'slot_completion.custom_safety',
+            requiresConfirmation: false,
+          }),
+          expect.objectContaining({
+            schemaAction: 'slot_completion.cancel',
+            requiresConfirmation: false,
+          }),
+        ]),
+      }),
+    ]);
+
+    const taskAfterFirst = (await taskRepo.findOne()) as AgentTask;
+    expect(taskAfterFirst.memory).toMatchObject({
+      socialAgentChat: {
+        publishStatus: 'collecting_slots',
+        pendingOpportunityDraft: expect.objectContaining({
+          status: 'collecting_slots',
+          sourceText: expect.stringContaining('青岛中山公园'),
+        }),
+      },
+    });
+
+    const second = await service.routeMessage(7, {
+      taskId: first.taskId,
+      message: '按默认安全设置处理',
+    });
+
+    expect(second).toMatchObject({
+      intent: 'action_request',
+      action: 'await_confirmation',
+      shouldQueueRun: false,
+      runMode: null,
+      pendingApproval: null,
+      taskId: first.taskId,
+    });
+    expect(second.assistantMessage).toContain('发布确认卡');
+    expect(second.cards).toEqual([
+      expect.objectContaining({
+        schemaType: 'social_match.activity',
+        status: 'waiting_confirmation',
+        data: expect.objectContaining({
+          schemaName: 'OpportunityCard',
+          opportunityCard: true,
+          city: '青岛',
+          activityType: '散步',
+          time: '8.27 下午六点',
+          locationName: '青岛中山公园',
+          socialRequestId: 301,
+          publishStatus: 'draft',
+          safetyBoundary: expect.stringContaining('公共场所'),
+        }),
+        actions: expect.arrayContaining([
+          expect.objectContaining({
+            schemaAction: 'publish_to_discover',
+            requiresConfirmation: true,
+            payload: expect.objectContaining({
+              socialRequestId: 301,
+              socialRequestDraft: expect.objectContaining({
+                socialRequestId: 301,
+              }),
+            }),
+          }),
+          expect.objectContaining({
+            schemaAction: 'activity.skip_publish',
+            requiresConfirmation: false,
+          }),
+        ]),
+      }),
+    ]);
+    expect(approvals.create).not.toHaveBeenCalled();
+    await flushAsync();
+    expect(executor.executeToolAction).not.toHaveBeenCalledWith(
+      expect.any(Number),
+      SocialAgentToolName.SearchMatches,
+      expect.any(Object),
+      expect.any(Number),
+    );
+
+    const publishAction = second.cards?.[0]?.actions?.find(
+      (action) => action.schemaAction === 'publish_to_discover',
+    );
+    expect(publishAction).toBeTruthy();
+
+    const published = await service.performCardAction(
+      7,
+      second.taskId as number,
+      {
+        action: 'publish_to_discover',
+        payload: {
+          ...(publishAction?.payload as Record<string, unknown>),
+          confirmedPublish: true,
+          approved: true,
+          confirmed: true,
+        },
+      },
+    );
+
+    expect(published.assistantMessage).toContain('已发布到发现页');
+    expect(published.cards).toEqual([
+      expect.objectContaining({
+        schemaType: 'social_match.activity',
+        status: 'completed',
+        data: expect.objectContaining({
+          publicIntentId: 'social_request_301',
+          socialRequestId: 301,
+          discoverHref: '/discover?publicIntentId=social_request_301',
+          publicIntentHref: '/public-intent/social_request_301',
+          publishStatus: 'published',
+        }),
+      }),
+    ]);
+    expect(executor.executeToolAction).toHaveBeenCalledWith(
+      second.taskId,
+      SocialAgentToolName.CreateSocialRequest,
+      expect.objectContaining({
+        socialRequestId: 301,
+        mode: 'publish',
+        publish: true,
+        syncPublicIntent: true,
+      }),
+      7,
     );
   });
 

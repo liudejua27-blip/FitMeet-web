@@ -798,6 +798,50 @@ describe('SocialAgentRouteAgentLoopRunnerService', () => {
     );
   });
 
+  it('plans publish action branch for pending slot completion follow-ups without publish wording', async () => {
+    const { service, deps } = makeService({
+      agentLoop: makeAgentLoop({ runTools: false }),
+    });
+
+    await service.run({
+      ownerUserId: 7,
+      task: deps.task as never,
+      state: createSocialAgentRouteTurnState('我按默认安全设置继续生成卡片。'),
+      message: '按默认安全设置处理',
+      decision: {
+        task: deps.task,
+        taskContext: {
+          currentTask: {
+            waitingFor: 'opportunity_slot_completion',
+            awaitingSearchConfirmation: false,
+          },
+          pendingOpportunityDraft: {
+            status: 'collecting_slots',
+            missing: ['安全边界'],
+            sourceText: '8.27 下午六点青岛中山公园散步',
+          },
+        },
+        route: makeRoute({
+          intent: 'action_request',
+          replyStrategy: 'execute_action',
+          shouldExecuteAction: true,
+        }),
+        profile: null,
+        longTermSnapshot: null,
+        brainToolResults: [],
+      } as never,
+      replanAndRefresh: jest.fn(),
+      queueInitialSearchForTask: jest.fn(),
+    });
+
+    const plan = deps.agentLoop.execute.mock.calls[0][0].plan.tools;
+    expect(plan).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ toolName: 'route_action_turn' }),
+      ]),
+    );
+  });
+
   it('does not plan candidate follow-up search without existing candidate context', async () => {
     const { service, deps } = makeService({
       agentLoop: makeAgentLoop({ runTools: false }),

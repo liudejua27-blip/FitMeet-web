@@ -4,6 +4,7 @@ export type ToolUISchemaType =
   | 'social_match.candidate'
   | 'social_match.activity'
   | 'social_match.empty'
+  | 'social_match.slot_completion'
   | 'profile.completion'
   | 'life_graph.diff'
   | 'meet_loop.timeline'
@@ -48,7 +49,10 @@ export type ToolUISchemaAction =
   | 'meet_loop.resume'
   | 'meet_loop.reschedule'
   | 'safety.approve'
-  | 'safety.reject';
+  | 'safety.reject'
+  | 'slot_completion.use_default_safety'
+  | 'slot_completion.custom_safety'
+  | 'slot_completion.cancel';
 
 export type AssistantCardAction = {
   id?: string;
@@ -816,6 +820,7 @@ export function productComponentForSchemaType(
   if (schemaType === 'social_match.candidate') return 'CandidateCards';
   if (schemaType === 'social_match.activity') return 'OpportunityCard';
   if (schemaType === 'social_match.empty') return 'CandidateEmptyStateCard';
+  if (schemaType === 'social_match.slot_completion') return 'GenericCard';
   if (schemaType === 'profile.completion') return 'ProfileCompletionCard';
   if (schemaType === 'life_graph.diff') return 'LifeGraphDiffCard';
   if (schemaType === 'meet_loop.timeline') return 'MeetLoopTimeline';
@@ -830,6 +835,9 @@ export function summarizeToolUICardCollection(
     (card) => card.schemaType === 'social_match.candidate',
   ).length;
   const emptyCount = cards.filter((card) => card.schemaType === 'social_match.empty').length;
+  const slotCompletionCount = cards.filter(
+    (card) => card.schemaType === 'social_match.slot_completion',
+  ).length;
   const activityCount = cards.filter((card) => card.schemaType === 'social_match.activity').length;
   const approvalCount = cards.filter((card) => card.schemaType === 'safety.approval').length;
   const lifeGraphDiffCount = cards.filter((card) => card.schemaType === 'life_graph.diff').length;
@@ -838,7 +846,7 @@ export function summarizeToolUICardCollection(
   ).length;
   const meetLoopCount = cards.filter((card) => card.schemaType === 'meet_loop.timeline').length;
   const genericCount = cards.filter((card) => card.schemaType === 'generic.card').length;
-  const opportunityCount = candidateCount + activityCount;
+  const opportunityCount = candidateCount + activityCount + slotCompletionCount;
   const components = Array.from(
     new Set(cards.map((card) => productComponentForSchemaType(card.schemaType))),
   );
@@ -846,6 +854,7 @@ export function summarizeToolUICardCollection(
     candidateCount > 0 ? `${candidateCount} 个候选` : null,
     emptyCount > 0 ? `${emptyCount} 个下一步建议` : null,
     activityCount > 0 ? `${activityCount} 张约练卡` : null,
+    slotCompletionCount > 0 ? `${slotCompletionCount} 张补充卡` : null,
     meetLoopCount > 0 ? `${meetLoopCount} 个约练进展` : null,
     lifeGraphDiffCount > 0 ? `${lifeGraphDiffCount} 条画像建议` : null,
     profileCompletionCount > 0 ? `${profileCompletionCount} 张资料补全卡` : null,
@@ -909,6 +918,7 @@ export function schemaDefaultTitle(schemaType: ToolUISchemaType) {
   if (schemaType === 'social_match.candidate') return '候选机会';
   if (schemaType === 'social_match.activity') return '活动机会';
   if (schemaType === 'social_match.empty') return '暂时没有找到合适的人';
+  if (schemaType === 'social_match.slot_completion') return '补齐约练卡信息';
   if (schemaType === 'profile.completion') return '个人信息补全';
   if (schemaType === 'life_graph.diff') return '资料更新建议';
   if (schemaType === 'meet_loop.timeline') return '约练进展';
@@ -922,6 +932,7 @@ export function toolUISchemaTypeFromUnknown(value: unknown): ToolUISchemaType | 
     text === 'social_match.candidate' ||
     text === 'social_match.activity' ||
     text === 'social_match.empty' ||
+    text === 'social_match.slot_completion' ||
     text === 'profile.completion' ||
     text === 'life_graph.diff' ||
     text === 'meet_loop.timeline' ||
@@ -963,7 +974,10 @@ export function toolUISchemaActionFromUnknown(value: unknown): ToolUISchemaActio
     text === 'meet_loop.resume' ||
     text === 'meet_loop.reschedule' ||
     text === 'safety.approve' ||
-    text === 'safety.reject'
+    text === 'safety.reject' ||
+    text === 'slot_completion.use_default_safety' ||
+    text === 'slot_completion.custom_safety' ||
+    text === 'slot_completion.cancel'
   ) {
     return text;
   }

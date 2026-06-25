@@ -3,16 +3,14 @@ import { AgentTaskStatus } from './entities/agent-task.entity';
 
 describe('SocialAgentPublishReconcilerCronService', () => {
   function makeRepo(tasks: Array<Record<string, unknown>>) {
-    const qb = {
-      where: jest.fn().mockReturnThis(),
-      andWhere: jest.fn().mockReturnThis(),
-      orderBy: jest.fn().mockReturnThis(),
-      limit: jest.fn().mockReturnThis(),
-      getMany: jest.fn().mockResolvedValue(tasks),
-    };
+    const queue = [...tasks];
     return {
-      qb,
-      createQueryBuilder: jest.fn().mockReturnValue(qb),
+      manager: {
+        query: jest.fn(async () => {
+          const next = queue.shift();
+          return next ? [next] : [];
+        }),
+      },
     };
   }
 
@@ -46,13 +44,25 @@ describe('SocialAgentPublishReconcilerCronService', () => {
       needsRepair: 1,
       failed: 0,
     });
-    expect(reconciler.reconcileTask).toHaveBeenCalledWith(7, 101);
-    expect(reconciler.reconcileTask).toHaveBeenCalledWith(7, 102);
-    expect(repo.qb.andWhere).toHaveBeenCalledWith(
-      expect.stringContaining('publicIntentId'),
+    expect(reconciler.reconcileTask).toHaveBeenCalledWith(
+      7,
+      101,
+      expect.any(String),
     );
-    expect(repo.qb.andWhere).toHaveBeenCalledWith(
-      expect.stringContaining('publishReconcile,status'),
+    expect(reconciler.reconcileTask).toHaveBeenCalledWith(
+      7,
+      102,
+      expect.any(String),
+    );
+    expect(repo.manager.query).toHaveBeenCalledWith(
+      expect.stringContaining('FOR UPDATE SKIP LOCKED'),
+      expect.arrayContaining([
+        expect.arrayContaining([
+          AgentTaskStatus.Succeeded,
+          AgentTaskStatus.WaitingResult,
+          AgentTaskStatus.AwaitingConfirmation,
+        ]),
+      ]),
     );
   });
 
@@ -72,7 +82,7 @@ describe('SocialAgentPublishReconcilerCronService', () => {
       reconciler as never,
     );
 
-    await expect(service.reconcileDuePublishedTasks()).resolves.toEqual({
+    await expect(service.reconcileDuePublishedTasks(2)).resolves.toEqual({
       scanned: 2,
       visible: 1,
       needsRepair: 0,

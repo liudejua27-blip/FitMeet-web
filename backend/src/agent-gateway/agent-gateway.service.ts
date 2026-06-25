@@ -882,6 +882,7 @@ export class AgentGatewayService {
       .skip(normalized.skip);
 
     query.andWhere('intent.mode = :mode', { mode: 'public' });
+    this.excludeTombstonedPublicIntents(query);
     this.excludeInternalPublicIntentFixtures(query);
 
     if (normalized.publicIntentId) {
@@ -977,15 +978,27 @@ export class AgentGatewayService {
     );
   }
 
+  private excludeTombstonedPublicIntents(
+    query: SelectQueryBuilder<PublicSocialIntent>,
+  ) {
+    query.andWhere(
+      `COALESCE(intent.metadata ->> 'tombstoned', 'false') <> 'true'`,
+    );
+  }
+
   async getPublicSocialIntent(id: string) {
     const intent = await this.publicIntentRepo.findOne({ where: { id } });
-    if (!intent) throw new NotFoundException('Public social intent not found');
+    if (!intent || !this.isDiscoverablePublicSocialIntent(intent)) {
+      throw new NotFoundException('Public social intent not found');
+    }
     return serializePublicSocialIntent(intent);
   }
 
   async getPublicSocialIntentMatches(id: string) {
     const intent = await this.publicIntentRepo.findOne({ where: { id } });
-    if (!intent) throw new NotFoundException('Public social intent not found');
+    if (!intent || !this.isDiscoverablePublicSocialIntent(intent)) {
+      throw new NotFoundException('Public social intent not found');
+    }
     const rawCandidates = await this.searchSocialCandidates(
       0,
       {
@@ -1029,6 +1042,36 @@ export class AgentGatewayService {
       request: serializePublicSocialIntent(intent),
       candidates: serializePublicSocialCandidates(candidates),
     };
+  }
+
+  private isDiscoverablePublicSocialIntent(intent: PublicSocialIntent) {
+    if (intent.mode && intent.mode !== 'public') return false;
+    if (
+      intent.status &&
+      ![
+        SocialRequestStatus.Active,
+        SocialRequestStatus.Matched,
+        SocialRequestStatus.Searching,
+      ].includes(intent.status)
+    ) {
+      return false;
+    }
+    const metadata = intent.metadata ?? {};
+    const tombstoned = this.publicIntentMetadataText(metadata.tombstoned);
+    const publishStatus = this.publicIntentMetadataText(metadata.publishStatus);
+    return (
+      metadata.tombstoned !== true &&
+      tombstoned !== 'true' &&
+      publishStatus !== 'dismissed'
+    );
+  }
+
+  private publicIntentMetadataText(value: unknown): string {
+    if (typeof value === 'string') return value.trim().toLowerCase();
+    if (typeof value === 'boolean' || typeof value === 'number') {
+      return String(value).trim().toLowerCase();
+    }
+    return '';
   }
 
   private publicVisibleSocialCandidates(

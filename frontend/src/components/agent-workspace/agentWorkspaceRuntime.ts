@@ -18,10 +18,7 @@ import type {
 } from './socialAgentThreadStore';
 import type { AgentError, AgentStreamEvent } from './api';
 import { isGenericSocialCodexProcessTitle } from '../../lib/socialCodexProcessCopy';
-import {
-  socialCodexThreadIdForTask,
-  socialCodexThreadIdOrExisting,
-} from './socialCodexThreadId';
+import { socialCodexThreadIdForTask, socialCodexThreadIdOrExisting } from './socialCodexThreadId';
 import { agentCardDedupKeys } from './agentCardIdentity';
 import { reduceSingleRunAssistantMessages } from './agentAssistantMessageReducer';
 
@@ -150,7 +147,9 @@ export function isAgentThreadMessage(value: unknown): value is AgentThreadMessag
   );
 }
 
-export function sanitizeStoredThreadMessage(message: AgentThreadMessage): AgentThreadMessage | null {
+export function sanitizeStoredThreadMessage(
+  message: AgentThreadMessage,
+): AgentThreadMessage | null {
   if (message.role === 'user') {
     const content = publicText(message.content, '');
     return content ? { ...message, content, result: null } : null;
@@ -289,6 +288,9 @@ export function continuesOpportunityClarification(prompt: string) {
   const normalized = prompt.trim().toLowerCase();
   if (!normalized || cancelsOpportunityClarification(normalized)) return false;
   if (intentForPrompt(normalized) === 'social') return true;
+  if (/(默认安全设置|安全默认值|默认安全边界|默认安全|安全方案|常规处理)/.test(normalized)) {
+    return true;
+  }
   if (
     /(为什么|怎么|如何|功能|入口|设置|客服|找回|聊天记录|历史消息|隐私政策|规则|说明|你是不是|没懂|什么意思|解释一下|介绍一下)/.test(
       normalized,
@@ -319,16 +321,31 @@ export function continuesOpportunityClarification(prompt: string) {
     /(公共场所|公开|不公开|站内聊|女生|男生|舞蹈|舞蹈生|同校|同城|低强度|高强度|安全|接受陌生人|不接受陌生人)/.test(
       normalized,
     );
-  return [hasTime, hasActivity, hasLocation, hasBoundaryOrPreference].filter(Boolean)
-    .length > 0;
+  return [hasTime, hasActivity, hasLocation, hasBoundaryOrPreference].filter(Boolean).length > 0;
 }
 
 export function responseAwaitsOpportunityClarification(response: UserFacingAgentResponse) {
-  return (
-    response.cards.length === 0 &&
-    /为了只推荐安全、合适的机会|还差.{0,24}(城市|时间|运动强度|社交边界)/.test(
-      response.assistantMessage,
+  if (
+    response.cards.some(
+      (card) =>
+        card.schemaType === 'social_match.slot_completion' ||
+        (card.data &&
+          typeof card.data === 'object' &&
+          (card.data as Record<string, unknown>).waitingFor === 'safety_boundary'),
     )
+  ) {
+    return true;
+  }
+  const workflowRequiredAction =
+    typeof response.workflow?.requiredAction === 'string' ? response.workflow.requiredAction : '';
+  if (
+    workflowRequiredAction === 'safety_boundary' ||
+    workflowRequiredAction === 'opportunity_slot_completion'
+  ) {
+    return true;
+  }
+  return /为了只推荐安全、合适的机会|发布约练卡前我先一次性确认|补齐后我会先生成一张可确认的约练卡|还差.{0,32}(城市|活动|时间|地点|运动强度|社交边界|安全边界)/.test(
+    response.assistantMessage,
   );
 }
 
@@ -435,7 +452,9 @@ export function intentForRestoredResponse(
   return hasSocialSurface ? 'social' : fallback;
 }
 
-export function sanitizeRestoredResponse(response: UserFacingAgentResponse): UserFacingAgentResponse {
+export function sanitizeRestoredResponse(
+  response: UserFacingAgentResponse,
+): UserFacingAgentResponse {
   if (
     isFallbackAssistantResponse(response) &&
     isGenericRecoveryAssistantText(response.assistantMessage) &&
@@ -527,13 +546,10 @@ export function recoveryFromUserFacingResponse(
 ): FitMeetAssistantRecovery {
   const notice = response.recoveryNotice;
   const title = publicText(notice?.title, '').trim();
-  const safeTitle =
-    title && !isGenericRecoveryTitle(title) ? title : DEFAULT_RECOVERY_TITLE;
+  const safeTitle = title && !isGenericRecoveryTitle(title) ? title : DEFAULT_RECOVERY_TITLE;
   const message = publicText(notice?.message, '').trim();
   const safeMessage =
-    message && !isGenericRecoveryNoticeMessage(message)
-      ? message
-      : DEFAULT_RECOVERY_MESSAGE;
+    message && !isGenericRecoveryNoticeMessage(message) ? message : DEFAULT_RECOVERY_MESSAGE;
   return {
     kind: notice?.kind === 'checkpoint' ? 'checkpoint_available' : 'failed',
     title: safeTitle,
@@ -616,9 +632,7 @@ function genericRecoveryNoticeMessagePattern() {
   );
 }
 
-export function isFallbackAssistantResponse(
-  response: UserFacingAgentResponse | null | undefined,
-) {
+export function isFallbackAssistantResponse(response: UserFacingAgentResponse | null | undefined) {
   return response?.assistantMessageSource === 'fallback';
 }
 
@@ -631,9 +645,7 @@ export function isFallbackAssistantMessage(message: AgentThreadMessage) {
 
 export function isNonBranchableAssistantSource(value: unknown) {
   return (
-    value === 'fallback' ||
-    value === 'deterministic_route' ||
-    value === 'deterministic_action'
+    value === 'fallback' || value === 'deterministic_route' || value === 'deterministic_action'
   );
 }
 
@@ -686,6 +698,7 @@ export function isSocialSurfaceCard(card: { type?: string; schemaType?: string; 
     schemaType === 'social_match.candidate' ||
     schemaType === 'social_match.activity' ||
     schemaType === 'social_match.empty' ||
+    schemaType === 'social_match.slot_completion' ||
     schemaType === 'meet_loop.timeline' ||
     schemaType === 'life_graph.diff' ||
     isApprovalCard(card)
@@ -797,10 +810,7 @@ export function messagesFromSessionSnapshot(
   const lastIntent =
     [...restoredMessages].reverse().find((message) => message.conversationIntent)
       ?.conversationIntent ?? 'conversation';
-  const resultMessageIndex = findRestoredResultMessageIndex(
-    restoredMessages,
-    sanitizedRestored,
-  );
+  const resultMessageIndex = findRestoredResultMessageIndex(restoredMessages, sanitizedRestored);
   const resultIntent = intentForRestoredResponse(sanitizedRestored, lastIntent);
   const showSocialResult = resultIntent === 'social' || resultIntent === 'approval';
   if (resultMessageIndex >= 0) {
@@ -809,7 +819,9 @@ export function messagesFromSessionSnapshot(
         index === resultMessageIndex && message.role === 'assistant'
           ? {
               ...message,
-              result: restoredResponseHasUsefulSurface(sanitizedRestored) ? sanitizedRestored : null,
+              result: restoredResponseHasUsefulSurface(sanitizedRestored)
+                ? sanitizedRestored
+                : null,
               taskId,
               conversationIntent: resultIntent,
               showSocialResult,
@@ -869,9 +881,9 @@ export function sessionMessageToThreadMessage(
   const runtime = isRecord(item.runtime) ? item.runtime : null;
   const assistantSource =
     role === 'assistant'
-      ? assistantMessageSourceFromUnknown(
+      ? (assistantMessageSourceFromUnknown(
           item.assistantMessageSource ?? item.messageSource ?? item.source,
-        ) ?? embeddedResult?.assistantMessageSource
+        ) ?? embeddedResult?.assistantMessageSource)
       : undefined;
   const conversationIntent =
     role === 'user'
@@ -888,14 +900,11 @@ export function sessionMessageToThreadMessage(
     status: 'done',
     taskId,
     runId: stringFromUnknown(item.runId) || stringFromUnknown(runtime?.runId) || null,
-    messageId:
-      stringFromUnknown(item.messageId) || stringFromUnknown(runtime?.messageId) || null,
+    messageId: stringFromUnknown(item.messageId) || stringFromUnknown(runtime?.messageId) || null,
     result: hasUsefulEmbeddedResult ? embeddedResult : null,
     conversationIntent,
     showSocialResult:
-      role === 'assistant' &&
-      hasUsefulEmbeddedResult &&
-      conversationIntent !== 'conversation',
+      role === 'assistant' && hasUsefulEmbeddedResult && conversationIntent !== 'conversation',
     surfaceKind: role === 'assistant' ? 'answer' : undefined,
     assistantMessageSource: assistantSource,
     branchable:
@@ -954,9 +963,7 @@ function restoredResultKeys(result: UserFacingAgentResponse) {
 
 function addKey(keys: Set<string>, prefix: string, value: unknown) {
   const text =
-    typeof value === 'number' && Number.isFinite(value)
-      ? String(value)
-      : stringFromUnknown(value);
+    typeof value === 'number' && Number.isFinite(value) ? String(value) : stringFromUnknown(value);
   if (text) keys.add(`${prefix}:${text}`);
 }
 
@@ -969,9 +976,7 @@ function sharesAnyKey(left: Set<string>, right: Set<string>) {
 }
 
 function normalizeComparableAssistantText(value: unknown) {
-  return publicText(value, '')
-    .replace(/\s+/g, '')
-    .trim();
+  return publicText(value, '').replace(/\s+/g, '').trim();
 }
 
 function assistantMessageSourceFromUnknown(value: unknown) {
@@ -1123,7 +1128,8 @@ export function numberFromUnknown(value: unknown): number | null {
 
 export function stepIdFromLightStatus(status: string): string {
   if (/确认关键信息|补充信息|补齐/i.test(status)) return 'clarify';
-  if (status.includes('Life Graph') || status.includes('长期偏好') || status.includes('画像')) return 'profile';
+  if (status.includes('Life Graph') || status.includes('长期偏好') || status.includes('画像'))
+    return 'profile';
   if (status.includes('筛选')) return 'search';
   if (status.includes('排除')) return 'rank';
   if (status.includes('安全')) return 'safety_filter';
@@ -1151,7 +1157,10 @@ export function mergeProgressStep(
         : event.state === 'waiting'
           ? 'waiting'
           : 'running';
-  const rawLabel = publicText(event.title, event.kind === 'tool' ? '正在整理当前信息' : '正在理解你的需求');
+  const rawLabel = publicText(
+    event.title,
+    event.kind === 'tool' ? '正在整理当前信息' : '正在理解你的需求',
+  );
   const processType =
     typeof event.metadata?.processType === 'string' && event.metadata.processType.trim()
       ? event.metadata.processType.trim()
@@ -1184,13 +1193,9 @@ export function mergeProgressStep(
 
   if (processType === 'run_summary') {
     const preservedApprovalSteps = baseSteps.filter(
-      (step) =>
-        step.processType === 'approval' ||
-        isApprovalProgressStepId(step.id),
+      (step) => step.processType === 'approval' || isApprovalProgressStepId(step.id),
     );
-    const waitingApprovalStep = preservedApprovalSteps.find(
-      (step) => step.status === 'waiting',
-    );
+    const waitingApprovalStep = preservedApprovalSteps.find((step) => step.status === 'waiting');
     const withoutPreviousSummaries = preservedApprovalSteps.filter(
       (step) => step.processType !== 'run_summary' && step.id !== event.id,
     );
@@ -1200,10 +1205,7 @@ export function mergeProgressStep(
             ...nextStep,
             label: waitingApprovalStep.label || nextStep.label,
             status: 'waiting' as const,
-            detail:
-              waitingApprovalStep.detail ??
-              nextStep.detail ??
-              '确认后我会接着处理。',
+            detail: waitingApprovalStep.detail ?? nextStep.detail ?? '确认后我会接着处理。',
             metadata: {
               ...nextStep.metadata,
               pendingApproval: true,
@@ -1373,9 +1375,7 @@ export function createAgentRecoveryFromError(
       kind: error.recoveryNotice.kind === 'checkpoint' ? 'checkpoint_available' : fallbackKind,
       title: title && !isGenericRecoveryTitle(title) ? title : DEFAULT_RECOVERY_TITLE,
       message:
-        message && !isGenericRecoveryNoticeMessage(message)
-          ? message
-          : DEFAULT_RECOVERY_MESSAGE,
+        message && !isGenericRecoveryNoticeMessage(message) ? message : DEFAULT_RECOVERY_MESSAGE,
       prompt,
       retryable: error.recoveryNotice.retryable,
     };
@@ -1395,9 +1395,7 @@ export function createAgentRecoveryFromError(
         ? title
         : DEFAULT_RECOVERY_TITLE,
     message:
-      message && !isGenericRecoveryNoticeMessage(message)
-        ? message
-        : DEFAULT_RECOVERY_MESSAGE,
+      message && !isGenericRecoveryNoticeMessage(message) ? message : DEFAULT_RECOVERY_MESSAGE,
     prompt,
     retryable: error.retryable,
   };

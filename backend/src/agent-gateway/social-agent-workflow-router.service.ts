@@ -17,6 +17,7 @@ import {
   hasExplicitSocialSideEffectIntent,
   isSocialExecutionIntent,
 } from './social-agent-social-intent-gate';
+import { hasPendingSocialOpportunitySlotCompletion } from './social-agent-opportunity-clarification';
 
 export type SocialAgentWorkflowRouterDecision = {
   route: SocialAgentIntentRouterResult;
@@ -25,6 +26,7 @@ export type SocialAgentWorkflowRouterDecision = {
     | 'candidate_refinement_workflow'
     | 'empty_candidate_recovery_workflow'
     | 'social_continuation_workflow'
+    | 'publish_draft_slot_completion_workflow'
     | 'social_action_workflow';
   skipBrain: true;
 };
@@ -58,8 +60,11 @@ export class SocialAgentWorkflowRouterService {
       hasEmptyCandidateContext(input.taskContext);
     const socialContinuation =
       socialContinuationPattern.test(message) && hasExecutionContext;
+    const pendingPublishSlotCompletion =
+      hasPendingSocialOpportunitySlotCompletion(input.taskContext);
 
     if (
+      !pendingPublishSlotCompletion &&
       !explicitSocial &&
       !explicitAction &&
       !candidateRefinement &&
@@ -67,6 +72,41 @@ export class SocialAgentWorkflowRouterService {
       !socialContinuation
     ) {
       return null;
+    }
+
+    if (pendingPublishSlotCompletion) {
+      if (isPendingPublishDraftMetaQuestion(message)) {
+        return {
+          route: {
+            ...this.intentRouter.routeByRules(input),
+            intent: 'workflow_help',
+            confidence: 0.9,
+            shouldSearch: false,
+            shouldReplan: false,
+            shouldUpdateProfile: false,
+            shouldExecuteAction: false,
+            replyStrategy: 'conversational_answer',
+          },
+          reason: 'publish_draft_slot_completion_workflow',
+          skipBrain: true,
+        };
+      }
+      const routed = this.intentRouter.routeByRules(input);
+      return {
+        route: {
+          ...routed,
+          intent: 'action_request',
+          confidence: Math.max(routed.confidence, 0.92),
+          shouldSearch: false,
+          shouldReplan: false,
+          shouldUpdateProfile: false,
+          shouldExecuteAction: true,
+          replyStrategy: 'execute_action',
+          source: routed.source,
+        },
+        reason: 'publish_draft_slot_completion_workflow',
+        skipBrain: true,
+      };
     }
 
     if (emptyCandidateRecovery) {
@@ -145,6 +185,20 @@ export class SocialAgentWorkflowRouterService {
       source: routed.source,
     };
   }
+}
+
+function isPendingPublishDraftMetaQuestion(message: string): boolean {
+  const text = primitiveText(message).toLowerCase();
+  if (!text) return false;
+  if (
+    hasExplicitSocialSideEffectIntent(text) ||
+    hasExplicitSocialExecutionIntent(text)
+  ) {
+    return false;
+  }
+  return /(为什么|为啥|什么意思|解释|流程|怎么做|怎么处理|需要什么|这些信息|安全边界是什么)/i.test(
+    text,
+  );
 }
 
 function hasWorkflowSlotContext(

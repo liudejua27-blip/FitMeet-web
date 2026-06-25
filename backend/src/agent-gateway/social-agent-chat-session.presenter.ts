@@ -113,6 +113,15 @@ function readResultFromTaskMemory(
     storedCandidates.length > 0
       ? storedCandidates
       : (eventResult?.candidates ?? []);
+  const storedCards = Array.isArray(chatRun.cards)
+    ? chatRun.cards.filter((card): card is FitMeetAlphaCard =>
+        Boolean(card && typeof card === 'object'),
+      )
+    : Array.isArray(result.cards)
+      ? result.cards.filter((card): card is FitMeetAlphaCard =>
+          Boolean(card && typeof card === 'object'),
+        )
+      : [];
 
   if (!rawDraft && candidates.length === 0) return null;
   const socialRequestDraft = rawDraft
@@ -156,6 +165,7 @@ function readResultFromTaskMemory(
       candidates,
       approvalRequiredActions: [],
       events,
+      cards: storedCards,
     },
     task.id,
   );

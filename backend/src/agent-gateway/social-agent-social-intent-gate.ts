@@ -255,11 +255,13 @@ export function shouldAllowSocialExecution(input: {
   if (isConversationOnlySocialMention(input.message)) return false;
   if (
     input.conversationIntent === 'conversation' &&
-    !hasExplicitSocialExecutionIntent(input.message)
+    !hasExplicitSocialExecutionIntent(input.message) &&
+    !hasPendingPublishSlotCompletionContext(input.taskContext)
   ) {
     return false;
   }
   if (input.intent === 'action_request') {
+    if (hasPendingPublishSlotCompletionContext(input.taskContext)) return true;
     return (
       hasExplicitSocialSideEffectIntent(input.message) &&
       (hasExplicitPublishSideEffectIntent(input.message) ||
@@ -350,6 +352,21 @@ export function enforceExplicitSocialExecutionRoute(
       replyStrategy: 'search_candidates',
     });
   }
+  if (
+    result.intent === 'action_request' &&
+    hasPendingPublishSlotCompletionContext(input.taskContext)
+  ) {
+    return normalizeAllowedSocialExecutionRoute({
+      ...gated,
+      intent: 'action_request',
+      confidence: Math.max(gated.confidence, 0.9),
+      source: gated.source,
+      shouldSearch: false,
+      shouldReplan: false,
+      shouldExecuteAction: true,
+      replyStrategy: 'execute_action',
+    });
+  }
   if (!hasExplicitSocialExecutionIntent(input.message)) return gated;
   if (hasExplicitSocialSideEffectIntent(input.message)) {
     if (
@@ -432,6 +449,36 @@ function nonEmptyText(value: unknown): boolean {
     return String(value).trim().length > 0;
   }
   return false;
+}
+
+function hasPendingPublishSlotCompletionContext(
+  taskContext?: SocialAgentIntentRouterInput['taskContext'],
+): boolean {
+  if (!taskContext) return false;
+  const taskMemory = record(taskContext.taskMemory);
+  const currentTask = record(taskContext.currentTask);
+  const memoryCurrentTask = record(taskMemory.currentTask);
+  const waitingFor = stringValue(
+    currentTask.waitingFor ?? memoryCurrentTask.waitingFor,
+  );
+  if (waitingFor === 'opportunity_slot_completion') return true;
+  return (
+    stringValue(record(taskContext.pendingOpportunityDraft).status) ===
+      'collecting_slots' ||
+    stringValue(record(taskMemory.pendingOpportunityDraft).status) ===
+      'collecting_slots'
+  );
+}
+
+function record(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+function stringValue(value: unknown): string {
+  if (typeof value === 'number' && Number.isFinite(value)) return String(value);
+  return typeof value === 'string' ? value.trim() : '';
 }
 
 function normalizeAllowedSocialExecutionRoute(

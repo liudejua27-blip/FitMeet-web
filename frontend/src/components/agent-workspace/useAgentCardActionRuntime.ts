@@ -73,6 +73,97 @@ export function useAgentCardActionRuntime({
     isRunningRef.current = isRunning;
   }, [isRunning]);
 
+  const runSlotCompletionMessageAction = useCallback(
+    async ({
+      action,
+      input,
+      taskId,
+    }: {
+      action: FitMeetAgentCardExecutableAction;
+      input?: CardActionInput;
+      taskId: number;
+    }) => {
+      const message = slotCompletionMessageForAction(action, input?.payload);
+      if (!message) throw new Error('当前补充动作缺少可发送内容。');
+      isRunningRef.current = true;
+      runConversationIntentRef.current = 'social';
+      setRecovery(null);
+      setIsRunning(true);
+      setSteps(
+        actionSteps.map((step, index) => ({
+          ...step,
+          status: index === 0 ? 'running' : 'pending',
+        })),
+      );
+      appendStreamingAssistant(taskId, 'social');
+      const controller = new AbortController();
+      beginAbortableRun(controller);
+      try {
+        const finalResult = await agentAdapter.run(
+          {
+            goal: message,
+            permissionMode: 'confirm',
+            conversationIntent: 'social',
+            taskId,
+            idempotencyKey: idempotencyKeyForCardAction(
+              taskId,
+              action,
+              input?.payload,
+            ),
+          },
+          {
+            onEvent: handleAgentStreamEvent,
+            signal: controller.signal,
+          },
+        );
+        setActiveTaskId(finalResult.taskId ?? taskId);
+        if (!finishedRef.current) finishUserFacing(finalResult.response);
+        void refreshThreads();
+        return finalResult.response;
+      } catch (error) {
+        const stopped = stopRequestedRef.current || isAbortError(error);
+        if (stopped) {
+          settleStreamingAssistantAfterInterruption();
+        } else {
+          setRecovery(createRecoveryFromError(mapAgentError(error), currentGoal));
+        }
+        setSteps((current) =>
+          current.map((step) =>
+            step.status === 'running'
+              ? { ...step, status: stopped ? 'pending' : 'error' }
+              : step,
+          ),
+        );
+        if (!stopped) throw error;
+      } finally {
+        isRunningRef.current = false;
+        setIsRunning(false);
+        finishAbortableRun();
+      }
+    },
+    [
+      actionSteps,
+      agentAdapter,
+      appendStreamingAssistant,
+      beginAbortableRun,
+      createRecoveryFromError,
+      currentGoal,
+      finishAbortableRun,
+      finishUserFacing,
+      finishedRef,
+      handleAgentStreamEvent,
+      isAbortError,
+      refreshThreads,
+      runConversationIntentRef,
+      setActiveTaskId,
+      setIsRunning,
+      setRecovery,
+      setSteps,
+      settleStreamingAssistantAfterInterruption,
+      stopRequestedRef,
+    ],
+  );
+
   const runCardActionStream = useCallback(
     async (input?: CardActionInput) => {
       if (isRunningRef.current) throw new Error('上一轮还在生成，请先停止或等待它完成。');
@@ -83,6 +174,14 @@ export function useAgentCardActionRuntime({
       if (!taskId) throw new Error('当前卡片缺少任务上下文，不能继续执行。');
       const action = schemaActionFromToolInput(input?.schemaAction);
       if (!action) throw new Error('当前卡片动作暂时不可执行。');
+
+      if (isSlotCompletionMessageAction(action)) {
+        return runSlotCompletionMessageAction({
+          action,
+          input,
+          taskId,
+        });
+      }
 
       isRunningRef.current = true;
       runConversationIntentRef.current =
@@ -197,6 +296,7 @@ export function useAgentCardActionRuntime({
       handleAgentStreamEvent,
       isAbortError,
       refreshThreads,
+      runSlotCompletionMessageAction,
       runConversationIntentRef,
       setActiveTaskId,
       setIsRunning,
@@ -248,8 +348,37 @@ function isExecutableToolUISchemaAction(
     value === 'life_graph.accept_update' ||
     value === 'life_graph.reject_update' ||
     value === 'meet_loop.resume' ||
-    value === 'meet_loop.reschedule'
+    value === 'meet_loop.reschedule' ||
+    value === 'slot_completion.use_default_safety' ||
+    value === 'slot_completion.custom_safety' ||
+    value === 'slot_completion.cancel'
   );
+}
+
+function isSlotCompletionMessageAction(action: FitMeetAgentCardExecutableAction) {
+  return (
+    action === 'slot_completion.use_default_safety' ||
+    action === 'slot_completion.custom_safety' ||
+    action === 'slot_completion.cancel'
+  );
+}
+
+function slotCompletionMessageForAction(
+  action: FitMeetAgentCardExecutableAction,
+  payload: Record<string, unknown> | undefined,
+) {
+  const payloadMessage = stringFromUnknown(payload?.message);
+  if (payloadMessage) return payloadMessage;
+  if (action === 'slot_completion.use_default_safety') {
+    return '按默认安全设置处理';
+  }
+  if (action === 'slot_completion.custom_safety') {
+    return '我想自定义安全边界';
+  }
+  if (action === 'slot_completion.cancel') {
+    return '取消这次约练卡发布';
+  }
+  return '';
 }
 
 function shouldAppendActionResultMessage(

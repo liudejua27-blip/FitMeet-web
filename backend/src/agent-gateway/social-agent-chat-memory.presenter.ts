@@ -103,6 +103,10 @@ export function summarizeSocialAgentTaskMemoryForLlm(
     ? memory.socialAgentChat
     : {};
   const shortTerm = isRecord(memory.shortTerm) ? memory.shortTerm : {};
+  const pendingOpportunityDraft = recordMemoryValue(
+    socialAgentChat.pendingOpportunityDraft,
+    shortTerm.pendingOpportunityDraft,
+  );
   const candidateActions = recordMemoryValue(
     shortTerm.candidateActions,
     rawTaskMemory.candidateActions,
@@ -166,6 +170,7 @@ export function summarizeSocialAgentTaskMemoryForLlm(
     activityState: taskMemory.activityState,
     pendingActions: taskMemory.pendingActions,
     pendingApprovals: pendingApprovals ?? taskMemory.pendingActions,
+    pendingOpportunityDraft,
     stableProfileFacts: taskMemory.stableProfileFacts,
     lastUserMessages: taskMemory.lastUserMessages,
     lastSearch,
