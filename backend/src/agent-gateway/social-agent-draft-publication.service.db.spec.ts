@@ -17,11 +17,13 @@ import {
 import { MatchingJob, MatchingJobStatus } from './entities/matching-job.entity';
 import { PublicSocialIntent } from './entities/public-social-intent.entity';
 import { SocialRequestStatus } from './entities/social-request.entity';
+import { AgentConnection } from './entities/agent-connection.entity';
 import {
   SocialRequestVisibility,
   UserSocialRequest,
   UserSocialRequestStatus,
 } from '../social-requests/social-request.entity';
+import { User } from '../users/user.entity';
 import { AgentSideEffectLedgerService } from './agent-side-effect-ledger.service';
 import { MatchingJobService } from './matching-job.service';
 import { SocialAgentDraftPublicationService } from './social-agent-draft-publication.service';
@@ -155,10 +157,12 @@ async function serviceWithFreshDatabase() {
     schema,
     entities: [
       AgentSideEffectLedger,
+      AgentConnection,
       AgentTask,
       AgentTaskEvent,
       MatchingJob,
       PublicSocialIntent,
+      User,
       UserSocialRequest,
     ],
     migrations: [
