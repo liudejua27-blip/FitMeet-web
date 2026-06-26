@@ -139,6 +139,36 @@ function requiredFieldsForRoute(
 export function isAwaitingSocialOpportunityClarification(
   taskContext: Record<string, unknown> | undefined,
 ): boolean {
+  if (hasPendingSocialOpportunitySlotCompletion(taskContext)) return true;
+  const { waitingFor, awaitingSearchConfirmation } =
+    readSocialOpportunityWaitingState(taskContext);
+  return (
+    awaitingSearchConfirmation === true &&
+    waitingFor === 'opportunity_clarification'
+  );
+}
+
+export function hasPendingSocialOpportunitySlotCompletion(
+  taskContext: Record<string, unknown> | undefined,
+): boolean {
+  if (!taskContext) return false;
+  const { waitingFor } = readSocialOpportunityWaitingState(taskContext);
+  if (waitingFor === 'opportunity_slot_completion') return true;
+  return (
+    pendingOpportunityDraftStatus(taskContext.pendingOpportunityDraft) ===
+      'collecting_slots' ||
+    pendingOpportunityDraftStatus(
+      record(record(taskContext.taskMemory).pendingOpportunityDraft),
+    ) === 'collecting_slots' ||
+    pendingOpportunityDraftStatus(
+      record(record(taskContext.taskMemory).shortTerm).pendingOpportunityDraft,
+    ) === 'collecting_slots'
+  );
+}
+
+function readSocialOpportunityWaitingState(
+  taskContext: Record<string, unknown> | undefined,
+): { waitingFor: string; awaitingSearchConfirmation: unknown } {
   const currentTask = isRecord(taskContext?.currentTask)
     ? taskContext?.currentTask
     : {};
@@ -155,10 +185,11 @@ export function isAwaitingSocialOpportunityClarification(
   const awaitingSearchConfirmation =
     currentTask.awaitingSearchConfirmation ??
     memoryCurrentTask.awaitingSearchConfirmation;
-  return (
-    awaitingSearchConfirmation === true &&
-    waitingFor === 'opportunity_clarification'
-  );
+  return { waitingFor, awaitingSearchConfirmation };
+}
+
+function pendingOpportunityDraftStatus(value: unknown): string {
+  return cleanDisplayText(record(value).status, '');
 }
 
 function resolveFields(input: {
@@ -720,6 +751,10 @@ function publicActivitySummary(
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function record(value: unknown): Record<string, unknown> {
+  return isRecord(value) ? value : {};
 }
 
 function isClarificationField(

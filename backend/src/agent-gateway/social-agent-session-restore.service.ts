@@ -85,10 +85,11 @@ export class SocialAgentSessionRestoreService {
     ownerUserId: number;
     task: AgentTask | null;
     visibleStepLabel: VisibleStepLabeler;
+    includeNonRestorable?: boolean;
   }): Promise<SocialAgentSessionSnapshot> {
     const restoredAt = new Date().toISOString();
     if (!input.task) return this.assembler.emptySession(restoredAt);
-    if (!this.isRestorableTask(input.task)) {
+    if (!input.includeNonRestorable && !this.isRestorableTask(input.task)) {
       return this.assembler.emptySession(restoredAt);
     }
 
@@ -99,7 +100,10 @@ export class SocialAgentSessionRestoreService {
       'session',
     );
 
-    if (this.shouldHideGenericCheckpointSession(input.task, context)) {
+    if (
+      !input.includeNonRestorable &&
+      this.shouldHideGenericCheckpointSession(input.task, context)
+    ) {
       return this.assembler.emptySession(restoredAt);
     }
 
@@ -118,6 +122,8 @@ export class SocialAgentSessionRestoreService {
     if (!this.restorableTaskStatuses.includes(task.status)) return false;
     const reason = cleanDisplayText(task.statusReason, '').trim();
     if (reason === 'task_conversation_unbound') return false;
+    if (reason === 'social_intent_publish_dismissed') return false;
+    if (this.hasDismissedSocialIntent(task)) return false;
     if (
       task.status === AgentTaskStatus.WaitingReply &&
       task.agentConnectionId == null
@@ -125,6 +131,20 @@ export class SocialAgentSessionRestoreService {
       return false;
     }
     return true;
+  }
+
+  private hasDismissedSocialIntent(task: AgentTask): boolean {
+    const result = this.record(task.result);
+    const memory = this.record(task.memory);
+    const publishSocialRequest = this.record(result.publishSocialRequest);
+    const chatRun = this.record(result.chatRun);
+    const socialAgentChat = this.record(memory.socialAgentChat);
+    return [publishSocialRequest, chatRun, socialAgentChat].some(
+      (record) =>
+        record.dismissed === true ||
+        this.text(record.publishStatus) === 'dismissed' ||
+        this.text(record.status) === 'dismissed',
+    );
   }
 
   async buildTaskTimeline(input: {
@@ -333,6 +353,16 @@ export class SocialAgentSessionRestoreService {
       '从已保存的 Agent 状态',
       '继续刚才保存的 Agent 步骤',
     ].some((pattern) => value.includes(pattern));
+  }
+
+  private record(value: unknown): Record<string, unknown> {
+    return typeof value === 'object' && value !== null && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : {};
+  }
+
+  private text(value: unknown): string {
+    return cleanDisplayText(value, '').trim();
   }
 
   private shouldHideGenericCheckpointSession(

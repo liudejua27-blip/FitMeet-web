@@ -29,7 +29,8 @@ export function ToolUICardCollectionBlock({
   const isProductCard = (card: SchemaDrivenAssistantCard) =>
     card.schemaType === 'social_match.candidate' ||
     card.schemaType === 'social_match.activity' ||
-    card.schemaType === 'social_match.empty';
+    card.schemaType === 'social_match.empty' ||
+    card.schemaType === 'social_match.slot_completion';
   const isProductCardFlow = cards.every(isProductCard);
   const isSingleProductCard = cards.length === 1 && isProductCardFlow;
   const sectionClassName = isProductCardFlow

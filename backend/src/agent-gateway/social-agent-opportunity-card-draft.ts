@@ -47,24 +47,27 @@ export function buildSocialAgentOpportunityDraftFromTask(
       slotText(slots, slotSummary, 'activity') ||
         inferActivity(message) ||
         cleanDisplayText(taskMemory.activeEntities.activityType, '') ||
+        inferActivity(sourceText) ||
         inferActivity(task.goal),
     ) || '';
   const time =
     slotText(slots, slotSummary, 'time_window') ||
     inferTime(message) ||
     cleanDisplayText(taskMemory.activeEntities.timePreference, '') ||
+    inferTime(sourceText) ||
     inferTime(task.goal);
   const location =
     slotText(slots, slotSummary, 'location_text') ||
     slotText(slots, slotSummary, 'geo_area') ||
     inferLocation(message) ||
     cleanDisplayText(taskMemory.activeEntities.locationPreference, '') ||
+    inferLocation(sourceText) ||
     inferLocation(task.goal);
   const city =
     cleanDisplayText(taskMemory.activeEntities.city, '') ||
     slotText(slots, slotSummary, 'city') ||
     slotText(slots, slotSummary, 'geo_area') ||
-    inferCity(location, message, task.goal);
+    inferCity(location, sourceText, task.goal);
   const safetyBoundary =
     slotText(slots, slotSummary, 'safety_boundary') ||
     inferSafetyBoundary(sourceText) ||
@@ -108,7 +111,10 @@ export function buildSocialAgentOpportunityDraftFromTask(
       type: socialRequestType(activity),
       title,
       description,
-      rawText: cleanDisplayText(message, '') || task.goal,
+      rawText:
+        cleanDisplayText(sourceText, '') ||
+        cleanDisplayText(message, '') ||
+        task.goal,
       city,
       radiusKm: 5,
       activityType: activity,
@@ -156,6 +162,10 @@ export function buildSocialAgentPublishConfirmationCard(input: {
     '不会公开精确位置、联系方式或私密资料。';
   const capacityLabel = text(draft.capacityLabel) || '找 1 人';
   const published = input.published === true;
+  const socialRequestId =
+    input.socialRequestId ??
+    positiveNumber(record(draft).socialRequestId) ??
+    positiveNumber(record(draft.metadata).socialRequestId);
   const discoverHref =
     text(input.discoverHref) ||
     (input.publicIntentId
@@ -164,7 +174,7 @@ export function buildSocialAgentPublishConfirmationCard(input: {
 
   return {
     id: published
-      ? `activity_plan:${task.id}:published:${input.publicIntentId ?? input.socialRequestId ?? 'ok'}`
+      ? `activity_plan:${task.id}:published:${input.publicIntentId ?? socialRequestId ?? 'ok'}`
       : `activity_plan:${task.id}:publish_confirmation`,
     type: published ? 'activity_status' : 'activity_plan',
     schemaVersion: 'fitmeet.tool-ui.v1',
@@ -193,7 +203,7 @@ export function buildSocialAgentPublishConfirmationCard(input: {
       publishPolicy: 'confirm_before_public_publish',
       approvalPolicy: published ? '已由你确认发布' : '发布到发现前必须由你确认',
       publicIntentId: input.publicIntentId ?? null,
-      socialRequestId: input.socialRequestId ?? null,
+      socialRequestId: socialRequestId ?? null,
       discoverHref,
       publicIntentHref: input.publicIntentHref ?? null,
       autoPublished: published,
@@ -223,6 +233,7 @@ export function buildSocialAgentPublishConfirmationCard(input: {
         safetyBoundary,
         capacityLabel,
         publicIntentId: input.publicIntentId ?? null,
+        socialRequestId: socialRequestId ?? null,
         discoverHref,
         publicIntentHref: input.publicIntentHref ?? null,
         autoPublished: published,
@@ -244,7 +255,7 @@ export function buildSocialAgentPublishConfirmationCard(input: {
               taskId: task.id,
               socialRequestDraft: draft,
               publicIntentId: input.publicIntentId ?? null,
-              socialRequestId: input.socialRequestId ?? null,
+              socialRequestId: socialRequestId ?? null,
               discoverHref,
               sideEffect: 'edit_draft_only',
             },
@@ -261,6 +272,7 @@ export function buildSocialAgentPublishConfirmationCard(input: {
             payload: {
               taskId: task.id,
               socialRequestDraft: draft,
+              socialRequestId: socialRequestId ?? null,
               actionType: 'publish_social_request',
               sideEffect: 'publish_social_request',
               approvalRequired: true,
@@ -284,6 +296,7 @@ export function buildSocialAgentPublishConfirmationCard(input: {
             payload: {
               taskId: task.id,
               socialRequestDraft: draft,
+              socialRequestId: socialRequestId ?? null,
               sideEffect: 'edit_draft_only',
             },
           },
@@ -297,6 +310,7 @@ export function buildSocialAgentPublishConfirmationCard(input: {
             payload: {
               taskId: task.id,
               socialRequestDraft: draft,
+              socialRequestId: socialRequestId ?? null,
               privateMatchMode: true,
               publicDiscoverPublishSkipped: true,
               sourceAction: 'activity.skip_publish',
@@ -304,6 +318,78 @@ export function buildSocialAgentPublishConfirmationCard(input: {
             },
           },
         ],
+  };
+}
+
+export function buildSocialAgentSlotCompletionCard(input: {
+  task: AgentTask;
+  missing: string[];
+  sourceText?: string | null;
+}): FitMeetAlphaCard {
+  const missing = input.missing.map((item) => text(item)).filter(Boolean);
+  const missingCopy = missing.length ? missing.join('、') : '必要信息';
+  return {
+    id: `activity_slot_completion:${input.task.id}`,
+    type: 'safety_boundary',
+    schemaVersion: 'fitmeet.tool-ui.v1',
+    schemaType: 'social_match.slot_completion',
+    title: '补齐约练卡信息',
+    body: `生成约练卡前还差：${missingCopy}。补齐后我会先生成确认卡，不会直接发布到发现页。`,
+    status: 'waiting_confirmation',
+    data: {
+      taskId: input.task.id,
+      schemaName: 'OpportunitySlotCompletion',
+      schemaVersion: 'fitmeet.tool-ui.v1',
+      schemaType: 'social_match.slot_completion',
+      workflowState: 'COLLECTING_SLOTS',
+      waitingFor: missing.includes('安全边界')
+        ? 'safety_boundary'
+        : 'opportunity_slot_completion',
+      missing,
+      sourceText: text(input.sourceText),
+      defaultSafetyMessage: '按默认安全设置处理',
+      customSafetyPrompt:
+        '请直接输入你的安全边界，例如：只在公共场所，先站内沟通。',
+      cancelMessage: '取消这次约练卡发布',
+    },
+    actions: [
+      {
+        id: `slot_default_safety:${input.task.id}`,
+        label: '使用默认安全设置',
+        action: 'slot_completion.use_default_safety',
+        schemaAction: 'slot_completion.use_default_safety',
+        requiresConfirmation: false,
+        payload: {
+          taskId: input.task.id,
+          message: '按默认安全设置处理',
+          waitingFor: 'safety_boundary',
+        },
+      },
+      {
+        id: `slot_custom_safety:${input.task.id}`,
+        label: '自定义安全边界',
+        action: 'slot_completion.custom_safety',
+        schemaAction: 'slot_completion.custom_safety',
+        requiresConfirmation: false,
+        payload: {
+          taskId: input.task.id,
+          message: '我想自定义安全边界',
+          waitingFor: 'safety_boundary',
+        },
+      },
+      {
+        id: `slot_cancel:${input.task.id}`,
+        label: '取消',
+        action: 'slot_completion.cancel',
+        schemaAction: 'slot_completion.cancel',
+        requiresConfirmation: false,
+        payload: {
+          taskId: input.task.id,
+          message: '取消这次约练卡发布',
+          waitingFor: 'opportunity_slot_completion',
+        },
+      },
+    ],
   };
 }
 
@@ -491,6 +577,11 @@ function uniqueStrings(values: Array<string | null | undefined>): string[] {
   return Array.from(
     new Set(values.map((value) => text(value)).filter(Boolean)),
   ).slice(0, 20);
+}
+
+function positiveNumber(value: unknown): number | null {
+  const number = Number(value);
+  return Number.isFinite(number) && number > 0 ? number : null;
 }
 
 function record(value: unknown): Record<string, unknown> {

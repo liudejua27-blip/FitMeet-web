@@ -36,6 +36,7 @@ describe('tool-ui-schema', () => {
     expect(productComponentForSchemaType('social_match.candidate')).toBe('CandidateCards');
     expect(productComponentForSchemaType('social_match.activity')).toBe('OpportunityCard');
     expect(productComponentForSchemaType('social_match.empty')).toBe('CandidateEmptyStateCard');
+    expect(productComponentForSchemaType('social_match.slot_completion')).toBe('GenericCard');
     expect(productComponentForSchemaType('life_graph.diff')).toBe('LifeGraphDiffCard');
     expect(productComponentForSchemaType('meet_loop.timeline')).toBe('MeetLoopTimeline');
     expect(productComponentForSchemaType('safety.approval')).toBe('ApprovalPanel');
@@ -83,6 +84,23 @@ describe('tool-ui-schema', () => {
       }),
       normalizeAssistantCard({
         schemaVersion: FITMEET_TOOL_UI_SCHEMA_VERSION,
+        schemaType: 'social_match.slot_completion',
+        title: '补齐约练卡信息',
+        data: {
+          schemaName: 'OpportunitySlotCompletion',
+          schemaVersion: FITMEET_TOOL_UI_SCHEMA_VERSION,
+          schemaType: 'social_match.slot_completion',
+        },
+        actions: [
+          {
+            schemaAction: 'slot_completion.use_default_safety',
+            label: '使用默认安全设置',
+            requiresConfirmation: false,
+          },
+        ],
+      }),
+      normalizeAssistantCard({
+        schemaVersion: FITMEET_TOOL_UI_SCHEMA_VERSION,
         schemaType: 'safety.approval',
         title: '安全确认',
         data: {
@@ -94,15 +112,16 @@ describe('tool-ui-schema', () => {
     ];
 
     expect(summarizeToolUICardCollection(cards)).toMatchObject({
-      title: '2 个候选 · 1 个下一步建议 · 1 张约练卡 · 1 个待确认动作',
+      title: '2 个候选 · 1 个下一步建议 · 1 张约练卡 · 1 张补充卡 · 1 个待确认动作',
       candidateCount: 2,
       emptyCount: 1,
-      opportunityCount: 3,
+      opportunityCount: 4,
       approvalCount: 1,
       components: [
         'CandidateCards',
         'CandidateEmptyStateCard',
         'OpportunityCard',
+        'GenericCard',
         'ApprovalPanel',
       ],
     });
@@ -613,6 +632,31 @@ describe('tool-ui-schema', () => {
       },
       {
         schemaAction: 'candidate.like',
+        requiresConfirmation: false,
+        source: 'default',
+      },
+      {
+        schemaAction: 'candidate.feedback.good_fit',
+        requiresConfirmation: false,
+        source: 'default',
+      },
+      {
+        schemaAction: 'candidate.feedback.bad_fit',
+        requiresConfirmation: false,
+        source: 'default',
+      },
+      {
+        schemaAction: 'candidate.feedback.too_far',
+        requiresConfirmation: false,
+        source: 'default',
+      },
+      {
+        schemaAction: 'candidate.feedback.time_mismatch',
+        requiresConfirmation: false,
+        source: 'default',
+      },
+      {
+        schemaAction: 'candidate.feedback.style_mismatch',
         requiresConfirmation: false,
         source: 'default',
       },
@@ -1279,6 +1323,9 @@ describe('tool-ui-schema', () => {
 
     expect(toolUISchemaActionFromUnknown('candidate.generate_opener')).toBe(
       'candidate.generate_opener',
+    );
+    expect(toolUISchemaActionFromUnknown('slot_completion.use_default_safety')).toBe(
+      'slot_completion.use_default_safety',
     );
     expect(toolUISchemaActionFromUnknown('debug.raw_tool')).toBeUndefined();
     expect(card.actions).toEqual([

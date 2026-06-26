@@ -19,6 +19,7 @@ import {
 } from '../api/adminRbacApi';
 import {
   agentL5RuntimeApi,
+  type AgentFeedbackEventDto,
   type AgentCanaryDecision,
   type AgentL5DashboardDto,
   type AgentMeetLoopStateDto,
@@ -50,7 +51,7 @@ const tabs: Array<{ key: AdminTab; label: string; description: string }> = [
   { key: 'meetLoop', label: 'Meet-loop State', description: '邀请到评价的事件状态机' },
   { key: 'canary', label: 'Canary Decision', description: '补丁灰度效果和发布决策' },
   { key: 'auto', label: 'Auto Runner', description: '自动 patch、eval、灰度和回滚' },
-  { key: 'feedback', label: 'Message Feedback', description: '用户点赞点踩与自进化信号' },
+  { key: 'feedback', label: 'Agent Feedback', description: '候选质量、纠错和消息反馈' },
   { key: 'observability', label: 'Observability', description: 'trace、延迟、失败和报警' },
   { key: 'workers', label: 'Worker Queue', description: 'DB 队列、心跳和失败重试' },
   { key: 'rbac', label: 'RBAC', description: '角色、授权和审计日志' },
@@ -191,6 +192,17 @@ export const AgentL5AdminPage = memo(function AgentL5AdminPage() {
     return items;
   }, [dashboard?.messageFeedback, feedbackFilter]);
 
+  const filteredAgentFeedback = useMemo(() => {
+    const items = dashboard?.agentFeedbackEvents ?? [];
+    if (feedbackFilter === 'positive') {
+      return items.filter((item) => item.reasonCode === 'good_fit');
+    }
+    if (feedbackFilter === 'negative') {
+      return items.filter((item) => item.reasonCode !== 'good_fit');
+    }
+    return items;
+  }, [dashboard?.agentFeedbackEvents, feedbackFilter]);
+
   const agentNames = useMemo(
     () => unique((dashboard?.subagentMemory ?? []).map((item) => item.agentName)),
     [dashboard?.subagentMemory],
@@ -272,9 +284,13 @@ export const AgentL5AdminPage = memo(function AgentL5AdminPage() {
             />
             <Metric
               icon={<Activity className="h-5 w-5" />}
-              label="Message Feedback"
-              value={dashboard?.summary.messageFeedback ?? dashboard?.messageFeedback?.length ?? 0}
-              detail={`${dashboard?.summary.negativeMessageFeedback ?? 0} negative signals`}
+              label="Agent Feedback"
+              value={
+                dashboard?.summary.agentFeedbackEvents ??
+                dashboard?.agentFeedbackEvents?.length ??
+                0
+              }
+              detail={`${dashboard?.summary.negativeAgentFeedbackEvents ?? 0} negative signals`}
             />
           </section>
 
@@ -329,11 +345,18 @@ export const AgentL5AdminPage = memo(function AgentL5AdminPage() {
                   runnerBusy={runnerBusy}
                 />
               ) : activeTab === 'feedback' ? (
-                <MessageFeedbackPanel
-                  feedbackFilter={feedbackFilter}
-                  items={filteredMessageFeedback}
-                  onFeedbackFilterChange={setFeedbackFilter}
-                />
+                <div className="space-y-6 p-4">
+                  <AgentFeedbackPanel
+                    feedbackFilter={feedbackFilter}
+                    items={filteredAgentFeedback}
+                    onFeedbackFilterChange={setFeedbackFilter}
+                  />
+                  <MessageFeedbackPanel
+                    feedbackFilter={feedbackFilter}
+                    items={filteredMessageFeedback}
+                    onFeedbackFilterChange={setFeedbackFilter}
+                  />
+                </div>
               ) : activeTab === 'observability' ? (
                 <ObservabilityPanel
                   observability={dashboard?.observability ?? null}
@@ -845,6 +868,66 @@ function CanaryPanel({
             {item.decision}
           </StatusPill>,
           item.note || jsonPreview(item.context),
+          formatDate(item.createdAt),
+        ])}
+      />
+    </PanelShell>
+  );
+}
+
+function AgentFeedbackPanel({
+  feedbackFilter,
+  items,
+  onFeedbackFilterChange,
+}: {
+  feedbackFilter: string;
+  items: AgentFeedbackEventDto[];
+  onFeedbackFilterChange: (value: string) => void;
+}) {
+  const negative = items.filter((item) => item.reasonCode !== 'good_fit').length;
+  return (
+    <PanelShell
+      action={
+        <select
+          className="rounded-lg border border-white/10 bg-[#0b0c0d] px-3 py-2 text-sm font-bold text-white outline-none"
+          value={feedbackFilter}
+          onChange={(event) => onFeedbackFilterChange(event.target.value)}
+        >
+          <option value="">全部反馈</option>
+          <option value="positive">Positive</option>
+          <option value="negative">Negative</option>
+        </select>
+      }
+      count={items.length}
+      description={`候选质量、用户纠错和任务结果反馈会写入 agent_feedback_events，并作为 failure corpus / golden-set 候选来源。当前负向或纠错信号 ${negative} 条。`}
+      title="Agent Feedback Events"
+    >
+      <DataTable
+        emptyText="暂无 agent feedback events"
+        headers={[
+          'ID',
+          'Type',
+          'Reason',
+          'Task',
+          'Public Intent',
+          'Candidate',
+          'Correction / Text',
+          'Source',
+          'Created',
+        ]}
+        rows={items.map((item) => [
+          `#${item.id}`,
+          item.feedbackType,
+          <StatusPill key="reason" tone={item.reasonCode === 'good_fit' ? 'good' : 'warn'}>
+            {item.reasonCode}
+          </StatusPill>,
+          item.taskId ? `Task ${item.taskId}` : '-',
+          item.publicIntentId ?? '-',
+          item.candidateId ?? item.candidateRecordId ?? '-',
+          item.correctionType
+            ? `${item.correctionType}: ${item.oldValue ?? '-'} -> ${item.newValue ?? '-'}`
+            : item.freeText || jsonPreview(item.metadata),
+          item.source,
           formatDate(item.createdAt),
         ])}
       />

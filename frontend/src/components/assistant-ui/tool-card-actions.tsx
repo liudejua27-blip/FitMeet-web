@@ -785,6 +785,11 @@ function visualActionsForCard(
     const preferredOrder: ToolUISchemaAction[] = [
       'candidate.view_detail',
       'candidate.like',
+      'candidate.feedback.good_fit',
+      'candidate.feedback.bad_fit',
+      'candidate.feedback.too_far',
+      'candidate.feedback.time_mismatch',
+      'candidate.feedback.style_mismatch',
       'candidate.generate_opener',
       'opener.confirm_send',
       'candidate.connect',
@@ -819,6 +824,27 @@ function isPublishDismissSchemaAction(
   );
 }
 
+function isCandidateFeedbackSchemaAction(
+  schemaAction: ToolUISchemaAction | null | undefined,
+) {
+  return (
+    schemaAction === 'candidate.feedback.good_fit' ||
+    schemaAction === 'candidate.feedback.bad_fit' ||
+    schemaAction === 'candidate.feedback.too_far' ||
+    schemaAction === 'candidate.feedback.time_mismatch' ||
+    schemaAction === 'candidate.feedback.style_mismatch'
+  );
+}
+
+function candidateFeedbackLabel(schemaAction: ToolUISchemaAction | null | undefined) {
+  if (schemaAction === 'candidate.feedback.good_fit') return '合适';
+  if (schemaAction === 'candidate.feedback.bad_fit') return '不合适';
+  if (schemaAction === 'candidate.feedback.too_far') return '太远';
+  if (schemaAction === 'candidate.feedback.time_mismatch') return '时间不对';
+  if (schemaAction === 'candidate.feedback.style_mismatch') return '风格不对';
+  return null;
+}
+
 function visualCardActionLabel(
   card: SchemaDrivenAssistantCard,
   action: VisibleCardAction,
@@ -843,6 +869,9 @@ function visualCardActionLabel(
   }
   if (card.schemaType === 'social_match.candidate') {
     if (action.schemaAction === 'candidate.view_detail') return '查看详情';
+    if (isCandidateFeedbackSchemaAction(action.schemaAction)) {
+      return candidateFeedbackLabel(action.schemaAction);
+    }
     if (action.schemaAction === 'candidate.like') return '收藏';
     if (action.schemaAction === 'candidate.generate_opener') return '发消息';
     if (action.schemaAction === 'opener.confirm_send') return '邀请Ta';
@@ -874,6 +903,9 @@ function visualCardActionIcon(
   }
   if (card.schemaType === 'social_match.candidate') {
     if (action.schemaAction === 'candidate.view_detail') return ExternalLink;
+    if (isCandidateFeedbackSchemaAction(action.schemaAction)) {
+      return action.schemaAction === 'candidate.feedback.good_fit' ? CheckCircle2 : X;
+    }
     if (action.schemaAction === 'candidate.like') return CheckCircle2;
     if (action.schemaAction === 'candidate.generate_opener') return MessageCircle;
     if (action.schemaAction === 'opener.confirm_send') return Send;
@@ -1004,6 +1036,21 @@ function canonicalVisibleActionKey(
     ) {
       return 'candidate.like';
     }
+    if (/^(candidate\.feedback\.good_fit|candidate_feedback_good_fit)$/.test(rawAction)) {
+      return 'candidate.feedback.good_fit';
+    }
+    if (/^(candidate\.feedback\.bad_fit|candidate_feedback_bad_fit)$/.test(rawAction)) {
+      return 'candidate.feedback.bad_fit';
+    }
+    if (/^(candidate\.feedback\.too_far|candidate_feedback_too_far)$/.test(rawAction)) {
+      return 'candidate.feedback.too_far';
+    }
+    if (/^(candidate\.feedback\.time_mismatch|candidate_feedback_time_mismatch)$/.test(rawAction)) {
+      return 'candidate.feedback.time_mismatch';
+    }
+    if (/^(candidate\.feedback\.style_mismatch|candidate_feedback_style_mismatch)$/.test(rawAction)) {
+      return 'candidate.feedback.style_mismatch';
+    }
     if (/^(generate_opener|draft_opener|candidate\.generate_opener)$/.test(rawAction)) {
       return 'candidate.generate_opener';
     }
@@ -1060,6 +1107,11 @@ function visibleActionRequiresConfirmation(
 const LOW_RISK_VISIBLE_SCHEMA_ACTIONS = new Set<ToolUISchemaAction>([
   'candidate.view_detail',
   'candidate.like',
+  'candidate.feedback.good_fit',
+  'candidate.feedback.bad_fit',
+  'candidate.feedback.too_far',
+  'candidate.feedback.time_mismatch',
+  'candidate.feedback.style_mismatch',
   'candidate.generate_opener',
   'candidate.more_like_this',
   'candidate.skip',
@@ -1071,6 +1123,9 @@ const LOW_RISK_VISIBLE_SCHEMA_ACTIONS = new Set<ToolUISchemaAction>([
   'social_intent.dismiss',
   'opener.regenerate',
   'opener.reject',
+  'slot_completion.use_default_safety',
+  'slot_completion.custom_safety',
+  'slot_completion.cancel',
 ]);
 
 const LOW_RISK_VISIBLE_RAW_ACTIONS = new Set([
@@ -1082,6 +1137,11 @@ const LOW_RISK_VISIBLE_RAW_ACTIONS = new Set([
   'candidate.save',
   'candidate.favorite',
   'candidate.bookmark',
+  'candidate.feedback.good_fit',
+  'candidate.feedback.bad_fit',
+  'candidate.feedback.too_far',
+  'candidate.feedback.time_mismatch',
+  'candidate.feedback.style_mismatch',
   'generate_opener',
   'draft_opener',
   'candidate.generate_opener',
@@ -1162,6 +1222,11 @@ function sortVisibleCardActions(
       ? [
           'candidate.view_detail',
           'candidate.like',
+          'candidate.feedback.good_fit',
+          'candidate.feedback.bad_fit',
+          'candidate.feedback.too_far',
+          'candidate.feedback.time_mismatch',
+          'candidate.feedback.style_mismatch',
           'candidate.generate_opener',
           'opener.confirm_send',
           'candidate.connect',
@@ -1409,6 +1474,7 @@ function inlineOutcomeFromActionResponse(
   if (
     action.schemaAction !== 'candidate.like' &&
     action.schemaAction !== 'candidate.skip' &&
+    !isCandidateFeedbackSchemaAction(action.schemaAction) &&
     action.schemaAction !== 'candidate.more_like_this' &&
     action.schemaAction !== 'candidate.view_detail' &&
     action.schemaAction !== 'publish_to_discover' &&
@@ -1440,6 +1506,21 @@ function inlineOutcomeStableBody(schemaAction: ToolUISchemaAction | null | undef
   if (schemaAction === 'candidate.like') {
     return '已记录这个候选，后续推荐会参考你的选择。';
   }
+  if (schemaAction === 'candidate.feedback.good_fit') {
+    return '已记录“合适”，后续候选质量会参考这个信号。';
+  }
+  if (schemaAction === 'candidate.feedback.bad_fit') {
+    return '已记录“不合适”，后续会减少类似候选。';
+  }
+  if (schemaAction === 'candidate.feedback.too_far') {
+    return '已记录“太远”，后续会优先收紧地点范围。';
+  }
+  if (schemaAction === 'candidate.feedback.time_mismatch') {
+    return '已记录“时间不对”，后续会更重视时间匹配。';
+  }
+  if (schemaAction === 'candidate.feedback.style_mismatch') {
+    return '已记录“风格不对”，后续会调整互动风格偏好。';
+  }
   if (schemaAction === 'candidate.skip') {
     return '已跳过这个候选，后续会减少类似推荐。';
   }
@@ -1457,6 +1538,9 @@ function inlineOutcomeStableBody(schemaAction: ToolUISchemaAction | null | undef
 
 function inlineOutcomeTitle(schemaAction: ToolUISchemaAction | null | undefined) {
   if (schemaAction === 'candidate.like') return '已收藏';
+  if (isCandidateFeedbackSchemaAction(schemaAction)) {
+    return candidateFeedbackLabel(schemaAction) ?? '已记录反馈';
+  }
   if (schemaAction === 'candidate.skip') return '已跳过';
   if (schemaAction === 'candidate.more_like_this') return '继续找类似机会';
   if (schemaAction === 'publish_to_discover') return '已发布到发现';
@@ -1471,6 +1555,21 @@ function inlineOutcomeTitle(schemaAction: ToolUISchemaAction | null | undefined)
 function inlineOutcomeFallbackBody(schemaAction: ToolUISchemaAction | null | undefined) {
   if (schemaAction === 'candidate.like') {
     return '已记录这个候选，后续推荐会参考你的选择。';
+  }
+  if (schemaAction === 'candidate.feedback.good_fit') {
+    return '已记录“合适”，后续候选质量会参考这个信号。';
+  }
+  if (schemaAction === 'candidate.feedback.bad_fit') {
+    return '已记录“不合适”，后续会减少类似候选。';
+  }
+  if (schemaAction === 'candidate.feedback.too_far') {
+    return '已记录“太远”，后续会优先收紧地点范围。';
+  }
+  if (schemaAction === 'candidate.feedback.time_mismatch') {
+    return '已记录“时间不对”，后续会更重视时间匹配。';
+  }
+  if (schemaAction === 'candidate.feedback.style_mismatch') {
+    return '已记录“风格不对”，后续会调整互动风格偏好。';
   }
   if (schemaAction === 'candidate.skip') {
     return '已跳过这个候选，后续会减少类似推荐。';
@@ -1839,6 +1938,9 @@ function normalizeVisibleActionLabel(
     return requiresConfirmation ? '加好友并聊天' : '加好友并聊天';
   }
   if (canonicalKey === 'candidate.like') return '收藏';
+  if (isCandidateFeedbackSchemaAction(canonicalKey)) {
+    return candidateFeedbackLabel(canonicalKey);
+  }
   if (canonicalKey === 'candidate.generate_opener') {
     return '生成开场白';
   }
@@ -1896,6 +1998,51 @@ function defaultCardActions(card: SchemaDrivenAssistantCard): VisibleCardAction[
         requiresConfirmation: false,
         schemaAction: 'candidate.like',
         action: 'candidate.like',
+        payload: basePayload,
+        source: 'default' as const,
+      },
+      {
+        id: `${card.id}:feedback-good-fit`,
+        label: '合适',
+        requiresConfirmation: false,
+        schemaAction: 'candidate.feedback.good_fit',
+        action: 'candidate.feedback.good_fit',
+        payload: basePayload,
+        source: 'default' as const,
+      },
+      {
+        id: `${card.id}:feedback-bad-fit`,
+        label: '不合适',
+        requiresConfirmation: false,
+        schemaAction: 'candidate.feedback.bad_fit',
+        action: 'candidate.feedback.bad_fit',
+        payload: basePayload,
+        source: 'default' as const,
+      },
+      {
+        id: `${card.id}:feedback-too-far`,
+        label: '太远',
+        requiresConfirmation: false,
+        schemaAction: 'candidate.feedback.too_far',
+        action: 'candidate.feedback.too_far',
+        payload: basePayload,
+        source: 'default' as const,
+      },
+      {
+        id: `${card.id}:feedback-time-mismatch`,
+        label: '时间不对',
+        requiresConfirmation: false,
+        schemaAction: 'candidate.feedback.time_mismatch',
+        action: 'candidate.feedback.time_mismatch',
+        payload: basePayload,
+        source: 'default' as const,
+      },
+      {
+        id: `${card.id}:feedback-style-mismatch`,
+        label: '风格不对',
+        requiresConfirmation: false,
+        schemaAction: 'candidate.feedback.style_mismatch',
+        action: 'candidate.feedback.style_mismatch',
         payload: basePayload,
         source: 'default' as const,
       },

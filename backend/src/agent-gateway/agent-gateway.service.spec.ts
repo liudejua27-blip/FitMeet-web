@@ -58,6 +58,9 @@ describe('AgentGatewayService public social intents', () => {
       mode: 'public',
     });
     expect(queryBuilder.andWhere).toHaveBeenCalledWith(
+      "COALESCE(intent.metadata ->> 'tombstoned', 'false') <> 'true'",
+    );
+    expect(queryBuilder.andWhere).toHaveBeenCalledWith(
       'intent.status IN (:...statuses)',
       {
         statuses: [
@@ -230,5 +233,42 @@ describe('AgentGatewayService public social intents', () => {
     expect(result.candidates[0]).not.toHaveProperty('reasonTags');
     expect(result.candidates[0]).not.toHaveProperty('nextAction');
     expect(JSON.stringify(result)).not.toMatch(/Agent Smoke|agent_api_smoke/i);
+  });
+
+  it('does not return tombstoned public intent detail', async () => {
+    const service = makeService({
+      findOne: jest.fn().mockResolvedValue({
+        id: 'intent-dismissed',
+        mode: 'public',
+        status: SocialRequestStatus.Searching,
+        metadata: { tombstoned: true, publishStatus: 'dismissed' },
+      }),
+    });
+
+    await expect(
+      service.getPublicSocialIntent('intent-dismissed'),
+    ).rejects.toThrow('Public social intent not found');
+  });
+
+  it('does not search matches for tombstoned public intents', async () => {
+    const publicIntentRepo = {
+      findOne: jest.fn().mockResolvedValue({
+        id: 'intent-dismissed',
+        mode: 'public',
+        status: SocialRequestStatus.Searching,
+        metadata: { tombstoned: true, publishStatus: 'dismissed' },
+      }),
+      save: jest.fn(),
+    };
+    const service = makeService(publicIntentRepo);
+    const searchSpy = jest.spyOn(
+      service as unknown as { searchSocialCandidates: jest.Mock },
+      'searchSocialCandidates',
+    );
+
+    await expect(
+      service.getPublicSocialIntentMatches('intent-dismissed'),
+    ).rejects.toThrow('Public social intent not found');
+    expect(searchSpy).not.toHaveBeenCalled();
   });
 });

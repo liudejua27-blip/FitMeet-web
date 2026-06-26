@@ -250,11 +250,16 @@ describe('tool-card-actions runtime identity', () => {
     expect(actions.map((action) => action.label)).toEqual([
       '查看详情',
       '收藏',
+      '合适',
+      '不合适',
+      '太远',
+      '时间不对',
+      '风格不对',
       '生成开场白',
       '发送邀请',
       '加好友并聊天',
     ]);
-    expect(actions).toHaveLength(5);
+    expect(actions).toHaveLength(10);
     expect(actions.filter((action) => action.label === '发送邀请')).toHaveLength(1);
     expect(actions.filter((action) => action.label === '加好友并聊天')).toHaveLength(1);
     expect(actions.find((action) => action.label === '收藏')).toMatchObject({

@@ -91,6 +91,7 @@ const ASSISTANT_CARD_RENDERERS: Record<ToolUISchemaType, ToolUICardRenderer> = {
   'social_match.candidate': CandidateResultCard,
   'social_match.activity': ActivityOpportunityCard,
   'social_match.empty': CandidateEmptyStateCard,
+  'social_match.slot_completion': GenericResultCard,
   'profile.completion': ProfileCompletionResultCard,
   'life_graph.diff': LifeGraphDiffCard,
   'meet_loop.timeline': MeetLoopResultCard,

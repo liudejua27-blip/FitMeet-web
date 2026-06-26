@@ -12,6 +12,8 @@ import {
   LifeGraphProposalStatus,
 } from '../life-graph/life-graph.enums';
 import { toUserFacingAgentResponse } from './user-facing-agent-response';
+import type { UserFacingAgentResponse } from './user-facing-agent-response';
+import { validateUserFacingAgentResponse } from './user-facing-agent-response-validator';
 
 describe('toUserFacingAgentResponse', () => {
   it('returns only the user-facing contract and strips debug fields from cards', () => {
@@ -1307,5 +1309,142 @@ describe('toUserFacingAgentResponse', () => {
       messagesHref: null,
       requiredConfirmation: false,
     });
+  });
+});
+
+describe('validateUserFacingAgentResponse', () => {
+  function baseResponse(
+    overrides: Partial<UserFacingAgentResponse> = {},
+  ): UserFacingAgentResponse {
+    return {
+      assistantMessage: '我会继续处理你的需求。',
+      lightStatus: '正在思考',
+      cards: [],
+      safeStatus: {
+        blocked: false,
+        level: 'low',
+        boundaryNotes: [],
+        requiredConfirmations: [],
+      },
+      pendingConfirmations: [],
+      permissionMode: AgentTaskPermissionMode.Confirm,
+      ...overrides,
+    };
+  }
+
+  it('rejects internal implementation terms in ordinary responses', () => {
+    expect(() =>
+      validateUserFacingAgentResponse(
+        baseResponse({ assistantMessage: 'planner 已经完成。' }),
+      ),
+    ).toThrow('user_facing_response_internal_term_leaked');
+  });
+
+  it('rejects published claims without a verified public intent', () => {
+    expect(() =>
+      validateUserFacingAgentResponse(
+        baseResponse({ assistantMessage: '已发布到发现页。' }),
+      ),
+    ).toThrow('user_facing_response_claims_published_without_public_intent');
+  });
+
+  it('rejects matched claims without candidate cards', () => {
+    expect(() =>
+      validateUserFacingAgentResponse(
+        baseResponse({
+          assistantMessage: '已匹配到合适候选。',
+          publicLoop: {
+            stage: 'discover_visible',
+            publicIntentId: 'intent_1',
+            discoverHref: '/discover?publicIntentId=intent_1',
+            publicIntentHref: '/public-intent/intent_1',
+            messagesHref: null,
+            requiredConfirmation: false,
+          },
+        }),
+      ),
+    ).toThrow('user_facing_response_claims_matched_without_candidates');
+  });
+
+  it('rejects candidate stage before Discover is verified', () => {
+    expect(() =>
+      validateUserFacingAgentResponse(
+        baseResponse({
+          publicLoop: {
+            stage: 'candidates_recommended',
+            publicIntentId: null,
+            discoverHref: null,
+            publicIntentHref: null,
+            messagesHref: null,
+            requiredConfirmation: false,
+          },
+          cards: [
+            {
+              id: 'candidate-1',
+              type: 'candidate_card',
+              title: '候选',
+              body: '时间地点接近。',
+              data: {},
+              actions: [],
+            },
+          ],
+        }),
+      ),
+    ).toThrow('user_facing_response_candidates_before_discover_verified');
+  });
+
+  it('rejects candidate cards after the user dismissed the loop', () => {
+    expect(() =>
+      validateUserFacingAgentResponse(
+        baseResponse({
+          publicLoop: {
+            stage: 'dismissed',
+            publicIntentId: null,
+            discoverHref: null,
+            publicIntentHref: null,
+            messagesHref: null,
+            requiredConfirmation: false,
+          },
+          cards: [
+            {
+              id: 'candidate-1',
+              type: 'candidate_card',
+              title: '候选',
+              body: '不应在撤下后展示。',
+              data: {},
+              actions: [],
+            },
+          ],
+        }),
+      ),
+    ).toThrow('user_facing_response_dismissed_contains_candidates');
+  });
+
+  it('accepts published and matched copy when evidence exists', () => {
+    expect(
+      validateUserFacingAgentResponse(
+        baseResponse({
+          assistantMessage: '已发布到发现页，并找到候选。',
+          publicLoop: {
+            stage: 'candidates_recommended',
+            publicIntentId: 'intent_1',
+            discoverHref: '/discover?publicIntentId=intent_1',
+            publicIntentHref: '/public-intent/intent_1',
+            messagesHref: null,
+            requiredConfirmation: false,
+          },
+          cards: [
+            {
+              id: 'candidate-1',
+              type: 'candidate_card',
+              title: '候选',
+              body: '时间地点接近。',
+              data: {},
+              actions: [],
+            },
+          ],
+        }),
+      ).assistantMessage,
+    ).toContain('已发布');
   });
 });

@@ -117,6 +117,11 @@ export type FitMeetAgentLoopStage =
 export type FitMeetAgentSchemaAction =
   | 'candidate.like'
   | 'candidate.skip'
+  | 'candidate.feedback.good_fit'
+  | 'candidate.feedback.bad_fit'
+  | 'candidate.feedback.too_far'
+  | 'candidate.feedback.time_mismatch'
+  | 'candidate.feedback.style_mismatch'
   | 'candidate.more_like_this'
   | 'candidate.view_detail'
   | 'candidate.connect'
@@ -140,7 +145,10 @@ export type FitMeetAgentSchemaAction =
   | 'life_graph.accept_update'
   | 'life_graph.reject_update'
   | 'meet_loop.resume'
-  | 'meet_loop.reschedule';
+  | 'meet_loop.reschedule'
+  | 'slot_completion.use_default_safety'
+  | 'slot_completion.custom_safety'
+  | 'slot_completion.cancel';
 
 export type FitMeetAgentCardExecutableAction = FitMeetAgentSchemaAction;
 export type UserFacingAgentCheckpointAction = 'resume' | 'retry' | 'replay' | 'fork';
@@ -323,6 +331,7 @@ export type FitMeetAlphaCardType =
   | 'audit_update'
   | 'safety_boundary'
   | 'profile_completion'
+  | 'slot_completion'
   | 'candidate_empty_state';
 
 export interface FitMeetAlphaCardAction {
@@ -361,6 +370,7 @@ export interface FitMeetAlphaCard {
     | 'social_match.candidate'
     | 'social_match.activity'
     | 'social_match.empty'
+    | 'social_match.slot_completion'
     | 'profile.completion'
     | 'life_graph.diff'
     | 'meet_loop.timeline'

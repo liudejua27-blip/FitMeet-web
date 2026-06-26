@@ -1989,6 +1989,33 @@ describe('agent workspace runtime fallback boundaries', () => {
     ).toBe(true);
   });
 
+  it('keeps opportunity clarification pending when the backend returns a slot completion card', () => {
+    expect(
+      responseAwaitsOpportunityClarification({
+        assistantMessage: '生成约练卡前还差：安全边界。',
+        assistantMessageSource: 'deterministic',
+        cards: [
+          {
+            id: 'activity_slot_completion:101',
+            type: 'safety_boundary',
+            schemaVersion: 'fitmeet.tool-ui.v1',
+            schemaType: 'social_match.slot_completion',
+            title: '补齐约练卡信息',
+            data: {
+              schemaType: 'social_match.slot_completion',
+              waitingFor: 'safety_boundary',
+            },
+            actions: [],
+          },
+        ],
+        candidateGroups: [],
+        nextActions: [],
+        profileUpdates: [],
+        taskId: 101,
+      } as unknown as UserFacingAgentResponse),
+    ).toBe(true);
+  });
+
   it('lets replay.summary replace old process nodes instead of accumulating a timeline', () => {
     const previousSteps: Step[] = [
       {

@@ -16,7 +16,7 @@ export function SocialWorldHeroVisual() {
 
     const pointerQuery = window.matchMedia('(pointer: fine) and (min-width: 769px)');
     const reducedMotionQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
-    const interactionSurface = root.closest<HTMLElement>('.fm-enterprise-hero') ?? root;
+    const interactionSurface = root.closest<HTMLElement>('.fm-enterprise-hero-system') ?? root;
     let animationFrame = 0;
     let latestPointer: PointerEvent | null = null;
 

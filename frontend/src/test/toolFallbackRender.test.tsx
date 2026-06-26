@@ -420,6 +420,81 @@ describe('assistant-ui tool fallback rendering', () => {
     );
   });
 
+  it('shows user-facing labels for remaining profile gaps after saving', async () => {
+    const draft = profileDraft();
+    vi.spyOn(socialProfileApi, 'aiDraft').mockResolvedValue({
+      mode: 'fallback',
+      draft,
+      proposal: {
+        proposalId: 902,
+        baseProfileVersion: 3,
+        proposedFields: {},
+        draft,
+        status: 'pending',
+        expiresAt: '2026-06-27T00:00:00.000Z',
+      },
+      profileUsed: {} as never,
+      completion: completion(),
+    });
+    vi.spyOn(socialProfileApi, 'aiSave').mockResolvedValue({
+      profile: {} as never,
+      aiDelegateProfile: null,
+      matchingEnabled: false,
+      completion: completion({
+        percent: 87,
+        missingFields: ['ageRange', 'gender', 'nearbyArea'],
+      }),
+      proposal: null,
+    });
+
+    render(
+      <AssistantDataFallback
+        type="data"
+        status={{ type: 'complete' }}
+        name="fitmeet-cards"
+        data={{
+          cards: [
+            {
+              id: 'profile_completion:labels',
+              type: 'profile_completion',
+              schemaVersion: 'fitmeet.tool-ui.v1',
+              schemaType: 'profile.completion',
+              title: '让 Agent 帮你补充个人信息',
+              body: '回答后先生成更新预览。',
+              data: {
+                schemaName: 'ProfileCompletionCard',
+                schemaVersion: 'fitmeet.tool-ui.v1',
+                schemaType: 'profile.completion',
+                questions: [
+                  {
+                    key: 'nearbyArea',
+                    label: '常活动区域',
+                    question: '你通常在哪个区、商圈或健身房附近活动？',
+                    options: ['学校或公司附近'],
+                  },
+                ],
+              },
+              actions: [],
+            },
+          ],
+        }}
+      />,
+    );
+
+    const card = await screen.findByTestId('profile-completion-card');
+    fireEvent.click(within(card).getByRole('button', { name: '学校或公司附近' }));
+    fireEvent.click(within(card).getByRole('button', { name: '生成更新预览' }));
+    await waitFor(() => expect(socialProfileApi.aiDraft).toHaveBeenCalled());
+    fireEvent.click(within(card).getByRole('button', { name: '确认保存' }));
+
+    await screen.findByText(/性别展示偏好/);
+    expect(screen.getByText(/年龄段展示偏好/)).toBeInTheDocument();
+    expect(screen.getAllByText(/常活动区域/).length).toBeGreaterThan(0);
+    expect(screen.queryByText(/ageRange/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/gender/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/nearbyArea/)).not.toBeInTheDocument();
+  });
+
   it('keeps standalone approval panels for high-risk social actions', () => {
     render(
       <AssistantDataFallback
@@ -610,7 +685,18 @@ describe('assistant-ui tool fallback rendering', () => {
       within(actionCard)
         .getAllByTestId('assistant-ui-schema-action')
         .map((button) => button.textContent?.trim()),
-    ).toEqual(['查看详情', '收藏', '发消息', '邀请Ta', '加好友并聊天']);
+    ).toEqual([
+      '查看详情',
+      '收藏',
+      '合适',
+      '不合适',
+      '太远',
+      '时间不对',
+      '风格不对',
+      '发消息',
+      '邀请Ta',
+      '加好友并聊天',
+    ]);
     expect(within(actionCard).getByRole('button', { name: '查看详情' })).toHaveAttribute(
       'data-requires-confirmation',
       'false',
@@ -886,7 +972,18 @@ describe('assistant-ui tool fallback rendering', () => {
       within(actionCard)
         .getAllByTestId('assistant-ui-schema-action')
         .map((button) => button.textContent?.trim()),
-    ).toEqual(['查看详情', '收藏', '发消息', '邀请Ta', '加好友并聊天']);
+    ).toEqual([
+      '查看详情',
+      '收藏',
+      '合适',
+      '不合适',
+      '太远',
+      '时间不对',
+      '风格不对',
+      '发消息',
+      '邀请Ta',
+      '加好友并聊天',
+    ]);
 
     fireEvent.click(within(actionCard).getByRole('button', { name: '发送邀请' }));
     const inlineApproval = await screen.findByTestId('assistant-ui-inline-approval-panel');
@@ -1127,7 +1224,18 @@ describe('assistant-ui tool fallback rendering', () => {
       within(actionCard)
         .getAllByTestId('assistant-ui-schema-action')
         .map((button) => button.textContent?.trim()),
-    ).toEqual(['查看详情', '收藏', '发消息', '邀请Ta', '加好友并聊天']);
+    ).toEqual([
+      '查看详情',
+      '收藏',
+      '合适',
+      '不合适',
+      '太远',
+      '时间不对',
+      '风格不对',
+      '发消息',
+      '邀请Ta',
+      '加好友并聊天',
+    ]);
     expect(within(actionCard).getByRole('button', { name: '收藏' })).toHaveAttribute(
       'data-requires-confirmation',
       'false',

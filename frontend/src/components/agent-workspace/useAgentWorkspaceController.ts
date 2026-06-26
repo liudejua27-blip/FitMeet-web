@@ -18,6 +18,7 @@ import {
   createAgentRecoveryFromError,
   createCheckpointAvailableRecovery,
   decorateAssistantBranches,
+  assistantMessageForUserFacingResult,
   findTaskId,
   intentForReplayTrace,
   intentForRestoredResponse,
@@ -29,6 +30,7 @@ import {
   publicText,
   readStoredAgentThread,
   responseFromSessionSnapshot,
+  responseAwaitsOpportunityClarification,
   restoredResponseHasUsefulSurface,
   sanitizeRestoredResponse,
   shouldFetchCheckpointRecovery,
@@ -134,6 +136,126 @@ export function useAgentWorkspaceController(view: AgentView) {
   const { agentAdapter, isRealAgent } = useAgentAdapterRuntime();
   const currentUserId = user?.id ?? null;
   const canonicalActiveThreadId = socialCodexThreadIdOrExisting(activeThreadId, activeTaskId);
+
+  useEffect(() => {
+    pendingOpportunityClarificationRef.current = Boolean(
+      userResult && responseAwaitsOpportunityClarification(userResult),
+    );
+  }, [pendingOpportunityClarificationRef, userResult]);
+
+  const refreshMatchingSnapshot = useCallback(
+    async (taskId: number | null | undefined) => {
+      if (!isRealAgent || !isLoggedIn || !taskId) return;
+      try {
+        const restored = await agentAdapter.restoreSession(taskId);
+        if (!restored?.response) return;
+        const response = sanitizeRestoredResponse(restored.response);
+        if (!restoredResponseHasUsefulSurface(response)) return;
+        const restoredTaskId = restored.taskId ?? findTaskId(response) ?? taskId;
+        const conversationIntent = intentForRestoredResponse(response, 'social');
+        const assistantMessage = assistantMessageForUserFacingResult(
+          response,
+          '我已经更新了当前约练进度。',
+        );
+        setActiveTaskId(restoredTaskId);
+        setActiveTaskStatus(restored.taskStatus ?? null);
+        setUserResult(response);
+        setRecovery(null);
+        setMessages((current) => {
+          const existingIndex = [...current]
+            .reverse()
+            .findIndex(
+              (message) =>
+                message.role === 'assistant' &&
+                (message.taskId === restoredTaskId ||
+                  findTaskId(message.result ?? null) === restoredTaskId),
+            );
+          const message = {
+            id: nextId('assistant'),
+            role: 'assistant' as const,
+            status: 'done' as const,
+            content: assistantMessage,
+            result: response,
+            taskId: restoredTaskId,
+            conversationIntent,
+            showSocialResult: conversationIntent !== 'conversation',
+            surfaceKind: 'answer' as const,
+            assistantMessageSource: response.assistantMessageSource,
+            branchable: false,
+          };
+          if (existingIndex < 0) return [...current, message];
+          const index = current.length - 1 - existingIndex;
+          return [
+            ...current.slice(0, index),
+            {
+              ...current[index],
+              content: assistantMessage || current[index].content,
+              status: 'done',
+              result: response,
+              taskId: restoredTaskId,
+              conversationIntent,
+              showSocialResult: conversationIntent !== 'conversation',
+              surfaceKind: 'answer',
+              assistantMessageSource: response.assistantMessageSource,
+              branchable: false,
+            },
+            ...current.slice(index + 1),
+          ];
+        });
+      } catch {
+        // The normal session restore path remains the source of truth; realtime
+        // refresh must not interrupt the current chat when a transient request fails.
+      }
+    },
+    [
+      agentAdapter,
+      isLoggedIn,
+      isRealAgent,
+      setActiveTaskId,
+      setActiveTaskStatus,
+      setMessages,
+      setRecovery,
+      setUserResult,
+    ],
+  );
+
+  useEffect(() => {
+    if (!isRealAgent || !isLoggedIn || shellView !== 'chat') return undefined;
+    const onRealtime = (event: Event) => {
+      const detail = (event as CustomEvent).detail as
+        | { eventType?: string; payload?: Record<string, unknown> }
+        | undefined;
+      if (detail?.eventType !== 'agent:candidates') return;
+      const eventTaskId = numberFromUnknown(detail.payload?.taskId);
+      if (activeTaskId && eventTaskId && eventTaskId !== activeTaskId) return;
+      void refreshMatchingSnapshot(eventTaskId ?? activeTaskId);
+    };
+    window.addEventListener('fitmeet:realtime', onRealtime);
+    return () => window.removeEventListener('fitmeet:realtime', onRealtime);
+  }, [activeTaskId, isLoggedIn, isRealAgent, refreshMatchingSnapshot, shellView]);
+
+  useEffect(() => {
+    if (!isRealAgent || !isLoggedIn || shellView !== 'chat') return undefined;
+    if (!activeTaskId || !shouldPollMatchingSnapshot(userResult, activeTaskStatus)) {
+      return undefined;
+    }
+    let cancelled = false;
+    const interval = window.setInterval(() => {
+      if (!cancelled) void refreshMatchingSnapshot(activeTaskId);
+    }, 5000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, [
+    activeTaskId,
+    activeTaskStatus,
+    isLoggedIn,
+    isRealAgent,
+    refreshMatchingSnapshot,
+    shellView,
+    userResult,
+  ]);
   const { refreshLatestCheckpointRecovery } = useAgentSessionRestore({
     agentAdapter,
     isRealAgent,
@@ -551,6 +673,37 @@ function messageHasProfileCompletionCard(message: { result?: UserFacingAgentResp
   );
 }
 
+function shouldPollMatchingSnapshot(
+  response: UserFacingAgentResponse | null,
+  taskStatus: string | null,
+) {
+  if (!response) return false;
+  if (response.publicLoop?.stage === 'dismissed') return false;
+  if (response.publicLoop?.stage === 'candidates_recommended') return false;
+  if (response.workflow?.state === 'CANDIDATES_READY') return false;
+  const normalizedTaskStatus = (taskStatus ?? '').trim().toLowerCase();
+  if (normalizedTaskStatus === 'cancelled' || normalizedTaskStatus === 'failed') return false;
+  const matchingJobStatus = response.cards
+    .map((card) => {
+      const matchingJob = isRecord(card.data?.matchingJob) ? card.data.matchingJob : null;
+      return card.data?.matchingJobStatus ?? matchingJob?.status;
+    })
+    .find((value) => typeof value === 'string');
+  if (matchingJobStatus === 'queued' || matchingJobStatus === 'running') return true;
+  if (response.publicLoop?.stage === 'discover_visible') return true;
+  if (response.workflow?.state === 'DISCOVER_VISIBLE') return true;
+  return /正在匹配|正在筛选|等待匹配/.test(response.assistantMessage);
+}
+
+function numberFromUnknown(value: unknown): number | null {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) && numeric > 0 ? numeric : null;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
 function buildProfileCompletionBootstrapResponse(input: {
   userId: string;
   questions: SocialProfileQuestion[];
@@ -573,6 +726,7 @@ function buildProfileCompletionBootstrapResponse(input: {
       schemaType: 'profile.completion',
       questionCount: questions.length,
       missingFields: input.completion.missingFields ?? [],
+      missingFieldLabels: (input.completion.missingFields ?? []).map(userFacingProfileFieldLabel),
       pendingProposal: input.pendingProposal ?? null,
       questions,
       savePolicy: 'preview_before_write',
@@ -624,8 +778,11 @@ function normalizeProfileCompletionQuestions(questions: SocialProfileQuestion[])
 }
 
 function profileCompletionQuestionLabel(question: SocialProfileQuestion) {
+  const keyLabel = userFacingProfileFieldLabel(question.key);
+  if (keyLabel !== question.key) return keyLabel;
   const text = `${question.key} ${question.domain ?? ''} ${question.matchRole ?? ''} ${question.question}`;
-  if (/city|nearby|location|地点|城市|附近|范围/i.test(text)) return '城市与活动范围';
+  if (/nearby|location|地点|附近|范围/i.test(text)) return '常活动区域';
+  if (/city|城市/i.test(text)) return '城市';
   if (/time|available|availability|weekday|weekend|时间|周末|工作日/i.test(text)) {
     return '可约时间';
   }
@@ -637,7 +794,8 @@ function profileCompletionQuestionLabel(question: SocialProfileQuestion) {
 
 function profileCompletionQuestionPlaceholder(question: SocialProfileQuestion) {
   const label = profileCompletionQuestionLabel(question);
-  if (label === '城市与活动范围') return '例如：青岛大学附近，3 公里内';
+  if (label === '城市') return '例如：青岛';
+  if (label === '常活动区域') return '例如：青岛大学附近，3 公里内';
   if (label === '可约时间') return '例如：周末下午，工作日晚上也可以';
   if (label === '兴趣活动') return '例如：跑步、羽毛球、散步、健身';
   if (label === '想认识的人') return '例如：节奏轻松、愿意先站内沟通的人';
@@ -647,7 +805,8 @@ function profileCompletionQuestionPlaceholder(question: SocialProfileQuestion) {
 
 function profileCompletionQuestionOptions(question: SocialProfileQuestion) {
   const label = profileCompletionQuestionLabel(question);
-  if (label === '城市与活动范围') return ['青岛', '学校或公司附近', '3 公里内', '暂不确定'];
+  if (label === '城市') return ['青岛', '北京', '上海', '暂不确定'];
+  if (label === '常活动区域') return ['学校或公司附近', '3 公里内', '商圈附近', '暂不确定'];
   if (label === '可约时间') return ['周末下午', '工作日晚上', '今天晚上', '暂不确定'];
   if (label === '兴趣活动') return ['跑步', '羽毛球', '散步', '健身', '暂不确定'];
   if (label === '想认识的人') return ['找运动搭子', '低压力轻松聊', '先运动后熟悉', '暂不确定'];
@@ -655,6 +814,39 @@ function profileCompletionQuestionOptions(question: SocialProfileQuestion) {
     return ['只接受公共场所', '先站内沟通', '不交换联系方式', '不接受太晚见面', '暂不确定'];
   }
   return ['暂不确定'];
+}
+
+function userFacingProfileFieldLabel(field: string) {
+  const labels: Record<string, string> = {
+    nickname: '昵称',
+    gender: '性别展示偏好',
+    ageRange: '年龄段展示偏好',
+    city: '城市',
+    nearbyArea: '常活动区域',
+    mbti: '性格关键词',
+    zodiac: '星座',
+    traits: '性格标签',
+    socialStyle: '社交风格',
+    communicationStyle: '沟通方式',
+    fitnessGoals: '运动目标',
+    interestTags: '兴趣活动',
+    lifestyleTags: '生活方式',
+    socialScenes: '社交场景',
+    wantToMeet: '想认识的人',
+    preferredTraits: '偏好的特质',
+    avoidTraits: '不接受的行为',
+    relationshipGoals: '社交目标',
+    availableTimes: '可约时间',
+    weekdayAvailability: '工作日可约时间',
+    weekendAvailability: '周末可约时间',
+    socialPreference: '相处节奏',
+    rejectRules: '拒绝规则',
+    privacyBoundary: '隐私与安全边界',
+    profileDiscoverable: '发现页可见授权',
+    agentCanRecommendMe: '匹配授权',
+    agentCanStartChatAfterApproval: '站内联系授权',
+  };
+  return labels[field] ?? field;
 }
 
 function fallbackProfileCompletionQuestions() {

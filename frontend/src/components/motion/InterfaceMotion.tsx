@@ -2,9 +2,8 @@ import { useEffect } from 'react';
 import { useLocation } from 'react-router-dom';
 
 const introSelectors = [
-  '.fitmeet-website .fm-hero__copy > *',
-  '.fitmeet-website .fm-hero__visual',
-  '.fitmeet-website .fm-social-hero-visual',
+  '.fitmeet-website .fm-enterprise-hero-system__copy > *',
+  '.fitmeet-website .fm-enterprise-hero-system__visual',
   '.fitmeet-website .concept-home-hero__copy > *',
   '.fitmeet-website .website-page-hero > div > *',
   '[data-testid="assistant-ui-thread-list"] a',
@@ -16,9 +15,12 @@ const introSelectors = [
 
 const revealSelectors = [
   '.fitmeet-website .fm-section__header',
-  '.fitmeet-website .fm-context-panel',
-  '.fitmeet-website .fm-enterprise-loop article',
-  '.fitmeet-website .fm-proof-strip article',
+  '.fitmeet-website .fm-context-brief article',
+  '.fitmeet-website .fm-flow-steps li',
+  '.fitmeet-website .fm-trust-rail article',
+  '.fitmeet-website .fm-capability-matrix article',
+  '.fitmeet-website .fm-proof-ledger article',
+  '.fitmeet-website .fm-product-surface-card',
   '.fitmeet-website .fm-final-cta > *',
   '.fitmeet-website .website-band__header',
   '.fitmeet-website .demand-comparison article',
@@ -40,7 +42,9 @@ const revealSelectors = [
 ].join(',');
 
 const ambientSelectors = [
-  '.fitmeet-website .fm-world-story img',
+  '.fitmeet-website .fm-product-proof-visual',
+  '.fitmeet-website .fm-demand-wallpaper img',
+  '.fitmeet-website .fm-product-surface-card img',
   '.fitmeet-website .website-hero__visual',
   '[data-testid="assistant-ui-composer"] button[type="submit"]',
 ].join(',');

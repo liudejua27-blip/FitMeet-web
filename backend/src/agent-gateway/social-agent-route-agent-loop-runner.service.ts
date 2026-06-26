@@ -33,6 +33,7 @@ import {
   isSocialExecutionIntent,
   shouldAllowSocialExecution,
 } from './social-agent-social-intent-gate';
+import { hasPendingSocialOpportunitySlotCompletion } from './social-agent-opportunity-clarification';
 import {
   applyConversationTurnState,
   applyProfileTurnState,
@@ -801,6 +802,7 @@ export class SocialAgentRouteAgentLoopRunnerService {
       );
     }
     if (toolName === 'route_action_turn') {
+      if (hasPendingSocialOpportunitySlotCompletion(taskContext)) return true;
       return (
         route.intent === 'action_request' &&
         hasExplicitSocialSideEffectIntent(message) &&
@@ -824,6 +826,8 @@ export class SocialAgentRouteAgentLoopRunnerService {
     const route = decision.route;
     if (!isSocialExecutionIntent(route.intent)) return false;
     if (toolName === 'route_action_turn') {
+      if (hasPendingSocialOpportunitySlotCompletion(decision.taskContext))
+        return true;
       return (
         route.intent === 'action_request' &&
         hasExplicitSocialSideEffectIntent(message) &&
@@ -873,6 +877,7 @@ export class SocialAgentRouteAgentLoopRunnerService {
     message: string,
     taskContext?: Record<string, unknown>,
   ): boolean {
+    if (hasPendingSocialOpportunitySlotCompletion(taskContext)) return true;
     return (
       route.intent === 'action_request' &&
       hasExplicitSocialSideEffectIntent(message) &&

@@ -4,36 +4,36 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 
-    <title>FitMeet | Social world 让社交更简单</title>
+    <title>FitMeet | Social World 让社交更简单</title>
     <meta
       name="description"
-      content="FitMeet 是面向真实生活连接的 Social world。用户从发现附近的人、活动和场景开始，在安全边界内自然认识彼此。"
+      content="FitMeet 是面向真实生活连接的 Social World。用户从发现附近的人、活动和场景开始，在安全边界内自然认识彼此。"
     />
     <meta
       name="keywords"
-      content="FitMeet,Social world,需求流社交,AI社交平台,同城社交,约练,找搭子,找朋友,相亲恋爱,运动搭子App,Agent生活助手,Life Graph"
+      content="FitMeet,Social World,需求流社交,AI社交平台,同城社交,约练,找搭子,找朋友,相亲恋爱,运动搭子App,FitMeet Agent"
     />
     <meta name="robots" content="index,follow" />
-    <link rel="canonical" href="https://ourfitmeet.cn/" />
+    <link rel="canonical" href="https://www.ourfitmeet.cn/" />
 
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="FitMeet" />
-    <meta property="og:title" content="FitMeet | Social world 让社交更简单" />
+    <meta property="og:title" content="FitMeet | Social World 让社交更简单" />
     <meta
       property="og:description"
       content="从同频场景开始认识彼此。FitMeet 把附近的人、活动和场景组织成更清晰、更安全的连接路径。"
     />
-    <meta property="og:url" content="https://ourfitmeet.cn/" />
-    <meta property="og:image" content="https://ourfitmeet.cn/og-cover.png" />
+    <meta property="og:url" content="https://www.ourfitmeet.cn/" />
+    <meta property="og:image" content="https://www.ourfitmeet.cn/og-cover.png" />
     <meta property="og:locale" content="zh_CN" />
 
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="FitMeet | Social world 让社交更简单" />
+    <meta name="twitter:title" content="FitMeet | Social World 让社交更简单" />
     <meta
       name="twitter:description"
-      content="FitMeet 是面向真实生活连接的 Social world，从同频场景开始认识彼此。"
+      content="FitMeet 是面向真实生活连接的 Social World，从同频场景开始认识彼此。"
     />
-    <meta name="twitter:image" content="https://ourfitmeet.cn/og-cover.png" />
+    <meta name="twitter:image" content="https://www.ourfitmeet.cn/og-cover.png" />
 
     <meta name="theme-color" content="#09090A" />
     <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png" />
@@ -47,13 +47,13 @@
           "@context": "https://schema.org",
           "@type": "Organization",
           "name": "FitMeet",
-          "legalName": "FitMeet Social world",
-          "url": "https://ourfitmeet.cn/",
-          "logo": "https://ourfitmeet.cn/favicon-512.png",
-          "sameAs": ["https://ourfitmeet.cn/about", "https://ourfitmeet.cn/press"],
+          "legalName": "FitMeet Social World",
+          "url": "https://www.ourfitmeet.cn/",
+          "logo": "https://www.ourfitmeet.cn/favicon-512.png",
+          "sameAs": ["https://www.ourfitmeet.cn/about"],
           "contactPoint": {
             "@type": "ContactPoint",
-            "email": "15253005312@163.com",
+            "email": "contact@ourfitmeet.cn",
             "contactType": "customer support",
             "availableLanguage": ["zh-CN", "en"]
           }
@@ -62,14 +62,9 @@
           "@context": "https://schema.org",
           "@type": "WebSite",
           "name": "FitMeet",
-          "url": "https://ourfitmeet.cn/",
+          "url": "https://www.ourfitmeet.cn/",
           "inLanguage": "zh-CN",
-          "description": "FitMeet 是面向真实生活连接的 Social world。用户从发现附近的人、活动和场景开始，在安全边界内自然认识彼此。",
-          "potentialAction": {
-            "@type": "SearchAction",
-            "target": "https://ourfitmeet.cn/search?q={search_term_string}",
-            "query-input": "required name=search_term_string"
-          }
+          "description": "FitMeet 是面向真实生活连接的 Social World。用户从发现附近的人、活动和场景开始，在安全边界内自然认识彼此。"
         },
         {
           "@context": "https://schema.org",
@@ -77,7 +72,7 @@
           "name": "FitMeet",
           "applicationCategory": "SocialNetworkingApplication",
           "operatingSystem": "Web, iOS, Android",
-          "url": "https://ourfitmeet.cn/",
+          "url": "https://www.ourfitmeet.cn/",
           "description": "FitMeet 把附近的人、活动和场景组织成更清晰、更安全的连接路径。",
           "offers": {
             "@type": "Offer",
@@ -91,7 +86,12 @@
       .geo-static-shell {
         background: #080807;
         color: #fff7ed;
-        font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+        font-family:
+          system-ui,
+          -apple-system,
+          BlinkMacSystemFont,
+          'Segoe UI',
+          sans-serif;
         min-height: 100vh;
         padding: 40px 24px;
       }
@@ -130,14 +130,15 @@
     <div id="root">
       <main class="geo-static-shell">
         <nav aria-label="FitMeet 关键页面">
-          <a href="/">首页</a> · <a href="/" data-spa-route="/discover" data-testid="static-discover-entry">发现</a> · <a href="/agent">Agent</a> ·
+          <a href="/">首页</a> ·
+          <a href="/" data-spa-route="/discover" data-testid="static-discover-entry">发现</a> ·
+          <a href="/agent">Agent</a> ·
           <a href="/safety">安全与信任</a>
         </nav>
         <section>
-          <h1>Social world</h1>
-          <p>让社交更简单</p>
+          <h1>让社交更简单</h1>
           <p>
-            FitMeet 是面向真实生活连接的 Social world。用户从发现附近的人、活动和场景开始，
+            FitMeet 是面向真实生活连接的 Social World。用户从发现附近的人、活动和场景开始，
             在安全边界内自然认识彼此。
           </p>
           <ul>
@@ -150,8 +151,17 @@
     </div>
     <script>
       document.addEventListener('click', function (event) {
-        var link = event.target && event.target.closest ? event.target.closest('[data-spa-route]') : null;
-        if (!link || event.defaultPrevented || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+        var link =
+          event.target && event.target.closest ? event.target.closest('[data-spa-route]') : null;
+        if (
+          !link ||
+          event.defaultPrevented ||
+          event.metaKey ||
+          event.ctrlKey ||
+          event.shiftKey ||
+          event.altKey
+        )
+          return;
         var route = link.getAttribute('data-spa-route');
         if (!route || route.charAt(0) !== '/') return;
         event.preventDefault();

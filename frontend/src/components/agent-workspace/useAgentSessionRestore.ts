@@ -270,11 +270,22 @@ export function useAgentSessionRestore({
       agentAdapter,
       responseFromSessionSnapshot,
       messagesFromSessionSnapshot,
-    })
+      })
       .then((restored) => {
         if (cancelled || !restored) return;
         const rawRestoredResponse = restored.response;
-        const restoredResponse = sanitizeRestoredResponse(restored.response);
+        if (!rawRestoredResponse) {
+          const restoredTaskId = restored.taskId ?? null;
+          setActiveTaskId(restoredTaskId);
+          setActiveThreadId(restoredTaskId ? socialCodexThreadIdForTask(restoredTaskId) : null);
+          setActiveTaskStatus(restored.taskStatus ?? null);
+          setUserResult(null);
+          setRecovery(null);
+          setMessages((current) => (current.length > 0 ? current : restored.messages));
+          if (shellView !== 'chat') navigate('/agent/chat', { replace: true });
+          return;
+        }
+        const restoredResponse = sanitizeRestoredResponse(rawRestoredResponse);
         const restoredTaskId = restored.taskId ?? null;
         const routeTaskExplicit = Boolean(routeTaskId);
         if (
@@ -474,7 +485,7 @@ async function restoreSessionWithMessages(input: {
     taskId: number | null,
   ) => AgentThreadMessage[];
 }): Promise<{
-  response: UserFacingAgentResponse;
+  response: UserFacingAgentResponse | null;
   taskId: number | null;
   taskStatus: string | null;
   messages: AgentThreadMessage[];
@@ -482,10 +493,10 @@ async function restoreSessionWithMessages(input: {
   try {
     const snapshot = await socialAgentApi.restoreSession(input.taskId ?? undefined);
     const response = input.responseFromSessionSnapshot(snapshot);
-    if (response) {
+    if (response || (snapshot?.messages?.length ?? 0) > 0) {
       const taskId = snapshot.activeTaskId ?? null;
       return {
-        response,
+        response: response ?? null,
         taskId,
         taskStatus: typeof snapshot.task?.status === 'string' ? snapshot.task.status : null,
         messages: input.messagesFromSessionSnapshot(snapshot, response, taskId),

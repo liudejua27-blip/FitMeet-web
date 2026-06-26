@@ -146,6 +146,56 @@ export function readSocialAgentOpportunityDraftClarification(
   return null;
 }
 
+export function clearSocialAgentOpportunityDraftClarification(
+  task: AgentTask,
+): void {
+  const now = new Date().toISOString();
+  const memory = record(task.memory);
+  const socialAgentChat = record(memory.socialAgentChat);
+  const shortTerm = record(memory.shortTerm);
+  const result = record(task.result);
+  const chatRun = record(result.chatRun);
+  task.memory = {
+    ...memory,
+    socialAgentChat: {
+      ...socialAgentChat,
+      pendingOpportunityDraft: null,
+      publishStatus:
+        socialAgentChat.publishStatus === 'collecting_slots'
+          ? 'cancelled'
+          : socialAgentChat.publishStatus,
+      updatedAt: now,
+    },
+    shortTerm: {
+      ...shortTerm,
+      pendingOpportunityDraft: null,
+      publishStatus:
+        shortTerm.publishStatus === 'collecting_slots'
+          ? 'cancelled'
+          : shortTerm.publishStatus,
+    },
+  };
+  task.result = {
+    ...result,
+    chatRun: {
+      ...chatRun,
+      pendingOpportunityDraft: null,
+      publishStatus:
+        chatRun.publishStatus === 'collecting_slots'
+          ? 'cancelled'
+          : chatRun.publishStatus,
+    },
+  };
+  transitionSocialAgentState(task, 'activity_planning', {
+    objective: 'meet_loop',
+    nextStep: '已取消本次约练卡补槽',
+    shouldSearchNow: false,
+    awaitingSearchConfirmation: false,
+    waitingFor: '',
+    lastCompletedStep: 'activity_slots_cancelled',
+  });
+}
+
 function record(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? (value as Record<string, unknown>)

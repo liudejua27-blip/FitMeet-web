@@ -56,6 +56,15 @@ export class MatchingJob {
   @Column({ type: 'text', default: '' })
   errorMessage: string;
 
+  @Column({ type: 'varchar', length: 120, nullable: true })
+  leaseOwner: string | null;
+
+  @Column({ type: 'timestamptz', nullable: true })
+  leaseExpiresAt: Date | null;
+
+  @Column({ type: 'timestamptz', nullable: true })
+  lastHeartbeatAt: Date | null;
+
   @Column({ type: 'jsonb', default: '{}' })
   result: Record<string, unknown>;
 

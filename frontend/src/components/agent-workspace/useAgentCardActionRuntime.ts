@@ -1,5 +1,9 @@
 import { useCallback, useEffect, useRef, type MutableRefObject } from 'react';
 
+import {
+  submitAgentFeedbackEvent,
+  type AgentFeedbackReasonCode,
+} from '../../api/agentFeedbackApi';
 import type {
   FitMeetAgentCardExecutableAction,
   FitMeetAgentSchemaAction,
@@ -73,6 +77,97 @@ export function useAgentCardActionRuntime({
     isRunningRef.current = isRunning;
   }, [isRunning]);
 
+  const runSlotCompletionMessageAction = useCallback(
+    async ({
+      action,
+      input,
+      taskId,
+    }: {
+      action: FitMeetAgentCardExecutableAction;
+      input?: CardActionInput;
+      taskId: number;
+    }) => {
+      const message = slotCompletionMessageForAction(action, input?.payload);
+      if (!message) throw new Error('当前补充动作缺少可发送内容。');
+      isRunningRef.current = true;
+      runConversationIntentRef.current = 'social';
+      setRecovery(null);
+      setIsRunning(true);
+      setSteps(
+        actionSteps.map((step, index) => ({
+          ...step,
+          status: index === 0 ? 'running' : 'pending',
+        })),
+      );
+      appendStreamingAssistant(taskId, 'social');
+      const controller = new AbortController();
+      beginAbortableRun(controller);
+      try {
+        const finalResult = await agentAdapter.run(
+          {
+            goal: message,
+            permissionMode: 'confirm',
+            conversationIntent: 'social',
+            taskId,
+            idempotencyKey: idempotencyKeyForCardAction(
+              taskId,
+              action,
+              input?.payload,
+            ),
+          },
+          {
+            onEvent: handleAgentStreamEvent,
+            signal: controller.signal,
+          },
+        );
+        setActiveTaskId(finalResult.taskId ?? taskId);
+        if (!finishedRef.current) finishUserFacing(finalResult.response);
+        void refreshThreads();
+        return finalResult.response;
+      } catch (error) {
+        const stopped = stopRequestedRef.current || isAbortError(error);
+        if (stopped) {
+          settleStreamingAssistantAfterInterruption();
+        } else {
+          setRecovery(createRecoveryFromError(mapAgentError(error), currentGoal));
+        }
+        setSteps((current) =>
+          current.map((step) =>
+            step.status === 'running'
+              ? { ...step, status: stopped ? 'pending' : 'error' }
+              : step,
+          ),
+        );
+        if (!stopped) throw error;
+      } finally {
+        isRunningRef.current = false;
+        setIsRunning(false);
+        finishAbortableRun();
+      }
+    },
+    [
+      actionSteps,
+      agentAdapter,
+      appendStreamingAssistant,
+      beginAbortableRun,
+      createRecoveryFromError,
+      currentGoal,
+      finishAbortableRun,
+      finishUserFacing,
+      finishedRef,
+      handleAgentStreamEvent,
+      isAbortError,
+      refreshThreads,
+      runConversationIntentRef,
+      setActiveTaskId,
+      setIsRunning,
+      setRecovery,
+      setSteps,
+      settleStreamingAssistantAfterInterruption,
+      stopRequestedRef,
+    ],
+  );
+
   const runCardActionStream = useCallback(
     async (input?: CardActionInput) => {
       if (isRunningRef.current) throw new Error('上一轮还在生成，请先停止或等待它完成。');
@@ -83,6 +178,38 @@ export function useAgentCardActionRuntime({
       if (!taskId) throw new Error('当前卡片缺少任务上下文，不能继续执行。');
       const action = schemaActionFromToolInput(input?.schemaAction);
       if (!action) throw new Error('当前卡片动作暂时不可执行。');
+
+      if (isSlotCompletionMessageAction(action)) {
+        return runSlotCompletionMessageAction({
+          action,
+          input,
+          taskId,
+        });
+      }
+
+      if (isCandidateFeedbackAction(action)) {
+        await submitAgentFeedbackEvent({
+          taskId,
+          publicIntentId: stringFromUnknown(input?.payload?.publicIntentId) || null,
+          matchingJobId: numberFromUnknown(input?.payload?.matchingJobId),
+          candidateId:
+            numberFromUnknown(input?.payload?.targetUserId) ??
+            numberFromUnknown(input?.payload?.candidateUserId) ??
+            numberFromUnknown(input?.payload?.candidateId),
+          candidateRecordId:
+            numberFromUnknown(input?.payload?.candidateRecordId) ??
+            numberFromUnknown(input?.payload?.socialRequestCandidateId),
+          feedbackType: 'candidate_quality',
+          reasonCode: candidateFeedbackReasonCode(action),
+          source: 'agent_candidate_card',
+          metadata: {
+            cardId: input?.payload?.cardId ?? input?.payload?.id ?? null,
+            candidate: input?.payload?.candidate ?? null,
+            action,
+          },
+        });
+        return candidateFeedbackResponse(taskId, action);
+      }
 
       isRunningRef.current = true;
       runConversationIntentRef.current =
@@ -197,6 +324,7 @@ export function useAgentCardActionRuntime({
       handleAgentStreamEvent,
       isAbortError,
       refreshThreads,
+      runSlotCompletionMessageAction,
       runConversationIntentRef,
       setActiveTaskId,
       setIsRunning,
@@ -225,6 +353,11 @@ function isExecutableToolUISchemaAction(
   return (
     value === 'candidate.like' ||
     value === 'candidate.skip' ||
+    value === 'candidate.feedback.good_fit' ||
+    value === 'candidate.feedback.bad_fit' ||
+    value === 'candidate.feedback.too_far' ||
+    value === 'candidate.feedback.time_mismatch' ||
+    value === 'candidate.feedback.style_mismatch' ||
     value === 'candidate.more_like_this' ||
     value === 'candidate.view_detail' ||
     value === 'candidate.connect' ||
@@ -248,8 +381,94 @@ function isExecutableToolUISchemaAction(
     value === 'life_graph.accept_update' ||
     value === 'life_graph.reject_update' ||
     value === 'meet_loop.resume' ||
-    value === 'meet_loop.reschedule'
+    value === 'meet_loop.reschedule' ||
+    value === 'slot_completion.use_default_safety' ||
+    value === 'slot_completion.custom_safety' ||
+    value === 'slot_completion.cancel'
   );
+}
+
+function isSlotCompletionMessageAction(action: FitMeetAgentCardExecutableAction) {
+  return (
+    action === 'slot_completion.use_default_safety' ||
+    action === 'slot_completion.custom_safety' ||
+    action === 'slot_completion.cancel'
+  );
+}
+
+function isCandidateFeedbackAction(action: FitMeetAgentCardExecutableAction) {
+  return (
+    action === 'candidate.feedback.good_fit' ||
+    action === 'candidate.feedback.bad_fit' ||
+    action === 'candidate.feedback.too_far' ||
+    action === 'candidate.feedback.time_mismatch' ||
+    action === 'candidate.feedback.style_mismatch'
+  );
+}
+
+function candidateFeedbackReasonCode(
+  action: FitMeetAgentCardExecutableAction,
+): AgentFeedbackReasonCode {
+  if (action === 'candidate.feedback.good_fit') return 'good_fit';
+  if (action === 'candidate.feedback.too_far') return 'too_far';
+  if (action === 'candidate.feedback.time_mismatch') return 'time_mismatch';
+  if (action === 'candidate.feedback.style_mismatch') return 'style_mismatch';
+  return 'bad_fit';
+}
+
+function candidateFeedbackResponse(
+  taskId: number,
+  action: FitMeetAgentCardExecutableAction,
+): UserFacingAgentResponse {
+  return {
+    taskId,
+    assistantMessage: candidateFeedbackMessage(action),
+    assistantMessageSource: 'deterministic_action',
+    lightStatus: '已整理回复',
+    cards: [],
+    safeStatus: {
+      blocked: false,
+      level: 'low',
+      boundaryNotes: [],
+      requiredConfirmations: [],
+    },
+    pendingConfirmations: [],
+    permissionMode: 'confirm',
+  };
+}
+
+function candidateFeedbackMessage(action: FitMeetAgentCardExecutableAction) {
+  if (action === 'candidate.feedback.good_fit') {
+    return '已记录“合适”，后续候选质量会参考这个信号。';
+  }
+  if (action === 'candidate.feedback.too_far') {
+    return '已记录“太远”，后续会优先收紧地点范围。';
+  }
+  if (action === 'candidate.feedback.time_mismatch') {
+    return '已记录“时间不对”，后续会更重视时间匹配。';
+  }
+  if (action === 'candidate.feedback.style_mismatch') {
+    return '已记录“风格不对”，后续会调整互动风格偏好。';
+  }
+  return '已记录“不合适”，后续会减少类似候选。';
+}
+
+function slotCompletionMessageForAction(
+  action: FitMeetAgentCardExecutableAction,
+  payload: Record<string, unknown> | undefined,
+) {
+  const payloadMessage = stringFromUnknown(payload?.message);
+  if (payloadMessage) return payloadMessage;
+  if (action === 'slot_completion.use_default_safety') {
+    return '按默认安全设置处理';
+  }
+  if (action === 'slot_completion.custom_safety') {
+    return '我想自定义安全边界';
+  }
+  if (action === 'slot_completion.cancel') {
+    return '取消这次约练卡发布';
+  }
+  return '';
 }
 
 function shouldAppendActionResultMessage(

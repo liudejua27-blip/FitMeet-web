@@ -1,10 +1,23 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import type { z } from 'zod';
 import { sanitizeCity } from '../common/city.util';
 import {
   callDeepSeekChatCompletion,
-  resolveDeepSeekModel,
+  callDeepSeekChatCompletionWithUsage,
+  DeepSeekMode,
+  resolveDeepSeekModelForMode,
 } from '../common/deepseek.util';
+import {
+  CandidateMatchContentOutputSchema,
+  ProfileBuilderCardOutputSchema,
+  SocialSlotToolOutputSchema,
+  SocialIntentOutputSchema,
+  SocialRequestCardOutputSchema,
+  aiBusinessInvariantFailure,
+  validateModelJson,
+  validateModelValue,
+} from './ai-output-guard';
 
 /** 完整的社交需求草稿卡输出结构（用于站内 AI 助手页面）。 */
 export interface SocialRequestCard {
@@ -90,8 +103,108 @@ export interface AiGenerationOptions {
   signal?: AbortSignal | null;
 }
 
+export type AiSocialSlotIntent =
+  | 'profile_completion'
+  | 'publish_social_intent'
+  | 'slot_completion'
+  | 'cancel_publish'
+  | 'contact_candidate'
+  | 'casual_chat';
+
+export type AiSocialSlotName =
+  | 'activity'
+  | 'city'
+  | 'locationText'
+  | 'timeText'
+  | 'safetyBoundary'
+  | 'socialStyle';
+
+export interface AiSocialSlotExtraction {
+  source: 'deepseek_tool' | 'fallback';
+  intent: AiSocialSlotIntent;
+  activity: string;
+  city: string;
+  locationText: string;
+  timeText: string;
+  safetyBoundary: string;
+  socialStyle: string;
+  confidence: number;
+  missingSlots: AiSocialSlotName[];
+}
+
 const AI_DEEPSEEK_TIMEOUT_FLOOR_MS = 25_000;
 const AI_DEEPSEEK_TIMEOUT_FALLBACK_MS = 30_000;
+const AI_PROMPT_VERSION = 'fitmeet-agent-llm-reliability-v1';
+const SOCIAL_SLOT_TOOL_NAME = 'extract_social_slots';
+
+const EXTRACT_SOCIAL_SLOTS_STRICT_TOOL = {
+  type: 'function',
+  function: {
+    name: SOCIAL_SLOT_TOOL_NAME,
+    description:
+      'Extract FitMeet social request slots from Chinese user text. Return only language understanding fields; never execute business actions.',
+    strict: true,
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      required: [
+        'intent',
+        'activity',
+        'city',
+        'locationText',
+        'timeText',
+        'safetyBoundary',
+        'socialStyle',
+        'confidence',
+        'missingSlots',
+      ],
+      properties: {
+        intent: {
+          type: 'string',
+          enum: [
+            'profile_completion',
+            'publish_social_intent',
+            'slot_completion',
+            'cancel_publish',
+            'contact_candidate',
+            'casual_chat',
+          ],
+        },
+        activity: { type: 'string', description: 'Activity, such as 散步.' },
+        city: { type: 'string', description: 'City only, such as 青岛.' },
+        locationText: {
+          type: 'string',
+          description: 'Safe coarse location text, no exact address.',
+        },
+        timeText: { type: 'string', description: 'Original time expression.' },
+        safetyBoundary: {
+          type: 'string',
+          description: 'Safety boundary preference or platform default.',
+        },
+        socialStyle: {
+          type: 'string',
+          description: 'Preferred social style, such as 低压力、安静、同城.',
+        },
+        confidence: { type: 'number', minimum: 0, maximum: 1 },
+        missingSlots: {
+          type: 'array',
+          maxItems: 8,
+          items: {
+            type: 'string',
+            enum: [
+              'activity',
+              'city',
+              'locationText',
+              'timeText',
+              'safetyBoundary',
+              'socialStyle',
+            ],
+          },
+        },
+      },
+    },
+  },
+} as const;
 
 /**
  * Pluggable AI capability surface used across FitMeet.
@@ -125,13 +238,21 @@ export class AIService {
     const fallback = this.fallbackParse(text);
     if (!this.isLlmEnabled() || !text) return fallback;
     try {
-      const out = await this.callDeepseek(
-        '你是一个把中文社交需求拆成结构化字段的助手，输出 JSON：{"activityType","tags","summary"}。',
-        text,
-      );
-      const parsed = this.safeJson<typeof fallback>(out);
-      if (parsed?.activityType) return parsed;
-      return fallback;
+      return await this.callDeepseekGuardedJson({
+        useCase: 'parseSocialIntent',
+        mode: 'structured',
+        systemPrompt:
+          '你是一个把中文社交需求拆成结构化字段的助手，输出 JSON：{"activityType","tags","summary"}。',
+        userPrompt: text,
+        options: {},
+        schema: SocialIntentOutputSchema,
+        fallback,
+        normalize: (parsed) => ({
+          activityType: parsed.activityType || fallback.activityType,
+          tags: parsed.tags.length > 0 ? parsed.tags : fallback.tags,
+          summary: parsed.summary || fallback.summary,
+        }),
+      });
     } catch (err) {
       if (this.isClientAbort(err)) throw this.toError(err);
       this.logger.warn(
@@ -266,6 +387,100 @@ export class AIService {
    * 把用户的一段自然语言诉求拆成结构化字段，用于创建 SocialRequest。
    * fallback：纯规则匹配，永远不会抛出。
    */
+  async extractSocialSlots(
+    rawText: string,
+    options: AiGenerationOptions = {},
+  ): Promise<AiSocialSlotExtraction> {
+    const text = (rawText || '').trim();
+    const fallback = this.fallbackExtractSocialSlots(text);
+    if (!this.isLlmEnabled() || !text) return fallback;
+
+    const mode: DeepSeekMode = 'tool';
+    const model = this.deepseekModelForMode(mode);
+    const temperature = this.temperatureForMode(mode);
+    const startedAt = Date.now();
+    let schemaValid = false;
+    let fallbackUsed = false;
+    let invariantFailure: string | null = null;
+    try {
+      const apiKey = this.config.get<string>('DEEPSEEK_API_KEY');
+      if (!apiKey) throw new Error('DEEPSEEK_API_KEY missing');
+      const timeoutMs = this.deepseekTimeoutMs();
+      const result = await callDeepSeekChatCompletionWithUsage({
+        apiKey,
+        baseUrl: this.config.get<string>('DEEPSEEK_BASE_URL'),
+        strictToolBaseUrl: this.config.get<string>(
+          'DEEPSEEK_STRICT_TOOL_BASE_URL',
+        ),
+        model,
+        mode,
+        temperature,
+        tools: [EXTRACT_SOCIAL_SLOTS_STRICT_TOOL],
+        toolChoice: {
+          type: 'function',
+          function: { name: SOCIAL_SLOT_TOOL_NAME },
+        },
+        strictTools: true,
+        timeoutMs,
+        retryAttempts: this.deepseekRetryAttempts(),
+        signal: options.signal,
+        timeoutMessage: `DeepSeek AIService timeout after ${timeoutMs}ms`,
+        messages: [
+          {
+            role: 'system',
+            content: [
+              '你是 FitMeet 的社交槽位提取器。',
+              '只负责理解中文输入并抽取字段，不发布、不匹配、不私信、不保存资料。',
+              '不要输出手机号、微信、QQ、邮箱、详细门牌地址。',
+              '所有未知字段使用空字符串，并放入 missingSlots。',
+            ].join('\n'),
+          },
+          { role: 'user', content: text },
+        ],
+      });
+      const args = readToolArguments(result.toolCalls, SOCIAL_SLOT_TOOL_NAME);
+      const guard = validateModelValue(args, SocialSlotToolOutputSchema);
+      schemaValid = guard.schemaValid;
+      invariantFailure = guard.invariantFailure;
+      if (!guard.parsed || invariantFailure) {
+        fallbackUsed = true;
+        return fallback;
+      }
+      const normalized = this.normalizeSocialSlotExtraction(
+        guard.parsed,
+        fallback,
+      );
+      invariantFailure = aiBusinessInvariantFailure(normalized);
+      if (invariantFailure) {
+        fallbackUsed = true;
+        return fallback;
+      }
+      return { ...normalized, source: 'deepseek_tool' };
+    } catch (error) {
+      if (this.isClientAbort(error)) throw this.toError(error);
+      fallbackUsed = true;
+      invariantFailure =
+        error instanceof Error ? error.message : String(error ?? 'unknown');
+      return fallback;
+    } finally {
+      this.logger.log(
+        JSON.stringify({
+          event: 'ai.deepseek.strict_tool',
+          promptVersion: AI_PROMPT_VERSION,
+          useCase: 'extractSocialSlots',
+          toolName: SOCIAL_SLOT_TOOL_NAME,
+          model,
+          mode,
+          temperature,
+          latencyMs: Date.now() - startedAt,
+          schemaValid,
+          fallbackUsed,
+          invariantFailure,
+        }),
+      );
+    }
+  }
+
   async parseSocialRequest(rawText: string): Promise<{
     goal: string;
     interestTags: string[];
@@ -277,25 +492,9 @@ export class AIService {
     const fallback = this.fallbackParseRich(text);
     if (!this.isLlmEnabled() || !text) return fallback;
     try {
-      const out = await this.callDeepseek(
-        '你是 FitMeet 的需求理解助手。把中文社交诉求拆为 JSON：' +
-          '{"goal","interestTags","locationPreference","personalityPreference","suggestedTitle"}。' +
-          'interestTags 为字符串数组，其它字段为短句。',
-        text,
-      );
-      const parsed = this.safeJson<typeof fallback>(out);
-      if (parsed && typeof parsed.goal === 'string') {
-        return {
-          goal: parsed.goal || fallback.goal,
-          interestTags: Array.isArray(parsed.interestTags)
-            ? parsed.interestTags
-            : fallback.interestTags,
-          locationPreference:
-            parsed.locationPreference || fallback.locationPreference,
-          personalityPreference:
-            parsed.personalityPreference || fallback.personalityPreference,
-          suggestedTitle: parsed.suggestedTitle || fallback.suggestedTitle,
-        };
+      const slots = await this.extractSocialSlots(text);
+      if (slots.source === 'deepseek_tool') {
+        return this.socialSlotsToRequest(slots, fallback, text);
       }
       return fallback;
     } catch (err) {
@@ -517,16 +716,17 @@ export class AIService {
     });
 
     try {
-      const out = await this.callDeepseekJson(
+      return await this.callDeepseekGuardedJson({
+        useCase: 'generateSocialRequestCard',
+        mode: 'copy',
         systemPrompt,
-        userPayload,
+        userPrompt: userPayload,
         options,
-      );
-      const parsed = this.safeJson<Partial<SocialRequestCard>>(out);
-      if (parsed && typeof parsed === 'object') {
-        return this.normalizeSocialRequestCard(parsed, fallback, profile, text);
-      }
-      return fallback;
+        schema: SocialRequestCardOutputSchema,
+        fallback,
+        normalize: (parsed) =>
+          this.normalizeSocialRequestCard(parsed, fallback, profile, text),
+      });
     } catch (err) {
       if (this.isClientAbort(err)) throw this.toError(err);
       this.logger.warn(
@@ -611,18 +811,22 @@ export class AIService {
     ].join('\n');
 
     try {
-      const out = await this.callDeepseekJson(
+      return await this.callDeepseekGuardedJson({
+        useCase: 'generateProfileBuilderCard',
+        mode: 'structured',
         systemPrompt,
-        JSON.stringify({
+        userPrompt: JSON.stringify({
           source: input.source ?? 'fitmeet_ai_profile_builder',
           user: input.user ?? {},
           existingProfile: input.existingProfile ?? {},
           answers: input.answers,
         }),
         options,
-      );
-      const parsed = this.safeJson<Partial<AiProfileBuilderCard>>(out);
-      return this.normalizeProfileBuilderCard(parsed, fallback);
+        schema: ProfileBuilderCardOutputSchema,
+        fallback,
+        normalize: (parsed) =>
+          this.normalizeProfileBuilderCard(parsed, fallback),
+      });
     } catch (err) {
       if (this.isClientAbort(err)) throw this.toError(err);
       this.logger.warn(
@@ -766,8 +970,10 @@ export class AIService {
     if (!this.isLlmEnabled()) return fallback;
 
     try {
-      const out = await this.callDeepseekJson(
-        [
+      return await this.callDeepseekGuardedJson({
+        useCase: 'generateCandidateMatchContent',
+        mode: 'copy',
+        systemPrompt: [
           '你是 FitMeet 的社交匹配内容生成器。',
           '输入已经通过后端确定性匹配、权限检查和安全过滤。你的任务只负责生成用户可见文案，不得改变候选人、分数或权限结果。',
           '只输出 JSON，不要 markdown，不要解释。',
@@ -778,30 +984,31 @@ export class AIService {
           '3. riskWarnings 输出 1 到 3 条中文安全提示或边界提示，每条不超过 42 字。',
           '4. 不要输出手机号、微信、QQ、邮箱、详细住址、收入、学校单位等敏感信息。',
           '5. 不要承诺线下见面一定发生；涉及线下只建议公开地点、站内先沟通、用户确认。',
+          '6. 不要输出已匹配、已发布、消息已发送、已加好友等状态性事实。',
         ].join('\n'),
-        JSON.stringify(input),
+        userPrompt: JSON.stringify(input),
         options,
-      );
-      const parsed = this.safeJson<Partial<AiCandidateMatchContent>>(out);
-      if (!parsed) return fallback;
-      return {
-        source: 'deepseek',
-        recommendationReasons: sanitizeAiMatchList(
-          parsed.recommendationReasons,
-          fallback.recommendationReasons,
-          4,
-        ),
-        icebreakerMessage:
-          sanitizeAiMatchText(
-            parsed.icebreakerMessage || fallback.icebreakerMessage,
-            90,
-          ) || fallback.icebreakerMessage,
-        riskWarnings: sanitizeAiMatchList(
-          parsed.riskWarnings,
-          fallback.riskWarnings,
-          3,
-        ),
-      };
+        schema: CandidateMatchContentOutputSchema,
+        fallback,
+        normalize: (parsed) => ({
+          source: 'deepseek',
+          recommendationReasons: sanitizeAiMatchList(
+            parsed.recommendationReasons,
+            fallback.recommendationReasons,
+            4,
+          ),
+          icebreakerMessage:
+            sanitizeAiMatchText(
+              parsed.icebreakerMessage || fallback.icebreakerMessage,
+              90,
+            ) || fallback.icebreakerMessage,
+          riskWarnings: sanitizeAiMatchList(
+            parsed.riskWarnings,
+            fallback.riskWarnings,
+            3,
+          ),
+        }),
+      });
     } catch (err) {
       if (this.isClientAbort(err)) throw this.toError(err);
       this.logger.warn(
@@ -1003,8 +1210,6 @@ export class AIService {
         limit,
       );
     };
-    const bool = (value: unknown, fallbackValue: boolean) =>
-      typeof value === 'boolean' ? value : fallbackValue;
     const basic = (parsed.basic ?? {}) as Partial<
       AiProfileBuilderCard['basic']
     >;
@@ -1022,9 +1227,6 @@ export class AIService {
     >;
     const availability = (parsed.availability ?? {}) as Partial<
       AiProfileBuilderCard['availability']
-    >;
-    const visibility = (parsed.visibility ?? {}) as Partial<
-      AiProfileBuilderCard['visibility']
     >;
     const rawSignals =
       parsed.matchSignals && typeof parsed.matchSignals === 'object'
@@ -1115,18 +1317,10 @@ export class AIService {
           stringValue(availability.weekends) || fallback.availability.weekends,
       },
       visibility: {
-        profileDiscoverable: bool(
-          visibility.profileDiscoverable,
-          fallback.visibility.profileDiscoverable,
-        ),
-        agentCanRecommendMe: bool(
-          visibility.agentCanRecommendMe,
-          fallback.visibility.agentCanRecommendMe,
-        ),
-        agentCanStartChatAfterApproval: bool(
-          visibility.agentCanStartChatAfterApproval,
+        profileDiscoverable: fallback.visibility.profileDiscoverable,
+        agentCanRecommendMe: fallback.visibility.agentCanRecommendMe,
+        agentCanStartChatAfterApproval:
           fallback.visibility.agentCanStartChatAfterApproval,
-        ),
       },
       matchSignals,
       summary: stringValue(parsed.summary) || fallback.summary,
@@ -1409,9 +1603,332 @@ export class AIService {
     userPrompt: string,
     options: AiGenerationOptions = {},
   ): Promise<string> {
-    return this.callDeepseekCompletion(systemPrompt, userPrompt, options, {
-      type: 'json_object',
-    });
+    return this.callDeepseekCompletion(
+      systemPrompt,
+      userPrompt,
+      options,
+      {
+        type: 'json_object',
+      },
+      'structured',
+    );
+  }
+
+  private async callDeepseekGuardedJson<TParsed, TResult>(input: {
+    useCase: string;
+    mode: DeepSeekMode;
+    systemPrompt: string;
+    userPrompt: string;
+    options: AiGenerationOptions;
+    schema: z.ZodType<TParsed>;
+    fallback: TResult;
+    normalize: (parsed: TParsed) => TResult;
+    invariant?: (value: TResult) => string | null;
+  }): Promise<TResult> {
+    const model = this.deepseekModelForMode(input.mode);
+    const startedAt = Date.now();
+    let schemaValid = false;
+    let fallbackUsed = false;
+    let invariantFailure: string | null = null;
+    const temperature = this.temperatureForMode(input.mode);
+    try {
+      const out = await this.callDeepseekCompletion(
+        input.systemPrompt,
+        input.userPrompt,
+        input.options,
+        { type: 'json_object' },
+        input.mode,
+      );
+      const guard = validateModelJson(out, input.schema);
+      schemaValid = guard.schemaValid;
+      invariantFailure = guard.invariantFailure;
+      if (!guard.parsed || invariantFailure) {
+        fallbackUsed = true;
+        return input.fallback;
+      }
+      const normalized = input.normalize(guard.parsed);
+      invariantFailure =
+        input.invariant?.(normalized) ?? aiBusinessInvariantFailure(normalized);
+      if (invariantFailure) {
+        fallbackUsed = true;
+        return input.fallback;
+      }
+      return normalized;
+    } catch (error) {
+      if (this.isClientAbort(error)) throw this.toError(error);
+      fallbackUsed = true;
+      invariantFailure =
+        error instanceof Error ? error.message : String(error ?? 'unknown');
+      return input.fallback;
+    } finally {
+      this.logger.log(
+        JSON.stringify({
+          event: 'ai.deepseek.output_guard',
+          promptVersion: AI_PROMPT_VERSION,
+          useCase: input.useCase,
+          model,
+          mode: input.mode,
+          temperature,
+          latencyMs: Date.now() - startedAt,
+          schemaValid,
+          fallbackUsed,
+          invariantFailure,
+        }),
+      );
+    }
+  }
+
+  private normalizeSocialSlotExtraction(
+    parsed: z.infer<typeof SocialSlotToolOutputSchema>,
+    fallback: AiSocialSlotExtraction,
+  ): AiSocialSlotExtraction {
+    const normalized = {
+      source: 'deepseek_tool' as const,
+      intent: parsed.intent || fallback.intent,
+      activity: stringValue(parsed.activity) || fallback.activity,
+      city: sanitizeCity(stringValue(parsed.city)) || fallback.city,
+      locationText: stringValue(parsed.locationText) || fallback.locationText,
+      timeText: stringValue(parsed.timeText) || fallback.timeText,
+      safetyBoundary:
+        stringValue(parsed.safetyBoundary) || fallback.safetyBoundary,
+      socialStyle: stringValue(parsed.socialStyle) || fallback.socialStyle,
+      confidence: Number.isFinite(parsed.confidence)
+        ? Math.max(0, Math.min(1, Number(parsed.confidence)))
+        : fallback.confidence,
+      missingSlots: this.normalizeMissingSocialSlots(parsed.missingSlots),
+    };
+    normalized.missingSlots = this.recomputeMissingSocialSlots(normalized);
+    return normalized;
+  }
+
+  private socialSlotsToRequest(
+    slots: AiSocialSlotExtraction,
+    fallback: {
+      goal: string;
+      interestTags: string[];
+      locationPreference: string;
+      personalityPreference: string;
+      suggestedTitle: string;
+    },
+    rawText: string,
+  ): {
+    goal: string;
+    interestTags: string[];
+    locationPreference: string;
+    personalityPreference: string;
+    suggestedTitle: string;
+  } {
+    const interestTags = this.cleanStrings(
+      [slots.activity, ...fallback.interestTags].filter(Boolean),
+      8,
+    );
+    const titleParts = [slots.city, slots.activity].filter(Boolean);
+    const suggestedTitle =
+      titleParts.length > 0
+        ? `${titleParts.join('')}约练`
+        : fallback.suggestedTitle;
+    return {
+      goal: rawText || fallback.goal,
+      interestTags:
+        interestTags.length > 0 ? interestTags : fallback.interestTags,
+      locationPreference:
+        slots.locationText || slots.city || fallback.locationPreference,
+      personalityPreference:
+        slots.socialStyle ||
+        slots.safetyBoundary ||
+        fallback.personalityPreference,
+      suggestedTitle,
+    };
+  }
+
+  private fallbackExtractSocialSlots(text: string): AiSocialSlotExtraction {
+    const source = 'fallback' as const;
+    const intent = this.fallbackSocialSlotIntent(text);
+    const city = this.extractCitySlot(text);
+    const activity = this.extractActivitySlot(text);
+    const timeText = this.extractTimeSlot(text);
+    const locationText = this.extractLocationSlot(text, city);
+    const safetyBoundary = this.extractSafetyBoundarySlot(text);
+    const socialStyle = this.extractSocialStyleSlot(text);
+    const result: AiSocialSlotExtraction = {
+      source,
+      intent,
+      activity,
+      city,
+      locationText,
+      timeText,
+      safetyBoundary,
+      socialStyle,
+      confidence: text ? 0.58 : 0.2,
+      missingSlots: [],
+    };
+    result.missingSlots = this.recomputeMissingSocialSlots(result);
+    return result;
+  }
+
+  private fallbackSocialSlotIntent(text: string): AiSocialSlotIntent {
+    if (
+      /(暂不发布|取消|不要发|不发了|隐藏|算了|不要继续匹配|撤下|不找人)/.test(
+        text,
+      )
+    ) {
+      return 'cancel_publish';
+    }
+    if (/(私信|发送|加好友|邀请|开场|联系|聊聊|消息)/.test(text)) {
+      return 'contact_candidate';
+    }
+    if (
+      /(完善|补充|补齐|更新|整理|缺什么|不完整|了解我|问我|个人信息|人物画像|画像)/.test(
+        text,
+      )
+    ) {
+      return 'profile_completion';
+    }
+    if (
+      /(默认|安全|公共场所|站内沟通|不交换联系方式|公开场所|常规处理|平台推荐)/.test(
+        text,
+      )
+    ) {
+      return 'slot_completion';
+    }
+    if (
+      /(发布|发一个|发一张|发现页|约练卡|约练需求|找.*搭子|找.*伙伴|找.*朋友|找.*人|认识新朋友|交友|有没有人|约人|一起|喝咖啡聊天)/.test(
+        text,
+      )
+    ) {
+      return 'publish_social_intent';
+    }
+    return 'casual_chat';
+  }
+
+  private extractCitySlot(text: string): string {
+    const match = text.match(
+      /(青岛|北京|上海|广州|深圳|杭州|成都|南京|武汉|西安|重庆|苏州|厦门|济南|长沙|郑州|天津|宁波|合肥|福州|昆明|大连)/,
+    );
+    return match ? sanitizeCity(match[1]) : '';
+  }
+
+  private extractActivitySlot(text: string): string {
+    const activities = [
+      '羽毛球',
+      '跑步',
+      '慢跑',
+      '散步',
+      '健身',
+      '咖啡',
+      '徒步',
+      '桌游',
+      '逛展',
+      '骑行',
+      '篮球',
+      '瑜伽',
+      '游泳',
+      '网球',
+      '爬山',
+      '自习',
+      '读书',
+      '电影',
+      '聊天',
+    ];
+    const found = activities.find((item) => text.includes(item));
+    if (found === '慢跑') return '跑步';
+    return found ?? '';
+  }
+
+  private extractTimeSlot(text: string): string {
+    if (/8\.27\s*下午六点|8月27日\s*18[:：]?00/.test(text)) {
+      return '8.27 下午六点';
+    }
+    if (/今晚|今天晚上|晚上七点|今晚六点|今晚八点/.test(text)) {
+      return '今晚';
+    }
+    if (/明天下午/.test(text)) return '明天下午';
+    if (/明天晚上/.test(text)) return '明天晚上';
+    if (/周六下午/.test(text)) return '周六下午';
+    if (/周末下午/.test(text)) return '周末下午';
+    if (/周日/.test(text)) return '周日';
+    if (/工作日晚上/.test(text)) return '工作日晚上';
+    const dateTime = text.match(
+      /(\d{1,2}[.月]\d{1,2}(?:日)?\s*(?:下午|晚上|上午)?\s*\d{1,2}(?:点|[:：]\d{2})?)/,
+    );
+    return dateTime ? dateTime[1].trim() : '';
+  }
+
+  private extractLocationSlot(text: string, city: string): string {
+    if (/中山公园/.test(text)) return `${city || '青岛'}中山公园`;
+    if (/青岛大学/.test(text)) return '青岛大学附近';
+    if (/市南区/.test(text)) return '市南区';
+    if (/五四广场/.test(text)) return `${city || '青岛'}五四广场`;
+    if (/奥帆中心/.test(text)) return `${city || '青岛'}奥帆中心`;
+    if (/海边/.test(text)) return city ? `${city}海边` : '海边';
+    if (/公园/.test(text)) return city ? `${city}公园` : '公园';
+    if (/附近/.test(text)) return '附近';
+    return city;
+  }
+
+  private extractSafetyBoundarySlot(text: string): string {
+    if (/默认|平台推荐|常规处理|默认值|默认安全|安全设置/.test(text)) {
+      return 'platform_default';
+    }
+    if (/公共场所|公开场所|站内沟通|不交换联系方式|不加微信/.test(text)) {
+      return 'public_place_station_chat';
+    }
+    return '';
+  }
+
+  private extractSocialStyleSlot(text: string): string {
+    const styles = [
+      '低压力',
+      '轻松',
+      '安静',
+      '同城',
+      '运动型',
+      '事业型',
+      '自律',
+      '慢热',
+      '外向',
+      '不尬聊',
+      '边界感',
+    ];
+    return styles.find((item) => text.includes(item)) ?? '';
+  }
+
+  private recomputeMissingSocialSlots(
+    slots: AiSocialSlotExtraction,
+  ): AiSocialSlotName[] {
+    if (
+      slots.intent !== 'publish_social_intent' &&
+      slots.intent !== 'slot_completion'
+    ) {
+      return this.normalizeMissingSocialSlots(slots.missingSlots);
+    }
+    const missing: AiSocialSlotName[] = [];
+    if (!slots.activity) missing.push('activity');
+    if (!slots.city) missing.push('city');
+    if (!slots.locationText) missing.push('locationText');
+    if (!slots.timeText) missing.push('timeText');
+    if (!slots.safetyBoundary) missing.push('safetyBoundary');
+    return missing;
+  }
+
+  private normalizeMissingSocialSlots(values: unknown): AiSocialSlotName[] {
+    if (!Array.isArray(values)) return [];
+    const allowed = new Set<AiSocialSlotName>([
+      'activity',
+      'city',
+      'locationText',
+      'timeText',
+      'safetyBoundary',
+      'socialStyle',
+    ]);
+    return Array.from(
+      new Set(
+        values.filter(
+          (value): value is AiSocialSlotName =>
+            typeof value === 'string' && allowed.has(value as AiSocialSlotName),
+        ),
+      ),
+    );
   }
 
   private fallbackParse(text: string): {
@@ -1670,7 +2187,13 @@ export class AIService {
     userPrompt: string,
     options: AiGenerationOptions = {},
   ): Promise<string> {
-    return this.callDeepseekCompletion(systemPrompt, userPrompt, options);
+    return this.callDeepseekCompletion(
+      systemPrompt,
+      userPrompt,
+      options,
+      undefined,
+      'copy',
+    );
   }
 
   private async callDeepseekCompletion(
@@ -1678,21 +2201,25 @@ export class AIService {
     userPrompt: string,
     options: AiGenerationOptions = {},
     responseFormat?: { type: 'json_object' },
+    mode: DeepSeekMode = 'copy',
   ): Promise<string> {
     const apiKey = this.config.get<string>('DEEPSEEK_API_KEY');
     if (!apiKey) throw new Error('DEEPSEEK_API_KEY missing');
-    const model = this.deepseekModel();
+    const model = this.deepseekModelForMode(mode);
     const timeoutMs = this.deepseekTimeoutMs();
     return callDeepSeekChatCompletion({
       apiKey,
       baseUrl: this.config.get<string>('DEEPSEEK_BASE_URL'),
       model,
-      temperature: 0.4,
+      mode,
+      temperature: this.temperatureForMode(mode),
       responseFormat,
       timeoutMs,
       retryAttempts: this.deepseekRetryAttempts(),
       signal: options.signal,
       timeoutMessage: `DeepSeek AIService timeout after ${timeoutMs}ms`,
+      thinking: mode === 'reasoning' ? { type: 'enabled' } : undefined,
+      reasoningEffort: mode === 'reasoning' ? 'high' : undefined,
       messages: [
         { role: 'system', content: systemPrompt },
         { role: 'user', content: userPrompt },
@@ -1700,11 +2227,25 @@ export class AIService {
     });
   }
 
-  private deepseekModel(): string {
-    return resolveDeepSeekModel(
-      this.config.get<string>('DEEPSEEK_CHAT_MODEL') ??
-        this.config.get<string>('DEEPSEEK_MODEL'),
-    );
+  private deepseekModelForMode(mode: DeepSeekMode): string {
+    const configured =
+      mode === 'structured' || mode === 'tool'
+        ? (this.config.get<string>('DEEPSEEK_MODEL_FAST') ??
+          this.config.get<string>('DEEPSEEK_MODEL_STRUCTURED'))
+        : mode === 'reasoning'
+          ? (this.config.get<string>('DEEPSEEK_MODEL_REASONING') ??
+            this.config.get<string>('DEEPSEEK_MODEL_PRO'))
+          : (this.config.get<string>('DEEPSEEK_MODEL_PRO') ??
+            this.config.get<string>('DEEPSEEK_CHAT_MODEL') ??
+            this.config.get<string>('DEEPSEEK_MODEL'));
+    return resolveDeepSeekModelForMode(mode, configured);
+  }
+
+  private temperatureForMode(mode: DeepSeekMode): number {
+    if (mode === 'structured' || mode === 'tool') return 0.1;
+    if (mode === 'copy') return 0.3;
+    if (mode === 'reasoning') return 0.2;
+    return 0.4;
   }
 
   private deepseekTimeoutMs(): number {
@@ -1739,6 +2280,31 @@ export class AIService {
 
 function stringValue(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
+}
+
+function readToolArguments(
+  toolCalls: unknown[],
+  expectedName: string,
+): unknown {
+  for (const call of toolCalls) {
+    if (!isRecord(call)) continue;
+    const fn = isRecord(call.function) ? call.function : null;
+    if (!fn || stringValue(fn.name) !== expectedName) continue;
+    const args = fn.arguments;
+    if (typeof args === 'string') {
+      try {
+        return JSON.parse(args);
+      } catch {
+        return null;
+      }
+    }
+    if (isRecord(args)) return args;
+  }
+  return null;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === 'object' && !Array.isArray(value));
 }
 
 function clampScore(value: number): number {
