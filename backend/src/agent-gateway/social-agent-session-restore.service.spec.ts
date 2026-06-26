@@ -536,7 +536,8 @@ describe('SocialAgentSessionRestoreService', () => {
     });
     task.result = {
       chatRun: {
-        message: '我已经把这次约练整理成发布确认卡。你点确认前不会公开到发现页。',
+        message:
+          '我已经把这次约练整理成发布确认卡。你点确认前不会公开到发现页。',
         socialRequestId: 2,
         socialRequestDraft: {
           socialRequestId: 2,

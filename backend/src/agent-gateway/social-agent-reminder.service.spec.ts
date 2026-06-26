@@ -152,9 +152,14 @@ describe('SocialAgentReminderService', () => {
   it('returns a disabled fallback preference when the preference store is unavailable', async () => {
     const { service, preferenceRepo } = build();
     preferenceRepo.findOne.mockRejectedValueOnce(
-      Object.assign(new Error('relation "social_agent_reminder_preferences" does not exist'), {
-        name: 'QueryFailedError',
-      }),
+      Object.assign(
+        new Error(
+          'relation "social_agent_reminder_preferences" does not exist',
+        ),
+        {
+          name: 'QueryFailedError',
+        },
+      ),
     );
 
     const preference = await service.getPreference(7);

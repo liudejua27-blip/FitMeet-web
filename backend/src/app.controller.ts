@@ -79,16 +79,15 @@ export class AppController {
       'social_agent_reminders',
     ];
     try {
-      const rows = (await this.dataSource.query(
-        `SELECT table_name AS "tableName"
+      const rows: Array<{ tableName?: string | null }> =
+        await this.dataSource.query(
+          `SELECT table_name AS "tableName"
            FROM information_schema.tables
           WHERE table_schema = 'public'
             AND table_name = ANY($1::text[])`,
-        [requiredTables],
-      )) as Array<{ tableName?: string | null }>;
-      const present = new Set(
-        rows.map((row) => row.tableName).filter(Boolean),
-      );
+          [requiredTables],
+        );
+      const present = new Set(rows.map((row) => row.tableName).filter(Boolean));
       const missing = requiredTables.filter((table) => !present.has(table));
       if (missing.length > 0) {
         return {
