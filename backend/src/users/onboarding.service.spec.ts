@@ -574,16 +574,14 @@ function profilePhotoQueryBuilder(state: TestState) {
           ...item,
           asset: state.assets.find((assetRow) => assetRow.id === item.assetId),
         }))
-        .sort(
-          (left, right) => {
-            const leftRow = left as Record<string, unknown>;
-            const rightRow = right as Record<string, unknown>;
-            return (
-              Number(leftRow.sortOrder) - Number(rightRow.sortOrder) ||
-              Number(leftRow.id) - Number(rightRow.id)
-            );
-          },
-        ),
+        .sort((left, right) => {
+          const leftRow = left as Record<string, unknown>;
+          const rightRow = right as Record<string, unknown>;
+          return (
+            Number(leftRow.sortOrder) - Number(rightRow.sortOrder) ||
+            Number(leftRow.id) - Number(rightRow.id)
+          );
+        }),
     ),
   };
   return qb;

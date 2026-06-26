@@ -3,7 +3,10 @@ import { Injectable, Optional } from '@nestjs/common';
 import { cleanDisplayText } from '../common/display-text.util';
 import { LifeGraphFieldCategory } from '../life-graph/life-graph.enums';
 import { LifeGraphService } from '../life-graph/life-graph.service';
-import { SocialProfileService } from '../users/social-profile.service';
+import {
+  SocialProfileCompletionResult,
+  SocialProfileService,
+} from '../users/social-profile.service';
 import type { AgentTask } from './entities/agent-task.entity';
 import type { SocialAgentIntentRouterResult } from './social-agent-intent-router.service';
 import {
@@ -51,10 +54,26 @@ export class SocialAgentProfileGateService {
   async getMinimumProfileStatus(
     ownerUserId: number,
   ): Promise<SocialAgentMinimumProfileGateStatus> {
-    const [lifeGraph, socialProfile] = await Promise.all([
+    const [lifeGraph, socialProfile, completion] = await Promise.all([
       this.readLifeGraph(ownerUserId),
       this.readSocialProfile(ownerUserId),
+      this.readSocialProfileCompletion(ownerUserId),
     ]);
+    if (completion) {
+      const missing = this.profileCompletionMissingToGate(
+        completion.missingRequired ?? completion.missingFields ?? [],
+      );
+      const passed = missing.length === 0;
+      return {
+        passed,
+        missing,
+        assistantMessage: passed ? '' : this.buildQuestion(missing),
+        profileCompleteness: this.numberValue(completion.percent),
+        readinessLevel: completion.readinessLevel ?? null,
+        canEnterMatchPool: passed && completion.canEnterMatchPool === true,
+        nextActions: this.completionNextActions(completion, missing),
+      };
+    }
     const missing: SocialAgentProfileGateMissingField[] = [];
     if (
       !this.hasAny([
@@ -330,6 +349,68 @@ export class SocialAgentProfileGateService {
     } catch {
       return null;
     }
+  }
+
+  private async readSocialProfileCompletion(
+    userId: number,
+  ): Promise<SocialProfileCompletionResult | null> {
+    if (!this.socialProfiles) return null;
+    try {
+      return await this.socialProfiles.getCompletion(userId);
+    } catch {
+      return null;
+    }
+  }
+
+  private profileCompletionMissingToGate(
+    fields: Array<string | number | symbol>,
+  ): SocialAgentProfileGateMissingField[] {
+    const fieldSet = new Set(fields.map((field) => String(field)));
+    const missing: SocialAgentProfileGateMissingField[] = [];
+    if (fieldSet.has('city') || fieldSet.has('nearbyArea')) {
+      missing.push('city');
+    }
+    if (
+      fieldSet.has('fitnessGoals') ||
+      fieldSet.has('interestTags') ||
+      fieldSet.has('socialScenes')
+    ) {
+      missing.push('activity');
+    }
+    if (
+      fieldSet.has('availableTimes') ||
+      fieldSet.has('weekdayAvailability') ||
+      fieldSet.has('weekendAvailability')
+    ) {
+      missing.push('availability');
+    }
+    if (
+      fieldSet.has('privacyBoundary') ||
+      fieldSet.has('rejectRules') ||
+      fieldSet.has('avoidTraits')
+    ) {
+      missing.push('boundary');
+    }
+    if (
+      fieldSet.has('profileDiscoverable') ||
+      fieldSet.has('agentCanRecommendMe')
+    ) {
+      missing.push('publicAuthorization');
+    }
+    return missing;
+  }
+
+  private completionNextActions(
+    completion: SocialProfileCompletionResult,
+    missing: SocialAgentProfileGateMissingField[],
+  ) {
+    const completionActions = Array.isArray(completion.nextActions)
+      ? completion.nextActions
+          .map((item) => cleanDisplayText(item, ''))
+          .filter(Boolean)
+      : [];
+    if (completionActions.length > 0) return completionActions.slice(0, 5);
+    return missing.map((field) => this.missingFieldLabel(field));
   }
 
   private lifeGraphValue(

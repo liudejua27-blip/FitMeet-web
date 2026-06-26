@@ -40,6 +40,41 @@ type SaveAiDraftInput = {
 
 type ProfileReadinessLevel = 'empty' | 'basic' | 'match_ready' | 'agent_ready';
 
+type ProfileFieldKey = keyof UserSocialProfile;
+
+type ProfileAuthorizationState = {
+  matchPoolEnabled: boolean;
+  profileDiscoverable: boolean;
+  agentCanRecommendMe: boolean;
+  agentCanStartChatAfterApproval: boolean;
+  hideSensitiveTags: boolean;
+  requiresOwnerConfirmationToEnable: boolean;
+  consentSource: 'owner_confirmed_profile_switch' | 'not_enabled';
+};
+
+export type SocialProfileCompletionResult = {
+  completedFields: ProfileFieldKey[];
+  missingFields: ProfileFieldKey[];
+  missingRequired: ProfileFieldKey[];
+  missingRecommended: ProfileFieldKey[];
+  missingOptional: ProfileFieldKey[];
+  questionQueue: string[];
+  percent: number;
+  readinessLevel: ProfileReadinessLevel;
+  canEnterMatchPool: boolean;
+  authorizationRequired: boolean;
+  authorization: ProfileAuthorizationState;
+  sections: Array<{
+    key: ProfileCompletionSection['key'];
+    label: string;
+    completedFields: ProfileFieldKey[];
+    missingFields: ProfileFieldKey[];
+    percent: number;
+    weight: number;
+  }>;
+  nextActions: string[];
+};
+
 type ProfileCompletionSection = {
   key:
     | 'basic'
@@ -299,7 +334,7 @@ const PROFILE_COMPLETION_SECTIONS: ProfileCompletionSection[] = [
   {
     key: 'availability',
     label: '时间安排',
-    fields: ['availableTimes'],
+    fields: ['availableTimes', 'weekdayAvailability', 'weekendAvailability'],
     weight: 10,
   },
   {
@@ -314,6 +349,51 @@ const PROFILE_COMPLETION_SECTIONS: ProfileCompletionSection[] = [
     fields: ['profileDiscoverable', 'agentCanRecommendMe'],
     weight: 6,
   },
+];
+
+const PROFILE_REQUIRED_GROUPS: ReadonlyArray<{
+  key: 'location' | 'activity' | 'availability' | 'safety' | 'authorization';
+  fields: ProfileFieldKey[];
+  missingField: ProfileFieldKey;
+}> = [
+  { key: 'location', fields: ['city', 'nearbyArea'], missingField: 'city' },
+  {
+    key: 'activity',
+    fields: ['fitnessGoals', 'interestTags', 'socialScenes'],
+    missingField: 'fitnessGoals',
+  },
+  {
+    key: 'availability',
+    fields: ['availableTimes', 'weekdayAvailability', 'weekendAvailability'],
+    missingField: 'availableTimes',
+  },
+  {
+    key: 'safety',
+    fields: ['privacyBoundary', 'rejectRules', 'avoidTraits'],
+    missingField: 'privacyBoundary',
+  },
+  {
+    key: 'authorization',
+    fields: ['profileDiscoverable', 'agentCanRecommendMe'],
+    missingField: 'profileDiscoverable',
+  },
+];
+
+const PROFILE_RECOMMENDED_FIELDS: ProfileFieldKey[] = [
+  'nickname',
+  'nearbyArea',
+  'wantToMeet',
+  'preferredTraits',
+  'relationshipGoals',
+  'socialPreference',
+];
+
+const PROFILE_OPTIONAL_FIELDS: ProfileFieldKey[] = [
+  'ageRange',
+  'gender',
+  'mbti',
+  'zodiac',
+  'lifestyleTags',
 ];
 
 /**
@@ -363,10 +443,10 @@ export class SocialProfileService {
   async generateQuestions(userId: number) {
     const profile = await this.get(userId);
     const pendingProposal = await this.getPendingProfileUpdateProposal(userId);
-    const missing = PROFILE_INTERVIEW_BANK.filter(
-      ({ key }) => !this.hasValue(profile, key as keyof UserSocialProfile),
-    );
     const completion = this.getCompletionFromProfile(profile);
+    const missing = PROFILE_INTERVIEW_BANK.filter((item) =>
+      completion.questionQueue.includes(item.key),
+    );
     const questions = missing.slice(0, 12);
     const privacyBoundary = missing.find(
       (item) => item.key === 'privacyBoundary',
@@ -759,7 +839,9 @@ export class SocialProfileService {
     return Array.isArray(value) ? value.length > 0 : Boolean(value);
   }
 
-  private getCompletionFromProfile(profile: UserSocialProfile) {
+  private getCompletionFromProfile(
+    profile: UserSocialProfile,
+  ): SocialProfileCompletionResult {
     const keys = PROFILE_COMPLETION_SECTIONS.flatMap(
       (section) => section.fields,
     );
@@ -788,34 +870,48 @@ export class SocialProfileService {
         0,
       ),
     );
-    const hasMatchBasics =
-      this.hasValue(profile, 'city') &&
-      (this.hasValue(profile, 'fitnessGoals') ||
-        this.hasValue(profile, 'interestTags')) &&
-      this.hasValue(profile, 'wantToMeet') &&
-      (this.hasValue(profile, 'avoidTraits') ||
-        this.hasValue(profile, 'rejectRules')) &&
-      this.hasValue(profile, 'privacyBoundary');
     const authorization = this.profileAuthorizationState(profile);
+    const missingRequired = PROFILE_REQUIRED_GROUPS.filter((group) => {
+      if (group.key === 'authorization') return !authorization.matchPoolEnabled;
+      return !this.hasAnyProfileValues(profile, group.fields);
+    }).map((group) => group.missingField);
+    const requiredSet = new Set<ProfileFieldKey>(missingRequired);
+    const missingRecommended = PROFILE_RECOMMENDED_FIELDS.filter(
+      (field) => !requiredSet.has(field) && !this.hasValue(profile, field),
+    );
+    const missingOptional = PROFILE_OPTIONAL_FIELDS.filter(
+      (field) => !this.hasValue(profile, field),
+    );
+    const profileReadyForMatching = missingRequired.length === 0;
     const readinessLevel: ProfileReadinessLevel =
-      weightedPercent >= 80 && authorization.matchPoolEnabled
+      profileReadyForMatching && weightedPercent >= 80
         ? 'agent_ready'
-        : weightedPercent >= 65 && hasMatchBasics
+        : profileReadyForMatching
           ? 'match_ready'
           : weightedPercent >= 30
             ? 'basic'
             : 'empty';
     const nextActions = this.profileNextActions(
-      sections,
+      missingRequired,
+      missingRecommended,
       authorization,
-      hasMatchBasics,
+    );
+    const missingFields = Array.from(
+      new Set([...missingRequired, ...missingRecommended]),
     );
     return {
       completedFields: filled,
-      missingFields: keys.filter((key) => !filled.includes(key)),
+      missingFields,
+      missingRequired,
+      missingRecommended,
+      missingOptional,
+      questionQueue: this.buildProfileQuestionQueue(
+        missingRequired,
+        missingRecommended,
+      ),
       percent: weightedPercent,
       readinessLevel,
-      canEnterMatchPool: hasMatchBasics && weightedPercent >= 65,
+      canEnterMatchPool: profileReadyForMatching,
       authorizationRequired: !authorization.matchPoolEnabled,
       authorization,
       sections,
@@ -823,9 +919,13 @@ export class SocialProfileService {
     };
   }
 
-  private profileAuthorizationState(profile: UserSocialProfile) {
+  private profileAuthorizationState(
+    profile: UserSocialProfile,
+  ): ProfileAuthorizationState {
     const matchPoolEnabled =
       profile.profileDiscoverable || profile.agentCanRecommendMe;
+    const consentSource: ProfileAuthorizationState['consentSource'] =
+      matchPoolEnabled ? 'owner_confirmed_profile_switch' : 'not_enabled';
     return {
       matchPoolEnabled,
       profileDiscoverable: profile.profileDiscoverable,
@@ -834,39 +934,83 @@ export class SocialProfileService {
       hideSensitiveTags: profile.hideSensitiveTags,
       requiresOwnerConfirmationToEnable:
         !profile.profileDiscoverable && !profile.agentCanRecommendMe,
-      consentSource: matchPoolEnabled
-        ? 'owner_confirmed_profile_switch'
-        : 'not_enabled',
+      consentSource,
     };
   }
 
   private profileNextActions(
-    sections: Array<{
-      key: string;
-      label: string;
-      missingFields: Array<keyof UserSocialProfile>;
-      percent: number;
-    }>,
-    authorization: ReturnType<
-      SocialProfileService['profileAuthorizationState']
-    >,
-    hasMatchBasics: boolean,
+    missingRequired: ProfileFieldKey[],
+    missingRecommended: ProfileFieldKey[],
+    authorization: ProfileAuthorizationState,
   ): string[] {
     const actions: string[] = [];
-    const weakest = sections
-      .filter((section) => section.percent < 100)
-      .sort((a, b) => a.percent - b.percent)
-      .slice(0, 2);
-    for (const section of weakest) {
-      actions.push(`补全${section.label}`);
+    if (missingRequired.length > 0) {
+      actions.push(
+        `补齐关键资料：${missingRequired
+          .map((field) => this.profileFieldLabel(field))
+          .join('、')}`,
+      );
     }
-    if (!hasMatchBasics) {
-      actions.push('补充城市、运动兴趣、想认识的人和安全边界');
+    if (missingRecommended.length > 0) {
+      actions.push(
+        `完善推荐信息：${missingRecommended
+          .slice(0, 3)
+          .map((field) => this.profileFieldLabel(field))
+          .join('、')}`,
+      );
     }
     if (!authorization.matchPoolEnabled) {
       actions.push('本人确认后开启匹配池授权');
     }
     return Array.from(new Set(actions)).slice(0, 4);
+  }
+
+  private hasAnyProfileValues(
+    profile: UserSocialProfile,
+    fields: ProfileFieldKey[],
+  ) {
+    return fields.some((field) => this.hasValue(profile, field));
+  }
+
+  private buildProfileQuestionQueue(
+    missingRequired: ProfileFieldKey[],
+    missingRecommended: ProfileFieldKey[],
+  ) {
+    const interviewKeys = new Set(
+      PROFILE_INTERVIEW_BANK.map((item) => item.key),
+    );
+    return Array.from(new Set([...missingRequired, ...missingRecommended]))
+      .map((field) => String(field))
+      .filter((field) => interviewKeys.has(field));
+  }
+
+  private profileFieldLabel(field: ProfileFieldKey) {
+    const labels: Partial<Record<ProfileFieldKey, string>> = {
+      city: '常驻城市',
+      nearbyArea: '常活动区域',
+      fitnessGoals: '活动偏好',
+      interestTags: '兴趣偏好',
+      socialScenes: '社交场景',
+      availableTimes: '可约时间',
+      weekdayAvailability: '工作日可约时间',
+      weekendAvailability: '周末可约时间',
+      privacyBoundary: '安全边界',
+      rejectRules: '拒绝规则',
+      avoidTraits: '不接受的行为',
+      profileDiscoverable: '匹配授权',
+      agentCanRecommendMe: '推荐授权',
+      nickname: '昵称',
+      wantToMeet: '想认识的人',
+      preferredTraits: '偏好特质',
+      relationshipGoals: '匹配目标',
+      socialPreference: '互动偏好',
+      ageRange: '年龄段',
+      gender: '性别',
+      mbti: '性格关键词',
+      zodiac: '星座',
+      lifestyleTags: '生活方式',
+    };
+    return labels[field] ?? String(field);
   }
 
   private assertOwnerAuthorizedProfileVisibility(input: SaveAiDraftInput) {
