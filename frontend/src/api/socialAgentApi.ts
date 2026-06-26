@@ -208,6 +208,7 @@ export interface UserFacingAgentSessionSnapshot {
   messages: Array<Record<string, unknown>>;
   events?: Array<Record<string, unknown>>;
   result?: Record<string, unknown> | UserFacingAgentResponse | null;
+  userFacingResult?: UserFacingAgentResponse | null;
   latestRun?: Record<string, unknown> | null;
   pendingApprovals?: Array<Record<string, unknown>>;
   restoredAt?: string;
