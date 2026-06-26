@@ -2,19 +2,28 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { socialAgentApi } from '../api/socialAgentApi';
 import * as dataService from '../services/dataService';
-import { useAuthStore } from '../stores';
+import { useAuthStore, useSocialContactStore } from '../stores';
 import type { PublicSocialCandidate, PublicSocialIntent } from '../types';
+import type { PublicIntentApplication } from '../types/socialContact';
 
 export function PublicIntentDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { isLoggedIn } = useAuthStore();
+  const { isLoggedIn, openLogin } = useAuthStore();
   const [intent, setIntent] = useState<PublicSocialIntent | null>(null);
   const [candidates, setCandidates] = useState<PublicSocialCandidate[]>([]);
+  const [actionBusy, setActionBusy] = useState(false);
   const [errorState, setErrorState] = useState<{
     id: string;
     message: string;
   } | null>(null);
+  const applicationsById = useSocialContactStore((s) => s.applicationsById);
+  const applicationByPublicIntentId = useSocialContactStore((s) => s.applicationByPublicIntentId);
+  const conversationsByApplicationId = useSocialContactStore((s) => s.conversationsByApplicationId);
+  const loadApplicantApplications = useSocialContactStore((s) => s.loadApplicantApplications);
+  const createApplication = useSocialContactStore((s) => s.createApplication);
+  const cancelApplication = useSocialContactStore((s) => s.cancelApplication);
+  const recoverProvisioningApplications = useSocialContactStore((s) => s.recoverProvisioningApplications);
 
   useEffect(() => {
     let cancelled = false;
@@ -70,6 +79,17 @@ export function PublicIntentDetailPage() {
   const publicIntentCity = intent?.city || null;
   const publicIntentLocation = intent?.locationPreference || intent?.loc || null;
   const publicIntentTime = intent?.timePreference || null;
+  const application = publicIntentId
+    ? applicationForIntent(publicIntentId, applicationByPublicIntentId, applicationsById)
+    : null;
+  const applicationConversation = application
+    ? conversationsByApplicationId[application.id] ?? null
+    : null;
+
+  useEffect(() => {
+    if (!isLoggedIn) return;
+    void loadApplicantApplications().then(() => recoverProvisioningApplications());
+  }, [isLoggedIn, loadApplicantApplications, recoverProvisioningApplications]);
 
   useEffect(() => {
     if (!isLoggedIn || !publicIntentId) return;
@@ -156,6 +176,57 @@ export function PublicIntentDetailPage() {
     ],
   );
 
+  const handlePrimaryAction = useCallback(async () => {
+    if (!intent) return;
+    if (!isLoggedIn) {
+      openLogin();
+      return;
+    }
+    if (application?.status === 'accepted') {
+      const conversationId = applicationConversation?.conversationId;
+      if (conversationId) {
+        navigate(`/messages?conversationId=${encodeURIComponent(conversationId)}`);
+      } else {
+        recoverProvisioningApplications();
+      }
+      return;
+    }
+    if (application?.status === 'pending') {
+      setActionBusy(true);
+      try {
+        await cancelApplication(application.id);
+      } finally {
+        setActionBusy(false);
+      }
+      return;
+    }
+    if (application?.status === 'rejected' || application?.status === 'expired') return;
+    setActionBusy(true);
+    try {
+      await createApplication({
+        publicIntentId: intent.id,
+        message: `我想报名「${publicIntentTitle(intent)}」，请发起人确认。`,
+      });
+    } catch (error) {
+      setErrorState({
+        id: intent.id,
+        message: publicIntentActionError(error),
+      });
+    } finally {
+      setActionBusy(false);
+    }
+  }, [
+    application,
+    applicationConversation?.conversationId,
+    cancelApplication,
+    createApplication,
+    intent,
+    isLoggedIn,
+    navigate,
+    openLogin,
+    recoverProvisioningApplications,
+  ]);
+
   if (loading) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-[#0d0d0b] text-sm text-[#c7c2b0]">
@@ -240,12 +311,23 @@ export function PublicIntentDetailPage() {
                 查看发起人
               </Link>
             ) : null}
-            <Link
-              to={`/agent/chat?intent=${encodeURIComponent(intent.id)}`}
+            <button
+              type="button"
+              disabled={actionBusy || publicIntentPrimaryDisabled(intent, application)}
+              onClick={handlePrimaryAction}
               className="rounded-full bg-[#c8ff80] px-5 py-2 text-sm font-black text-[#11140f]"
             >
-              让 Agent 帮我参与
-            </Link>
+              {publicIntentPrimaryLabel(intent, application, applicationConversation)}
+            </button>
+            {application?.status === 'accepted' && !applicationConversation?.conversationId ? (
+              <button
+                type="button"
+                className="rounded-full border border-white/15 px-5 py-2 text-sm font-bold text-[#f4efe6] transition hover:border-[#c8ff80]/60"
+                onClick={() => recoverProvisioningApplications()}
+              >
+                手动刷新会话
+              </button>
+            ) : null}
           </div>
         </section>
 
@@ -327,6 +409,54 @@ function publicStatusLabel(status: PublicSocialIntent['status']) {
   if (status === 'closed' || status === 'inactive') return '已关闭';
   if (status === 'cancelled') return '已取消';
   return '可参与';
+}
+
+function applicationForIntent(
+  publicIntentId: string,
+  applicationByPublicIntentId: Record<string, number>,
+  applicationsById: Record<number, PublicIntentApplication>,
+) {
+  const applicationId = applicationByPublicIntentId[publicIntentId];
+  return applicationId ? applicationsById[applicationId] ?? null : null;
+}
+
+function publicIntentPrimaryLabel(
+  intent: PublicSocialIntent,
+  application: PublicIntentApplication | null,
+  conversation: { status: string; conversationId: string | null } | null,
+) {
+  if (intent.status === 'closed' || intent.status === 'inactive' || intent.status === 'cancelled') {
+    return '已结束';
+  }
+  if (application?.status === 'pending') return '已报名，等待确认';
+  if (application?.status === 'accepted') {
+    return conversation?.conversationId ? '进入聊天' : '正在建立会话';
+  }
+  if (application?.status === 'rejected') return '未通过';
+  if (application?.status === 'cancelled') return '重新报名';
+  if (application?.status === 'expired') return '已过期';
+  return '报名';
+}
+
+function publicIntentPrimaryDisabled(
+  intent: PublicSocialIntent,
+  application: PublicIntentApplication | null,
+) {
+  if (intent.status === 'closed' || intent.status === 'inactive' || intent.status === 'cancelled') {
+    return true;
+  }
+  return application?.status === 'rejected' || application?.status === 'expired';
+}
+
+function publicIntentActionError(error: unknown) {
+  const message = error instanceof Error ? error.message : '';
+  if (/SOCIAL_PROFILE_NOT_READY/.test(message)) return '请先完善资料后再报名。';
+  if (/PUBLIC_INTENT_FULL/.test(message)) return '这张约练卡已经满员。';
+  if (/PUBLIC_INTENT_NOT_ACTIVE/.test(message)) return '这张约练卡已经结束。';
+  if (/PUBLIC_INTENT_APPLICATION_DUPLICATE/.test(message)) return '你已经报名过这张约练卡。';
+  if (/USER_BLOCKED/.test(message)) return '当前关系不可报名。';
+  if (/IDEMPOTENCY_KEY_REUSED/.test(message)) return '请求状态冲突，请刷新后重试。';
+  return message || '报名失败，请稍后重试。';
 }
 
 function publicIntentTitle(intent: PublicSocialIntent) {

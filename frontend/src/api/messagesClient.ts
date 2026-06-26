@@ -1,5 +1,6 @@
 import { request } from './baseClient';
 import { fitMeetCoreEndpoints } from './fitmeetCoreContract';
+import type { ContactContextType } from '../types/socialContact';
 
 export interface ApiConversation {
   id: string;
@@ -55,10 +56,22 @@ export function sendMessage(conversationId: string, text: string): Promise<ApiMe
   );
 }
 
-export function startConversation(otherUserId: number): Promise<StartConversationResponse> {
+export function startConversation(input: {
+  targetUserId: number;
+  contextType: ContactContextType;
+  contextId: string;
+  initialMessage?: string;
+  idempotencyKey: string;
+}): Promise<StartConversationResponse> {
   return request<StartConversationResponse>(fitMeetCoreEndpoints.messages.startConversation, {
     method: 'POST',
-    body: JSON.stringify({ otherUserId }),
+    headers: { 'Idempotency-Key': input.idempotencyKey },
+    body: JSON.stringify({
+      targetUserId: input.targetUserId,
+      contextType: input.contextType,
+      contextId: input.contextId,
+      initialMessage: input.initialMessage,
+    }),
   });
 }
 

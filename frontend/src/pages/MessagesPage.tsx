@@ -7,7 +7,8 @@
 } from 'react';
 import clsx from 'clsx';
 import { Link, useSearchParams } from 'react-router-dom';
-import { useMessageStore } from '../stores';
+import { useMessageStore, useSocialContactStore } from '../stores';
+import type { PublicIntentApplication } from '../types/socialContact';
 
 export const MessagesPage = () => {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -19,12 +20,27 @@ export const MessagesPage = () => {
     closeConv,
     sendMessage,
     loadConversations,
+    disabledConversationReasons,
   } = useMessageStore();
+  const {
+    applicationsById,
+    ownerApplicationIds,
+    applicantApplicationIds,
+    conversationsByApplicationId,
+    loadOwnerApplications,
+    loadApplicantApplications,
+    acceptApplication,
+    rejectApplication,
+    cancelApplication,
+    recoverProvisioningApplications,
+  } = useSocialContactStore();
   const [inputText, setInputText] = useState('');
   const [conversationError, setConversationError] = useState<string | null>(null);
+  const [applicationActionId, setApplicationActionId] = useState<number | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const activeConv = conversations.find((c) => c.id === activeConvId);
+  const disabledReason = activeConvId ? disabledConversationReasons[activeConvId] : '';
 
   const activeMessages = useMemo(
     () => (activeConvId ? messages[activeConvId] || [] : []),
@@ -36,6 +52,34 @@ export const MessagesPage = () => {
     ? `/social-agent?taskId=${encodeURIComponent(agentTaskId)}`
     : '/social-agent';
   const handledConversationQueryRef = useRef<string | null>(null);
+
+  const ownerApplications = useMemo(
+    () =>
+      ownerApplicationIds
+        .map((id) => applicationsById[id])
+        .filter((item): item is PublicIntentApplication => Boolean(item)),
+    [applicationsById, ownerApplicationIds],
+  );
+  const applicantApplications = useMemo(
+    () =>
+      applicantApplicationIds
+        .map((id) => applicationsById[id])
+        .filter((item): item is PublicIntentApplication => Boolean(item)),
+    [applicantApplicationIds, applicationsById],
+  );
+
+  useEffect(() => {
+    void Promise.allSettled([
+      loadOwnerApplications(),
+      loadApplicantApplications(),
+      loadConversations(),
+    ]).then(() => recoverProvisioningApplications());
+  }, [
+    loadApplicantApplications,
+    loadConversations,
+    loadOwnerApplications,
+    recoverProvisioningApplications,
+  ]);
 
   useEffect(() => {
     const fromQuery =
@@ -88,10 +132,61 @@ export const MessagesPage = () => {
   }, [activeMessages]);
 
   const handleSend = useCallback(() => {
-    if (!inputText.trim() || !activeConvId) return;
-    sendMessage(activeConvId, inputText.trim());
+    if (!inputText.trim() || !activeConvId || disabledReason) return;
+    void sendMessage(activeConvId, inputText.trim());
     setInputText('');
-  }, [inputText, activeConvId, sendMessage]);
+  }, [activeConvId, disabledReason, inputText, sendMessage]);
+
+  const handleAcceptApplication = useCallback(
+    async (application: PublicIntentApplication) => {
+      setApplicationActionId(application.id);
+      try {
+        await acceptApplication(application.id);
+      } finally {
+        setApplicationActionId(null);
+      }
+    },
+    [acceptApplication],
+  );
+
+  const handleRejectApplication = useCallback(
+    async (application: PublicIntentApplication) => {
+      setApplicationActionId(application.id);
+      try {
+        await rejectApplication(application.id);
+      } finally {
+        setApplicationActionId(null);
+      }
+    },
+    [rejectApplication],
+  );
+
+  const handleCancelApplication = useCallback(
+    async (application: PublicIntentApplication) => {
+      setApplicationActionId(application.id);
+      try {
+        await cancelApplication(application.id);
+      } finally {
+        setApplicationActionId(null);
+      }
+    },
+    [cancelApplication],
+  );
+
+  const openApplicationConversation = useCallback(
+    (application: PublicIntentApplication) => {
+      const conversationId = conversationsByApplicationId[application.id]?.conversationId;
+      if (!conversationId) {
+        recoverProvisioningApplications();
+        return;
+      }
+      setConversationError(null);
+      handledConversationQueryRef.current = conversationId;
+      selectConv(conversationId);
+      setSearchParams({ conversationId });
+    },
+    [conversationsByApplicationId, recoverProvisioningApplications, selectConv, setSearchParams],
+  );
 
   return (
     <div className="min-h-screen bg-[#100b08] text-cream">
@@ -109,6 +204,17 @@ export const MessagesPage = () => {
               {conversations.filter((c) => c.unread > 0).length} 条未读
             </p>
           </div>
+
+          <ApplicationInboxSection
+            actionId={applicationActionId}
+            applicantApplications={applicantApplications}
+            conversationByApplicationId={conversationsByApplicationId}
+            ownerApplications={ownerApplications}
+            onAccept={handleAcceptApplication}
+            onCancel={handleCancelApplication}
+            onOpenConversation={openApplicationConversation}
+            onReject={handleRejectApplication}
+          />
 
           <div className="divide-y divide-border/50">
             {conversations.map((conv) => (
@@ -249,6 +355,8 @@ export const MessagesPage = () => {
                         )}
                       >
                         {msg.time}
+                        {msg.deliveryStatus === 'pending' ? ' · 发送中' : ''}
+                        {msg.deliveryStatus === 'failed' ? ` · ${msg.errorText || '发送失败'}` : ''}
                       </div>
                     </div>
                   </div>
@@ -261,21 +369,22 @@ export const MessagesPage = () => {
                 <div className="flex items-center gap-3">
                   <input
                     type="text"
-                    placeholder="输入消息..."
+                    placeholder={disabledReason || '输入消息...'}
                     value={inputText}
                     onChange={(e) => setInputText(e.target.value)}
                     onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && handleSend()}
+                    disabled={Boolean(disabledReason)}
                     className="flex-1 rounded-lg border border-border bg-surface px-4 py-2.5 text-sm text-white outline-none transition placeholder:text-textSofter focus:border-lime/50"
                   />
                   <button
                     className={clsx(
                       'cursor-pointer rounded-lg px-5 py-2.5 text-sm font-black transition',
-                      inputText.trim()
+                      inputText.trim() && !disabledReason
                         ? 'bg-lime text-white hover:bg-brand2 hover:shadow-glow'
                         : 'bg-surfaceMuted text-textSofter cursor-not-allowed'
                     )}
                     onClick={handleSend}
-                    disabled={!inputText.trim()}
+                    disabled={!inputText.trim() || Boolean(disabledReason)}
                   >
                     发送
                   </button>
@@ -303,3 +412,191 @@ export const MessagesPage = () => {
     </div>
   );
 };
+
+function ApplicationInboxSection({
+  actionId,
+  applicantApplications,
+  conversationByApplicationId,
+  ownerApplications,
+  onAccept,
+  onCancel,
+  onOpenConversation,
+  onReject,
+}: {
+  actionId: number | null;
+  applicantApplications: PublicIntentApplication[];
+  conversationByApplicationId: Record<
+    number,
+    { status: string; conversationId: string | null }
+  >;
+  ownerApplications: PublicIntentApplication[];
+  onAccept: (application: PublicIntentApplication) => void;
+  onCancel: (application: PublicIntentApplication) => void;
+  onOpenConversation: (application: PublicIntentApplication) => void;
+  onReject: (application: PublicIntentApplication) => void;
+}) {
+  const visibleOwner = ownerApplications.slice(0, 4);
+  const visibleApplicant = applicantApplications.slice(0, 4);
+  if (visibleOwner.length === 0 && visibleApplicant.length === 0) return null;
+
+  return (
+    <section className="border-b border-border/70 px-4 py-3">
+      <div className="mb-2 flex items-center justify-between">
+        <strong className="text-xs font-black text-white">约练申请</strong>
+        <span className="text-[10px] text-textSofter">
+          {visibleOwner.length + visibleApplicant.length} 条
+        </span>
+      </div>
+      <div className="space-y-2">
+        {visibleOwner.map((application) => (
+          <ApplicationCard
+            key={`owner-${application.id}`}
+            actionId={actionId}
+            application={application}
+            conversation={conversationByApplicationId[application.id]}
+            mode="owner"
+            onAccept={onAccept}
+            onCancel={onCancel}
+            onOpenConversation={onOpenConversation}
+            onReject={onReject}
+          />
+        ))}
+        {visibleApplicant.map((application) => (
+          <ApplicationCard
+            key={`applicant-${application.id}`}
+            actionId={actionId}
+            application={application}
+            conversation={conversationByApplicationId[application.id]}
+            mode="applicant"
+            onAccept={onAccept}
+            onCancel={onCancel}
+            onOpenConversation={onOpenConversation}
+            onReject={onReject}
+          />
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function ApplicationCard({
+  actionId,
+  application,
+  conversation,
+  mode,
+  onAccept,
+  onCancel,
+  onOpenConversation,
+  onReject,
+}: {
+  actionId: number | null;
+  application: PublicIntentApplication;
+  conversation?: { status: string; conversationId: string | null };
+  mode: 'owner' | 'applicant';
+  onAccept: (application: PublicIntentApplication) => void;
+  onCancel: (application: PublicIntentApplication) => void;
+  onOpenConversation: (application: PublicIntentApplication) => void;
+  onReject: (application: PublicIntentApplication) => void;
+}) {
+  const busy = actionId === application.id;
+  const ready = application.status === 'accepted' && Boolean(conversation?.conversationId);
+  const provisioning =
+    application.status === 'accepted' &&
+    (!conversation || conversation.status === 'provisioning' || !conversation.conversationId);
+  return (
+    <article className="rounded-xl border border-border bg-surface/80 p-3">
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <div className="truncate text-xs font-black text-white">
+            {mode === 'owner' ? `来自用户 ${application.applicantUserId}` : `报名 ${application.publicIntentId}`}
+          </div>
+          <div className="mt-1 truncate text-[11px] text-textSofter">
+            {application.message || '对方没有留言'}
+          </div>
+        </div>
+        <span className="shrink-0 rounded-md bg-white/10 px-2 py-0.5 text-[10px] text-textMuted">
+          {applicationStatusLabel(application.status, provisioning, ready)}
+        </span>
+      </div>
+      <div className="mt-2 flex flex-wrap gap-2">
+        {mode === 'owner' && application.status === 'pending' ? (
+          <>
+            <button
+              type="button"
+              className="rounded-md bg-lime px-3 py-1 text-[11px] font-black text-white disabled:opacity-60"
+              disabled={busy}
+              onClick={() => onAccept(application)}
+            >
+              接受
+            </button>
+            <button
+              type="button"
+              className="rounded-md border border-border px-3 py-1 text-[11px] font-bold text-textMuted disabled:opacity-60"
+              disabled={busy}
+              onClick={() => onReject(application)}
+            >
+              拒绝
+            </button>
+          </>
+        ) : null}
+        {mode === 'applicant' && application.status === 'pending' ? (
+          <button
+            type="button"
+            className="rounded-md border border-border px-3 py-1 text-[11px] font-bold text-textMuted disabled:opacity-60"
+            disabled={busy}
+            onClick={() => onCancel(application)}
+          >
+            取消报名
+          </button>
+        ) : null}
+        {ready ? (
+          <button
+            type="button"
+            className="rounded-md bg-lime px-3 py-1 text-[11px] font-black text-white"
+            onClick={() => onOpenConversation(application)}
+          >
+            进入聊天
+          </button>
+        ) : null}
+        {provisioning ? (
+          <button
+            type="button"
+            className="rounded-md border border-border px-3 py-1 text-[11px] font-bold text-textMuted"
+            onClick={() => onOpenConversation(application)}
+          >
+            正在建立会话
+          </button>
+        ) : null}
+        <Link
+          to={`/user/${mode === 'owner' ? application.applicantUserId : application.ownerUserId}`}
+          className="rounded-md border border-border px-3 py-1 text-[11px] font-bold text-textMuted"
+        >
+          查看资料
+        </Link>
+      </div>
+    </article>
+  );
+}
+
+function applicationStatusLabel(
+  status: PublicIntentApplication['status'],
+  provisioning: boolean,
+  ready: boolean,
+) {
+  if (ready) return '可聊天';
+  if (provisioning) return '建立中';
+  switch (status) {
+    case 'pending':
+      return '待确认';
+    case 'accepted':
+      return '已接受';
+    case 'rejected':
+      return '未通过';
+    case 'cancelled':
+      return '已取消';
+    case 'expired':
+      return '已过期';
+    default:
+      return status;
+  }
+}

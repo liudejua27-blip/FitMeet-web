@@ -84,9 +84,9 @@ const seo: Record<WebsitePage, { title: string; description: string; path: strin
 };
 
 const homeSeo = {
-  title: 'FitMeet | 需求流社交，让 Agent 帮你匹配合适的人',
+  title: 'FitMeet | Social world 让社交更简单',
   description:
-    'FitMeet 把社交从刷信息流变成需求流。用户说出想认识什么样的人，Agent 基于目标、兴趣、时间、地点和安全边界匹配，并在确认后发布到发现页。',
+    'FitMeet 是面向真实生活连接的 Social world。用户从附近的人、活动和场景开始，在安全边界内更自然地认识彼此。',
 };
 
 const safetyItems = [
@@ -133,6 +133,25 @@ const appTabs = [
   ['我的', '个人信息、兴趣爱好和安全边界'],
 ];
 
+const productFlowSteps = [
+  ['01', '说出需求', '用户先说清想找谁、做什么、什么时候方便。'],
+  ['02', '生成卡片', 'Agent 整理成可发布、可筛选、可解释的需求卡。'],
+  ['03', '确认公开', '用户确认后才进入发现页，敏感信息默认不公开。'],
+  ['04', '推进沟通', '围绕同频候选进入邀请、私信、加好友和后续确认。'],
+];
+
+const safetyOperatingSteps = [
+  ['默认隐藏', '精确位置、联系方式和敏感个人信息不进入公开卡片。'],
+  ['动作确认', '发布、邀请、共享位置和敏感资料更新都先等待用户确认。'],
+  ['事后可控', '授权、偏好、活动申请和公开需求都可以撤回或删除。'],
+];
+
+const aboutValues = [
+  ['需求先行', '用户先表达约练、交友或搭子需求，再进入匹配和发现。'],
+  ['安全可信', '公共场所优先、站内先聊、确认后执行是默认原则。'],
+  ['Agent 可控', 'AI 可以帮用户整理需求、完善画像和筛选候选，但不替用户越过关键边界。'],
+];
+
 export function WebsitePlatform({ page }: { page: WebsitePage }) {
   const location = useLocation();
 
@@ -155,7 +174,7 @@ export function WebsitePlatform({ page }: { page: WebsitePage }) {
   }, [location.hash, location.pathname]);
 
   return (
-    <div className="fitmeet-website fm-site fm-enterprise-site">
+    <div className={clsx('fitmeet-website fm-site fm-enterprise-site', `fm-page-${page}`)}>
       <WebsiteNavbar />
       <main>
         {page === 'home' ? <HomePage /> : null}
@@ -188,7 +207,7 @@ function WebsiteNavbar() {
     <header className={clsx('fm-nav', menuOpen && 'is-menu-open')}>
       <Link to="/" className="fm-brand" aria-label="FitMeet 首页">
         <span>
-          <img src="/favicon-192.png" alt="FitMeet" width="38" height="38" />
+          <img src="/favicon-32x32.png" alt="FitMeet" width="38" height="38" />
         </span>
         <strong>FitMeet</strong>
       </Link>
@@ -234,37 +253,27 @@ function HomePage() {
     <>
       <section className="fm-hero fm-enterprise-hero">
         <div className="fm-hero__copy">
-          <span className="fm-eyebrow">Demand Flow Social</span>
-          <h1>
-            <span>说出需求，</span>
-            <span>匹配合适的人</span>
-          </h1>
-          <p>从刷信息流，变成让 Agent 理解你想认识什么样的人，再把约练、交友和搭子需求变成可确认的真实连接。</p>
+          <h1>Social world</h1>
+          <p className="fm-hero__tagline">让社交更简单</p>
+          <p className="fm-hero__body">
+            FitMeet 把附近的人、活动和消息整理成清晰路径，让认识、邀请和沟通更自然可控。
+          </p>
           <div className="fm-actions">
             <Link to="/agent" className="fm-button fm-button--primary">
-              让 Agent 帮我匹配
+              立即体验
             </Link>
-            <SiteLink to="/discover" className="fm-button fm-button--ghost">
-              查看发现页
-            </SiteLink>
+            <Link to="/download" className="fm-button fm-button--ghost">
+              预约 App
+            </Link>
           </div>
           <div className="fm-hero__trust" aria-label="FitMeet 安全原则">
-            <span>需求先行</span>
-            <span>兴趣匹配</span>
-            <span>确认后发布</span>
+            <span>真实场景</span>
+            <span>确认后连接</span>
+            <span>安全边界</span>
           </div>
         </div>
         <div className="fm-hero__visual" aria-label="FitMeet Social World App 互动主视觉">
-          <CinematicShowcase
-            alt="FitMeet Social World 深色手机产品阵列"
-            imageSrc="/images/fitmeet/cinematic/social-world-dark-phones.png"
-            variant="home"
-            cards={[
-              { label: '需求理解', body: '目标、爱好和边界先对齐', icon: Sparkles },
-              { label: '发布到发现', body: '确认后同步真实新卡', icon: MapPin },
-              { label: '站内连接', body: '邀请和私信都可控', icon: MessageCircle },
-            ]}
-          />
+          <SocialWorldHeroImage />
         </div>
       </section>
 
@@ -348,6 +357,35 @@ function HomePage() {
   );
 }
 
+function SocialWorldHeroImage() {
+  return (
+    <figure className="fm-social-app-hero">
+      <picture className="fm-social-app-hero__media">
+        <source
+          type="image/webp"
+          srcSet="/images/fitmeet/hero/social-world-app-hero-v2-960.webp 960w, /images/fitmeet/hero/social-world-app-hero-v2-1600.webp 1600w"
+          sizes="(max-width: 768px) 94vw, (max-width: 1180px) 88vw, 760px"
+        />
+        <source
+          type="image/jpeg"
+          srcSet="/images/fitmeet/hero/social-world-app-hero-v2-960.jpg 960w, /images/fitmeet/hero/social-world-app-hero-v2-1600.jpg 1600w"
+          sizes="(max-width: 768px) 94vw, (max-width: 1180px) 88vw, 760px"
+        />
+        <img
+          src="/images/fitmeet/hero/social-world-app-hero-v2-1600.jpg"
+          alt="FitMeet Social world App 的手机界面，展示附近用户、活动邀请、聊天和安全确认"
+          width="1600"
+          height="1066"
+          loading="eager"
+          fetchPriority="high"
+          decoding="async"
+        />
+      </picture>
+      <figcaption>Social world App preview</figcaption>
+    </figure>
+  );
+}
+
 function FeaturesPage() {
   return (
     <>
@@ -365,6 +403,7 @@ function FeaturesPage() {
         title="围绕约练、交友和搭子，把一次社交拆成可执行步骤。"
         body="参考成熟社交产品的推荐流和本地活动组织方式，但 FitMeet 的入口不是无限滑动，而是当前需求：我想认识什么样的人、为什么现在可以开始。"
       >
+        <ProductFlowMap />
         <div className="fm-feature-pillars">
           {featurePillars.map(([title, body]) => (
             <article key={title} className="fm-card">
@@ -383,6 +422,11 @@ function FeaturesPage() {
               <h3>{title}</h3>
               <p>{body}</p>
             </article>
+          ))}
+        </div>
+        <div className="fm-signal-rail" aria-label="FitMeet 产品闭环">
+          {['需求表达', '画像补齐', '候选解释', '确认发布', '站内沟通'].map((item) => (
+            <span key={item}>{item}</span>
           ))}
         </div>
       </Section>
@@ -436,6 +480,14 @@ function SafetyCenterPage() {
         visual={<SafetyProductVisual />}
       />
       <Section label="安全机制" title="每个关键动作都要可解释、可确认、可追溯。">
+        <div className="fm-safety-operating">
+          {safetyOperatingSteps.map(([title, body]) => (
+            <article key={title}>
+              <strong>{title}</strong>
+              <p>{body}</p>
+            </article>
+          ))}
+        </div>
         <div className="fm-safety-grid">
           {safetyItems.map(([title, body]) => (
             <article key={title} className="fm-card">
@@ -463,6 +515,19 @@ function SafetyCenterPage() {
           ))}
         </div>
       </Section>
+      <section className="fm-final-cta">
+        <span>Safety by default</span>
+        <h2>安全不是额外说明，是每个动作旁边的默认边界。</h2>
+        <p>FitMeet 把隐私、确认、审计和撤回放进产品流程，让用户知道什么时候公开、公开给谁、如何撤回。</p>
+        <div className="fm-actions">
+          <Link to="/demo" className="fm-button fm-button--primary">
+            体验免登录 Demo
+          </Link>
+          <Link to="/download" className="fm-button fm-button--ghost">
+            预约 App
+          </Link>
+        </div>
+      </section>
     </>
   );
 }
@@ -489,6 +554,10 @@ function DownloadPage() {
             </article>
           ))}
         </div>
+        <div className="fm-download-note">
+          <strong>Beta 阶段先服务真实社交闭环。</strong>
+          <p>预约后，我们会优先邀请愿意体验 Agent 生成需求卡、发现页匹配和站内消息确认流程的用户。</p>
+        </div>
       </Section>
       <Section label="App Flow" title="用户每天只需要看懂这五个入口。" tone="deep">
         <PhonePreview />
@@ -511,14 +580,19 @@ function AboutContactPage() {
           { label: '联系合作', to: '#contact', variant: 'primary' },
           { label: '下载 App', to: '/download' },
         ]}
+        visual={<AboutWorldVisual />}
       />
       <Section label="Vision" title="不是让用户停留更久，而是让合适的人更自然见面。">
+        <div className="fm-about-manifesto">
+          <p>
+            FitMeet 的判断很简单：真实生活里的社交，不应该从刷更多内容开始，而应该从一个明确需求开始。
+          </p>
+          <p>
+            当用户知道自己想做什么、什么时候方便、愿意公开到什么程度，Agent 才有机会把认识、邀请和沟通变成可控路径。
+          </p>
+        </div>
         <div className="fm-about-values">
-          {[
-            ['需求先行', '用户先表达约练、交友或搭子需求，再进入匹配和发现。'],
-            ['安全可信', '公共场所优先、站内先聊、确认后执行是默认原则。'],
-            ['Agent 可控', 'AI 可以帮用户整理需求、完善画像和筛选候选，但不替用户越过关键边界。'],
-          ].map(([title, body]) => (
+          {aboutValues.map(([title, body]) => (
             <article key={title} className="fm-card">
               <span>Value</span>
               <h3>{title}</h3>
@@ -556,6 +630,43 @@ function AboutContactPage() {
         </div>
       </section>
     </>
+  );
+}
+
+function ProductFlowMap() {
+  return (
+    <div className="fm-product-flow-map" aria-label="FitMeet 产品流程">
+      {productFlowSteps.map(([index, title, body]) => (
+        <article key={title}>
+          <span>{index}</span>
+          <strong>{title}</strong>
+          <p>{body}</p>
+        </article>
+      ))}
+    </div>
+  );
+}
+
+function AboutWorldVisual() {
+  return (
+    <figure className="fm-about-world-visual">
+      <picture>
+        <source
+          type="image/webp"
+          srcSet="/images/fitmeet/concept-earth-asia-960.webp 960w, /images/fitmeet/concept-earth-asia-1400.webp 1400w"
+          sizes="(max-width: 768px) 92vw, 560px"
+        />
+        <img
+          src="/images/fitmeet/concept-earth-asia.png"
+          alt="FitMeet Social World 的亚洲城市连接视觉"
+          width="1400"
+          height="788"
+          loading="lazy"
+          decoding="async"
+        />
+      </picture>
+      <figcaption>Social World connection map</figcaption>
+    </figure>
   );
 }
 
@@ -913,7 +1024,7 @@ function WebsiteFooter() {
   return (
     <footer className="fm-footer">
       <strong>
-        <img src="/favicon-192.png" alt="FitMeet" width="28" height="28" />
+        <img src="/favicon-32x32.png" alt="FitMeet" width="28" height="28" />
         FitMeet
       </strong>
       <p>需求流社交，从一个明确需求开始，遇见真正合适的人。</p>

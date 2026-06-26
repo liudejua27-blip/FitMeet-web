@@ -18,7 +18,8 @@ import { getBrowserLocation } from '../lib/location';
 import type { Coordinates } from '../lib/amap';
 import { filterDisplayableMeets } from '../data/discoverContent';
 import { getSportLabel, normalizeSportGroup } from '../data/taxonomy';
-import { useAuthStore, useNotificationStore } from '../stores';
+import { useAuthStore, useNotificationStore, useSocialContactStore } from '../stores';
+import type { PublicIntentApplication } from '../types/socialContact';
 import type { Meet, PublicSocialIntent } from '../types';
 import {
   detailHrefForDiscoverMeet,
@@ -72,6 +73,13 @@ export const DiscoverPage = () => {
   const [isLocating, setIsLocating] = useState(false);
   const { isLoggedIn, openLogin } = useAuthStore();
   const { addNotification } = useNotificationStore();
+  const applicationsById = useSocialContactStore((s) => s.applicationsById);
+  const applicationByPublicIntentId = useSocialContactStore((s) => s.applicationByPublicIntentId);
+  const conversationsByApplicationId = useSocialContactStore((s) => s.conversationsByApplicationId);
+  const loadApplicantApplications = useSocialContactStore((s) => s.loadApplicantApplications);
+  const createApplication = useSocialContactStore((s) => s.createApplication);
+  const cancelApplication = useSocialContactStore((s) => s.cancelApplication);
+  const recoverProvisioningApplications = useSocialContactStore((s) => s.recoverProvisioningApplications);
 
   const loadDiscover = useCallback(async () => {
     setLoading(true);
@@ -176,6 +184,11 @@ export const DiscoverPage = () => {
     void loadDiscover();
   }, [loadDiscover]);
 
+  useEffect(() => {
+    if (!isLoggedIn) return;
+    void loadApplicantApplications().then(() => recoverProvisioningApplications());
+  }, [isLoggedIn, loadApplicantApplications, recoverProvisioningApplications]);
+
   const liveItems = useMemo<LiveItem[]>(() => {
     const seen = new Set<string>();
     const uniqueMeets = displayMeets.filter((meet) => {
@@ -231,7 +244,55 @@ export const DiscoverPage = () => {
         return;
       }
       if ((meet as DiscoverMeet).sourceKind === 'publicIntent') {
-        navigate((meet as DiscoverMeet).detailHref || '/agent/chat');
+        const publicIntentId = (meet as DiscoverMeet).publicIntentId;
+        if (!publicIntentId) return;
+        const application = applicationForPublicIntent(
+          publicIntentId,
+          applicationByPublicIntentId,
+          applicationsById,
+        );
+        if (application?.status === 'pending') {
+          await cancelApplication(application.id);
+          addNotification({
+            type: 'meet',
+            username: meet.username || '约练',
+            avatar: (meet.username || '约')[0],
+            color: meet.color,
+            text: `已取消「${meet.title}」报名。`,
+            time: '刚刚',
+          });
+          return;
+        }
+        if (application?.status === 'accepted') {
+          const conversationId = conversationsByApplicationId[application.id]?.conversationId;
+          if (conversationId) {
+            navigate(`/messages?conversationId=${encodeURIComponent(conversationId)}`);
+          } else {
+            recoverProvisioningApplications();
+            addNotification({
+              type: 'meet',
+              username: meet.username || '约练',
+              avatar: (meet.username || '约')[0],
+              color: meet.color,
+              text: '会话正在建立，请稍后在消息页查看。',
+              time: '刚刚',
+            });
+          }
+          return;
+        }
+        if (application?.status === 'rejected') return;
+        await createApplication({
+          publicIntentId,
+          message: `我想报名「${meet.title}」，请发起人确认。`,
+        });
+        addNotification({
+          type: 'meet',
+          username: meet.username || '约练',
+          avatar: (meet.username || '约')[0],
+          color: meet.color,
+          text: `报名已提交「${meet.title}」，等待发起人确认。`,
+          time: '刚刚',
+        });
         return;
       }
       if (joinedMeets.includes(meet.id)) return;
@@ -251,7 +312,20 @@ export const DiscoverPage = () => {
         setError('加入失败，请稍后重试。');
       }
     },
-    [addNotification, isLoggedIn, joinedMeets, loadDiscover, navigate, openLogin],
+    [
+      addNotification,
+      applicationByPublicIntentId,
+      applicationsById,
+      cancelApplication,
+      conversationsByApplicationId,
+      createApplication,
+      isLoggedIn,
+      joinedMeets,
+      loadDiscover,
+      navigate,
+      openLogin,
+      recoverProvisioningApplications,
+    ],
   );
 
   const recordDiscoverInterest = useCallback(
@@ -428,6 +502,21 @@ export const DiscoverPage = () => {
                     meet={meet}
                     index={index}
                     joined={joinedMeets.includes(meet.id)}
+                    publicIntentApplication={
+                      meet.publicIntentId
+                        ? applicationForPublicIntent(
+                            meet.publicIntentId,
+                            applicationByPublicIntentId,
+                            applicationsById,
+                          )
+                        : null
+                    }
+                    publicIntentConversation={publicIntentConversation(
+                      meet.publicIntentId,
+                      applicationByPublicIntentId,
+                      applicationsById,
+                      conversationsByApplicationId,
+                    )}
                     distance={getMeetDistanceMeters(meet, userLocation)}
                     detailHref={detailHrefForDiscoverMeet(meet)}
                     onJoin={() => void handleJoin(meet)}
@@ -526,7 +615,7 @@ function DiscoverSiteNav() {
     <header className={clsx('fm-nav', menuOpen && 'is-menu-open')}>
       <Link to="/" className="fm-brand" aria-label="FitMeet 首页">
         <span>
-          <img src="/favicon-192.png" alt="FitMeet" width="38" height="38" />
+          <img src="/favicon-32x32.png" alt="FitMeet" width="38" height="38" />
         </span>
         <strong>FitMeet</strong>
       </Link>
@@ -572,7 +661,7 @@ function DiscoverSiteFooter() {
   return (
     <footer className="fm-footer">
       <strong>
-        <img src="/favicon-192.png" alt="FitMeet" width="28" height="28" />
+        <img src="/favicon-32x32.png" alt="FitMeet" width="28" height="28" />
         FitMeet
       </strong>
       <p>发现附近真实需求卡片，从明确目标出发，遇见真正合适的人。</p>
@@ -691,6 +780,8 @@ function MeetupMatchCard({
   onJoin,
   onOpen,
   detailHref,
+  publicIntentApplication,
+  publicIntentConversation,
 }: {
   distance: number | null | undefined;
   index: number;
@@ -699,12 +790,14 @@ function MeetupMatchCard({
   onJoin: () => void;
   onOpen?: () => void;
   detailHref: string;
+  publicIntentApplication?: PublicIntentApplication | null;
+  publicIntentConversation?: { status: string; conversationId: string | null } | null;
 }) {
   const score = matchScore(meet);
   const tone = ['green', 'orange', 'blue', 'gold'][index % 4];
   const statusLabel =
     meet.sourceKind === 'publicIntent'
-      ? '查看详情'
+      ? publicIntentApplicationLabel(publicIntentApplication, publicIntentConversation)
       : joined
         ? '已申请'
         : meet.status === 'matched'
@@ -760,7 +853,9 @@ function MeetupMatchCard({
         <div className="match-card__tags">
           <button
             type="button"
-            className={joined ? 'is-muted' : 'is-open'}
+            className={
+              joined || publicIntentApplication?.status === 'pending' ? 'is-muted' : 'is-open'
+            }
             onClick={handleJoinClick}
           >
             {statusLabel}
@@ -789,6 +884,45 @@ function MeetupMatchCard({
       </article>
     </Link>
   );
+}
+
+function applicationForPublicIntent(
+  publicIntentId: string,
+  applicationByPublicIntentId: Record<string, number>,
+  applicationsById: Record<number, PublicIntentApplication>,
+) {
+  const applicationId = applicationByPublicIntentId[publicIntentId];
+  return applicationId ? applicationsById[applicationId] ?? null : null;
+}
+
+function publicIntentConversation(
+  publicIntentId: string | undefined,
+  applicationByPublicIntentId: Record<string, number>,
+  applicationsById: Record<number, PublicIntentApplication>,
+  conversationsByApplicationId: Record<number, { status: string; conversationId: string | null }>,
+) {
+  if (!publicIntentId) return null;
+  const application = applicationForPublicIntent(
+    publicIntentId,
+    applicationByPublicIntentId,
+    applicationsById,
+  );
+  return application ? conversationsByApplicationId[application.id] ?? null : null;
+}
+
+function publicIntentApplicationLabel(
+  application?: PublicIntentApplication | null,
+  conversation?: { status: string; conversationId: string | null } | null,
+) {
+  if (!application) return '报名';
+  if (application.status === 'pending') return '已报名';
+  if (application.status === 'accepted') {
+    return conversation?.conversationId ? '进入聊天' : '建立会话中';
+  }
+  if (application.status === 'rejected') return '未通过';
+  if (application.status === 'cancelled') return '重新报名';
+  if (application.status === 'expired') return '已过期';
+  return '查看详情';
 }
 
 function meetDemandSummary(meet: DiscoverMeet) {
