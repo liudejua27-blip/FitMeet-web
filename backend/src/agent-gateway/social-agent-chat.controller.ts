@@ -25,6 +25,7 @@ import type {
   FitMeetRequest,
   SocialAgentConnectCandidateBody,
   SocialAgentCheckpointActionBody,
+  SocialAgentFeedbackEventBody,
   SocialAgentMessageFeedbackBody,
   SocialAgentReplanRunBody,
   SocialAgentRouteMessageBody,
@@ -67,6 +68,7 @@ import { SocialAgentTaskMemoryStateMachineService } from './social-agent-task-me
 import { SocialAgentMessageLogService } from './social-agent-message-log.service';
 import { SocialAgentTaskLifecycleService } from './social-agent-task-lifecycle.service';
 import { SocialAgentUserInterestEventService } from './social-agent-user-interest-event.service';
+import { SocialAgentFeedbackEventService } from './social-agent-feedback-event.service';
 import type { SocialAgentUserInterestEventType } from './entities/social-agent-user-interest-event.entity';
 import {
   SocialCodexEventPipelineService,
@@ -144,6 +146,8 @@ export class SocialAgentChatController {
     private readonly taskLifecycle?: SocialAgentTaskLifecycleService,
     @Optional()
     private readonly interestEvents?: SocialAgentUserInterestEventService,
+    @Optional()
+    private readonly agentFeedbackEvents?: SocialAgentFeedbackEventService,
   ) {}
 
   private initialRunCopy(input?: InitialRunCopyInput | null) {
@@ -269,6 +273,15 @@ export class SocialAgentChatController {
     };
   }
 
+  @Post('feedback-events')
+  @HttpCode(200)
+  submitAgentFeedbackEvent(
+    @Req() req: FitMeetRequest,
+    @Body() body: SocialAgentFeedbackEventBody,
+  ) {
+    return this.requireAgentFeedbackEvents().submit(req.user.id, body ?? {});
+  }
+
   @Post('run')
   run(@Req() req: FitMeetRequest, @Body() body: SocialAgentRunBody) {
     return this.chat.run(req.user.id, body ?? {});
@@ -288,6 +301,7 @@ export class SocialAgentChatController {
     @Req() req: FitMeetRequest,
     @Body() body: SocialAgentRouteMessageBody,
   ) {
+    await this.recordInlineCorrectionIfNeeded(req.user.id, body ?? {});
     const result = await this.chat.routeMessage(req.user.id, body ?? {});
     return this.userFacingSanitizer.toUserFacingAgentResponse(
       result,
@@ -312,6 +326,7 @@ export class SocialAgentChatController {
     @Req() req: FitMeetRequest,
     @Body() body: SocialAgentRouteMessageBody,
   ) {
+    await this.recordInlineCorrectionIfNeeded(req.user.id, body ?? {});
     const result = await this.chat.handleMessage(req.user.id, body ?? {});
     return this.userFacingSanitizer.toUserFacingAgentResponse(
       result,
@@ -355,6 +370,10 @@ export class SocialAgentChatController {
     @Param('id', ParseIntPipe) id: number,
     @Body() body: SocialAgentRouteMessageBody,
   ) {
+    await this.recordInlineCorrectionIfNeeded(req.user.id, {
+      ...(body ?? {}),
+      taskId: id,
+    });
     const result = await this.chat.handleMessage(req.user.id, {
       ...(body ?? {}),
       taskId: id,
@@ -980,6 +999,7 @@ export class SocialAgentChatController {
     let streamedAssistantMessageId: string | null = null;
     let taskBoundInitialTraceTaskId = body.taskId ?? null;
     try {
+      await this.recordInlineCorrectionIfNeeded(req.user.id, body);
       const initialCopy = this.initialRunCopy(body);
       await socialCodexEvents.writeRunStarted(
         v2,
@@ -1622,6 +1642,49 @@ export class SocialAgentChatController {
       throw new Error('SocialAgentUserInterestEventService is not configured');
     }
     return this.interestEvents;
+  }
+
+  private requireAgentFeedbackEvents(): SocialAgentFeedbackEventService {
+    if (!this.agentFeedbackEvents) {
+      throw new Error('SocialAgentFeedbackEventService is not configured');
+    }
+    return this.agentFeedbackEvents;
+  }
+
+  private async recordInlineCorrectionIfNeeded(
+    ownerUserId: number,
+    body: SocialAgentRouteMessageBody,
+  ) {
+    const message = cleanDisplayText(body?.message, '').trim();
+    if (!this.isUserCorrectionMessage(message)) return;
+    const taskId = parseSocialAgentThreadTaskId(
+      body?.taskId ?? body?.clientContext?.threadId,
+    );
+    if (!taskId) return;
+    if (!this.agentFeedbackEvents) return;
+    await this.agentFeedbackEvents
+      .submit(ownerUserId, {
+        taskId,
+        feedbackType: 'task_correction',
+        reasonCode: 'other',
+        freeText: message,
+        source: 'agent_chat_correction',
+        metadata: {
+          conversationIntent: body?.conversationIntent ?? null,
+          threadId: body?.clientContext?.threadId ?? null,
+        },
+      })
+      .catch(() => undefined);
+  }
+
+  private isUserCorrectionMessage(message: string): boolean {
+    return (
+      /不是\s*[^，,。；;]{1,40}\s*[，, ]?\s*是\s*[^，,。；;]{1,40}/.test(
+        message,
+      ) ||
+      /不要太远|别太远|太远|近一点|附近就好|附近即可|附近优先/.test(message) ||
+      /不要公开|不想公开|别公开|只私下|不要发到发现/.test(message)
+    );
   }
 
   private interestEventType(

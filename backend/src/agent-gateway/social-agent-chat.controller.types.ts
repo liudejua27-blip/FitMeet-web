@@ -145,6 +145,21 @@ export type SocialAgentUserInterestEventBody = {
   metadata?: Record<string, unknown> | null;
 };
 
+export type SocialAgentFeedbackEventBody = {
+  taskId?: number | null;
+  publicIntentId?: string | null;
+  matchingJobId?: number | null;
+  candidateId?: number | null;
+  candidateRecordId?: number | null;
+  feedbackType?: string | null;
+  reasonCode?: string | null;
+  freeText?: string | null;
+  appliesToCurrentTask?: boolean | null;
+  appliesToFutureProfile?: boolean | null;
+  source?: string | null;
+  metadata?: Record<string, unknown> | null;
+};
+
 export type SocialAgentCheckpointActionBody = {
   decision?: 'approved' | 'rejected' | null;
   reason?: string | null;

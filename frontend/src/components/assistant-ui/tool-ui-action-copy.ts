@@ -10,6 +10,11 @@ export const TOOL_UI_SCHEMA_ACTIONS = [
   'candidate.view_detail',
   'candidate.like',
   'candidate.skip',
+  'candidate.feedback.good_fit',
+  'candidate.feedback.bad_fit',
+  'candidate.feedback.too_far',
+  'candidate.feedback.time_mismatch',
+  'candidate.feedback.style_mismatch',
   'candidate.connect',
   'candidate.generate_opener',
   'candidate.more_like_this',
@@ -55,6 +60,31 @@ export const TOOL_UI_CARD_ACTION_COPY: Record<ToolUISchemaAction, ToolUICardActi
     busy: '正在减少类似推荐',
     done: '已跳过',
     result: '已跳过这个机会，后续会减少类似推荐。',
+  },
+  'candidate.feedback.good_fit': {
+    busy: '正在记录反馈',
+    done: '已记录合适',
+    result: '已记录“合适”，后续候选质量会参考这个信号。',
+  },
+  'candidate.feedback.bad_fit': {
+    busy: '正在记录反馈',
+    done: '已记录不合适',
+    result: '已记录“不合适”，后续会减少类似候选。',
+  },
+  'candidate.feedback.too_far': {
+    busy: '正在记录反馈',
+    done: '已记录太远',
+    result: '已记录“太远”，后续会优先收紧地点范围。',
+  },
+  'candidate.feedback.time_mismatch': {
+    busy: '正在记录反馈',
+    done: '已记录时间不对',
+    result: '已记录“时间不对”，后续会更重视时间匹配。',
+  },
+  'candidate.feedback.style_mismatch': {
+    busy: '正在记录反馈',
+    done: '已记录风格不对',
+    result: '已记录“风格不对”，后续会调整互动风格偏好。',
   },
   'candidate.connect': {
     busy: '正在准备邀请',

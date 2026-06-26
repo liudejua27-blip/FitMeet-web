@@ -685,7 +685,18 @@ describe('assistant-ui tool fallback rendering', () => {
       within(actionCard)
         .getAllByTestId('assistant-ui-schema-action')
         .map((button) => button.textContent?.trim()),
-    ).toEqual(['查看详情', '收藏', '发消息', '邀请Ta', '加好友并聊天']);
+    ).toEqual([
+      '查看详情',
+      '收藏',
+      '合适',
+      '不合适',
+      '太远',
+      '时间不对',
+      '风格不对',
+      '发消息',
+      '邀请Ta',
+      '加好友并聊天',
+    ]);
     expect(within(actionCard).getByRole('button', { name: '查看详情' })).toHaveAttribute(
       'data-requires-confirmation',
       'false',
@@ -961,7 +972,18 @@ describe('assistant-ui tool fallback rendering', () => {
       within(actionCard)
         .getAllByTestId('assistant-ui-schema-action')
         .map((button) => button.textContent?.trim()),
-    ).toEqual(['查看详情', '收藏', '发消息', '邀请Ta', '加好友并聊天']);
+    ).toEqual([
+      '查看详情',
+      '收藏',
+      '合适',
+      '不合适',
+      '太远',
+      '时间不对',
+      '风格不对',
+      '发消息',
+      '邀请Ta',
+      '加好友并聊天',
+    ]);
 
     fireEvent.click(within(actionCard).getByRole('button', { name: '发送邀请' }));
     const inlineApproval = await screen.findByTestId('assistant-ui-inline-approval-panel');
@@ -1202,7 +1224,18 @@ describe('assistant-ui tool fallback rendering', () => {
       within(actionCard)
         .getAllByTestId('assistant-ui-schema-action')
         .map((button) => button.textContent?.trim()),
-    ).toEqual(['查看详情', '收藏', '发消息', '邀请Ta', '加好友并聊天']);
+    ).toEqual([
+      '查看详情',
+      '收藏',
+      '合适',
+      '不合适',
+      '太远',
+      '时间不对',
+      '风格不对',
+      '发消息',
+      '邀请Ta',
+      '加好友并聊天',
+    ]);
     expect(within(actionCard).getByRole('button', { name: '收藏' })).toHaveAttribute(
       'data-requires-confirmation',
       'false',

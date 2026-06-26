@@ -47,6 +47,7 @@ function makeController() {
       applyRetentionPolicy: jest.fn().mockResolvedValue({}),
     } as never,
     { listRecent: jest.fn().mockResolvedValue([]) } as never,
+    { listRecent: jest.fn().mockResolvedValue([]) } as never,
     {
       snapshot: jest.fn().mockReturnValue({
         cacheEfficiencySummary: {

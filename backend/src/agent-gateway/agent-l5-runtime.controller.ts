@@ -22,6 +22,7 @@ import { AgentObservabilityService } from './agent-observability.service';
 import { SubagentWorkerQueueService } from './subagent-worker-queue.service';
 import { LifeGraphComplianceService } from '../life-graph/life-graph-compliance.service';
 import { SocialAgentMessageFeedbackService } from './social-agent-message-feedback.service';
+import { SocialAgentFeedbackEventService } from './social-agent-feedback-event.service';
 import { SocialAgentMetricsService } from './social-agent-metrics.service';
 
 type UserSatisfactionBody = {
@@ -45,6 +46,7 @@ export class AgentL5RuntimeController {
     private readonly subagentWorkerQueue: SubagentWorkerQueueService,
     private readonly lifeGraphCompliance: LifeGraphComplianceService,
     private readonly messageFeedback: SocialAgentMessageFeedbackService,
+    private readonly agentFeedbackEvents: SocialAgentFeedbackEventService,
     private readonly socialAgentMetrics: SocialAgentMetricsService,
   ) {}
 
@@ -71,6 +73,9 @@ export class AgentL5RuntimeController {
     const messageFeedback = await this.messageFeedback.listRecent(
       Number(limit),
     );
+    const agentFeedbackEvents = await this.agentFeedbackEvents.listRecent({
+      limit: Number(limit),
+    });
     return {
       ...dashboard,
       summary: {
@@ -91,9 +96,14 @@ export class AgentL5RuntimeController {
         negativeMessageFeedback: messageFeedback.filter(
           (item) => item.value === 'negative',
         ).length,
+        agentFeedbackEvents: agentFeedbackEvents.length,
+        negativeAgentFeedbackEvents: agentFeedbackEvents.filter(
+          (item) => item.reasonCode !== 'good_fit',
+        ).length,
       },
       autoRuns,
       messageFeedback,
+      agentFeedbackEvents,
       workerLanes,
       workerJobs,
       workerHeartbeats,
@@ -101,6 +111,45 @@ export class AgentL5RuntimeController {
       observability,
       socialAgentMetrics,
     };
+  }
+
+  @Get('feedback-events')
+  @RequireAdminPermission('agent:l5:read')
+  listAgentFeedbackEvents(
+    @Request() _req: AuthenticatedRequest,
+    @Query('feedbackType') feedbackType?: string,
+    @Query('reasonCode') reasonCode?: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.agentFeedbackEvents.listRecent({
+      feedbackType: feedbackType || null,
+      reasonCode: reasonCode || null,
+      limit: Number(limit),
+    });
+  }
+
+  @Get('feedback-failure-corpus')
+  @RequireAdminPermission('agent:l5:read')
+  exportFeedbackFailureCorpus(
+    @Request() _req: AuthenticatedRequest,
+    @Query('limit') limit?: string,
+    @Query('since') since?: string,
+  ) {
+    return this.agentFeedbackEvents.exportFailureCorpus({
+      limit: Number(limit),
+      since: since ? new Date(since) : null,
+    });
+  }
+
+  @Get('feedback-golden-candidates')
+  @RequireAdminPermission('agent:l5:read')
+  generateFeedbackGoldenCandidates(
+    @Request() _req: AuthenticatedRequest,
+    @Query('limit') limit?: string,
+  ) {
+    return this.agentFeedbackEvents.generateGoldenCandidateCases({
+      limit: Number(limit),
+    });
   }
 
   @Get('replay-samples')

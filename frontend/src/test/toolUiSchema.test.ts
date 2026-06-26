@@ -636,6 +636,31 @@ describe('tool-ui-schema', () => {
         source: 'default',
       },
       {
+        schemaAction: 'candidate.feedback.good_fit',
+        requiresConfirmation: false,
+        source: 'default',
+      },
+      {
+        schemaAction: 'candidate.feedback.bad_fit',
+        requiresConfirmation: false,
+        source: 'default',
+      },
+      {
+        schemaAction: 'candidate.feedback.too_far',
+        requiresConfirmation: false,
+        source: 'default',
+      },
+      {
+        schemaAction: 'candidate.feedback.time_mismatch',
+        requiresConfirmation: false,
+        source: 'default',
+      },
+      {
+        schemaAction: 'candidate.feedback.style_mismatch',
+        requiresConfirmation: false,
+        source: 'default',
+      },
+      {
         schemaAction: 'candidate.generate_opener',
         requiresConfirmation: false,
         source: 'default',
