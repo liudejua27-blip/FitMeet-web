@@ -1,5 +1,8 @@
 import { AgentApprovalService } from './agent-approval.service';
 import { AgentSessionAssemblerService } from './agent-session-assembler.service';
+import { AgentCardAssemblerService } from './response-quality/agent-card-assembler.service';
+import { LightStatusMapperService } from './response-quality/light-status-mapper.service';
+import { UserFacingResponseSanitizerService } from './response-quality/user-facing-response-sanitizer.service';
 import {
   ApprovalRiskLevel,
   ApprovalType,
@@ -175,6 +178,10 @@ function makeHarness(
     latestForTask: jest.fn().mockResolvedValue(options.checkpoint ?? null),
   };
   const assembler = new AgentSessionAssemblerService();
+  const userFacingSanitizer = new UserFacingResponseSanitizerService(
+    new LightStatusMapperService(),
+    new AgentCardAssemblerService(),
+  );
   const runState = new SocialAgentRunStateService(
     {} as never,
     {} as never,
@@ -196,6 +203,7 @@ function makeHarness(
           ),
         } as never)
       : undefined,
+    userFacingSanitizer,
   );
   return { approvals, checkpoints, eventRepo, service, task, taskRepo };
 }
@@ -518,6 +526,76 @@ describe('SocialAgentSessionRestoreService', () => {
       role: 'assistant',
       assistantMessageSource: 'fallback',
     });
+  });
+
+  it('returns a user-facing opportunity card when restoring an unpublished social request draft', async () => {
+    const task = makeTask({
+      goal: '帮我发布约练卡片，明天晚上7点在青岛五四广场散步，按默认安全设置处理',
+      status: AgentTaskStatus.AwaitingConfirmation,
+      statusReason: 'publish_confirmation_required',
+    });
+    task.result = {
+      chatRun: {
+        message:
+          '我已经把这次约练整理成发布确认卡。你点确认前不会公开到发现页。',
+        socialRequestId: 2,
+        socialRequestDraft: {
+          socialRequestId: 2,
+          title: '青岛五四广场晚散步搭子',
+          city: '青岛',
+          activityType: '散步',
+          timePreference: '明天晚上7点',
+          locationPreference: '青岛五四广场',
+          description: '轻松散步，按平台默认安全设置处理。',
+          interestTags: ['散步'],
+          autoPublished: false,
+        },
+      },
+    };
+    task.memory = {
+      socialAgentConversation: {
+        turns: [
+          {
+            id: 'turn_user_publish_1',
+            role: 'user',
+            text: task.goal,
+            at: '2026-06-05T00:00:00.000Z',
+          },
+          {
+            id: 'turn_assistant_publish_1',
+            role: 'assistant',
+            text: '我已经把这次约练整理成发布确认卡。你点确认前不会公开到发现页。',
+            at: '2026-06-05T00:00:02.000Z',
+          },
+        ],
+      },
+    };
+    const { service } = makeHarness({ approvals: [], events: [], task });
+
+    const snapshot = await service.buildSessionSnapshot({
+      ownerUserId: 7,
+      task,
+      visibleStepLabel: (_, label) => label,
+    });
+
+    const card = snapshot.userFacingResult?.cards[0];
+    expect(card).toMatchObject({
+      schemaType: 'social_match.activity',
+      data: expect.objectContaining({
+        taskId: task.id,
+        socialRequestId: 2,
+      }),
+    });
+    expect(card?.actions.map((action) => action.schemaAction)).toEqual(
+      expect.arrayContaining([
+        'publish_to_discover',
+        'activity.modify_time',
+        'activity.skip_publish',
+      ]),
+    );
+    expect(
+      card?.actions.map((action) => action.payload?.socialRequestId),
+    ).toEqual(expect.arrayContaining([2]));
   });
 
   it('restores chat messages with the configured unified context window', async () => {

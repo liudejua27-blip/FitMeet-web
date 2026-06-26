@@ -34,6 +34,7 @@ export class AppController {
   async getReadiness() {
     const checks = {
       postgres: await this.checkPostgres(),
+      reminderTables: await this.checkReminderTables(),
       mongo: await this.checkMongo(),
       redis: await this.checkRedis(),
     };
@@ -66,6 +67,40 @@ export class AppController {
     try {
       await this.dataSource.query('SELECT 1');
       return { status: 'ok' as const, latencyMs: Date.now() - startedAt };
+    } catch {
+      return { status: 'error' as const, latencyMs: Date.now() - startedAt };
+    }
+  }
+
+  private async checkReminderTables() {
+    const startedAt = Date.now();
+    const requiredTables = [
+      'social_agent_reminder_preferences',
+      'social_agent_reminders',
+    ];
+    try {
+      const rows: Array<{ tableName?: string | null }> =
+        await this.dataSource.query(
+          `SELECT table_name AS "tableName"
+           FROM information_schema.tables
+          WHERE table_schema = 'public'
+            AND table_name = ANY($1::text[])`,
+          [requiredTables],
+        );
+      const present = new Set(rows.map((row) => row.tableName).filter(Boolean));
+      const missing = requiredTables.filter((table) => !present.has(table));
+      if (missing.length > 0) {
+        return {
+          status: 'error' as const,
+          latencyMs: Date.now() - startedAt,
+          missingTables: missing,
+        };
+      }
+      return {
+        status: 'ok' as const,
+        latencyMs: Date.now() - startedAt,
+        tables: requiredTables,
+      };
     } catch {
       return { status: 'error' as const, latencyMs: Date.now() - startedAt };
     }

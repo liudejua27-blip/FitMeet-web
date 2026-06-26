@@ -82,6 +82,40 @@ describe('SocialAgentProfileGateService', () => {
     expect(result.assistantMessage).toContain('可约时间');
   });
 
+  it('uses the shared social profile completion policy for the Agent entry gate', async () => {
+    const service = new SocialAgentProfileGateService(
+      {
+        getLifeGraph: jest.fn().mockResolvedValue({
+          completeness: { completenessScore: 0 },
+          fields: {},
+        }),
+      } as never,
+      {
+        get: jest.fn().mockResolvedValue({}),
+        getCompletion: jest.fn().mockResolvedValue({
+          percent: 87,
+          readinessLevel: 'agent_ready',
+          canEnterMatchPool: true,
+          missingRequired: [],
+          missingRecommended: ['nearbyArea'],
+          missingOptional: ['ageRange', 'gender'],
+          nextActions: ['完善推荐信息：常活动区域'],
+        }),
+      } as never,
+    );
+
+    const result = await service.getMinimumProfileStatus(7);
+
+    expect(result).toMatchObject({
+      passed: true,
+      missing: [],
+      profileCompleteness: 87,
+      readinessLevel: 'agent_ready',
+      canEnterMatchPool: true,
+    });
+    expect(result.assistantMessage).toBe('');
+  });
+
   it('asks only for search-critical fields before candidate search', async () => {
     const service = new SocialAgentProfileGateService({
       getLifeGraph: jest.fn().mockResolvedValue({

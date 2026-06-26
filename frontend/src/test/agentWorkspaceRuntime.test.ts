@@ -17,6 +17,7 @@ import {
   mergeProgressStep,
   messagesFromSessionSnapshot,
   recoveryFromUserFacingResponse,
+  responseFromSessionSnapshot,
   responseHasCheckpointRuntime,
   responseAwaitsOpportunityClarification,
   intentForPrompt,
@@ -1498,6 +1499,105 @@ describe('agent workspace runtime fallback boundaries', () => {
         ]),
       }),
       showSocialResult: true,
+    });
+  });
+
+  it('restores user-facing opportunity cards from server session snapshots', () => {
+    const restored = {
+      ...userFacingResponseWithCards([
+        {
+          id: 'activity_plan:42:2',
+          type: 'activity_plan',
+          schemaType: 'social_match.activity',
+          title: '青岛五四广场晚散步搭子',
+          body: '确认后这张约练卡才会出现在发现页。',
+          status: 'waiting_confirmation',
+          data: {
+            taskId: 42,
+            socialRequestId: 2,
+            schemaType: 'social_match.activity',
+          },
+          actions: [
+            {
+              id: 'publish_to_discover:42:2',
+              label: '确认发布',
+              action: 'publish_to_discover',
+              schemaAction: 'publish_to_discover',
+              requiresConfirmation: true,
+              payload: { taskId: 42, socialRequestId: 2 },
+            },
+            {
+              id: 'modify_activity_plan:42:2',
+              label: '修改卡片',
+              action: 'reschedule_meet_loop',
+              schemaAction: 'activity.modify_time',
+              requiresConfirmation: false,
+              payload: { taskId: 42, socialRequestId: 2 },
+            },
+            {
+              id: 'skip_publish_activity:42:2',
+              label: '暂不发布',
+              action: 'activity.skip_publish',
+              schemaAction: 'activity.skip_publish',
+              requiresConfirmation: false,
+              payload: { taskId: 42, socialRequestId: 2 },
+            },
+          ],
+        },
+      ]),
+      assistantMessage: '我已经把这次约练整理成发布确认卡。你点确认前不会公开到发现页。',
+      workflow: {
+        workflowId: 'agent-task:42',
+        state: 'INTENT_DRAFT',
+        requiredAction: 'publish_confirmation_required',
+        retryable: false,
+        recoveryMessage: null,
+      },
+    } satisfies UserFacingAgentResponse;
+    const snapshot = {
+      hasSession: true,
+      activeTaskId: 42,
+      task: { id: 42, status: 'awaiting_confirmation' },
+      userFacingResult: restored,
+      result: {
+        taskId: 42,
+        assistantMessage: restored.assistantMessage,
+        cards: [],
+      },
+      messages: [
+        {
+          id: 'user-1',
+          role: 'user',
+          content:
+            '发布约练卡片，明天晚上7点在青岛五四广场散步，按默认安全设置处理',
+        },
+        {
+          id: 'assistant-db-1',
+          role: 'assistant',
+          content: restored.assistantMessage,
+        },
+      ],
+    };
+
+    const response = responseFromSessionSnapshot(snapshot);
+    const messages = messagesFromSessionSnapshot(snapshot, response, 42);
+
+    expect(response?.cards[0]).toMatchObject({
+      schemaType: 'social_match.activity',
+      data: expect.objectContaining({ socialRequestId: 2 }),
+    });
+    expect(messages).toHaveLength(2);
+    expect(messages[1]).toMatchObject({
+      id: 'assistant-db-1',
+      result: expect.objectContaining({
+        cards: [
+          expect.objectContaining({
+            schemaType: 'social_match.activity',
+          }),
+        ],
+      }),
+      showSocialResult: true,
+      conversationIntent: 'social',
     });
   });
 

@@ -22,6 +22,7 @@ import type {
   SocialAgentSessionTaskSummary,
   SocialAgentPendingApprovalSnapshot,
 } from './social-agent-chat.types';
+import type { UserFacingAgentResponse } from './user-facing-agent-response';
 
 @Injectable()
 export class AgentSessionAssemblerService {
@@ -35,6 +36,7 @@ export class AgentSessionAssemblerService {
       messages: [],
       events: [],
       result: null,
+      userFacingResult: null,
       latestRun: null,
       pendingApprovals: [],
       candidateActions: {},
@@ -46,6 +48,7 @@ export class AgentSessionAssemblerService {
     task: AgentTask;
     events: Array<Record<string, unknown>>;
     result: SocialAgentChatRunResult | SocialAgentChatReplanRunResult | null;
+    userFacingResult?: UserFacingAgentResponse | null;
     latestRun: SocialAgentAsyncRunSnapshot | null;
     pendingApprovals: SocialAgentPendingApprovalSnapshot[];
     conversationHistory: Array<Record<string, unknown>>;
@@ -63,6 +66,7 @@ export class AgentSessionAssemblerService {
       }),
       events: input.events,
       result: input.result,
+      userFacingResult: input.userFacingResult ?? null,
       latestRun: input.latestRun,
       pendingApprovals: input.pendingApprovals,
       candidateActions: this.readCandidateActions(input.task),
