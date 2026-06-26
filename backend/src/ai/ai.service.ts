@@ -1454,6 +1454,7 @@ export class AIService {
     let schemaValid = false;
     let fallbackUsed = false;
     let invariantFailure: string | null = null;
+    const temperature = this.temperatureForMode(input.mode);
     try {
       const out = await this.callDeepseekCompletion(
         input.systemPrompt,
@@ -1491,6 +1492,7 @@ export class AIService {
           useCase: input.useCase,
           model,
           mode: input.mode,
+          temperature,
           latencyMs: Date.now() - startedAt,
           schemaValid,
           fallbackUsed,
@@ -1781,6 +1783,7 @@ export class AIService {
       baseUrl: this.config.get<string>('DEEPSEEK_BASE_URL'),
       model,
       mode,
+      temperature: this.temperatureForMode(mode),
       responseFormat,
       timeoutMs,
       retryAttempts: this.deepseekRetryAttempts(),
@@ -1807,6 +1810,13 @@ export class AIService {
             this.config.get<string>('DEEPSEEK_CHAT_MODEL') ??
             this.config.get<string>('DEEPSEEK_MODEL'));
     return resolveDeepSeekModelForMode(mode, configured);
+  }
+
+  private temperatureForMode(mode: DeepSeekMode): number {
+    if (mode === 'structured' || mode === 'tool') return 0.1;
+    if (mode === 'copy') return 0.3;
+    if (mode === 'reasoning') return 0.2;
+    return 0.4;
   }
 
   private deepseekTimeoutMs(): number {

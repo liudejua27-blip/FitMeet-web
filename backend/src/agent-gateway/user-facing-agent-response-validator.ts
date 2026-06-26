@@ -38,6 +38,12 @@ export function validateUserFacingAgentResponse(
   ) {
     throw new Error('user_facing_response_candidates_before_discover_verified');
   }
+  if (
+    response.publicLoop?.stage === 'dismissed' &&
+    candidateCardCount(response) > 0
+  ) {
+    throw new Error('user_facing_response_dismissed_contains_candidates');
+  }
   return response;
 }
 

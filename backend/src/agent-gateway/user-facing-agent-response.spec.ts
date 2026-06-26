@@ -1393,6 +1393,33 @@ describe('validateUserFacingAgentResponse', () => {
     ).toThrow('user_facing_response_candidates_before_discover_verified');
   });
 
+  it('rejects candidate cards after the user dismissed the loop', () => {
+    expect(() =>
+      validateUserFacingAgentResponse(
+        baseResponse({
+          publicLoop: {
+            stage: 'dismissed',
+            publicIntentId: null,
+            discoverHref: null,
+            publicIntentHref: null,
+            messagesHref: null,
+            requiredConfirmation: false,
+          },
+          cards: [
+            {
+              id: 'candidate-1',
+              type: 'candidate_card',
+              title: '候选',
+              body: '不应在撤下后展示。',
+              data: {},
+              actions: [],
+            },
+          ],
+        }),
+      ),
+    ).toThrow('user_facing_response_dismissed_contains_candidates');
+  });
+
   it('accepts published and matched copy when evidence exists', () => {
     expect(
       validateUserFacingAgentResponse(

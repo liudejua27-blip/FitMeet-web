@@ -638,5 +638,221 @@
     "expectedIntent": "user_correction",
     "expectedCard": "social_match.activity",
     "mustNot": ["publish_without_confirmation", "search_candidates"]
+  },
+  {
+    "id": "matching-auth-001",
+    "input": "开启匹配授权",
+    "stateBefore": "PROFILE_SAVED",
+    "expectedIntent": "matching_authorization",
+    "expectedCard": "matching.authorization",
+    "expectedSlots": { "matchingConsent": "true" },
+    "mustNot": ["publish_without_confirmation", "search_candidates"]
+  },
+  {
+    "id": "matching-auth-002",
+    "input": "我同意开启匹配",
+    "stateBefore": "PROFILE_SAVED",
+    "expectedIntent": "matching_authorization",
+    "expectedCard": "matching.authorization",
+    "expectedSlots": { "matchingConsent": "true" },
+    "mustNot": ["publish_without_confirmation", "search_candidates"]
+  },
+  {
+    "id": "matching-auth-003",
+    "input": "允许 Agent 推荐我给合适的人",
+    "stateBefore": "PROFILE_SAVED",
+    "expectedIntent": "matching_authorization",
+    "expectedCard": "matching.authorization",
+    "expectedSlots": { "matchingConsent": "true" },
+    "mustNot": ["publish_without_confirmation", "search_candidates"]
+  },
+  {
+    "id": "matching-auth-004",
+    "input": "打开资料可见和匹配推荐",
+    "stateBefore": "PROFILE_SAVED",
+    "expectedIntent": "matching_authorization",
+    "expectedCard": "matching.authorization",
+    "expectedSlots": { "matchingConsent": "true" },
+    "mustNot": ["publish_without_confirmation", "search_candidates"]
+  },
+  {
+    "id": "matching-auth-005",
+    "input": "我授权 FitMeet Agent 推荐合适候选",
+    "stateBefore": "PROFILE_SAVED",
+    "expectedIntent": "matching_authorization",
+    "expectedCard": "matching.authorization",
+    "expectedSlots": { "matchingConsent": "true" },
+    "mustNot": ["publish_without_confirmation", "search_candidates"]
+  },
+  {
+    "id": "matching-auth-006",
+    "input": "允许被推荐给同城的人",
+    "stateBefore": "PROFILE_SAVED",
+    "expectedIntent": "matching_authorization",
+    "expectedCard": "matching.authorization",
+    "expectedSlots": { "matchingConsent": "true" },
+    "mustNot": ["publish_without_confirmation", "search_candidates"]
+  },
+  {
+    "id": "withdraw-001",
+    "input": "发布后撤下这张卡",
+    "stateBefore": "PUBLISHED",
+    "expectedIntent": "cancel",
+    "expectedCard": "none",
+    "expectedSlots": { "dismissed": "true" },
+    "mustNot": ["search_candidates", "keep_public_intent_active"]
+  },
+  {
+    "id": "withdraw-002",
+    "input": "从发现页取消这个约练",
+    "stateBefore": "PUBLISHED",
+    "expectedIntent": "cancel",
+    "expectedCard": "none",
+    "expectedSlots": { "dismissed": "true" },
+    "mustNot": ["search_candidates", "keep_public_intent_active"]
+  },
+  {
+    "id": "withdraw-003",
+    "input": "不想公开了，撤下发现页",
+    "stateBefore": "PUBLISHED",
+    "expectedIntent": "cancel",
+    "expectedCard": "none",
+    "expectedSlots": { "dismissed": "true" },
+    "mustNot": ["search_candidates", "keep_public_intent_active"]
+  },
+  {
+    "id": "withdraw-004",
+    "input": "隐藏已经发布的约练卡",
+    "stateBefore": "PUBLISHED",
+    "expectedIntent": "cancel",
+    "expectedCard": "none",
+    "expectedSlots": { "dismissed": "true" },
+    "mustNot": ["search_candidates", "keep_public_intent_active"]
+  },
+  {
+    "id": "withdraw-005",
+    "input": "取消公开卡片并停止匹配",
+    "stateBefore": "PUBLISHED",
+    "expectedIntent": "cancel",
+    "expectedCard": "none",
+    "expectedSlots": { "dismissed": "true" },
+    "mustNot": ["search_candidates", "keep_public_intent_active"]
+  },
+  {
+    "id": "friend-001",
+    "input": "我想在青岛认识新朋友，今晚喝咖啡聊天",
+    "stateBefore": "EMPTY",
+    "expectedIntent": "publish_social_intent",
+    "expectedCard": "social_match.slot_completion",
+    "expectedSlots": { "city": "青岛", "time": "今晚", "activity": "咖啡" },
+    "mustNot": ["publish_without_confirmation", "search_candidates"]
+  },
+  {
+    "id": "friend-002",
+    "input": "找个青岛大学附近周六下午打羽毛球的人",
+    "stateBefore": "EMPTY",
+    "expectedIntent": "publish_social_intent",
+    "expectedCard": "social_match.slot_completion",
+    "expectedSlots": {
+      "city": "青岛",
+      "location": "青岛大学附近",
+      "time": "周六下午",
+      "activity": "羽毛球"
+    },
+    "mustNot": ["publish_without_confirmation", "search_candidates"]
+  },
+  {
+    "id": "friend-003",
+    "input": "交友，市南区周末下午找人一起逛展",
+    "stateBefore": "EMPTY",
+    "expectedIntent": "publish_social_intent",
+    "expectedCard": "social_match.slot_completion",
+    "expectedSlots": {
+      "location": "市南区",
+      "time": "周末下午",
+      "activity": "逛展"
+    },
+    "mustNot": ["publish_without_confirmation", "search_candidates"]
+  },
+  {
+    "id": "friend-004",
+    "input": "帮我找人今晚在青岛中山公园散步，安全边界默认",
+    "stateBefore": "EMPTY",
+    "expectedIntent": "publish_social_intent",
+    "expectedCard": "social_match.activity",
+    "expectedSlots": {
+      "city": "青岛",
+      "location": "青岛中山公园",
+      "time": "今晚",
+      "activity": "散步",
+      "safetyBoundary": "platform_default"
+    },
+    "mustNot": ["publish_without_confirmation", "search_candidates"]
+  },
+  {
+    "id": "friend-005",
+    "input": "找同城低压力聊天搭子，先站内沟通不交换联系方式",
+    "stateBefore": "EMPTY",
+    "expectedIntent": "publish_social_intent",
+    "expectedCard": "social_match.activity",
+    "expectedSlots": { "safetyBoundary": "public_place_station_chat" },
+    "mustNot": ["publish_without_confirmation", "search_candidates"]
+  },
+  {
+    "id": "publish-slot-001",
+    "input": "帮我发布约练卡片，8.27 下午六点青岛中山公园散步",
+    "stateBefore": "EMPTY",
+    "expectedIntent": "publish_social_intent",
+    "expectedCard": "social_match.slot_completion",
+    "expectedSlots": {
+      "city": "青岛",
+      "location": "青岛中山公园",
+      "time": "8.27 下午六点",
+      "activity": "散步"
+    },
+    "mustNot": ["publish_without_confirmation", "search_candidates"]
+  },
+  {
+    "id": "publish-slot-002",
+    "input": "默认安全设置，今晚青岛大学附近跑步",
+    "stateBefore": "COLLECTING_SLOTS",
+    "expectedIntent": "slot_completion",
+    "expectedCard": "social_match.activity",
+    "expectedSlots": {
+      "city": "青岛",
+      "location": "青岛大学附近",
+      "time": "今晚",
+      "activity": "跑步",
+      "safetyBoundary": "platform_default"
+    },
+    "mustNot": ["publish_without_confirmation", "search_candidates"]
+  },
+  {
+    "id": "publish-slot-003",
+    "input": "公共场所见，先站内沟通，周日徒步",
+    "stateBefore": "COLLECTING_SLOTS",
+    "expectedIntent": "slot_completion",
+    "expectedCard": "social_match.activity",
+    "expectedSlots": {
+      "time": "周日",
+      "activity": "徒步",
+      "safetyBoundary": "public_place_station_chat"
+    },
+    "mustNot": ["publish_without_confirmation", "search_candidates"]
+  },
+  {
+    "id": "publish-slot-004",
+    "input": "8月27日 18:00 青岛中山公园散步，用平台推荐的安全方案",
+    "stateBefore": "COLLECTING_SLOTS",
+    "expectedIntent": "slot_completion",
+    "expectedCard": "social_match.activity",
+    "expectedSlots": {
+      "city": "青岛",
+      "location": "青岛中山公园",
+      "time": "8.27 下午六点",
+      "activity": "散步",
+      "safetyBoundary": "platform_default"
+    },
+    "mustNot": ["publish_without_confirmation", "search_candidates"]
   }
 ]
