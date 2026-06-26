@@ -180,7 +180,18 @@ export class SocialAgentReminderService {
   }
 
   async getPreference(userId: number) {
-    return this.ensurePreference(userId);
+    try {
+      return await this.ensurePreference(userId);
+    } catch (error) {
+      this.logger.error(
+        JSON.stringify({
+          event: 'social_agent.reminder_preferences.unavailable',
+          userId,
+          message: error instanceof Error ? error.message : String(error),
+        }),
+      );
+      return this.disabledFallbackPreference(userId, error);
+    }
   }
 
   async updatePreference(
@@ -425,6 +436,29 @@ export class SocialAgentReminderService {
         mutedUntil: null,
       }),
     );
+  }
+
+  private disabledFallbackPreference(userId: number, error: unknown) {
+    const now = new Date();
+    return {
+      id: 0,
+      userId,
+      enabled: false,
+      topics: [] as SocialAgentReminderTopic[],
+      frequency: 'manual' as SocialAgentReminderFrequency,
+      quietStart: '09:00',
+      quietEnd: '21:00',
+      tone: 'quiet' as const,
+      metadata: {
+        unavailable: true,
+        reason: 'reminder_preferences_unavailable',
+        errorCode: error instanceof Error ? error.name : 'unknown_error',
+      },
+      lastSuggestedAt: null,
+      mutedUntil: null,
+      createdAt: now,
+      updatedAt: now,
+    };
   }
 
   private skipReason(
