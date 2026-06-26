@@ -132,7 +132,7 @@ describe('SocialAgentSessionQueryService', () => {
   });
 
   it('delegates latest and task session snapshots through session restore', async () => {
-    const { service, sessionRestore, taskLifecycle } = makeHarness();
+    const { service, sessionRestore, task, taskLifecycle } = makeHarness();
 
     await expect(service.getLatestSession(7)).resolves.toMatchObject({
       hasSession: true,
@@ -147,6 +147,13 @@ describe('SocialAgentSessionQueryService', () => {
     expect(sessionRestore.findLatestRestorableTask).toHaveBeenCalledWith(7);
     expect(taskLifecycle.assertTaskOwner).toHaveBeenCalledWith(101, 7);
     expect(sessionRestore.buildSessionSnapshot).toHaveBeenCalledTimes(2);
+    expect(sessionRestore.buildSessionSnapshot).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        ownerUserId: 7,
+        task,
+        includeNonRestorable: true,
+      }),
+    );
   });
 
   it('returns the current task from persisted task memory and display-safe fields', async () => {

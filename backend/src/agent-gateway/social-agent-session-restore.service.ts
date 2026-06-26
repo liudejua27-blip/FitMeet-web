@@ -85,10 +85,11 @@ export class SocialAgentSessionRestoreService {
     ownerUserId: number;
     task: AgentTask | null;
     visibleStepLabel: VisibleStepLabeler;
+    includeNonRestorable?: boolean;
   }): Promise<SocialAgentSessionSnapshot> {
     const restoredAt = new Date().toISOString();
     if (!input.task) return this.assembler.emptySession(restoredAt);
-    if (!this.isRestorableTask(input.task)) {
+    if (!input.includeNonRestorable && !this.isRestorableTask(input.task)) {
       return this.assembler.emptySession(restoredAt);
     }
 
@@ -99,7 +100,10 @@ export class SocialAgentSessionRestoreService {
       'session',
     );
 
-    if (this.shouldHideGenericCheckpointSession(input.task, context)) {
+    if (
+      !input.includeNonRestorable &&
+      this.shouldHideGenericCheckpointSession(input.task, context)
+    ) {
       return this.assembler.emptySession(restoredAt);
     }
 

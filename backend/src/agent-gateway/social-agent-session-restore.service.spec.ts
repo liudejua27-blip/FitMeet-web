@@ -340,6 +340,54 @@ describe('SocialAgentSessionRestoreService', () => {
     });
   });
 
+  it('can return durable transcript for an explicitly opened non-restorable thread', async () => {
+    const completedTask = makeTask({
+      status: AgentTaskStatus.Succeeded,
+      statusReason: 'completed',
+      memory: {
+        socialAgentConversation: {
+          turns: [
+            {
+              role: 'user',
+              text: '帮我发布青岛今晚散步约练卡',
+              at: '2026-06-05T00:00:00.000Z',
+            },
+            {
+              role: 'assistant',
+              text: '这次约练已经发布到发现页。',
+              at: '2026-06-05T00:01:00.000Z',
+            },
+          ],
+        },
+      },
+      result: {},
+    });
+    const { service } = makeHarness({ task: completedTask, events: [] });
+
+    const snapshot = await service.buildSessionSnapshot({
+      ownerUserId: 7,
+      task: completedTask,
+      visibleStepLabel: (_, label) => label,
+      includeNonRestorable: true,
+    });
+
+    expect(snapshot).toMatchObject({
+      hasSession: true,
+      activeTaskId: 101,
+      task: expect.objectContaining({ status: AgentTaskStatus.Succeeded }),
+    });
+    expect(snapshot.messages.slice(0, 2)).toEqual([
+      expect.objectContaining({
+        role: 'user',
+        content: '帮我发布青岛今晚散步约练卡',
+      }),
+      expect.objectContaining({
+        role: 'assistant',
+        content: '这次约练已经发布到发现页。',
+      }),
+    ]);
+  });
+
   it('builds a restorable session snapshot from events, approvals, and latest run', async () => {
     const { approvals, eventRepo, service } = makeHarness();
 

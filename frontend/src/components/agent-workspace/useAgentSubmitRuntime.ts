@@ -113,8 +113,8 @@ export function useAgentSubmitRuntime({
       const conversationIntent = shouldContinueOpportunityClarification
         ? 'social'
         : intentForPrompt(goal);
-      const taskIdForRun = conversationIntent === 'conversation' ? null : activeTaskId;
-      const threadIdForRun = conversationIntent === 'conversation' ? null : canonicalActiveThreadId;
+      const taskIdForRun = activeTaskId;
+      const threadIdForRun = canonicalActiveThreadId;
       runConversationIntentRef.current = conversationIntent;
       if (isRealAgent && !isLoggedIn) {
         setMessages((current) => [
@@ -202,12 +202,11 @@ export function useAgentSubmitRuntime({
             signal: controller.signal,
           },
         );
-        if (conversationIntent !== 'conversation' || finalResult.taskId) {
-          setActiveTaskId(finalResult.taskId ?? taskIdForRun);
-        }
+        setActiveTaskId(finalResult.taskId ?? taskIdForRun);
         const nextThreadId =
           threadIdFromResponse(finalResult.response) ??
           observedRunThreadIdRef.current ??
+          threadIdForRun ??
           socialCodexThreadIdForTask(finalResult.taskId);
         if (nextThreadId) {
           setActiveThreadId(nextThreadId);

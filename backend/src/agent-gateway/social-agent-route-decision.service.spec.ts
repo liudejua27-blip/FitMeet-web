@@ -871,6 +871,48 @@ describe('SocialAgentRouteDecisionService', () => {
     });
   });
 
+  it('keeps pending opportunity slot completion writable even when the UI marks the turn as conversation', async () => {
+    const ownedTask = makeTask({
+      goal: '今晚青岛大学散步搭子',
+      taskType: 'social_match',
+      memory: {
+        taskMemory: {
+          currentTask: {
+            waitingFor: 'opportunity_slot_completion',
+          },
+          pendingOpportunityDraft: {
+            status: 'collecting_slots',
+          },
+        },
+      },
+    });
+    const { service } = makeHarness({
+      brainDisabled: true,
+      ownedTask,
+    });
+
+    const result = await service.prepare({
+      ownerUserId: 7,
+      task: ownedTask,
+      body: {
+        taskId: 101,
+        message: '只在公共场所，先平台内沟通',
+        conversationIntent: 'conversation',
+      },
+      message: '只在公共场所，先平台内沟通',
+    });
+
+    expect(result.task.memory.taskSlots).toMatchObject({
+      safety_boundary: expect.objectContaining({
+        value: '首次见面优先公共场所，先在平台内沟通',
+        state: 'answered',
+      }),
+    });
+    expect(result.task.memory.knownTaskSlotConstraints).toMatchObject({
+      doNotAskAgainFor: expect.arrayContaining(['safety_boundary']),
+    });
+  });
+
   it('still writes task slots when a conversation-marked turn explicitly asks for social execution', async () => {
     const ownedTask = makeTask({
       goal: '今晚青岛大学散步搭子',

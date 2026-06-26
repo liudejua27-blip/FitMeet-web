@@ -170,8 +170,12 @@ describe('Agent user route isolation', () => {
     );
 
     expect(submitRuntimeSource).toContain('const threadIdForRun =');
-    expect(submitRuntimeSource).toContain(
+    expect(submitRuntimeSource).toContain('const threadIdForRun = canonicalActiveThreadId');
+    expect(submitRuntimeSource).not.toContain(
       "conversationIntent === 'conversation' ? null : canonicalActiveThreadId",
+    );
+    expect(submitRuntimeSource).not.toContain(
+      "conversationIntent === 'conversation' ? null : activeTaskId",
     );
     expect(submitRuntimeSource).toContain('threadId: threadIdForRun');
     expect(submitRuntimeSource).toContain('beginAbortableRun(controller, threadIdForRun)');
