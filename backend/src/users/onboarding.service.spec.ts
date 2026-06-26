@@ -295,9 +295,9 @@ describe('OnboardingService', () => {
   it('rolls back complete writes when a later transaction step fails', async () => {
     const state = makeState();
     const { service, repos } = makeService(state);
-    repos.profileRepo.save.mockRejectedValueOnce(
-      new Error('profile save failed'),
-    );
+    repos.profileRepo.save.mockImplementationOnce(() => {
+      throw new Error('profile save failed');
+    });
 
     await expect(
       service.complete(1, completeDto(), 'idem-rollback'),
@@ -575,9 +575,14 @@ function profilePhotoQueryBuilder(state: TestState) {
           asset: state.assets.find((assetRow) => assetRow.id === item.assetId),
         }))
         .sort(
-          (left, right) =>
-            Number(left.sortOrder) - Number(right.sortOrder) ||
-            Number(left.id) - Number(right.id),
+          (left, right) => {
+            const leftRow = left as Record<string, unknown>;
+            const rightRow = right as Record<string, unknown>;
+            return (
+              Number(leftRow.sortOrder) - Number(rightRow.sortOrder) ||
+              Number(leftRow.id) - Number(rightRow.id)
+            );
+          },
         ),
     ),
   };
