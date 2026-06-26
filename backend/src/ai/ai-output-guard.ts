@@ -22,6 +22,38 @@ export const SocialRequestOutputSchema = z
   })
   .strict();
 
+export const SocialSlotToolOutputSchema = z
+  .object({
+    intent: z.enum([
+      'profile_completion',
+      'publish_social_intent',
+      'slot_completion',
+      'cancel_publish',
+      'contact_candidate',
+      'casual_chat',
+    ]),
+    activity: ShortText,
+    city: ShortText,
+    locationText: ShortText,
+    timeText: ShortText,
+    safetyBoundary: ShortText,
+    socialStyle: ShortText,
+    confidence: z.number().min(0).max(1),
+    missingSlots: z
+      .array(
+        z.enum([
+          'activity',
+          'city',
+          'locationText',
+          'timeText',
+          'safetyBoundary',
+          'socialStyle',
+        ]),
+      )
+      .max(8),
+  })
+  .strict();
+
 export const SocialRequestCardOutputSchema = z
   .object({
     title: ShortText.max(64),
@@ -131,10 +163,17 @@ export function validateModelJson<T>(
   schema: z.ZodType<T>,
 ): AiOutputGuardResult<T> {
   const json = parseModelJson(raw);
-  const parsed = schema.safeParse(json);
+  return validateModelValue(json, schema);
+}
+
+export function validateModelValue<T>(
+  value: unknown,
+  schema: z.ZodType<T>,
+): AiOutputGuardResult<T> {
+  const parsed = schema.safeParse(value);
   if (!parsed.success) {
     return {
-      raw: json,
+      raw: value,
       parsed: null,
       schemaValid: false,
       invariantFailure: null,
@@ -142,7 +181,7 @@ export function validateModelJson<T>(
   }
   const invariantFailure = aiBusinessInvariantFailure(parsed.data);
   return {
-    raw: json,
+    raw: value,
     parsed: parsed.data,
     schemaValid: true,
     invariantFailure,

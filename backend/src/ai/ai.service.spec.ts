@@ -404,4 +404,225 @@ describe('AIService profile builder fallback', () => {
       icebreakerMessage: '你好，可以先站内聊聊散步安排吗？',
     });
   });
+
+  it('uses a strict DeepSeek tool for social slot extraction', async () => {
+    const config = {
+      get: jest.fn((key: string) => {
+        if (key === 'DEEPSEEK_API_KEY') return 'test-key';
+        if (key === 'DEEPSEEK_MODEL_FAST') return 'deepseek-v4-flash';
+        return undefined;
+      }),
+    } as unknown as ConfigService;
+    const service = new AIService(config);
+    const requestBodies: Array<Record<string, unknown>> = [];
+    const requestUrls: string[] = [];
+    global.fetch = jest.fn((url: RequestInfo | URL, init: RequestInit = {}) => {
+      const requestUrl =
+        typeof url === 'string' ? url : url instanceof URL ? url.href : url.url;
+      requestUrls.push(requestUrl);
+      if (typeof init.body === 'string') {
+        requestBodies.push(JSON.parse(init.body) as Record<string, unknown>);
+      }
+      return Promise.resolve({
+        ok: true,
+        json: async () => ({
+          choices: [
+            {
+              message: {
+                content: '',
+                tool_calls: [
+                  {
+                    id: 'call-slots-1',
+                    type: 'function',
+                    function: {
+                      name: 'extract_social_slots',
+                      arguments: JSON.stringify({
+                        intent: 'publish_social_intent',
+                        activity: '散步',
+                        city: '青岛',
+                        locationText: '青岛中山公园',
+                        timeText: '8.27 下午六点',
+                        safetyBoundary: 'platform_default',
+                        socialStyle: '低压力',
+                        confidence: 0.92,
+                        missingSlots: [],
+                      }),
+                    },
+                  },
+                ],
+              },
+            },
+          ],
+        }),
+      } as Response);
+    }) as jest.MockedFunction<typeof fetch>;
+
+    const slots = await service.extractSocialSlots(
+      '帮我发布约练卡片，8.27 下午六点青岛中山公园散步，按默认安全设置处理',
+    );
+
+    expect(requestUrls[0]).toBe(
+      'https://api.deepseek.com/beta/v1/chat/completions',
+    );
+    expect(requestBodies[0]).toMatchObject({
+      model: 'deepseek-v4-flash',
+      temperature: 0.1,
+      tool_choice: {
+        type: 'function',
+        function: { name: 'extract_social_slots' },
+      },
+    });
+    const tools = requestBodies[0].tools as Array<{
+      function: {
+        strict: boolean;
+        parameters: {
+          additionalProperties: boolean;
+          required: string[];
+        };
+      };
+    }>;
+    expect(tools[0].function.strict).toBe(true);
+    expect(tools[0].function.parameters.additionalProperties).toBe(false);
+    expect(tools[0].function.parameters.required).toEqual([
+      'intent',
+      'activity',
+      'city',
+      'locationText',
+      'timeText',
+      'safetyBoundary',
+      'socialStyle',
+      'confidence',
+      'missingSlots',
+    ]);
+    expect(slots).toMatchObject({
+      source: 'deepseek_tool',
+      intent: 'publish_social_intent',
+      activity: '散步',
+      city: '青岛',
+      locationText: '青岛中山公园',
+      timeText: '8.27 下午六点',
+      safetyBoundary: 'platform_default',
+      socialStyle: '低压力',
+      confidence: 0.92,
+      missingSlots: [],
+    });
+  });
+
+  it('maps strict social slots into the existing social request parser contract', async () => {
+    const config = {
+      get: jest.fn((key: string) => {
+        if (key === 'DEEPSEEK_API_KEY') return 'test-key';
+        return undefined;
+      }),
+    } as unknown as ConfigService;
+    const service = new AIService(config);
+    global.fetch = jest.fn(() =>
+      Promise.resolve({
+        ok: true,
+        json: async () => ({
+          choices: [
+            {
+              message: {
+                tool_calls: [
+                  {
+                    type: 'function',
+                    function: {
+                      name: 'extract_social_slots',
+                      arguments: JSON.stringify({
+                        intent: 'publish_social_intent',
+                        activity: '羽毛球',
+                        city: '青岛',
+                        locationText: '青岛大学附近',
+                        timeText: '今晚',
+                        safetyBoundary: 'public_place_station_chat',
+                        socialStyle: '安静低压力',
+                        confidence: 0.88,
+                        missingSlots: [],
+                      }),
+                    },
+                  },
+                ],
+              },
+            },
+          ],
+        }),
+      } as Response),
+    ) as unknown as jest.MockedFunction<typeof fetch>;
+
+    const result = await service.parseSocialRequest(
+      '今晚青岛大学附近找安静低压力羽毛球搭子，公共场所先站内沟通',
+    );
+
+    expect(result.interestTags).toContain('羽毛球');
+    expect(result.locationPreference).toBe('青岛大学附近');
+    expect(result.personalityPreference).toBe('安静低压力');
+    expect(result.suggestedTitle).toBe('青岛羽毛球约练');
+  });
+
+  it('falls back when strict slot tool output violates business invariants', async () => {
+    const config = {
+      get: jest.fn((key: string) => {
+        if (key === 'DEEPSEEK_API_KEY') return 'test-key';
+        return undefined;
+      }),
+    } as unknown as ConfigService;
+    const service = new AIService(config);
+    global.fetch = jest.fn(() =>
+      Promise.resolve({
+        ok: true,
+        json: async () => ({
+          choices: [
+            {
+              message: {
+                tool_calls: [
+                  {
+                    type: 'function',
+                    function: {
+                      name: 'extract_social_slots',
+                      arguments: JSON.stringify({
+                        intent: 'publish_social_intent',
+                        activity: '散步',
+                        city: '青岛',
+                        locationText: '青岛中山公园 3号楼',
+                        timeText: '今晚',
+                        safetyBoundary: '微信 abcdefg',
+                        socialStyle: '轻松',
+                        confidence: 0.8,
+                        missingSlots: [],
+                      }),
+                    },
+                  },
+                ],
+              },
+            },
+          ],
+        }),
+      } as Response),
+    ) as unknown as jest.MockedFunction<typeof fetch>;
+
+    const slots =
+      await service.extractSocialSlots('今晚青岛中山公园散步，安全默认');
+
+    expect(slots.source).toBe('fallback');
+    expect(JSON.stringify(slots)).not.toContain('abcdefg');
+    expect(JSON.stringify(slots)).not.toContain('3号楼');
+  });
+
+  it('fails closed without calling DeepSeek when reasoner is configured for strict tools', async () => {
+    const config = {
+      get: jest.fn((key: string) => {
+        if (key === 'DEEPSEEK_API_KEY') return 'test-key';
+        if (key === 'DEEPSEEK_MODEL_FAST') return 'deepseek-reasoner';
+        return undefined;
+      }),
+    } as unknown as ConfigService;
+    const service = new AIService(config);
+    global.fetch = jest.fn() as jest.MockedFunction<typeof fetch>;
+
+    const slots = await service.extractSocialSlots('今晚青岛中山公园散步');
+
+    expect(global.fetch).not.toHaveBeenCalled();
+    expect(slots.source).toBe('fallback');
+    expect(slots.locationText).toBe('青岛中山公园');
+  });
 });
