@@ -257,7 +257,7 @@ describe('callDeepSeekChatCompletion', () => {
           ],
         }),
       } as Response),
-    ) as jest.MockedFunction<typeof fetch>;
+    ) as unknown as jest.MockedFunction<typeof fetch>;
 
     const result = await callDeepSeekChatCompletionWithUsage({
       apiKey: 'test-key',
