@@ -6,6 +6,7 @@ import type {
 import { AgentCardAssemblerService } from './response-quality/agent-card-assembler.service';
 import { LightStatusMapperService } from './response-quality/light-status-mapper.service';
 import { UserFacingResponseSanitizerService } from './response-quality/user-facing-response-sanitizer.service';
+import { validateUserFacingAgentResponse } from './user-facing-agent-response-validator';
 import type {
   SocialAgentChatRunResult,
   SocialAgentAssistantMessageSource,
@@ -121,5 +122,7 @@ export function toUserFacingAgentResponse(
   result: SanitizableAgentResult,
   permissionMode: AgentTaskPermissionMode,
 ): UserFacingAgentResponse {
-  return fallbackSanitizer.toUserFacingAgentResponse(result, permissionMode);
+  return validateUserFacingAgentResponse(
+    fallbackSanitizer.toUserFacingAgentResponse(result, permissionMode),
+  );
 }

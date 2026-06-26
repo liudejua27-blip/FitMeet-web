@@ -63,7 +63,7 @@ describe('AIService profile builder fallback', () => {
     expect(content.riskWarnings.join('')).toContain('尚未完成认证');
   });
 
-  it('normalizes DeepSeek candidate content into safe structured fields', async () => {
+  it('falls back when DeepSeek candidate content leaks direct contact details', async () => {
     const config = {
       get: jest.fn((key: string) => {
         if (key === 'DEEPSEEK_API_KEY') return 'test-key';
@@ -96,11 +96,122 @@ describe('AIService profile builder fallback', () => {
       candidate: { nickname: '小林', city: '青岛' },
     });
 
-    expect(content.source).toBe('deepseek');
+    expect(content.source).toBe('fallback');
     const serialized = JSON.stringify(content);
     expect(serialized).not.toContain('13800138000');
     expect(serialized).not.toContain('runner@example.com');
-    expect(serialized).toContain('[已隐藏]');
+    expect(serialized).not.toContain('[已隐藏]');
+  });
+
+  it('rejects state-fact claims in structured social request parsing', async () => {
+    const config = {
+      get: jest.fn((key: string) => {
+        if (key === 'DEEPSEEK_API_KEY') return 'test-key';
+        return undefined;
+      }),
+    } as unknown as ConfigService;
+    const service = new AIService(config);
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({
+                goal: '已发布到发现页，正在匹配',
+                interestTags: ['散步'],
+                locationPreference: '青岛',
+                personalityPreference: '轻松',
+                suggestedTitle: '青岛散步',
+              }),
+            },
+          },
+        ],
+      }),
+    } as Response);
+
+    const result = await service.parseSocialRequest('想今晚在青岛散步');
+
+    expect(result.goal).toContain('想今晚在青岛散步');
+    expect(JSON.stringify(result)).not.toContain('已发布');
+  });
+
+  it('does not let DeepSeek change profile visibility permissions', async () => {
+    const config = {
+      get: jest.fn((key: string) => {
+        if (key === 'DEEPSEEK_API_KEY') return 'test-key';
+        return undefined;
+      }),
+    } as unknown as ConfigService;
+    const service = new AIService(config);
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({
+                basic: {
+                  nickname: '',
+                  city: '青岛',
+                  ageRange: '',
+                  gender: '',
+                  zodiac: '',
+                },
+                personality: {
+                  mbti: '',
+                  traits: ['自律'],
+                  socialStyle: '自然相处型',
+                  communicationStyle: '真诚、尊重边界',
+                },
+                interests: {
+                  sports: ['跑步'],
+                  lifestyle: ['读书'],
+                  socialScenes: ['同城约练'],
+                },
+                preferences: {
+                  wantToMeet: ['运动搭子'],
+                  preferredTraits: ['真诚'],
+                  avoid: ['骚扰'],
+                },
+                relationshipIntent: {
+                  goals: ['找搭子'],
+                  openness: 'medium',
+                },
+                availability: {
+                  weekdays: '晚上',
+                  weekends: '下午',
+                },
+                visibility: {
+                  profileDiscoverable: false,
+                  agentCanRecommendMe: false,
+                  agentCanStartChatAfterApproval: false,
+                },
+                matchSignals: {
+                  publicTags: ['跑步'],
+                  privatePreferenceTags: ['运动搭子'],
+                  sensitivePrivateTags: [],
+                  matchKeywords: ['跑步', '运动搭子'],
+                  confidence: 0.8,
+                  source: 'deepseek',
+                },
+                summary: '适合同城运动匹配。',
+              }),
+            },
+          },
+        ],
+      }),
+    } as Response);
+
+    const card = await service.generateProfileBuilderCard({
+      answers: [{ question: '城市和活动？', answer: '青岛，喜欢跑步' }],
+    });
+
+    expect(card.visibility).toEqual({
+      profileDiscoverable: true,
+      agentCanRecommendMe: true,
+      agentCanStartChatAfterApproval: true,
+    });
   });
 
   it('uses the quality chat model instead of legacy DEEPSEEK_MODEL for tool text generation', async () => {
