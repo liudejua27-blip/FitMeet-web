@@ -37,6 +37,7 @@ import {
   hasExplicitSocialExecutionIntent,
   isSocialExecutionIntent,
 } from './social-agent-social-intent-gate';
+import { hasPendingSocialOpportunitySlotCompletion } from './social-agent-opportunity-clarification';
 import {
   SocialAgentWorkflowRouterService,
   type SocialAgentWorkflowRouterDecision,
@@ -93,7 +94,7 @@ export class SocialAgentRouteDecisionService {
       this.readLongTermSnapshot(ownerUserId),
     ]);
     const task = freshTask;
-    if (this.shouldApplyCurrentMessageToTaskSlots(body, message)) {
+    if (this.shouldApplyCurrentMessageToTaskSlots(body, message, task)) {
       this.applyCurrentMessageToTaskSlots(task, message);
     }
     const hydratedContext = this.withLatestTaskSlots(
@@ -220,7 +221,14 @@ export class SocialAgentRouteDecisionService {
   private shouldApplyCurrentMessageToTaskSlots(
     body: SocialAgentRouteMessageBody,
     message: string,
+    task?: AgentTask,
   ): boolean {
+    if (
+      task &&
+      hasPendingSocialOpportunitySlotCompletion(this.pendingTaskContext(task))
+    ) {
+      return true;
+    }
     const conversationIntent = this.conversationIntent(body);
     if (
       conversationIntent === 'conversation' &&
@@ -229,6 +237,38 @@ export class SocialAgentRouteDecisionService {
       return false;
     }
     return true;
+  }
+
+  private pendingTaskContext(task: AgentTask): Record<string, unknown> {
+    const memory = this.recordValue(task.memory);
+    const result = this.recordValue(task.result);
+    const taskMemory = this.recordValue(memory.taskMemory);
+    const currentTask = this.recordValue(taskMemory.currentTask);
+    const legacyCurrentTask = this.recordValue(memory.currentTask);
+    const socialAgentChat = this.recordValue(memory.socialAgentChat);
+    const shortTerm = this.recordValue(memory.shortTerm);
+    const chatRun = this.recordValue(result.chatRun);
+    return {
+      currentTask,
+      taskMemory,
+      shortTermMemory: shortTerm,
+      socialAgentChat,
+      pendingOpportunityDraft:
+        socialAgentChat.pendingOpportunityDraft ??
+        shortTerm.pendingOpportunityDraft ??
+        chatRun.pendingOpportunityDraft,
+      publishStatus:
+        socialAgentChat.publishStatus ??
+        shortTerm.publishStatus ??
+        chatRun.publishStatus,
+      waitingFor: currentTask.waitingFor ?? legacyCurrentTask.waitingFor,
+    };
+  }
+
+  private recordValue(value: unknown): Record<string, unknown> {
+    return value && typeof value === 'object' && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : {};
   }
 
   private async planBrainTurn(input: {

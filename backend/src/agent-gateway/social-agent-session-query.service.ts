@@ -52,6 +52,7 @@ export class SocialAgentSessionQueryService {
       ownerUserId,
       task,
       visibleStepLabel: (id, label) => this.userVisibleStepLabel(id, label),
+      includeNonRestorable: true,
     });
   }
 
@@ -64,6 +65,7 @@ export class SocialAgentSessionQueryService {
       ownerUserId,
       task,
       visibleStepLabel: (id, label) => this.userVisibleStepLabel(id, label),
+      includeNonRestorable: true,
     });
   }
 
