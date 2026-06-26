@@ -49,9 +49,6 @@ jobs:
             frontend/pnpm-lock.yaml
             backend/pnpm-lock.yaml
 
-      - name: Prepare release scripts
-        run: find scripts -type f -name "*.sh" -exec chmod +x {} +
-
       - name: Build ECS deploy package
         env:
           CI: true
