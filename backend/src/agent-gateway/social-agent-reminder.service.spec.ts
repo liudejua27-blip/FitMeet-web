@@ -130,6 +130,53 @@ describe('SocialAgentReminderService', () => {
     };
   };
 
+  it('returns a default disabled preference when none exists', async () => {
+    const { service, preferenceRepo } = build();
+
+    const preference = await service.getPreference(7);
+
+    expect(preference).toMatchObject({
+      id: 1,
+      userId: 7,
+      enabled: false,
+      topics: ['friendship', 'fitness_partner', 'activity'],
+      frequency: 'weekly',
+      quietStart: '09:00',
+      quietEnd: '21:00',
+      tone: 'gentle',
+      metadata: {},
+    });
+    expect(preferenceRepo.save).toHaveBeenCalledTimes(1);
+  });
+
+  it('returns a disabled fallback preference when the preference store is unavailable', async () => {
+    const { service, preferenceRepo } = build();
+    preferenceRepo.findOne.mockRejectedValueOnce(
+      Object.assign(new Error('relation "social_agent_reminder_preferences" does not exist'), {
+        name: 'QueryFailedError',
+      }),
+    );
+
+    const preference = await service.getPreference(7);
+
+    expect(preference).toMatchObject({
+      id: 0,
+      userId: 7,
+      enabled: false,
+      topics: [],
+      frequency: 'manual',
+      quietStart: '09:00',
+      quietEnd: '21:00',
+      tone: 'quiet',
+      metadata: {
+        unavailable: true,
+        reason: 'reminder_preferences_unavailable',
+        errorCode: 'QueryFailedError',
+      },
+    });
+    expect(preferenceRepo.save).not.toHaveBeenCalled();
+  });
+
   it('keeps proactive reminders disabled by default', async () => {
     const { service, notifications } = build();
 
