@@ -1,4 +1,9 @@
 export const DEFAULT_DEEPSEEK_MODEL = 'deepseek-v4-pro';
+export const DEFAULT_DEEPSEEK_FAST_MODEL = 'deepseek-v4-flash';
+export const DEFAULT_DEEPSEEK_STRICT_TOOL_BASE_URL =
+  'https://api.deepseek.com/beta';
+
+export type DeepSeekMode = 'structured' | 'copy' | 'reasoning' | 'tool';
 
 export type DeepSeekChatMessage = {
   role: 'system' | 'user' | 'assistant';
@@ -9,8 +14,15 @@ export type DeepSeekChatCompletionOptions = {
   apiKey: string;
   baseUrl?: string | null;
   model: string;
+  mode?: DeepSeekMode;
   temperature?: number;
   responseFormat?: { type: 'json_object' };
+  tools?: unknown[];
+  toolChoice?: unknown;
+  strictTools?: boolean;
+  strictToolBaseUrl?: string | null;
+  thinking?: { type: 'enabled' | 'disabled' };
+  reasoningEffort?: 'low' | 'medium' | 'high';
   messages: DeepSeekChatMessage[];
   timeoutMs: number;
   signal?: AbortSignal | null;
@@ -28,6 +40,7 @@ export type DeepSeekChatCompletionUsage = {
 
 export type DeepSeekChatCompletionResult = {
   content: string;
+  toolCalls: unknown[];
   usage: DeepSeekChatCompletionUsage;
   systemFingerprint: string | null;
 };
@@ -54,6 +67,23 @@ export function resolveDeepSeekModel(value?: string | null): string {
   }
 
   return configured;
+}
+
+export function resolveDeepSeekModelForMode(
+  mode: DeepSeekMode,
+  configured?: string | null,
+): string {
+  const explicit = configured?.trim();
+  if (explicit && (mode === 'structured' || mode === 'tool')) {
+    if (/^deepseek-chat$/i.test(explicit)) return DEFAULT_DEEPSEEK_FAST_MODEL;
+    if (explicit === 'deepseek-v4') return DEFAULT_DEEPSEEK_FAST_MODEL;
+    return explicit;
+  }
+  if (explicit) return resolveDeepSeekModel(explicit);
+  if (mode === 'structured' || mode === 'tool') {
+    return DEFAULT_DEEPSEEK_FAST_MODEL;
+  }
+  return DEFAULT_DEEPSEEK_MODEL;
 }
 
 export async function callDeepSeekChatCompletion(
@@ -84,6 +114,7 @@ async function callDeepSeekChatCompletionOnce(
   options: DeepSeekChatCompletionOptions,
 ): Promise<DeepSeekChatCompletionResult> {
   assertNotClientAborted(options.signal);
+  assertDeepSeekToolCompatibility(options);
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), options.timeoutMs);
   const abortFromParent = () => controller.abort();
@@ -95,7 +126,11 @@ async function callDeepSeekChatCompletionOnce(
   }
 
   try {
-    const baseUrl = options.baseUrl || 'https://api.deepseek.com';
+    const baseUrl =
+      options.strictTools && options.tools?.length
+        ? options.strictToolBaseUrl || DEFAULT_DEEPSEEK_STRICT_TOOL_BASE_URL
+        : options.baseUrl || 'https://api.deepseek.com';
+    const requestBody = buildDeepSeekRequestBody(options);
     const res = await fetch(
       `${baseUrl.replace(/\/$/, '')}/v1/chat/completions`,
       {
@@ -105,14 +140,7 @@ async function callDeepSeekChatCompletionOnce(
           'content-type': 'application/json',
           authorization: `Bearer ${options.apiKey}`,
         },
-        body: JSON.stringify({
-          model: options.model,
-          temperature: options.temperature ?? 0.4,
-          ...(options.responseFormat
-            ? { response_format: options.responseFormat }
-            : {}),
-          messages: options.messages,
-        }),
+        body: JSON.stringify(requestBody),
       },
     );
     if (!res.ok) {
@@ -121,6 +149,7 @@ async function callDeepSeekChatCompletionOnce(
     const data = (await res.json()) as Record<string, unknown>;
     return {
       content: readDeepSeekCompletionContent(data),
+      toolCalls: readDeepSeekToolCalls(data),
       usage: readDeepSeekCompletionUsage(data),
       systemFingerprint: stringValue(data.system_fingerprint),
     };
@@ -140,11 +169,50 @@ async function callDeepSeekChatCompletionOnce(
   }
 }
 
+function buildDeepSeekRequestBody(
+  options: DeepSeekChatCompletionOptions,
+): Record<string, unknown> {
+  const body: Record<string, unknown> = {
+    model: options.model,
+    temperature: options.temperature ?? defaultTemperatureForMode(options.mode),
+    messages: options.messages,
+  };
+  if (options.responseFormat) body.response_format = options.responseFormat;
+  if (options.tools?.length) body.tools = options.tools;
+  if (options.toolChoice !== undefined) body.tool_choice = options.toolChoice;
+  if (options.thinking) body.thinking = options.thinking;
+  if (options.reasoningEffort) body.reasoning_effort = options.reasoningEffort;
+  return body;
+}
+
+function defaultTemperatureForMode(mode: DeepSeekMode | undefined): number {
+  if (mode === 'structured' || mode === 'tool') return 0.1;
+  if (mode === 'copy') return 0.3;
+  if (mode === 'reasoning') return 0.2;
+  return 0.4;
+}
+
+function assertDeepSeekToolCompatibility(
+  options: DeepSeekChatCompletionOptions,
+): void {
+  if (!options.tools?.length) return;
+  if (/^deepseek-reasoner$/i.test(options.model.trim())) {
+    throw new Error('deepseek-reasoner does not support Function Calling');
+  }
+}
+
 function readDeepSeekCompletionContent(data: Record<string, unknown>): string {
   const choices = Array.isArray(data.choices) ? data.choices : [];
   const first = isRecord(choices[0]) ? choices[0] : {};
   const message = isRecord(first.message) ? first.message : {};
   return typeof message.content === 'string' ? message.content : '';
+}
+
+function readDeepSeekToolCalls(data: Record<string, unknown>): unknown[] {
+  const choices = Array.isArray(data.choices) ? data.choices : [];
+  const first = isRecord(choices[0]) ? choices[0] : {};
+  const message = isRecord(first.message) ? first.message : {};
+  return Array.isArray(message.tool_calls) ? message.tool_calls : [];
 }
 
 function readDeepSeekCompletionUsage(

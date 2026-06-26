@@ -1,8 +1,11 @@
 import {
+  DEFAULT_DEEPSEEK_FAST_MODEL,
   DEFAULT_DEEPSEEK_MODEL,
+  DEFAULT_DEEPSEEK_STRICT_TOOL_BASE_URL,
   callDeepSeekChatCompletion,
   callDeepSeekChatCompletionWithUsage,
   resolveDeepSeekModel,
+  resolveDeepSeekModelForMode,
 } from './deepseek.util';
 
 const originalFetch = global.fetch;
@@ -36,6 +39,28 @@ describe('resolveDeepSeekModel', () => {
 
   it('keeps an explicit supported model name', () => {
     expect(resolveDeepSeekModel(' deepseek-v4-pro ')).toBe('deepseek-v4-pro');
+  });
+
+  it('uses fast models for structured and tool modes', () => {
+    expect(resolveDeepSeekModelForMode('structured')).toBe(
+      DEFAULT_DEEPSEEK_FAST_MODEL,
+    );
+    expect(resolveDeepSeekModelForMode('tool')).toBe(
+      DEFAULT_DEEPSEEK_FAST_MODEL,
+    );
+    expect(resolveDeepSeekModelForMode('structured', 'deepseek-chat')).toBe(
+      DEFAULT_DEEPSEEK_FAST_MODEL,
+    );
+  });
+
+  it('keeps the quality path for copy and reasoning modes', () => {
+    expect(resolveDeepSeekModelForMode('copy')).toBe(DEFAULT_DEEPSEEK_MODEL);
+    expect(resolveDeepSeekModelForMode('reasoning')).toBe(
+      DEFAULT_DEEPSEEK_MODEL,
+    );
+    expect(resolveDeepSeekModelForMode('copy', 'deepseek-v4-flash')).toBe(
+      DEFAULT_DEEPSEEK_MODEL,
+    );
   });
 });
 
@@ -112,6 +137,7 @@ describe('callDeepSeekChatCompletion', () => {
       }),
     ).resolves.toEqual({
       content: '带 usage 的结果',
+      toolCalls: [],
       systemFingerprint: 'fp-cache-a',
       usage: {
         promptTokens: 120,
@@ -153,6 +179,119 @@ describe('callDeepSeekChatCompletion', () => {
       completionTokens: 9,
       reasoningTokens: 3,
     });
+    expect(result.toolCalls).toEqual([]);
+  });
+
+  it('applies mode-specific defaults and reasoning controls', async () => {
+    const requestBodies: Array<Record<string, unknown>> = [];
+    global.fetch = jest.fn((_url, init: RequestInit = {}) => {
+      if (typeof init.body === 'string') {
+        requestBodies.push(JSON.parse(init.body) as Record<string, unknown>);
+      }
+      return Promise.resolve({
+        ok: true,
+        json: async () => ({
+          choices: [{ message: { content: 'ok' } }],
+        }),
+      } as Response);
+    }) as jest.MockedFunction<typeof fetch>;
+
+    await callDeepSeekChatCompletion({
+      apiKey: 'test-key',
+      model: 'deepseek-v4-flash',
+      mode: 'structured',
+      timeoutMs: 12_000,
+      messages: [{ role: 'user', content: '结构化' }],
+    });
+    await callDeepSeekChatCompletion({
+      apiKey: 'test-key',
+      model: 'deepseek-v4-pro',
+      mode: 'copy',
+      timeoutMs: 12_000,
+      messages: [{ role: 'user', content: '文案' }],
+    });
+    await callDeepSeekChatCompletion({
+      apiKey: 'test-key',
+      model: 'deepseek-v4-pro',
+      mode: 'reasoning',
+      thinking: { type: 'enabled' },
+      reasoningEffort: 'high',
+      timeoutMs: 12_000,
+      messages: [{ role: 'user', content: '复盘' }],
+    });
+
+    expect(requestBodies[0]).toMatchObject({ temperature: 0.1 });
+    expect(requestBodies[1]).toMatchObject({ temperature: 0.3 });
+    expect(requestBodies[2]).toMatchObject({
+      temperature: 0.2,
+      thinking: { type: 'enabled' },
+      reasoning_effort: 'high',
+    });
+  });
+
+  it('uses the beta endpoint for strict tool calls by default', async () => {
+    const tool = {
+      type: 'function',
+      function: {
+        name: 'extract_slots',
+        strict: true,
+        parameters: {
+          type: 'object',
+          properties: { city: { type: 'string' } },
+          required: ['city'],
+          additionalProperties: false,
+        },
+      },
+    };
+    global.fetch = jest.fn(() =>
+      Promise.resolve({
+        ok: true,
+        json: async () => ({
+          choices: [
+            {
+              message: {
+                content: '',
+                tool_calls: [{ id: 'call-1', type: 'function' }],
+              },
+            },
+          ],
+        }),
+      } as Response),
+    ) as jest.MockedFunction<typeof fetch>;
+
+    const result = await callDeepSeekChatCompletionWithUsage({
+      apiKey: 'test-key',
+      baseUrl: 'https://api.deepseek.com',
+      model: 'deepseek-v4-flash',
+      mode: 'tool',
+      tools: [tool],
+      toolChoice: { type: 'function', function: { name: 'extract_slots' } },
+      strictTools: true,
+      timeoutMs: 12_000,
+      messages: [{ role: 'user', content: '青岛散步' }],
+    });
+
+    expect(global.fetch).toHaveBeenCalledWith(
+      `${DEFAULT_DEEPSEEK_STRICT_TOOL_BASE_URL}/v1/chat/completions`,
+      expect.objectContaining({ method: 'POST' }),
+    );
+    expect(result.toolCalls).toEqual([{ id: 'call-1', type: 'function' }]);
+  });
+
+  it('fails closed when deepseek-reasoner is configured with tools', async () => {
+    global.fetch = jest.fn() as jest.MockedFunction<typeof fetch>;
+
+    await expect(
+      callDeepSeekChatCompletion({
+        apiKey: 'test-key',
+        model: 'deepseek-reasoner',
+        mode: 'tool',
+        tools: [{ type: 'function', function: { name: 'x' } }],
+        timeoutMs: 12_000,
+        messages: [{ role: 'user', content: '你好' }],
+      }),
+    ).rejects.toThrow('deepseek-reasoner does not support Function Calling');
+    expect(global.fetch).not.toHaveBeenCalled();
   });
 
   it('does not turn parent aborts into timeout failures', async () => {
