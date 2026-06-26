@@ -28,7 +28,10 @@ import type {
   FitMeetAlphaCard,
 } from './fitmeet-alpha-agent.types';
 import type { AgentLoopRun, SubagentHandoffResult } from './agent-loop.types';
-import type { UserFacingAgentPublicLoop } from './user-facing-agent-response';
+import type {
+  UserFacingAgentPublicLoop,
+  UserFacingAgentResponse,
+} from './user-facing-agent-response';
 
 export interface SocialAgentVisibleStep {
   id: string;
@@ -441,6 +444,7 @@ export interface SocialAgentSessionSnapshot {
   messages: SocialAgentSessionMessage[];
   events: Array<Record<string, unknown>>;
   result: SocialAgentChatRunResult | SocialAgentChatReplanRunResult | null;
+  userFacingResult: UserFacingAgentResponse | null;
   latestRun: SocialAgentAsyncRunSnapshot | null;
   pendingApprovals: SocialAgentPendingApprovalSnapshot[];
   candidateActions: Record<string, Record<string, unknown>>;

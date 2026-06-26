@@ -783,6 +783,9 @@ export function responseFromSessionSnapshot(
   snapshot: UserFacingAgentSessionSnapshot | null | undefined,
 ): UserFacingAgentResponse | null {
   if (!snapshot) return null;
+  if (isUserFacingAgentResponse(snapshot.userFacingResult)) {
+    return snapshot.userFacingResult;
+  }
   if (isUserFacingAgentResponse(snapshot.result)) return snapshot.result;
   const latestRunResult =
     snapshot.latestRun && typeof snapshot.latestRun === 'object'

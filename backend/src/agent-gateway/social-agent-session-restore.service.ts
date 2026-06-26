@@ -19,8 +19,10 @@ import {
 import {
   AgentTask,
   AgentTaskEvent,
+  AgentTaskPermissionMode,
   AgentTaskStatus,
 } from './entities/agent-task.entity';
+import { UserFacingResponseSanitizerService } from './response-quality/user-facing-response-sanitizer.service';
 import type {
   SocialAgentAsyncRunSnapshot,
   SocialAgentChatReplanRunResult,
@@ -29,6 +31,7 @@ import type {
   SocialAgentSessionSnapshot,
   SocialAgentTaskTimelineSnapshot,
 } from './social-agent-chat.types';
+import type { UserFacingAgentResponse } from './user-facing-agent-response';
 import { readSocialAgentConversationHistory } from './social-agent-chat-memory.presenter';
 import {
   buildSocialAgentTimelineSnapshot,
@@ -63,6 +66,8 @@ export class SocialAgentSessionRestoreService {
     private readonly checkpoints?: AgentRunCheckpointService,
     @Optional()
     private readonly config?: ConfigService,
+    @Optional()
+    private readonly userFacingSanitizer?: UserFacingResponseSanitizerService,
   ) {}
 
   findLatestRestorableTask(ownerUserId: number): Promise<AgentTask | null> {
@@ -111,6 +116,7 @@ export class SocialAgentSessionRestoreService {
       task: input.task,
       events: context.events,
       result: context.result,
+      userFacingResult: this.toUserFacingResult(context.result, input.task),
       latestRun: context.latestRun,
       pendingApprovals: context.pendingApprovals,
       conversationHistory: this.conversationHistory(input.task),
@@ -363,6 +369,28 @@ export class SocialAgentSessionRestoreService {
 
   private text(value: unknown): string {
     return cleanDisplayText(value, '').trim();
+  }
+
+  private toUserFacingResult(
+    result: ReturnType<typeof readSocialAgentRestorableResult>,
+    task: AgentTask,
+  ): UserFacingAgentResponse | null {
+    if (!result || !this.userFacingSanitizer) return null;
+    try {
+      return this.userFacingSanitizer.toUserFacingAgentResponse(
+        result,
+        task.permissionMode ?? AgentTaskPermissionMode.Confirm,
+      );
+    } catch (error) {
+      this.logger.warn(
+        JSON.stringify({
+          event: 'social_agent.session.user_facing_restore_failed',
+          taskId: task.id,
+          message: error instanceof Error ? error.message : String(error),
+        }),
+      );
+      return null;
+    }
   }
 
   private shouldHideGenericCheckpointSession(
