@@ -1,0 +1,93 @@
+name: Build ECS Deploy Package
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Git ref to package
+        required: false
+        default: main
+      run_backend_docker_build_check:
+        description: Run backend production Docker build check
+        required: false
+        default: "true"
+        type: choice
+        options:
+          - "true"
+          - "false"
+
+concurrency:
+  group: deploy-package-${{ github.event.inputs.ref || 'main' }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  build-deploy-package:
+    name: Build deploy zip
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout selected ref
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.ref || 'main' }}
+          fetch-depth: 1
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.23.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: |
+            frontend/pnpm-lock.yaml
+            backend/pnpm-lock.yaml
+
+      - name: Build ECS deploy package
+        env:
+          CI: true
+          RUN_BACKEND_DOCKER_BUILD_CHECK: ${{ github.event.inputs.run_backend_docker_build_check || 'true' }}
+        run: |
+          set -euo pipefail
+          commit="$(git rev-parse --short=12 HEAD)"
+          output="output/fitmeet-ecs-deploy-${commit}.zip"
+          bash scripts/build-deploy-zip.sh "$output"
+          {
+            echo "commit=${commit}"
+            echo "zip=${output}"
+            echo "sha256=${output}.sha256"
+            echo "installer=output/fitmeet-ecs-install-release.sh"
+          } >> "$GITHUB_OUTPUT"
+        id: package
+
+      - name: Upload deploy package artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: fitmeet-ecs-deploy-${{ steps.package.outputs.commit }}
+          path: |
+            ${{ steps.package.outputs.zip }}
+            ${{ steps.package.outputs.sha256 }}
+            ${{ steps.package.outputs.installer }}
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Release package summary
+        run: |
+          {
+            echo "## FitMeet ECS deploy package"
+            echo
+            echo "- Commit: \`${{ steps.package.outputs.commit }}\`"
+            echo "- Artifact: \`fitmeet-ecs-deploy-${{ steps.package.outputs.commit }}\`"
+            echo "- Zip: \`${{ steps.package.outputs.zip }}\`"
+            echo "- Checksum:"
+            echo
+            echo '```text'
+            cat "${{ steps.package.outputs.sha256 }}"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
