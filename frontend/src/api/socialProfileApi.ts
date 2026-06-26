@@ -113,6 +113,10 @@ export interface SocialProfileQuestion {
 export interface SocialProfileCompletion {
   completedFields: string[];
   missingFields: string[];
+  missingRequired?: string[];
+  missingRecommended?: string[];
+  missingOptional?: string[];
+  questionQueue?: string[];
   percent: number;
   readinessLevel?: 'empty' | 'basic' | 'match_ready' | 'agent_ready';
   canEnterMatchPool?: boolean;

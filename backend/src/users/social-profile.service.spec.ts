@@ -469,6 +469,64 @@ describe('SocialProfileService', () => {
     expect(completion.sections.length).toBeGreaterThan(0);
   });
 
+  it('does not block matching on optional age range or gender gaps', async () => {
+    profileRepo.findOne.mockResolvedValue({
+      userId: 1,
+      profileVersion: 1,
+      nickname: 'Nova',
+      gender: '',
+      ageRange: '',
+      city: '青岛',
+      mbti: '',
+      traits: [],
+      socialStyle: '',
+      communicationStyle: '',
+      nearbyArea: '',
+      fitnessGoals: ['羽毛球'],
+      interestTags: [],
+      lifestyleTags: [],
+      wantToMeet: ['运动伙伴'],
+      preferredTraits: [],
+      avoidTraits: [],
+      primaryPurpose: '',
+      relationshipGoals: [],
+      availableTimes: ['晚上'],
+      defaultMatchRadiusKm: null,
+      socialPreference: '',
+      rejectRules: '',
+      privacyBoundary: '公共场所，先站内聊',
+      profileDiscoverable: true,
+      agentCanRecommendMe: false,
+      agentCanStartChatAfterApproval: false,
+      hideSensitiveTags: true,
+      aiSummary: '',
+      aiProfileCard: {},
+      matchSignals: {},
+      sensitiveTagDecisions: {},
+      openness: '',
+      zodiac: '',
+      socialScenes: [],
+      weekdayAvailability: '',
+      weekendAvailability: '',
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    } as UserSocialProfile);
+
+    const completion = await service.getCompletion(1);
+
+    expect(completion.canEnterMatchPool).toBe(true);
+    expect(completion.missingRequired).toEqual([]);
+    expect(completion.missingOptional).toEqual(
+      expect.arrayContaining(['ageRange', 'gender']),
+    );
+    expect(completion.missingFields).not.toEqual(
+      expect.arrayContaining(['ageRange', 'gender']),
+    );
+    expect(completion.questionQueue).not.toEqual(
+      expect.arrayContaining(['ageRange', 'gender']),
+    );
+  });
+
   it('maps interviewer aliases such as sports into canonical profile fields', async () => {
     profileRepo.findOne.mockResolvedValue(null);
     delegateRepo.findOne.mockResolvedValue(null);
