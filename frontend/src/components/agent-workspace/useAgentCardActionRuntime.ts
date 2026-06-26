@@ -1,5 +1,9 @@
 import { useCallback, useEffect, useRef, type MutableRefObject } from 'react';
 
+import {
+  submitAgentFeedbackEvent,
+  type AgentFeedbackReasonCode,
+} from '../../api/agentFeedbackApi';
 import type {
   FitMeetAgentCardExecutableAction,
   FitMeetAgentSchemaAction,
@@ -183,6 +187,30 @@ export function useAgentCardActionRuntime({
         });
       }
 
+      if (isCandidateFeedbackAction(action)) {
+        await submitAgentFeedbackEvent({
+          taskId,
+          publicIntentId: stringFromUnknown(input?.payload?.publicIntentId) || null,
+          matchingJobId: numberFromUnknown(input?.payload?.matchingJobId),
+          candidateId:
+            numberFromUnknown(input?.payload?.targetUserId) ??
+            numberFromUnknown(input?.payload?.candidateUserId) ??
+            numberFromUnknown(input?.payload?.candidateId),
+          candidateRecordId:
+            numberFromUnknown(input?.payload?.candidateRecordId) ??
+            numberFromUnknown(input?.payload?.socialRequestCandidateId),
+          feedbackType: 'candidate_quality',
+          reasonCode: candidateFeedbackReasonCode(action),
+          source: 'agent_candidate_card',
+          metadata: {
+            cardId: input?.payload?.cardId ?? input?.payload?.id ?? null,
+            candidate: input?.payload?.candidate ?? null,
+            action,
+          },
+        });
+        return candidateFeedbackResponse(taskId, action);
+      }
+
       isRunningRef.current = true;
       runConversationIntentRef.current =
         action === 'candidate.connect' ||
@@ -325,6 +353,11 @@ function isExecutableToolUISchemaAction(
   return (
     value === 'candidate.like' ||
     value === 'candidate.skip' ||
+    value === 'candidate.feedback.good_fit' ||
+    value === 'candidate.feedback.bad_fit' ||
+    value === 'candidate.feedback.too_far' ||
+    value === 'candidate.feedback.time_mismatch' ||
+    value === 'candidate.feedback.style_mismatch' ||
     value === 'candidate.more_like_this' ||
     value === 'candidate.view_detail' ||
     value === 'candidate.connect' ||
@@ -361,6 +394,63 @@ function isSlotCompletionMessageAction(action: FitMeetAgentCardExecutableAction)
     action === 'slot_completion.custom_safety' ||
     action === 'slot_completion.cancel'
   );
+}
+
+function isCandidateFeedbackAction(action: FitMeetAgentCardExecutableAction) {
+  return (
+    action === 'candidate.feedback.good_fit' ||
+    action === 'candidate.feedback.bad_fit' ||
+    action === 'candidate.feedback.too_far' ||
+    action === 'candidate.feedback.time_mismatch' ||
+    action === 'candidate.feedback.style_mismatch'
+  );
+}
+
+function candidateFeedbackReasonCode(
+  action: FitMeetAgentCardExecutableAction,
+): AgentFeedbackReasonCode {
+  if (action === 'candidate.feedback.good_fit') return 'good_fit';
+  if (action === 'candidate.feedback.too_far') return 'too_far';
+  if (action === 'candidate.feedback.time_mismatch') return 'time_mismatch';
+  if (action === 'candidate.feedback.style_mismatch') return 'style_mismatch';
+  return 'bad_fit';
+}
+
+function candidateFeedbackResponse(
+  taskId: number,
+  action: FitMeetAgentCardExecutableAction,
+): UserFacingAgentResponse {
+  return {
+    taskId,
+    assistantMessage: candidateFeedbackMessage(action),
+    assistantMessageSource: 'deterministic_action',
+    lightStatus: '已整理回复',
+    cards: [],
+    safeStatus: {
+      blocked: false,
+      level: 'low',
+      boundaryNotes: [],
+      requiredConfirmations: [],
+    },
+    pendingConfirmations: [],
+    permissionMode: 'confirm',
+  };
+}
+
+function candidateFeedbackMessage(action: FitMeetAgentCardExecutableAction) {
+  if (action === 'candidate.feedback.good_fit') {
+    return '已记录“合适”，后续候选质量会参考这个信号。';
+  }
+  if (action === 'candidate.feedback.too_far') {
+    return '已记录“太远”，后续会优先收紧地点范围。';
+  }
+  if (action === 'candidate.feedback.time_mismatch') {
+    return '已记录“时间不对”，后续会更重视时间匹配。';
+  }
+  if (action === 'candidate.feedback.style_mismatch') {
+    return '已记录“风格不对”，后续会调整互动风格偏好。';
+  }
+  return '已记录“不合适”，后续会减少类似候选。';
 }
 
 function slotCompletionMessageForAction(

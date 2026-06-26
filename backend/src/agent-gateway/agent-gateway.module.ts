@@ -116,6 +116,7 @@ import { SocialAgentChatTurnCallbacksService } from './social-agent-chat-turn-ca
 import { SocialAgentChatRunFacadeService } from './social-agent-chat-run-facade.service';
 import { SocialAgentChatSessionFacadeService } from './social-agent-chat-session-facade.service';
 import { SocialAgentMessageFeedbackService } from './social-agent-message-feedback.service';
+import { SocialAgentFeedbackEventService } from './social-agent-feedback-event.service';
 import { SocialAgentReminderService } from './social-agent-reminder.service';
 import { SocialAgentThreadService } from './social-agent-thread.service';
 import { SocialAgentThreadSessionManager } from './social-agent-thread-session-manager.service';
@@ -140,6 +141,7 @@ import { SocialAgentMetricsService } from './social-agent-metrics.service';
 import { SocialAgentLongTermMemoryService } from './social-agent-long-term-memory.service';
 import { SocialAgentLongTermMemory } from './entities/social-agent-long-term-memory.entity';
 import { SocialAgentMessageFeedback } from './entities/social-agent-message-feedback.entity';
+import { AgentFeedbackEvent } from './entities/agent-feedback-event.entity';
 import {
   SocialAgentReminder,
   SocialAgentReminderPreference,
@@ -275,6 +277,7 @@ import { AdminRbacModule } from '../admin-rbac/admin-rbac.module';
       UserSocialProfile,
       SocialAgentLongTermMemory,
       SocialAgentMessageFeedback,
+      AgentFeedbackEvent,
       SocialAgentUserInterestEvent,
       SocialAgentReminderPreference,
       SocialAgentReminder,
@@ -370,6 +373,7 @@ import { AdminRbacModule } from '../admin-rbac/admin-rbac.module';
     SocialAgentChatRunFacadeService,
     SocialAgentChatSessionFacadeService,
     SocialAgentMessageFeedbackService,
+    SocialAgentFeedbackEventService,
     SocialAgentReminderService,
     SocialAgentThreadService,
     SocialAgentThreadSessionManager,
@@ -488,6 +492,7 @@ import { AdminRbacModule } from '../admin-rbac/admin-rbac.module';
     SocialAgentSessionRestoreService,
     SocialAgentMessageLogService,
     SocialAgentMessageFeedbackService,
+    SocialAgentFeedbackEventService,
     SocialAgentThreadService,
     AgentRunCheckpointService,
     SocialAgentEventV2Service,

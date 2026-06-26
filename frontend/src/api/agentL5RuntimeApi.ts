@@ -29,6 +29,8 @@ export type AgentL5DashboardSummary = {
   activeAlerts?: number;
   messageFeedback?: number;
   negativeMessageFeedback?: number;
+  agentFeedbackEvents?: number;
+  negativeAgentFeedbackEvents?: number;
 };
 
 export type AgentOnlineReplaySampleDto = {
@@ -306,6 +308,37 @@ export type SocialAgentMessageFeedbackDto = {
   updatedAt: string;
 };
 
+export type AgentFeedbackEventDto = {
+  id: number;
+  userId: number;
+  taskId: number | null;
+  publicIntentId: string | null;
+  matchingJobId: number | null;
+  candidateId: number | null;
+  candidateRecordId: number | null;
+  feedbackType: string;
+  reasonCode: string;
+  freeText: string | null;
+  correctionType: string | null;
+  oldValue: string | null;
+  newValue: string | null;
+  appliesToCurrentTask: boolean;
+  appliesToFutureProfile: boolean;
+  source: string;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+};
+
+export type AgentFeedbackGoldenCandidateCaseDto = {
+  caseId: string;
+  source: string;
+  feedbackEventId: number;
+  stateBefore: Record<string, unknown>;
+  input: string;
+  expected: Record<string, unknown>;
+  metadata: Record<string, unknown>;
+};
+
 export type AgentL5DashboardDto = {
   summary: AgentL5DashboardSummary;
   replaySamples: AgentOnlineReplaySampleDto[];
@@ -314,6 +347,7 @@ export type AgentL5DashboardDto = {
   patchEffects: AgentSkillPatchEffectDto[];
   autoRuns: AgentSkillPatchDto[];
   messageFeedback?: SocialAgentMessageFeedbackDto[];
+  agentFeedbackEvents?: AgentFeedbackEventDto[];
   observability?: AgentObservabilityDto;
   socialAgentMetrics?: SocialAgentRuntimeMetricsDto;
   workerJobs?: SubagentWorkerJobDto[];
@@ -390,6 +424,25 @@ export const agentL5RuntimeApi = {
   autoRuns(limit = 50) {
     return requestProtected<AgentSkillPatchDto[]>(
       withQuery(fitMeetCoreEndpoints.socialAgentL5.autoRuns, { limit }),
+    );
+  },
+  agentFeedbackEvents(input?: {
+    feedbackType?: string;
+    reasonCode?: string;
+    limit?: number;
+  }) {
+    return requestProtected<AgentFeedbackEventDto[]>(
+      withQuery(fitMeetCoreEndpoints.socialAgentL5.feedbackEvents, input),
+    );
+  },
+  feedbackFailureCorpus(input?: { limit?: number; since?: string }) {
+    return requestProtected<AgentFeedbackEventDto[]>(
+      withQuery(fitMeetCoreEndpoints.socialAgentL5.feedbackFailureCorpus, input),
+    );
+  },
+  feedbackGoldenCandidates(input?: { limit?: number }) {
+    return requestProtected<AgentFeedbackGoldenCandidateCaseDto[]>(
+      withQuery(fitMeetCoreEndpoints.socialAgentL5.feedbackGoldenCandidates, input),
     );
   },
   observability() {

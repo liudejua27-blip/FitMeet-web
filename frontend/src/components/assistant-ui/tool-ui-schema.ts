@@ -25,6 +25,11 @@ export type ToolUISchemaAction =
   | 'candidate.view_detail'
   | 'candidate.like'
   | 'candidate.skip'
+  | 'candidate.feedback.good_fit'
+  | 'candidate.feedback.bad_fit'
+  | 'candidate.feedback.too_far'
+  | 'candidate.feedback.time_mismatch'
+  | 'candidate.feedback.style_mismatch'
   | 'candidate.connect'
   | 'candidate.generate_opener'
   | 'candidate.more_like_this'
@@ -950,6 +955,11 @@ export function toolUISchemaActionFromUnknown(value: unknown): ToolUISchemaActio
     text === 'candidate.view_detail' ||
     text === 'candidate.like' ||
     text === 'candidate.skip' ||
+    text === 'candidate.feedback.good_fit' ||
+    text === 'candidate.feedback.bad_fit' ||
+    text === 'candidate.feedback.too_far' ||
+    text === 'candidate.feedback.time_mismatch' ||
+    text === 'candidate.feedback.style_mismatch' ||
     text === 'candidate.connect' ||
     text === 'candidate.generate_opener' ||
     text === 'candidate.more_like_this' ||
@@ -1054,6 +1064,11 @@ export function defaultOpportunityActionsForSchema(
     return [
       { schemaAction: 'candidate.view_detail', requiresConfirmation: false, source: 'default' },
       { schemaAction: 'candidate.like', requiresConfirmation: false, source: 'default' },
+      { schemaAction: 'candidate.feedback.good_fit', requiresConfirmation: false, source: 'default' },
+      { schemaAction: 'candidate.feedback.bad_fit', requiresConfirmation: false, source: 'default' },
+      { schemaAction: 'candidate.feedback.too_far', requiresConfirmation: false, source: 'default' },
+      { schemaAction: 'candidate.feedback.time_mismatch', requiresConfirmation: false, source: 'default' },
+      { schemaAction: 'candidate.feedback.style_mismatch', requiresConfirmation: false, source: 'default' },
       { schemaAction: 'candidate.generate_opener', requiresConfirmation: false, source: 'default' },
       { schemaAction: 'opener.confirm_send', requiresConfirmation: true, source: 'default' },
       { schemaAction: 'candidate.connect', requiresConfirmation: true, source: 'default' },

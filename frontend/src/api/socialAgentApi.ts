@@ -117,6 +117,11 @@ export type FitMeetAgentLoopStage =
 export type FitMeetAgentSchemaAction =
   | 'candidate.like'
   | 'candidate.skip'
+  | 'candidate.feedback.good_fit'
+  | 'candidate.feedback.bad_fit'
+  | 'candidate.feedback.too_far'
+  | 'candidate.feedback.time_mismatch'
+  | 'candidate.feedback.style_mismatch'
   | 'candidate.more_like_this'
   | 'candidate.view_detail'
   | 'candidate.connect'
