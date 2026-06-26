@@ -5902,10 +5902,10 @@ describe('AgentWorkspacePage', () => {
     await waitFor(() => expect(streamSpy).toHaveBeenCalled());
     expect(streamSpy.mock.calls[0]?.[0]).toMatchObject({
       goal: '你好，你能正常聊天吗？',
-      taskId: null,
+      taskId: 42,
       clientContext: expect.objectContaining({
         conversationIntent: 'conversation',
-        threadId: null,
+        threadId: 'agent-task:42',
       }),
     });
   });
@@ -7282,9 +7282,9 @@ describe('AgentWorkspacePage', () => {
     await waitFor(() => expect(streamSpy).toHaveBeenCalled());
     expect(streamSpy.mock.calls[0]?.[0]).toMatchObject({
       goal: '接着刚才的话题',
-      taskId: null,
+      taskId: 77,
       clientContext: expect.objectContaining({
-        threadId: null,
+        threadId: 'agent-task:77',
       }),
     });
   });

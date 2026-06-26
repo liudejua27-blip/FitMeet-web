@@ -347,11 +347,46 @@ function shouldShowMatchingAuthorization(state: DraftState) {
 
 function savedProfileMessage(completion: SocialProfileCompletion) {
   const rounded = Math.round(completion.percent);
-  const missing = completion.missingFields.map((field) => field.trim()).filter(Boolean);
+  const missing = completion.missingFields
+    .map((field) => userFacingProfileFieldLabel(field.trim()))
+    .filter(Boolean);
   if (missing.length === 0) {
     return `已保存到个人信息。当前资料完整度 ${rounded}%。匹配授权需要单独确认。`;
   }
   return `已保存到个人信息。当前资料完整度 ${rounded}%。还可以继续补充：${missing.slice(0, 4).join('、')}。`;
+}
+
+function userFacingProfileFieldLabel(field: string) {
+  const labels: Record<string, string> = {
+    nickname: '昵称',
+    gender: '性别展示偏好',
+    ageRange: '年龄段展示偏好',
+    city: '城市',
+    nearbyArea: '常活动区域',
+    mbti: '性格关键词',
+    zodiac: '星座',
+    traits: '性格标签',
+    socialStyle: '社交风格',
+    communicationStyle: '沟通方式',
+    fitnessGoals: '运动目标',
+    interestTags: '兴趣活动',
+    lifestyleTags: '生活方式',
+    socialScenes: '社交场景',
+    wantToMeet: '想认识的人',
+    preferredTraits: '偏好的特质',
+    avoidTraits: '不接受的行为',
+    relationshipGoals: '社交目标',
+    availableTimes: '可约时间',
+    weekdayAvailability: '工作日可约时间',
+    weekendAvailability: '周末可约时间',
+    socialPreference: '相处节奏',
+    rejectRules: '拒绝规则',
+    privacyBoundary: '隐私与安全边界',
+    profileDiscoverable: '发现页可见授权',
+    agentCanRecommendMe: '匹配授权',
+    agentCanStartChatAfterApproval: '站内联系授权',
+  };
+  return labels[field] ?? field;
 }
 
 function readPendingProposal(value: unknown): ProfileUpdateProposal | null {

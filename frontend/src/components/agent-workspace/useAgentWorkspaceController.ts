@@ -726,6 +726,7 @@ function buildProfileCompletionBootstrapResponse(input: {
       schemaType: 'profile.completion',
       questionCount: questions.length,
       missingFields: input.completion.missingFields ?? [],
+      missingFieldLabels: (input.completion.missingFields ?? []).map(userFacingProfileFieldLabel),
       pendingProposal: input.pendingProposal ?? null,
       questions,
       savePolicy: 'preview_before_write',
@@ -777,8 +778,11 @@ function normalizeProfileCompletionQuestions(questions: SocialProfileQuestion[])
 }
 
 function profileCompletionQuestionLabel(question: SocialProfileQuestion) {
+  const keyLabel = userFacingProfileFieldLabel(question.key);
+  if (keyLabel !== question.key) return keyLabel;
   const text = `${question.key} ${question.domain ?? ''} ${question.matchRole ?? ''} ${question.question}`;
-  if (/city|nearby|location|地点|城市|附近|范围/i.test(text)) return '城市与活动范围';
+  if (/nearby|location|地点|附近|范围/i.test(text)) return '常活动区域';
+  if (/city|城市/i.test(text)) return '城市';
   if (/time|available|availability|weekday|weekend|时间|周末|工作日/i.test(text)) {
     return '可约时间';
   }
@@ -790,7 +794,8 @@ function profileCompletionQuestionLabel(question: SocialProfileQuestion) {
 
 function profileCompletionQuestionPlaceholder(question: SocialProfileQuestion) {
   const label = profileCompletionQuestionLabel(question);
-  if (label === '城市与活动范围') return '例如：青岛大学附近，3 公里内';
+  if (label === '城市') return '例如：青岛';
+  if (label === '常活动区域') return '例如：青岛大学附近，3 公里内';
   if (label === '可约时间') return '例如：周末下午，工作日晚上也可以';
   if (label === '兴趣活动') return '例如：跑步、羽毛球、散步、健身';
   if (label === '想认识的人') return '例如：节奏轻松、愿意先站内沟通的人';
@@ -800,7 +805,8 @@ function profileCompletionQuestionPlaceholder(question: SocialProfileQuestion) {
 
 function profileCompletionQuestionOptions(question: SocialProfileQuestion) {
   const label = profileCompletionQuestionLabel(question);
-  if (label === '城市与活动范围') return ['青岛', '学校或公司附近', '3 公里内', '暂不确定'];
+  if (label === '城市') return ['青岛', '北京', '上海', '暂不确定'];
+  if (label === '常活动区域') return ['学校或公司附近', '3 公里内', '商圈附近', '暂不确定'];
   if (label === '可约时间') return ['周末下午', '工作日晚上', '今天晚上', '暂不确定'];
   if (label === '兴趣活动') return ['跑步', '羽毛球', '散步', '健身', '暂不确定'];
   if (label === '想认识的人') return ['找运动搭子', '低压力轻松聊', '先运动后熟悉', '暂不确定'];
@@ -808,6 +814,39 @@ function profileCompletionQuestionOptions(question: SocialProfileQuestion) {
     return ['只接受公共场所', '先站内沟通', '不交换联系方式', '不接受太晚见面', '暂不确定'];
   }
   return ['暂不确定'];
+}
+
+function userFacingProfileFieldLabel(field: string) {
+  const labels: Record<string, string> = {
+    nickname: '昵称',
+    gender: '性别展示偏好',
+    ageRange: '年龄段展示偏好',
+    city: '城市',
+    nearbyArea: '常活动区域',
+    mbti: '性格关键词',
+    zodiac: '星座',
+    traits: '性格标签',
+    socialStyle: '社交风格',
+    communicationStyle: '沟通方式',
+    fitnessGoals: '运动目标',
+    interestTags: '兴趣活动',
+    lifestyleTags: '生活方式',
+    socialScenes: '社交场景',
+    wantToMeet: '想认识的人',
+    preferredTraits: '偏好的特质',
+    avoidTraits: '不接受的行为',
+    relationshipGoals: '社交目标',
+    availableTimes: '可约时间',
+    weekdayAvailability: '工作日可约时间',
+    weekendAvailability: '周末可约时间',
+    socialPreference: '相处节奏',
+    rejectRules: '拒绝规则',
+    privacyBoundary: '隐私与安全边界',
+    profileDiscoverable: '发现页可见授权',
+    agentCanRecommendMe: '匹配授权',
+    agentCanStartChatAfterApproval: '站内联系授权',
+  };
+  return labels[field] ?? field;
 }
 
 function fallbackProfileCompletionQuestions() {
