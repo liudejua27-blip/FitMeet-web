@@ -39,7 +39,10 @@ import { AgentLoopService } from './agent-loop.service';
 import { AgentL5RuntimeService } from './agent-l5-runtime.service';
 import { AgentApprovalDispatcherService } from './agent-approval-dispatcher.service';
 import { AgentApprovalService } from './agent-approval.service';
-import { rememberSocialAgentShortTerm } from './social-agent-memory.util';
+import {
+  rememberSocialAgentShortTerm,
+  transitionSocialAgentState,
+} from './social-agent-memory.util';
 import { toSocialAgentMessageArray } from './social-agent-loop-state';
 import { SocialAgentCandidatePoolService } from './social-agent-candidate-pool.service';
 import { SocialAgentLongTermMemoryService } from './social-agent-long-term-memory.service';
@@ -1980,32 +1983,162 @@ export class SocialAgentToolExecutorService {
     input: Record<string, unknown>,
   ): Promise<unknown> {
     const patch = buildSocialAgentProfileContextPatch(input);
+    const proposalInput = this.profileContextProposalInput(input, patch);
+    if (
+      proposalInput.answers.length === 0 &&
+      !proposalInput.rawText &&
+      Object.keys(patch.dto).length === 0
+    ) {
+      const profile = await this.socialProfiles.get(task.ownerUserId);
+      return {
+        success: true,
+        status: 'no_profile_update_proposed',
+        profileUpdated: false,
+        confirmationRequired: false,
+        updatedFields: [],
+        memoryFields: [],
+        missingFields: patch.missingFields,
+        profile,
+      };
+    }
 
-    const saved =
-      Object.keys(patch.dto).length > 0
-        ? await this.socialProfiles.upsert(task.ownerUserId, patch.dto)
-        : await this.socialProfiles.get(task.ownerUserId);
+    const preview = await this.socialProfiles.generateAiDraft(
+      task.ownerUserId,
+      {
+        answers: proposalInput.answers,
+        rawText: proposalInput.rawText,
+        source: 'agent_tool_profile_memory_proposal',
+      },
+    );
+    task.result = {
+      ...(task.result ?? {}),
+      profileUpdatePreview: {
+        ...preview,
+        status: 'pending_confirmation',
+        confirmationRequired: true,
+        source: 'agent_tool_profile_memory_proposal',
+      },
+    };
+    transitionSocialAgentState(task, 'profile_detected', {
+      objective: 'profile_enrichment',
+      nextStep: '等待用户确认是否保存资料更新预览',
+      shouldSearchNow: false,
+      profileSaved: false,
+      awaitingSearchConfirmation: false,
+      waitingFor: 'profile_update_preview_confirmation',
+      lastCompletedStep: 'profile_update_preview_created',
+    });
     await this.createTaskEvent(
       task,
       AgentTaskEventType.SocialAgentContextAppended,
       {
-        summary: 'Updated social profile from agent context',
+        summary: 'Created profile update proposal from agent context',
         payload: {
           extractedProfile: patch.extractedProfile,
           updatedFields: patch.updatedFields,
           memoryFields: patch.memoryFields,
           missingFields: patch.missingFields,
           sourceMessage: patch.sourceMessage,
+          proposalId: this.profileProposalId(preview.proposal),
+          confirmationRequired: true,
         },
       },
     );
     return {
       success: true,
+      status: 'pending_confirmation',
+      profileUpdated: false,
+      confirmationRequired: true,
       updatedFields: patch.updatedFields,
       memoryFields: patch.memoryFields,
       missingFields: patch.missingFields,
-      profile: saved,
+      proposal: preview.proposal,
+      profileUpdatePreview: preview,
     };
+  }
+
+  private profileContextProposalInput(
+    input: Record<string, unknown>,
+    patch: ReturnType<typeof buildSocialAgentProfileContextPatch>,
+  ): {
+    answers: Array<{ key: string; answer: string }>;
+    rawText: string;
+  } {
+    const answers: Array<{ key: string; answer: string }> = [];
+    for (const field of patch.updatedFields) {
+      if (
+        field === 'agentCanRecommendMe' ||
+        field === 'agentCanStartChatAfterApproval'
+      ) {
+        continue;
+      }
+      const value = (patch.dto as Record<string, unknown>)[field];
+      const answer = this.profileProposalAnswerText(value);
+      if (!answer) continue;
+      answers.push({ key: field, answer });
+    }
+    const memoryText = this.toolInput.string(input.text);
+    if (memoryText) {
+      const memoryType = this.toolInput.string(input.memoryType) || 'note';
+      answers.push({
+        key: this.profileMemoryProposalKey(memoryType),
+        answer: memoryText,
+      });
+    }
+    const rawText =
+      patch.sourceMessage ||
+      this.toolInput.string(input.sourceMessage) ||
+      memoryText ||
+      answers.map((answer) => answer.answer).join('；');
+    return { answers, rawText };
+  }
+
+  private profileProposalAnswerText(value: unknown): string {
+    if (Array.isArray(value)) {
+      return value
+        .map((item) => this.toolInput.string(item))
+        .filter(Boolean)
+        .join('、');
+    }
+    if (this.toolInput.isRecord(value)) {
+      const memory = this.toolInput.isRecord(value.agentProfileMemory)
+        ? value.agentProfileMemory
+        : value;
+      return Object.entries(memory)
+        .map(([key, item]) => {
+          const rendered = Array.isArray(item)
+            ? item
+                .map((entry) => this.toolInput.string(entry))
+                .filter(Boolean)
+                .join('、')
+            : this.toolInput.string(item);
+          return rendered ? `${key}: ${rendered}` : '';
+        })
+        .filter(Boolean)
+        .join('；');
+    }
+    return this.toolInput.string(value) ?? '';
+  }
+
+  private profileMemoryProposalKey(memoryType: string): string {
+    switch (memoryType) {
+      case 'boundary':
+        return 'privacyBoundary';
+      case 'social_goal':
+        return 'wantToMeet';
+      case 'preference':
+        return 'preferredTraits';
+      case 'profile_fact':
+        return 'traits';
+      case 'note':
+      default:
+        return 'traits';
+    }
+  }
+
+  private profileProposalId(proposal: unknown): number | null {
+    if (!this.toolInput.isRecord(proposal)) return null;
+    return this.toolInput.number(proposal.proposalId) ?? null;
   }
 
   private async createSocialRequest(

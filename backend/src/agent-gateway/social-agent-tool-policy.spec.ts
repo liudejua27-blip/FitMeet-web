@@ -186,22 +186,6 @@ describe('social agent tool policy', () => {
         { fields: { privacyBoundary: '仅熟人可见' } },
       ],
       [
-        SocialAgentToolName.UpdateProfileFromAgentContext,
-        { patch: { phone: '15253005312' } },
-      ],
-      [
-        SocialAgentToolName.UpdateProfileFromAgentContext,
-        { patch: { profileDiscoverable: true, agentCanRecommendMe: true } },
-      ],
-      [
-        SocialAgentToolName.UpdateProfileFromAgentContext,
-        { patch: { profile_discoverable: true, agent_can_recommend_me: true } },
-      ],
-      [
-        SocialAgentToolName.UpdateProfileFromAgentContext,
-        { patch: { 'share-precise-location': true } },
-      ],
-      [
         SocialAgentToolName.UpdateAiProfileFromAnswers,
         { answers: [{ field: 'visibility', value: 'public' }] },
       ],
@@ -250,6 +234,18 @@ describe('social agent tool policy', () => {
       requiresMandatorySocialAgentApproval(
         SocialAgentToolName.CreateSocialRequest,
         { mode: 'draft', city: '青岛', activityType: '羽毛球' },
+      ),
+    ).toBe(false);
+    expect(
+      requiresMandatorySocialAgentApproval(
+        SocialAgentToolName.UpdateProfileFromAgentContext,
+        { patch: { phone: '15253005312' } },
+      ),
+    ).toBe(false);
+    expect(
+      requiresMandatorySocialAgentApproval(
+        SocialAgentToolName.UpdateProfileFromAgentContext,
+        { patch: { profileDiscoverable: true, agentCanRecommendMe: true } },
       ),
     ).toBe(false);
     expect(
