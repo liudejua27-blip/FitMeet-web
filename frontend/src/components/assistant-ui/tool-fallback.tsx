@@ -11,21 +11,11 @@ import {
   Send,
   ShieldCheck,
 } from 'lucide-react';
-import {
-  lazy,
-  Suspense,
-  useLayoutEffect,
-  useRef,
-  useState,
-  type ReactNode,
-} from 'react';
+import { lazy, Suspense, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 
 import { cn } from '../../lib/utils';
 import { AssistantThinkingDots } from './thinking-dots';
-import {
-  ToolUICardCollectionBlock,
-  type ToolUICardRenderer,
-} from './tool-card-collection';
+import { ToolUICardCollectionBlock, type ToolUICardRenderer } from './tool-card-collection';
 import {
   naturalProcessTitle,
   summarizeDataPart,
@@ -53,10 +43,7 @@ import {
   type SchemaDrivenAssistantCard,
   type ToolUISchemaType,
 } from './tool-ui-schema';
-import {
-  isLowRiskApprovalActionType,
-  isLowRiskApprovalText,
-} from './tool-risk-policy';
+import { isLowRiskApprovalActionType, isLowRiskApprovalText } from './tool-risk-policy';
 import { sanitizePublicProcessText as sanitizePublicText } from './public-process-text';
 
 const LazyCandidateResultCard = lazy(() =>
@@ -68,6 +55,11 @@ const LazyActivityOpportunityCard = lazy(() =>
 const LazyCandidateEmptyStateCard = lazy(() =>
   import('./tool-candidate-empty-card').then((module) => ({
     default: module.CandidateEmptyStateCard,
+  })),
+);
+const LazySlotClarificationCard = lazy(() =>
+  import('./tool-slot-clarification-card').then((module) => ({
+    default: module.SlotClarificationCard,
   })),
 );
 const LazyLifeGraphDiffCard = lazy(() =>
@@ -94,7 +86,7 @@ const ASSISTANT_CARD_RENDERERS: Record<ToolUISchemaType, ToolUICardRenderer> = {
   'social_match.no_candidates': CandidateEmptyStateCard,
   'social_match.privacy_guard': CandidateEmptyStateCard,
   'social_match.rate_limited': CandidateEmptyStateCard,
-  'social_match.slot_completion': GenericResultCard,
+  'social_match.slot_completion': SlotClarificationResultCard,
   'profile.completion': ProfileCompletionResultCard,
   'life_graph.diff': LifeGraphDiffCard,
   'meet_loop.timeline': MeetLoopResultCard,
@@ -243,8 +235,7 @@ function pendingConfirmationFromSafetyCard(card: SchemaDrivenAssistantCard) {
       primitiveIdentityString(approval.riskLevel) ??
       'medium',
     expiresAt:
-      primitiveIdentityString(card.data.expiresAt) ??
-      primitiveIdentityString(approval.expiresAt),
+      primitiveIdentityString(card.data.expiresAt) ?? primitiveIdentityString(approval.expiresAt),
   };
 }
 
@@ -303,6 +294,14 @@ function CandidateEmptyStateCard({ card }: { card: SchemaDrivenAssistantCard }) 
   return (
     <Suspense fallback={<GenericResultCard card={card} />}>
       <LazyCandidateEmptyStateCard card={card} />
+    </Suspense>
+  );
+}
+
+function SlotClarificationResultCard({ card }: { card: SchemaDrivenAssistantCard }) {
+  return (
+    <Suspense fallback={<GenericResultCard card={card} />}>
+      <LazySlotClarificationCard card={card} />
     </Suspense>
   );
 }
@@ -458,9 +457,7 @@ function ProcessStatusBlock({
         onClick={(event) => {
           event.preventDefault();
           if (!hasExpandableDetails) return;
-          setDetailsOpenKey((current) =>
-            current === statusUpdateKey ? null : statusUpdateKey,
-          );
+          setDetailsOpenKey((current) => (current === statusUpdateKey ? null : statusUpdateKey));
         }}
       >
         <StatusBadge status={summary.status}>{icon}</StatusBadge>
@@ -539,10 +536,7 @@ type CompactEvidenceItem = {
   metadata?: Record<string, unknown>;
 };
 
-function shouldExposeProcessDetails(
-  summary: ProcessSummary,
-  renderMode: 'tool-ui' | 'fallback',
-) {
+function shouldExposeProcessDetails(summary: ProcessSummary, renderMode: 'tool-ui' | 'fallback') {
   const hasCheckpointAction =
     summary.resumeContext.hasCheckpoint ||
     summary.checkpointActions.length > 0 ||
@@ -825,10 +819,7 @@ function ApprovalRuntimeHints({ metadata }: { metadata?: Record<string, unknown>
     .slice(0, 4);
   if (items.length === 0) return null;
   return (
-    <div
-      className="mt-2 flex flex-wrap gap-1.5"
-      data-testid="assistant-ui-approval-runtime-hints"
-    >
+    <div className="mt-2 flex flex-wrap gap-1.5" data-testid="assistant-ui-approval-runtime-hints">
       {items.map((item) => (
         <span
           key={item}
@@ -960,7 +951,8 @@ function ExecutableTraceActions({ summary }: { summary: ProcessSummary }) {
         busyKey: null,
         completedKey: null,
         failedKey: item.key,
-        error: nextError instanceof Error ? nextError.message : '刚才没处理完，可以沿同一对话重试。',
+        error:
+          nextError instanceof Error ? nextError.message : '刚才没处理完，可以沿同一对话重试。',
       };
       setLocalActionState(failedState);
       setCheckpointActionRuntimeState(runtimeKey, failedState);
@@ -997,7 +989,7 @@ function ExecutableTraceActions({ summary }: { summary: ProcessSummary }) {
             data-checkpoint-action={item.key}
             data-checkpoint-id={String(summary.checkpointId ?? '')}
             data-step-id={item.stepId ?? summary.stepId ?? ''}
-            data-step-level={item.stepId ?? summary.stepId ? 'true' : 'false'}
+            data-step-level={(item.stepId ?? summary.stepId) ? 'true' : 'false'}
             data-action-source={item.source}
             onClick={() => void runAction(item)}
           />

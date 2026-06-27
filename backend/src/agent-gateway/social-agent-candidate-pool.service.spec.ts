@@ -739,6 +739,57 @@ describe('SocialAgentCandidatePoolService', () => {
     ).toBeGreaterThan(0);
   });
 
+  it('applies bounded task ranking preference to candidate explanations', async () => {
+    const { service } = makeService({
+      users: [realUser(1), realUser(2), realUser(3)],
+      profiles: [
+        profile(2, {
+          nickname: '低压力散步候选',
+          interestTags: ['散步', '低压力', '轻松'],
+          socialStyle: '轻松低压力',
+        }),
+        profile(3, {
+          nickname: '普通散步候选',
+          interestTags: ['散步'],
+          socialStyle: '高强度竞技',
+        }),
+      ],
+    });
+
+    const result = await service.searchSocial({
+      ownerUserId: 1,
+      city: '青岛',
+      interestTags: ['散步'],
+      rawText: '今晚想找一个能聊得来的散步搭子',
+      rankingPreference: {
+        distance: 1,
+        time: 1,
+        interest: 1,
+        language: 1,
+        socialStyle: 1.8,
+        labels: ['同频优先'],
+        reason: '能聊得来优先',
+        source: 'user_task_preference',
+        updatedAt: '2026-06-27T00:00:00.000Z',
+      },
+    });
+
+    expect(result.candidates[0]).toMatchObject({
+      candidateUserId: 2,
+      scoreBreakdown: expect.objectContaining({
+        taskRankingSocialStyle: expect.any(Number),
+        taskRankingPreference: expect.any(Number),
+      }),
+      explanationSteps: expect.arrayContaining([
+        expect.stringContaining('更看重同频优先'),
+      ]),
+    });
+    expect(
+      result.candidates[0].scoreBreakdown.taskRankingSocialStyle,
+    ).toBeGreaterThan(0);
+    expect(result.candidates[0].whyYouMayLike).toContain('同频优先');
+  });
+
   it('boosts candidates the user previously viewed or clicked from Discover', async () => {
     const interestEvents = {
       summarizeForUser: jest.fn().mockResolvedValue({

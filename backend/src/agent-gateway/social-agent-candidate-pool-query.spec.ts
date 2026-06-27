@@ -31,7 +31,7 @@ describe('buildCandidatePoolResolvedQuery', () => {
       task: { goal: '上海咖啡聊天' } as AgentTask,
     });
 
-    expect(query).toEqual({
+    expect(query).toMatchObject({
       city: '青岛',
       intent: 'activity_search',
       interestTags: ['跑步', '咖啡', '羽毛球'],
@@ -46,6 +46,14 @@ describe('buildCandidatePoolResolvedQuery', () => {
       acceptsStrangers: null,
       candidateUserIds: [],
       publicIntentIds: [],
+      rankingPreference: expect.objectContaining({
+        distance: 1,
+        time: 1,
+        interest: 1,
+        language: 1,
+        socialStyle: 1,
+        source: 'default',
+      }),
     });
   });
 
@@ -135,6 +143,43 @@ describe('buildCandidatePoolResolvedQuery', () => {
     });
     expect(query.interestTags).toEqual(expect.arrayContaining(['散步']));
     expect(query.interestTags).not.toEqual(expect.arrayContaining(['咖啡']));
+  });
+
+  it('hydrates task ranking preference from current task memory', () => {
+    const query = buildCandidatePoolResolvedQuery({
+      query: {
+        ownerUserId: 1,
+        taskId: 88,
+        rawText: '继续找更近一点、能聊得来的搭子',
+      },
+      socialRequestId: null,
+      task: {
+        goal: '今天晚上在青岛大学附近散步',
+        memory: {
+          taskMemory: {
+            rankingPreference: {
+              distance: 1.65,
+              time: 1,
+              interest: 1,
+              language: 1,
+              socialStyle: 1.55,
+              labels: ['距离优先', '同频优先'],
+              reason: '更近一点，能聊得来优先',
+              source: 'user_task_preference',
+              updatedAt: '2026-06-27T00:00:00.000Z',
+            },
+          },
+        },
+      } as unknown as AgentTask,
+    });
+
+    expect(query.rankingPreference).toMatchObject({
+      distance: 1.65,
+      socialStyle: 1.55,
+      labels: ['距离优先', '同频优先'],
+      reason: '更近一点，能聊得来优先',
+      source: 'user_task_preference',
+    });
   });
 
   it('extracts city, activity, tags, and time from task goal raw text', () => {

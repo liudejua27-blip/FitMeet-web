@@ -5,6 +5,7 @@ import type { SocialAgentIntentRouterResult } from './social-agent-intent-router
 import {
   mergeSocialAgentBoundaries,
   mergeSocialAgentPreferences,
+  mergeSocialAgentRankingPreference,
   readSocialAgentTaskMemory,
   transitionSocialAgentState,
 } from './social-agent-memory.util';
@@ -38,6 +39,7 @@ export function evaluateSocialOpportunityClarification(input: {
 }): SocialAgentOpportunityClarification {
   mergeSocialAgentPreferences(input.task, input.message);
   mergeSocialAgentBoundaries(input.task, input.message);
+  mergeSocialAgentRankingPreference(input.task, input.message);
   const memory = readSocialAgentTaskMemory(input.task);
   const fields = resolveFields(input);
   const missing = requiredFieldsForRoute(input.route).filter(
@@ -106,6 +108,7 @@ export function resolveSocialOpportunitySearchGoal(input: {
 }): string {
   mergeSocialAgentPreferences(input.task, input.message);
   mergeSocialAgentBoundaries(input.task, input.message);
+  mergeSocialAgentRankingPreference(input.task, input.message);
   const memory = readSocialAgentTaskMemory(input.task);
   const fields = resolveFields(input);
   return buildSearchGoal({

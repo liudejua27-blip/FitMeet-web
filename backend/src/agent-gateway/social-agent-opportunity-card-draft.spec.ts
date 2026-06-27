@@ -2,6 +2,7 @@ import type { AgentTask } from './entities/agent-task.entity';
 import {
   buildSocialAgentOpportunityDraftFromTask,
   buildSocialAgentPublishConfirmationCard,
+  buildSocialAgentSlotCompletionCard,
 } from './social-agent-opportunity-card-draft';
 
 describe('social agent opportunity card draft', () => {
@@ -180,5 +181,80 @@ describe('social agent opportunity card draft', () => {
       location: '徐汇区公共场所',
     });
     expect(JSON.stringify(card)).not.toContain('青岛');
+  });
+
+  it('returns a stable SlotClarificationCard contract with slots and ranking preference', () => {
+    const task = {
+      id: 79,
+      ownerUserId: 7,
+      goal: '帮我发布一个散步卡',
+      memory: {
+        taskMemory: {
+          rankingPreference: {
+            distance: 1.65,
+            time: 1,
+            interest: 1,
+            language: 1,
+            socialStyle: 1.55,
+            labels: ['距离优先', '同频优先'],
+            reason: '更近一点，能聊得来优先',
+            source: 'user_task_preference',
+            updatedAt: '2026-06-27T00:00:00.000Z',
+          },
+        },
+        taskSlots: {
+          geo_area: {
+            value: '青岛',
+            state: 'completed',
+            source: 'user_message',
+          },
+          activity: {
+            value: '散步',
+            state: 'completed',
+            source: 'user_message',
+          },
+        },
+      },
+    } as unknown as AgentTask;
+
+    const card = buildSocialAgentSlotCompletionCard({
+      task,
+      missing: ['时间', '地点', '安全边界'],
+      sourceText: '明天晚上附近散步',
+    });
+
+    expect(card.schemaType).toBe('social_match.slot_completion');
+    expect(card.data).toMatchObject({
+      workflowState: 'COLLECTING_SLOTS',
+      waitingFor: 'safety_boundary',
+      missingSlots: [
+        expect.objectContaining({ key: 'time', label: '时间' }),
+        expect.objectContaining({ key: 'location', label: '地点' }),
+        expect.objectContaining({
+          key: 'safety_boundary',
+          label: '安全边界',
+        }),
+      ],
+      completedSlots: expect.arrayContaining([
+        expect.objectContaining({ key: 'city', value: '青岛' }),
+        expect.objectContaining({ key: 'activity', value: '散步' }),
+      ]),
+      rankingPreference: expect.objectContaining({
+        distance: 1.65,
+        socialStyle: 1.55,
+        labels: ['距离优先', '同频优先'],
+      }),
+      slotPatch: expect.objectContaining({
+        city: '青岛',
+        activity: '散步',
+      }),
+    });
+    expect(card.actions[0]).toMatchObject({
+      schemaAction: 'slot_completion.use_default_safety',
+      payload: expect.objectContaining({
+        missingSlots: expect.any(Array),
+        rankingPreference: expect.objectContaining({ distance: 1.65 }),
+      }),
+    });
   });
 });

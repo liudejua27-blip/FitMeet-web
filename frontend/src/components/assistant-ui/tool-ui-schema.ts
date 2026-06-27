@@ -18,6 +18,7 @@ export type ToolUIProductComponent =
   | 'CandidateCards'
   | 'OpportunityCard'
   | 'CandidateEmptyStateCard'
+  | 'SlotClarificationCard'
   | 'ProfileCompletionCard'
   | 'LifeGraphDiffCard'
   | 'MeetLoopTimeline'
@@ -838,7 +839,7 @@ export function productComponentForSchemaType(
   ) {
     return 'CandidateEmptyStateCard';
   }
-  if (schemaType === 'social_match.slot_completion') return 'GenericCard';
+  if (schemaType === 'social_match.slot_completion') return 'SlotClarificationCard';
   if (schemaType === 'profile.completion') return 'ProfileCompletionCard';
   if (schemaType === 'life_graph.diff') return 'LifeGraphDiffCard';
   if (schemaType === 'meet_loop.timeline') return 'MeetLoopTimeline';
@@ -1095,11 +1096,31 @@ export function defaultOpportunityActionsForSchema(
     return [
       { schemaAction: 'candidate.view_detail', requiresConfirmation: false, source: 'default' },
       { schemaAction: 'candidate.like', requiresConfirmation: false, source: 'default' },
-      { schemaAction: 'candidate.feedback.good_fit', requiresConfirmation: false, source: 'default' },
-      { schemaAction: 'candidate.feedback.bad_fit', requiresConfirmation: false, source: 'default' },
-      { schemaAction: 'candidate.feedback.too_far', requiresConfirmation: false, source: 'default' },
-      { schemaAction: 'candidate.feedback.time_mismatch', requiresConfirmation: false, source: 'default' },
-      { schemaAction: 'candidate.feedback.style_mismatch', requiresConfirmation: false, source: 'default' },
+      {
+        schemaAction: 'candidate.feedback.good_fit',
+        requiresConfirmation: false,
+        source: 'default',
+      },
+      {
+        schemaAction: 'candidate.feedback.bad_fit',
+        requiresConfirmation: false,
+        source: 'default',
+      },
+      {
+        schemaAction: 'candidate.feedback.too_far',
+        requiresConfirmation: false,
+        source: 'default',
+      },
+      {
+        schemaAction: 'candidate.feedback.time_mismatch',
+        requiresConfirmation: false,
+        source: 'default',
+      },
+      {
+        schemaAction: 'candidate.feedback.style_mismatch',
+        requiresConfirmation: false,
+        source: 'default',
+      },
       { schemaAction: 'candidate.generate_opener', requiresConfirmation: false, source: 'default' },
       { schemaAction: 'opener.confirm_send', requiresConfirmation: true, source: 'default' },
       { schemaAction: 'candidate.connect', requiresConfirmation: true, source: 'default' },
@@ -1109,7 +1130,11 @@ export function defaultOpportunityActionsForSchema(
     return [
       { schemaAction: 'publish_to_discover', requiresConfirmation: true, source: 'default' },
       { schemaAction: 'activity.modify_time', requiresConfirmation: false, source: 'default' },
-      { schemaAction: 'social_intent.decline_publish', requiresConfirmation: false, source: 'default' },
+      {
+        schemaAction: 'social_intent.decline_publish',
+        requiresConfirmation: false,
+        source: 'default',
+      },
     ];
   }
   if (schemaType === 'social_match.empty') {
@@ -1125,7 +1150,11 @@ export function defaultOpportunityActionsForSchema(
       { schemaAction: 'matching.relax_time', requiresConfirmation: false, source: 'default' },
       { schemaAction: 'matching.relax_tags', requiresConfirmation: false, source: 'default' },
       { schemaAction: 'activity.modify_time', requiresConfirmation: false, source: 'default' },
-      { schemaAction: 'social_intent.decline_publish', requiresConfirmation: false, source: 'default' },
+      {
+        schemaAction: 'social_intent.decline_publish',
+        requiresConfirmation: false,
+        source: 'default',
+      },
     ];
   }
   return [];
@@ -2292,7 +2321,10 @@ function meetLoopStageDescription(label: string, state: MeetLoopStageState) {
 const INTERNAL_TRACE_ID_PATTERN = new RegExp(`\\b${['trace', '[Ii]d'].join('')}\\b`, 'g');
 const INTERNAL_AGENT_TRACE_PATTERN = new RegExp(`\\b${['agent', '[Tt]race'].join('')}\\b`, 'g');
 const INTERNAL_NEXT_STEP_PATTERN = new RegExp(`\\b${['plan', '(n)?er'].join('')}\\b`, 'gi');
-const INTERNAL_RAW_STRUCTURED_PATTERN = new RegExp(`\\b${['raw', '\\s+', 'JSON'].join('')}\\b`, 'gi');
+const INTERNAL_RAW_STRUCTURED_PATTERN = new RegExp(
+  `\\b${['raw', '\\s+', 'JSON'].join('')}\\b`,
+  'gi',
+);
 const INTERNAL_RAW_STRUCTURED_LOWER_PATTERN = new RegExp(
   `\\b${['raw', '\\s+', 'json'].join('')}\\b`,
 );

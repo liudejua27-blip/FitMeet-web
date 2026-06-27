@@ -2,6 +2,12 @@ import { AgentTask } from './entities/agent-task.entity';
 import { cleanDisplayText } from '../common/display-text.util';
 import { SOCIAL_AGENT_DEFAULT_CONTEXT_TURNS } from './social-agent-context-window';
 import type { SocialAgentKnownTaskSlotConstraints } from './social-agent-task-slot-constraints.presenter';
+import {
+  SOCIAL_AGENT_DEFAULT_RANKING_PREFERENCE,
+  extractSocialAgentRankingPreferenceFromMessage,
+  normalizeSocialAgentRankingPreference,
+  type SocialAgentRankingPreference,
+} from './social-agent-ranking-preference';
 
 export type SocialAgentShortTermStep = Record<string, unknown> & {
   id: string;
@@ -332,6 +338,7 @@ export type SocialAgentTaskMemory = {
     clarificationAskedAt: string;
   };
   stableProfileFacts: Record<string, string | string[]>;
+  rankingPreference: SocialAgentRankingPreference;
   taskSlots?: Record<string, unknown>;
   taskSlotSummary?: Record<string, string>;
   knownTaskSlotConstraints?: SocialAgentKnownTaskSlotConstraints | null;
@@ -394,6 +401,7 @@ function defaultTaskMemory(): SocialAgentTaskMemory {
       clarificationAskedAt: '',
     },
     stableProfileFacts: {},
+    rankingPreference: SOCIAL_AGENT_DEFAULT_RANKING_PREFERENCE,
     updatedAt: new Date(0).toISOString(),
   };
 }
@@ -545,6 +553,9 @@ export function readSocialAgentTaskMemory(
     stableProfileFacts: isRecord(stored.stableProfileFacts)
       ? coerceProfileFacts(stored.stableProfileFacts)
       : base.stableProfileFacts,
+    rankingPreference: normalizeSocialAgentRankingPreference(
+      stored.rankingPreference,
+    ),
     taskSlots,
     taskSlotSummary,
     knownTaskSlotConstraints,
@@ -691,6 +702,22 @@ export function mergeSocialAgentBoundaries(
       excluded,
       4,
     );
+  }
+  writeSocialAgentTaskMemory(task, memory);
+  return memory;
+}
+
+export function mergeSocialAgentRankingPreference(
+  task: AgentTask,
+  message: string,
+): SocialAgentTaskMemory {
+  const memory = readSocialAgentTaskMemory(task);
+  const next = extractSocialAgentRankingPreferenceFromMessage({
+    message,
+    previous: memory.rankingPreference,
+  });
+  if (next) {
+    memory.rankingPreference = next;
   }
   writeSocialAgentTaskMemory(task, memory);
   return memory;
