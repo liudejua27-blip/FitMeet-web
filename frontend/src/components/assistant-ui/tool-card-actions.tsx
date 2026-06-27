@@ -775,7 +775,9 @@ function visualActionsForCard(
         action.schemaAction === 'publish_to_discover' ||
         action.schemaAction === 'activity.confirm_create',
     );
-    const close = actions.find((action) => isPublishDismissSchemaAction(action.schemaAction));
+    const close =
+      actions.find((action) => action.schemaAction === 'activity.skip_publish') ??
+      actions.find((action) => isPublishDismissSchemaAction(action.schemaAction));
     const detail = actions.find((action) => action.schemaAction === 'activity.view_detail');
     return published
       ? compactVisualActions([modify, detail]).slice(0, 2)
@@ -937,19 +939,25 @@ function isPublishedActivityCard(card: SchemaDrivenAssistantCard) {
   ]
     .filter(Boolean)
     .join(' ');
+  const publishedHref =
+    firstSafePublicIntentHref(card.data.publicIntentHref, card.data.discoverHref) ??
+    firstSafePublicIntentHref(card.data.detailHref, card.data.href);
   return (
     card.data.autoPublished === true ||
-    Boolean(
-      firstPublicPrimitive(card.data.publicIntentId, card.data.socialRequestId) ??
-      firstSafeInternalHref(
-        card.data.discoverHref,
-        card.data.detailHref,
-        card.data.activityHref,
-        card.data.href,
-      ),
-    ) ||
+    Boolean(firstPublicPrimitive(card.data.publicIntentId) ?? publishedHref) ||
     /已发布|published|public/i.test(statusText)
   );
+}
+
+function firstSafePublicIntentHref(...values: unknown[]): string | null {
+  for (const value of values) {
+    const href = firstSafeInternalHref(value);
+    if (!href) continue;
+    if (href.startsWith('/public-intent/') || href === '/discover' || href.startsWith('/discover?')) {
+      return href;
+    }
+  }
+  return null;
 }
 
 function dedupeVisibleCardActions(
