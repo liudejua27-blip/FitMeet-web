@@ -36,7 +36,7 @@ function repo<T>(rows: T[] = []) {
 }
 
 const now = new Date('2026-05-23T08:00:00.000Z');
-const futureActivityEnd = new Date('2027-06-27T08:00:00.000Z');
+const futureActivityEnd = new Date('2099-06-27T08:00:00.000Z');
 
 function realUser(id: number, overrides: Partial<User> = {}): User {
   return {
