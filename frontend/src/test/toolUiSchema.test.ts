@@ -14,6 +14,7 @@ import {
   normalizeGenericCardView,
   normalizeLifeGraphDiffView,
   normalizeMeetLoopTimelineView,
+  normalizePublicIntentApplicationView,
   normalizeSafetyApprovalView,
   productComponentForSchemaType,
   schemaTypeFromLegacyCardType,
@@ -50,6 +51,9 @@ describe('tool-ui-schema', () => {
     );
     expect(productComponentForSchemaType('life_graph.diff')).toBe('LifeGraphDiffCard');
     expect(productComponentForSchemaType('meet_loop.timeline')).toBe('MeetLoopTimeline');
+    expect(productComponentForSchemaType('public_intent.application')).toBe(
+      'PublicIntentApplicationCard',
+    );
     expect(productComponentForSchemaType('safety.approval')).toBe('ApprovalPanel');
 
     const cards = [
@@ -147,6 +151,59 @@ describe('tool-ui-schema', () => {
       ],
     });
     expect(summarizeToolUICardCollection(cards).detail).toContain('结构化卡片');
+  });
+
+  it('normalizes public intent application cards for owner-side Agent actions', () => {
+    const card = normalizeAssistantCard({
+      schemaVersion: FITMEET_TOOL_UI_SCHEMA_VERSION,
+      schemaType: 'public_intent.application',
+      title: '有人申请加入你的约练',
+      body: '我也想参加这次散步。',
+      data: {
+        schemaName: 'PublicIntentApplicationCard',
+        schemaVersion: FITMEET_TOOL_UI_SCHEMA_VERSION,
+        schemaType: 'public_intent.application',
+        applicationId: 42,
+        publicIntentId: 'intent_abc',
+        applicantUserId: 11,
+        applicantName: '青岛散步搭子',
+        publicIntentTitle: '今晚五四广场散步',
+        status: 'pending',
+        profileHref: '/user/11',
+      },
+      actions: [
+        {
+          id: 'accept-42',
+          label: '接受并开聊',
+          schemaAction: 'public_intent_application.accept',
+          requiresConfirmation: true,
+          payload: { applicationId: 42 },
+        },
+      ],
+    });
+
+    expect(toolUISchemaTypeFromUnknown('public_intent.application')).toBe(
+      'public_intent.application',
+    );
+    expect(toolUISchemaActionFromUnknown('public_intent_application.accept')).toBe(
+      'public_intent_application.accept',
+    );
+    expect(schemaTypeFromLegacyCardType('public_intent_application_card')).toBe(
+      'public_intent.application',
+    );
+    expect(isCanonicalAssistantCard(card)).toBe(true);
+    expect(normalizePublicIntentApplicationView(card)).toEqual(
+      expect.objectContaining({
+        applicationId: 42,
+        publicIntentId: 'intent_abc',
+        applicantUserId: 11,
+        applicantName: '青岛散步搭子',
+        publicIntentTitle: '今晚五四广场散步',
+        status: 'pending',
+        statusLabel: '待处理',
+        profileHref: '/user/11',
+      }),
+    );
   });
 
   it('collapses noisy approval cards into the current opportunity card action row', () => {

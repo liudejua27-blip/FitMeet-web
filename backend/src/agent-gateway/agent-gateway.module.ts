@@ -204,6 +204,7 @@ import { SocialAgentPublishReconcilerService } from './social-agent-publish-reco
 import { SocialAgentPublishReconcilerCronService } from './social-agent-publish-reconciler-cron.service';
 import { SocialAgentMatchRelaxationService } from './social-agent-match-relaxation.service';
 import { SocialAgentMatchRelaxationActionService } from './social-agent-match-relaxation-action.service';
+import { SocialAgentApplicationActionService } from './social-agent-application-action.service';
 import { PublicIntentPrivacyGuardService } from './public-intent-privacy-guard.service';
 import { SocialIntentRateLimitService } from './social-intent-rate-limit.service';
 import { SocialAgentDomainClassifierService } from './social-agent-domain-classifier.service';
@@ -319,6 +320,7 @@ import { AdminRbacModule } from '../admin-rbac/admin-rbac.module';
     SocialAgentPublishReconcilerCronService,
     SocialAgentMatchRelaxationService,
     SocialAgentMatchRelaxationActionService,
+    SocialAgentApplicationActionService,
     PublicIntentPrivacyGuardService,
     SocialIntentRateLimitService,
     SocialAgentDomainClassifierService,

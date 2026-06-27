@@ -16,7 +16,8 @@ export type FitMeetAlphaCardType =
   | 'review_card'
   | 'audit_update'
   | 'safety_boundary'
-  | 'candidate_empty_state';
+  | 'candidate_empty_state'
+  | 'public_intent_application_card';
 
 export type FitMeetAgentLoopStage =
   | 'social_search'
@@ -65,7 +66,11 @@ export type FitMeetAgentSchemaAction =
   | 'meet_loop.reschedule'
   | 'slot_completion.use_default_safety'
   | 'slot_completion.custom_safety'
-  | 'slot_completion.cancel';
+  | 'slot_completion.cancel'
+  | 'public_intent_application.accept'
+  | 'public_intent_application.reject'
+  | 'public_intent_application.view_profile'
+  | 'public_intent_application.open_conversation';
 
 export interface FitMeetAlphaCardAction {
   id: string;
@@ -113,6 +118,7 @@ export interface FitMeetAlphaCard {
     | 'profile.completion'
     | 'life_graph.diff'
     | 'meet_loop.timeline'
+    | 'public_intent.application'
     | 'safety.approval'
     | 'generic.card';
   title: string;

@@ -800,6 +800,17 @@ function visualActionsForCard(
       .map((schemaAction) => actions.find((action) => action.schemaAction === schemaAction))
       .filter((action): action is VisibleCardAction => Boolean(action));
   }
+  if (card.schemaType === 'public_intent.application') {
+    const preferredOrder: ToolUISchemaAction[] = [
+      'public_intent_application.accept',
+      'public_intent_application.reject',
+      'public_intent_application.view_profile',
+      'public_intent_application.open_conversation',
+    ];
+    return preferredOrder
+      .map((schemaAction) => actions.find((action) => action.schemaAction === schemaAction))
+      .filter((action): action is VisibleCardAction => Boolean(action));
+  }
   return actions.slice(0, 5);
 }
 
@@ -879,6 +890,12 @@ function visualCardActionLabel(
     if (action.schemaAction === 'opener.confirm_send') return '邀请Ta';
     if (action.schemaAction === 'candidate.connect') return '加好友并聊天';
   }
+  if (card.schemaType === 'public_intent.application') {
+    if (action.schemaAction === 'public_intent_application.accept') return '接受并开聊';
+    if (action.schemaAction === 'public_intent_application.reject') return '暂不接受';
+    if (action.schemaAction === 'public_intent_application.view_profile') return '查看资料';
+    if (action.schemaAction === 'public_intent_application.open_conversation') return '去消息页';
+  }
   return fallbackLabel ?? action.label ?? '继续';
 }
 
@@ -913,6 +930,12 @@ function visualCardActionIcon(
     if (action.schemaAction === 'opener.confirm_send') return Send;
     if (action.schemaAction === 'candidate.connect') return UserPlus;
   }
+  if (card.schemaType === 'public_intent.application') {
+    if (action.schemaAction === 'public_intent_application.accept') return ShieldCheck;
+    if (action.schemaAction === 'public_intent_application.reject') return X;
+    if (action.schemaAction === 'public_intent_application.view_profile') return ExternalLink;
+    if (action.schemaAction === 'public_intent_application.open_conversation') return MessageCircle;
+  }
   if (action.requiresConfirmation) return ShieldCheck;
   return Send;
 }
@@ -925,6 +948,9 @@ function isPrimaryVisualCardAction(card: SchemaDrivenAssistantCard, action: Visi
     return (
       action.schemaAction === 'opener.confirm_send' || action.schemaAction === 'candidate.connect'
     );
+  }
+  if (card.schemaType === 'public_intent.application') {
+    return action.schemaAction === 'public_intent_application.accept';
   }
   return action.requiresConfirmation;
 }
@@ -1009,6 +1035,16 @@ function visibleActionGroupKey(
       action.schemaAction === 'activity.modify_location')
   ) {
     return 'activity.modify';
+  }
+  if (schemaType === 'public_intent.application') {
+    if (
+      action.schemaAction === 'public_intent_application.accept' ||
+      action.schemaAction === 'public_intent_application.reject' ||
+      action.schemaAction === 'public_intent_application.view_profile' ||
+      action.schemaAction === 'public_intent_application.open_conversation'
+    ) {
+      return action.schemaAction;
+    }
   }
   const canonicalKey = canonicalVisibleActionKey(schemaType, action);
   if (canonicalKey) return canonicalKey;
@@ -1109,6 +1145,36 @@ function canonicalVisibleActionKey(
       return 'candidate.more_like_this';
     }
   }
+  if (schemaType === 'public_intent.application') {
+    if (
+      /^(public_intent_application\.accept|accept_public_intent_application|accept_application|application\.accept)$/.test(
+        rawAction,
+      )
+    ) {
+      return 'public_intent_application.accept';
+    }
+    if (
+      /^(public_intent_application\.reject|reject_public_intent_application|reject_application|application\.reject)$/.test(
+        rawAction,
+      )
+    ) {
+      return 'public_intent_application.reject';
+    }
+    if (
+      /^(public_intent_application\.view_profile|view_application_profile|application\.view_profile)$/.test(
+        rawAction,
+      )
+    ) {
+      return 'public_intent_application.view_profile';
+    }
+    if (
+      /^(public_intent_application\.open_conversation|open_application_conversation|application\.open_conversation)$/.test(
+        rawAction,
+      )
+    ) {
+      return 'public_intent_application.open_conversation';
+    }
+  }
   return null;
 }
 
@@ -1145,6 +1211,9 @@ const LOW_RISK_VISIBLE_SCHEMA_ACTIONS = new Set<ToolUISchemaAction>([
   'slot_completion.use_default_safety',
   'slot_completion.custom_safety',
   'slot_completion.cancel',
+  'public_intent_application.reject',
+  'public_intent_application.view_profile',
+  'public_intent_application.open_conversation',
 ]);
 
 const LOW_RISK_VISIBLE_RAW_ACTIONS = new Set([
@@ -1182,6 +1251,9 @@ const LOW_RISK_VISIBLE_RAW_ACTIONS = new Set([
   'skip_publish',
   'opener.regenerate',
   'opener.reject',
+  'public_intent_application.reject',
+  'public_intent_application.view_profile',
+  'public_intent_application.open_conversation',
 ]);
 
 const HIGH_RISK_VISIBLE_SCHEMA_ACTIONS = new Set<ToolUISchemaAction>([
@@ -1189,6 +1261,7 @@ const HIGH_RISK_VISIBLE_SCHEMA_ACTIONS = new Set<ToolUISchemaAction>([
   'opener.confirm_send',
   'publish_to_discover',
   'activity.confirm_create',
+  'public_intent_application.accept',
 ]);
 
 const HIGH_RISK_VISIBLE_RAW_ACTIONS = new Set([
@@ -1203,6 +1276,7 @@ const HIGH_RISK_VISIBLE_RAW_ACTIONS = new Set([
   'publish_to_discover',
   'create_activity',
   'activity.confirm_create',
+  'public_intent_application.accept',
   'exchange_contact',
   'reveal_precise_location',
   'update_sensitive_profile',
@@ -1287,6 +1361,13 @@ function sortVisibleCardActions(
                 'meet_loop.reschedule',
                 'activity.upload_proof',
               ]
+            : schemaType === 'public_intent.application'
+              ? [
+                  'public_intent_application.accept',
+                  'public_intent_application.reject',
+                  'public_intent_application.view_profile',
+                  'public_intent_application.open_conversation',
+                ]
             : [];
   if (preferredOrder.length === 0) return actions;
   const rank = new Map(preferredOrder.map((item, index) => [item, index]));
@@ -1991,6 +2072,12 @@ function normalizeVisibleActionLabel(
   ) {
     return '修改卡片';
   }
+  if (schemaType === 'public_intent.application') {
+    if (canonicalKey === 'public_intent_application.accept') return '接受并开聊';
+    if (canonicalKey === 'public_intent_application.reject') return '暂不接受';
+    if (canonicalKey === 'public_intent_application.view_profile') return '查看资料';
+    if (canonicalKey === 'public_intent_application.open_conversation') return '去消息页';
+  }
   return label;
 }
 
@@ -2116,6 +2203,46 @@ function defaultCardActions(card: SchemaDrivenAssistantCard): VisibleCardAction[
         requiresConfirmation: false,
         schemaAction: 'social_intent.decline_publish',
         action: 'social_intent.decline_publish',
+        payload: basePayload,
+        source: 'default' as const,
+      },
+    ];
+  }
+  if (card.schemaType === 'public_intent.application') {
+    return [
+      {
+        id: `${card.id}:accept`,
+        label: '接受并开聊',
+        requiresConfirmation: true,
+        schemaAction: 'public_intent_application.accept',
+        action: 'public_intent_application.accept',
+        payload: basePayload,
+        source: 'default' as const,
+      },
+      {
+        id: `${card.id}:reject`,
+        label: '暂不接受',
+        requiresConfirmation: false,
+        schemaAction: 'public_intent_application.reject',
+        action: 'public_intent_application.reject',
+        payload: basePayload,
+        source: 'default' as const,
+      },
+      {
+        id: `${card.id}:view-profile`,
+        label: '查看资料',
+        requiresConfirmation: false,
+        schemaAction: 'public_intent_application.view_profile',
+        action: 'public_intent_application.view_profile',
+        payload: basePayload,
+        source: 'default' as const,
+      },
+      {
+        id: `${card.id}:open-conversation`,
+        label: '去消息页',
+        requiresConfirmation: false,
+        schemaAction: 'public_intent_application.open_conversation',
+        action: 'public_intent_application.open_conversation',
         payload: basePayload,
         source: 'default' as const,
       },
@@ -2424,6 +2551,51 @@ function cardActionNavigationHref(
       return `/discover?socialRequestId=${encodeURIComponent(String(socialRequestId))}`;
     return null;
   }
+  if (action.schemaAction === 'public_intent_application.view_profile') {
+    const application = recordFromUnknown(card.data.application);
+    const applicant = recordFromUnknown(card.data.applicant);
+    const direct = firstSafeInternalHref(
+      payload.profileHref,
+      payload.userHref,
+      card.data.profileHref,
+      card.data.userHref,
+      application.profileHref,
+      applicant.profileHref,
+    );
+    if (direct) return direct;
+    const applicantUserId = firstPublicPrimitive(
+      payload.applicantUserId,
+      payload.targetUserId,
+      payload.userId,
+      card.data.applicantUserId,
+      application.applicantUserId,
+      applicant.userId,
+      applicant.id,
+    );
+    return applicantUserId === null
+      ? null
+      : `/user/${encodeURIComponent(String(applicantUserId))}`;
+  }
+  if (action.schemaAction === 'public_intent_application.open_conversation') {
+    const application = recordFromUnknown(card.data.application);
+    const direct = firstSafeInternalHref(
+      payload.messagesHref,
+      payload.conversationHref,
+      card.data.messagesHref,
+      card.data.conversationHref,
+      application.messagesHref,
+      application.conversationHref,
+    );
+    if (direct) return direct;
+    const conversationId = firstPublicPrimitive(
+      payload.conversationId,
+      card.data.conversationId,
+      application.conversationId,
+    );
+    return conversationId === null
+      ? null
+      : `/messages?conversationId=${encodeURIComponent(String(conversationId))}`;
+  }
   return null;
 }
 
@@ -2439,6 +2611,8 @@ function firstSafeInternalHref(...values: unknown[]): string | null {
 function isSafeInternalHref(href: string) {
   return (
     href.startsWith('/user/') ||
+    href === '/messages' ||
+    href.startsWith('/messages?') ||
     href.startsWith('/public-intent/') ||
     href === '/discover' ||
     href.startsWith('/discover?')
@@ -2458,6 +2632,8 @@ function defaultCardActionPayload(card: SchemaDrivenAssistantCard): Record<strin
   const candidateProfile = recordFromUnknown(candidateRecord.profile);
   const opportunityProfile = recordFromUnknown(opportunity.profile);
   const proposal = isRecord(card.data.proposal) ? card.data.proposal : {};
+  const application = isRecord(card.data.application) ? card.data.application : {};
+  const applicant = recordFromUnknown(card.data.applicant);
   const candidate = defaultCandidatePayload(card, opportunity);
   const activity = defaultActivityPayload(card, opportunity);
   const lifeGraph = defaultLifeGraphPayload(card, proposal);
@@ -2523,6 +2699,17 @@ function defaultCardActionPayload(card: SchemaDrivenAssistantCard): Record<strin
     ),
     socialRequestId: firstPublicPrimitive(card.data.socialRequestId, opportunity.socialRequestId),
     publicIntentId: firstPublicPrimitive(card.data.publicIntentId, opportunity.publicIntentId),
+    applicationId: firstPublicPrimitive(card.data.applicationId, application.id),
+    publicIntentApplicationId: firstPublicPrimitive(card.data.applicationId, application.id),
+    applicantUserId: firstPublicPrimitive(
+      card.data.applicantUserId,
+      application.applicantUserId,
+      applicant.userId,
+      applicant.id,
+    ),
+    conversationId: firstPublicPrimitive(card.data.conversationId, application.conversationId),
+    messagesHref: firstPublicPrimitive(card.data.messagesHref, application.messagesHref),
+    profileHref: firstPublicPrimitive(card.data.profileHref, application.profileHref),
     ...(card.schemaType === 'social_match.activity' ? activity : {}),
     activityId: firstPublicPrimitive(card.data.activityId, opportunity.activityId),
     candidate: Object.keys(candidate).length > 0 ? candidate : undefined,

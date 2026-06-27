@@ -75,6 +75,11 @@ const LazyProfileCompletionCard = lazy(() =>
 const LazyMeetLoopResultCard = lazy(() =>
   import('./tool-meet-loop-card').then((module) => ({ default: module.MeetLoopResultCard })),
 );
+const LazyPublicIntentApplicationCard = lazy(() =>
+  import('./tool-public-intent-application-card').then((module) => ({
+    default: module.PublicIntentApplicationCard,
+  })),
+);
 const LazySafetyResultCard = lazy(() =>
   import('./tool-safety-card').then((module) => ({ default: module.SafetyResultCard })),
 );
@@ -90,6 +95,7 @@ const ASSISTANT_CARD_RENDERERS: Record<ToolUISchemaType, ToolUICardRenderer> = {
   'profile.completion': ProfileCompletionResultCard,
   'life_graph.diff': LifeGraphDiffCard,
   'meet_loop.timeline': MeetLoopResultCard,
+  'public_intent.application': PublicIntentApplicationResultCard,
   'safety.approval': SafetyResultCard,
   'generic.card': GenericResultCard,
 };
@@ -326,6 +332,14 @@ function MeetLoopResultCard({ card }: { card: SchemaDrivenAssistantCard }) {
   return (
     <Suspense fallback={<GenericResultCard card={card} />}>
       <LazyMeetLoopResultCard card={card} />
+    </Suspense>
+  );
+}
+
+function PublicIntentApplicationResultCard({ card }: { card: SchemaDrivenAssistantCard }) {
+  return (
+    <Suspense fallback={<GenericResultCard card={card} />}>
+      <LazyPublicIntentApplicationCard card={card} />
     </Suspense>
   );
 }

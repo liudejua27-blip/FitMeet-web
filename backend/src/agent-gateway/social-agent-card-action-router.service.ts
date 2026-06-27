@@ -23,6 +23,7 @@ import { SocialAgentMetricsService } from './social-agent-metrics.service';
 import { PublicIntentPrivacyGuardService } from './public-intent-privacy-guard.service';
 import { SocialIntentRateLimitService } from './social-intent-rate-limit.service';
 import { SocialAgentMatchRelaxationActionService } from './social-agent-match-relaxation-action.service';
+import { SocialAgentApplicationActionService } from './social-agent-application-action.service';
 
 type HandleMessage = (
   body: SocialAgentRouteMessageBody,
@@ -47,6 +48,8 @@ export class SocialAgentCardActionRouterService {
     private readonly rateLimit?: SocialIntentRateLimitService,
     @Optional()
     private readonly matchingRelaxation?: SocialAgentMatchRelaxationActionService,
+    @Optional()
+    private readonly applicationActions?: SocialAgentApplicationActionService,
   ) {}
 
   async perform(input: {
@@ -174,6 +177,20 @@ export class SocialAgentCardActionRouterService {
       });
     }
 
+    if (this.isPublicIntentApplicationAction(action)) {
+      if (!this.applicationActions) {
+        throw new BadRequestException(
+          'Public intent application runtime is unavailable',
+        );
+      }
+      return this.applicationActions.performApplicationAction({
+        ownerUserId,
+        taskId,
+        action,
+        body: normalizedBody,
+      });
+    }
+
     if (
       action === 'candidate.view_detail' ||
       action === 'candidate.more_like_this' ||
@@ -287,6 +304,15 @@ export class SocialAgentCardActionRouterService {
       action === 'matching.relax_distance' ||
       action === 'matching.relax_time' ||
       action === 'matching.relax_tags'
+    );
+  }
+
+  private isPublicIntentApplicationAction(action: string) {
+    return (
+      action === 'public_intent_application.accept' ||
+      action === 'public_intent_application.reject' ||
+      action === 'public_intent_application.view_profile' ||
+      action === 'public_intent_application.open_conversation'
     );
   }
 
@@ -457,6 +483,8 @@ export class SocialAgentCardActionRouterService {
       'matching.relax_distance',
       'matching.relax_time',
       'matching.relax_tags',
+      'public_intent_application.view_profile',
+      'public_intent_application.open_conversation',
       'candidate.generate_opener',
       'opener.regenerate',
       'opener.reject',
@@ -476,6 +504,7 @@ export class SocialAgentCardActionRouterService {
       'candidate.connect',
       'connect_candidate',
       'activity.confirm_create',
+      'public_intent_application.accept',
       'life_graph.accept_update',
       'life_graph.reject_update',
       'meet_loop.resume',
@@ -533,6 +562,36 @@ export class SocialAgentCardActionRouterService {
       return 'matching.relax_tags';
     }
     if (
+      normalized === 'public_intent_application.accept' ||
+      normalized === 'accept_public_intent_application' ||
+      normalized === 'accept_application' ||
+      normalized === 'application.accept'
+    ) {
+      return 'public_intent_application.accept';
+    }
+    if (
+      normalized === 'public_intent_application.reject' ||
+      normalized === 'reject_public_intent_application' ||
+      normalized === 'reject_application' ||
+      normalized === 'application.reject'
+    ) {
+      return 'public_intent_application.reject';
+    }
+    if (
+      normalized === 'public_intent_application.view_profile' ||
+      normalized === 'view_application_profile' ||
+      normalized === 'application.view_profile'
+    ) {
+      return 'public_intent_application.view_profile';
+    }
+    if (
+      normalized === 'public_intent_application.open_conversation' ||
+      normalized === 'open_application_conversation' ||
+      normalized === 'application.open_conversation'
+    ) {
+      return 'public_intent_application.open_conversation';
+    }
+    if (
       normalized === 'see_more' ||
       normalized === 'more_like_this' ||
       normalized === 'expand_radius' ||
@@ -588,6 +647,8 @@ export class SocialAgentCardActionRouterService {
     if (this.isPublishDismissAction(action))
       return 'FitMeet Main Agent' as const;
     if (action.startsWith('matching.')) return 'FitMeet Main Agent' as const;
+    if (action.startsWith('public_intent_application.'))
+      return 'Match Agent' as const;
     if (action.startsWith('life_graph.')) return 'Life Graph Agent' as const;
     if (
       action.startsWith('activity.') ||

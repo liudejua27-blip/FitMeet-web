@@ -54,6 +54,6 @@ import { DomainOutboxEvent } from '../social-loop/domain-outbox-event.entity';
     DomainOutboxWorkerService,
     AgentSideEffectLedgerService,
   ],
-  exports: [MessagesService, MessagesGateway],
+  exports: [MessagesService, MessagesGateway, DomainOutboxWorkerService],
 })
 export class MessagesModule {}

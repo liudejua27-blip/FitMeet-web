@@ -46,6 +46,10 @@ export const TOOL_UI_SCHEMA_ACTIONS = [
   'slot_completion.use_default_safety',
   'slot_completion.custom_safety',
   'slot_completion.cancel',
+  'public_intent_application.accept',
+  'public_intent_application.reject',
+  'public_intent_application.view_profile',
+  'public_intent_application.open_conversation',
 ] as const satisfies readonly ToolUISchemaAction[];
 
 export const TOOL_UI_CARD_ACTION_COPY: Record<ToolUISchemaAction, ToolUICardActionCopy> = {
@@ -243,5 +247,25 @@ export const TOOL_UI_CARD_ACTION_COPY: Record<ToolUISchemaAction, ToolUICardActi
     busy: '正在取消',
     done: '已取消',
     result: '已取消这次约练卡草稿，不会发布到发现页。',
+  },
+  'public_intent_application.accept': {
+    busy: '正在接受报名',
+    done: '已接受',
+    result: '已接受报名并准备站内会话，后续可以到消息页继续。',
+  },
+  'public_intent_application.reject': {
+    busy: '正在拒绝报名',
+    done: '已拒绝',
+    result: '已拒绝这条报名申请，不会创建会话或约练参与关系。',
+  },
+  'public_intent_application.view_profile': {
+    busy: '正在打开资料',
+    done: '已打开资料',
+    result: '已打开对方资料，接受前不会自动触达对方。',
+  },
+  'public_intent_application.open_conversation': {
+    busy: '正在打开消息页',
+    done: '已打开消息页',
+    result: '已打开消息页，可以继续确认约练细节。',
   },
 };
