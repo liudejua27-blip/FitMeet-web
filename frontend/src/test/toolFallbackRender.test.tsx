@@ -1742,6 +1742,82 @@ describe('assistant-ui tool fallback rendering', () => {
     );
   });
 
+  it('keeps publish and dismiss CTAs visible for private activity drafts with socialRequestId', async () => {
+    render(
+      <AssistantDataFallback
+        type="data"
+        status={{ type: 'complete' }}
+        name="fitmeet-cards"
+        data={{
+          cards: [
+            {
+              id: 'activity-plan-private-draft',
+              schemaType: 'social_match.activity',
+              schemaVersion: 'fitmeet.tool-ui.v1',
+              title: '五四广场散步约练卡',
+              body: '明天晚上 7 点，在青岛五四广场轻松散步。',
+              status: 'waiting_confirmation',
+              data: {
+                schemaType: 'social_match.activity',
+                taskId: 28,
+                socialRequestId: 3,
+                city: '青岛',
+                location: '青岛五四广场',
+                time: '明天晚上 7 点',
+                activityType: '散步',
+                publishStatus: 'draft',
+                visibilityStatus: 'private',
+              },
+              actions: [
+                {
+                  id: 'publish-private-draft',
+                  label: '确认发布',
+                  action: 'publish_to_discover',
+                  schemaAction: 'publish_to_discover',
+                  requiresConfirmation: true,
+                  payload: { taskId: 28, socialRequestId: 3 },
+                },
+                {
+                  id: 'modify-private-draft',
+                  label: '修改卡片',
+                  action: 'modify_activity',
+                  schemaAction: 'activity.modify_time',
+                  requiresConfirmation: false,
+                  payload: { taskId: 28, socialRequestId: 3 },
+                },
+                {
+                  id: 'skip-private-draft',
+                  label: '暂不发布',
+                  action: 'activity.skip_publish',
+                  schemaAction: 'activity.skip_publish',
+                  requiresConfirmation: false,
+                  payload: { taskId: 28, socialRequestId: 3 },
+                },
+              ],
+            },
+          ],
+        }}
+      />,
+    );
+
+    const activityCard = await screen.findByTestId('activity-opportunity-card');
+    expect(activityCard).toHaveTextContent('发布前确认');
+    expect(activityCard).not.toHaveTextContent('已发布');
+    const actionCard = screen.getByTestId('assistant-ui-unified-action-card');
+    expect(within(actionCard).getByRole('button', { name: '确认发布' })).toHaveAttribute(
+      'data-schema-action',
+      'publish_to_discover',
+    );
+    expect(within(actionCard).getByRole('button', { name: '修改卡片' })).toHaveAttribute(
+      'data-schema-action',
+      'activity.modify_time',
+    );
+    expect(within(actionCard).getByRole('button', { name: '暂不发布' })).toHaveAttribute(
+      'data-schema-action',
+      'activity.skip_publish',
+    );
+  });
+
   it('renders schema approval cards as product confirmation cards instead of backend approval forms', async () => {
     render(
       <AssistantDataFallback
