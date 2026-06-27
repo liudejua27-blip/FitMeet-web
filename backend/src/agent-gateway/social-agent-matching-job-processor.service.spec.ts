@@ -171,6 +171,39 @@ it('uses candidate search index hints before running the candidate pool', async 
   );
 });
 
+it('syncs the candidate search index and retries when the first search is empty', async () => {
+  const harness = makeHarness({
+    candidates: [makeCandidate()],
+    indexSearchResults: [
+      [],
+      [
+        {
+          userId: 8,
+          publicIntentId: 'public_candidate_8',
+        },
+      ],
+    ],
+  });
+
+  await expect(harness.service.processClaimedJob(makeJob())).resolves.toBe(
+    MatchingJobStatus.CandidatesReady,
+  );
+
+  expect(harness.candidateSearchIndex.search).toHaveBeenCalledTimes(2);
+  expect(harness.candidateSearchIndex.syncActiveProfiles).toHaveBeenCalledWith({
+    limit: 500,
+  });
+  expect(
+    harness.candidateSearchIndex.syncActivePublicIntents,
+  ).toHaveBeenCalledWith({ limit: 500 });
+  expect(harness.candidatePool.searchSocial).toHaveBeenCalledWith(
+    expect.objectContaining({
+      candidateUserIds: [8],
+      publicIntentIds: ['public_candidate_8'],
+    }),
+  );
+});
+
 function makeHarness(
   options: {
     candidates?: unknown[];
@@ -180,6 +213,12 @@ function makeHarness(
       userId?: number | null;
       publicIntentId?: string | null;
     }>;
+    indexSearchResults?: Array<
+      Array<{
+        userId?: number | null;
+        publicIntentId?: string | null;
+      }>
+    >;
   } = {},
 ) {
   const publicIntent = options.publicIntent ?? makePublicIntent();
@@ -212,9 +251,26 @@ function makeHarness(
     })),
     persistCandidateRows: jest.fn(async () => undefined),
   };
+  const indexSearchResults = [...(options.indexSearchResults ?? [])];
   const candidateSearchIndex = {
     upsertFromPublicIntent: jest.fn(async () => undefined),
-    search: jest.fn(async () => options.indexRows ?? []),
+    syncActiveProfiles: jest.fn(async () => ({
+      scanned: 0,
+      active: 0,
+      inactive: 0,
+      failed: 0,
+    })),
+    syncActivePublicIntents: jest.fn(async () => ({
+      scanned: 0,
+      active: 0,
+      inactive: 0,
+      failed: 0,
+    })),
+    search: jest.fn(async () =>
+      indexSearchResults.length > 0
+        ? (indexSearchResults.shift() ?? [])
+        : (options.indexRows ?? []),
+    ),
   };
   const task = {
     id: 101,
