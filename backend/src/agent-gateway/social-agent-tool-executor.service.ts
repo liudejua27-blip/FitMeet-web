@@ -74,6 +74,10 @@ import {
   type SocialAgentDecisionToolResult,
 } from './social-agent-decision-tool.service';
 import { SocialAgentTaskMemoryService } from './social-agent-task-memory.service';
+import {
+  SocialAgentSafetyPolicyResult,
+  SocialAgentSafetyToolService,
+} from './social-agent-safety-tool.service';
 import { AgentSideEffectLedgerService } from './agent-side-effect-ledger.service';
 import { summarizeSocialAgentToolCalls } from './social-agent-tool-execution-summary';
 import { buildSocialAgentProfileContextPatch } from './social-agent-profile-context-patch';
@@ -218,6 +222,7 @@ export class SocialAgentToolExecutorService {
     private readonly conversationTools: SocialAgentConversationToolService,
     private readonly decisionTools: SocialAgentDecisionToolService,
     private readonly taskMemory: SocialAgentTaskMemoryService,
+    private readonly safetyTools: SocialAgentSafetyToolService,
     @Optional()
     private readonly agentLoop?: AgentLoopService,
     @Optional()
@@ -1392,6 +1397,28 @@ export class SocialAgentToolExecutorService {
         );
         return socialCodexBlocked;
       }
+      const safetyBlocked = await this.maybeBlockBySafetyTool({
+        callId,
+        executionInput,
+        startedAt,
+        stepId,
+        task,
+        toolName,
+      });
+      if (safetyBlocked) {
+        await this.createTaskEvent(
+          task,
+          AgentTaskEventType.ToolFailed,
+          buildSocialAgentToolFailedEvent({
+            toolName,
+            stepId,
+            toolCallId: callId,
+            inputSummary,
+            call: safetyBlocked,
+          }),
+        );
+        return safetyBlocked;
+      }
       this.toolExecutionPolicy.assertHighRiskFrequencyLimit(task, toolName);
       const hasApprovedCredential = await this.hasApprovedToolActionCredential(
         task,
@@ -1594,6 +1621,97 @@ export class SocialAgentToolExecutorService {
     });
   }
 
+  private async maybeBlockBySafetyTool(input: {
+    callId: string;
+    executionInput: Record<string, unknown>;
+    startedAt: Date;
+    stepId: string;
+    task: AgentTask;
+    toolName: SocialAgentToolName;
+  }): Promise<SocialAgentToolCallRecord | null> {
+    if (!this.shouldRunSafetyPreflight(input.toolName)) return null;
+    const safety = await this.safetyTools.checkSafetyPolicy({
+      ownerUserId: input.task.ownerUserId,
+      taskId: input.task.id,
+      action: input.toolName,
+      text: this.safetyTextFromInput(input.executionInput),
+      payload: input.executionInput,
+    });
+    if (safety.allowed) return null;
+    return this.buildSafetyBlockedCall(input, safety);
+  }
+
+  private shouldRunSafetyPreflight(toolName: SocialAgentToolName): boolean {
+    return [
+      SocialAgentToolName.PublishSocialRequest,
+      SocialAgentToolName.CreateSocialRequest,
+      SocialAgentToolName.SendMessage,
+      SocialAgentToolName.SendMessageToCandidate,
+      SocialAgentToolName.ReplyMessage,
+      SocialAgentToolName.ConnectCandidate,
+      SocialAgentToolName.AddFriend,
+      SocialAgentToolName.CreateActivity,
+      SocialAgentToolName.InviteActivity,
+      SocialAgentToolName.JoinActivity,
+      SocialAgentToolName.OfflineMeeting,
+    ].includes(toolName);
+  }
+
+  private safetyTextFromInput(input: Record<string, unknown>): string {
+    return [
+      this.toolInput.string(input.text),
+      this.toolInput.string(input.message),
+      this.toolInput.string(input.content),
+      this.toolInput.string(input.description),
+      this.toolInput.string(input.title),
+      this.toolInput.string(input.locationText),
+      this.toolInput.string(input.location),
+    ]
+      .filter(Boolean)
+      .join('\n');
+  }
+
+  private buildSafetyBlockedCall(
+    input: {
+      callId: string;
+      executionInput: Record<string, unknown>;
+      startedAt: Date;
+      stepId: string;
+      toolName: SocialAgentToolName;
+    },
+    safety: SocialAgentSafetyPolicyResult,
+  ): SocialAgentToolCallRecord {
+    const reasons = Array.isArray(safety.reasons) ? safety.reasons : [];
+    const requiredConfirmations = Array.isArray(safety.requiredConfirmations)
+      ? safety.requiredConfirmations
+      : [];
+    return this.toolCallFactory.buildToolCall({
+      id: input.callId,
+      stepId: input.stepId,
+      toolName: input.toolName,
+      status: 'blocked',
+      input: input.executionInput,
+      output: {
+        safety,
+        cards: safety.card ? [safety.card] : [],
+      },
+      error: {
+        code: 'SOCIAL_AGENT_SAFETY_POLICY_BLOCKED',
+        message:
+          reasons[0] ?? 'This action was blocked by FitMeet safety policy.',
+        retryable: false,
+        userMessage:
+          '这个动作触碰了隐私或安全边界，我没有继续执行。请移除联系方式、精确地址或高风险内容后再继续。',
+        reasons,
+        requiredConfirmations,
+        level: safety.level,
+        highRisk: true,
+        compensationStatus: 'not_needed',
+      },
+      startedAt: input.startedAt,
+    });
+  }
+
   private async dispatchTool(
     task: AgentTask,
     toolName: SocialAgentToolName,
@@ -1692,6 +1810,20 @@ export class SocialAgentToolExecutorService {
           task,
           await this.decisionTools.decideNextSocialAction(task, input, options),
         );
+      case SocialAgentToolName.CheckSafetyPolicy:
+        return this.safetyTools.checkSafetyPolicy({
+          ownerUserId: task.ownerUserId,
+          taskId: task.id,
+          action: this.toolInput.string(input.action) || 'unknown',
+          text: this.toolInput.string(input.text),
+          payload: this.toolInput.isRecord(input.payload)
+            ? input.payload
+            : input,
+        });
+      case SocialAgentToolName.ReportSafetyIssue:
+        return this.safetyTools.reportSafetyIssue(task.ownerUserId, input);
+      case SocialAgentToolName.RedactSensitiveOutput:
+        return this.safetyTools.redactSensitiveOutput(input);
       case SocialAgentToolName.ReplyMessage:
         return this.replyMessage(task, input, stepId);
       case SocialAgentToolName.Payment:

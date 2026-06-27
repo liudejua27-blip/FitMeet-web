@@ -297,6 +297,9 @@ export function getSocialAgentToolActionType(
     case SocialAgentToolName.ReadTaskConversationMessages:
     case SocialAgentToolName.SummarizeReply:
     case SocialAgentToolName.DecideNextSocialAction:
+    case SocialAgentToolName.CheckSafetyPolicy:
+    case SocialAgentToolName.ReportSafetyIssue:
+    case SocialAgentToolName.RedactSensitiveOutput:
       return AgentActionType.AgentEvent;
   }
 }
@@ -510,6 +513,9 @@ export function getSocialAgentPermissionActionForTool(
     case SocialAgentToolName.ReadTaskConversationMessages:
     case SocialAgentToolName.SummarizeReply:
     case SocialAgentToolName.DecideNextSocialAction:
+    case SocialAgentToolName.CheckSafetyPolicy:
+    case SocialAgentToolName.ReportSafetyIssue:
+    case SocialAgentToolName.RedactSensitiveOutput:
       return null;
   }
 }
