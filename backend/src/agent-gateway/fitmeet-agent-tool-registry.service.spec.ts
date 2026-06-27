@@ -109,6 +109,28 @@ describe('FitMeetAgentToolRegistryService', () => {
     );
   });
 
+  it('registers view_match_history as an implemented owner-scoped read tool', () => {
+    const tool = service.getTool('view_match_history');
+
+    expect(tool).toMatchObject({
+      name: 'view_match_history',
+      category: FitMeetAgentToolCategory.Candidate,
+      riskLevel: AgentActionRiskLevel.Low,
+      requiresApproval: false,
+      executorToolName: 'view_match_history',
+      runtimeStatus: 'implemented',
+      plannerEnabled: true,
+      dataScope: 'owner_match_history_only',
+      sideEffects: [],
+    });
+    expect(tool?.outputSchema).toEqual(
+      expect.objectContaining({
+        type: 'object',
+        required: expect.arrayContaining(['matches']),
+      }),
+    );
+  });
+
   it('returns only implemented planner-visible tools for planning', () => {
     const plannerTools = service.listPlannerTools(
       AgentTaskPermissionMode.Assist,
@@ -176,6 +198,9 @@ describe('FitMeetAgentToolRegistryService', () => {
     );
     expect(service.resolveExecutorToolName('search_matches')).toBe(
       'search_matches',
+    );
+    expect(service.resolveExecutorToolName('view_match_history')).toBe(
+      'view_match_history',
     );
     expect(service.resolveExecutorToolName('get_agent_message_events')).toBe(
       'get_agent_message_events',

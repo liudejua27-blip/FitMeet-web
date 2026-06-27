@@ -78,6 +78,7 @@ import {
   SocialAgentSafetyPolicyResult,
   SocialAgentSafetyToolService,
 } from './social-agent-safety-tool.service';
+import { SocialAgentMatchHistoryService } from './social-agent-match-history.service';
 import { AgentSideEffectLedgerService } from './agent-side-effect-ledger.service';
 import { summarizeSocialAgentToolCalls } from './social-agent-tool-execution-summary';
 import { buildSocialAgentProfileContextPatch } from './social-agent-profile-context-patch';
@@ -231,6 +232,8 @@ export class SocialAgentToolExecutorService {
     private readonly config?: ConfigService,
     @Optional()
     private readonly sideEffectLedger?: AgentSideEffectLedgerService,
+    @Optional()
+    private readonly matchHistory?: SocialAgentMatchHistoryService,
   ) {}
 
   async executeTask(
@@ -1750,6 +1753,15 @@ export class SocialAgentToolExecutorService {
         return this.searchMatches(task, input);
       case SocialAgentToolName.ExplainMatches:
         return this.explainMatches(task, input, options);
+      case SocialAgentToolName.ViewMatchHistory:
+        if (!this.matchHistory) {
+          throw new BadRequestException('Match history runtime is unavailable');
+        }
+        return this.matchHistory.viewMatchHistory({
+          ownerUserId: task.ownerUserId,
+          taskId: task.id,
+          limit: this.toolInput.number(input.limit),
+        });
       case SocialAgentToolName.DraftOpener:
         return this.draftOpener(input, options);
       case SocialAgentToolName.SendMessageToCandidate:
