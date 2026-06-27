@@ -78,6 +78,7 @@ import { SocialAgentActivityToolService } from './social-agent-activity-tool.ser
 import { SocialAgentMessageEventToolService } from './social-agent-message-event-tool.service';
 import { SocialAgentConversationToolService } from './social-agent-conversation-tool.service';
 import { SocialAgentDecisionToolService } from './social-agent-decision-tool.service';
+import { SocialAgentSafetyToolService } from './social-agent-safety-tool.service';
 import { SocialAgentTaskMemoryService } from './social-agent-task-memory.service';
 import { FitMeetAgentToolRegistryService } from './fitmeet-agent-tool-registry.service';
 import { SocialAgentAutopilotService } from './social-agent-autopilot.service';
@@ -443,6 +444,7 @@ import { AdminRbacModule } from '../admin-rbac/admin-rbac.module';
     SocialAgentMessageEventToolService,
     SocialAgentConversationToolService,
     SocialAgentDecisionToolService,
+    SocialAgentSafetyToolService,
     SocialAgentTaskMemoryService,
     AgentWebhookService,
     AiSocialAutopilotService,

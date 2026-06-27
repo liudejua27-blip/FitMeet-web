@@ -187,6 +187,24 @@ function makeService(options: { agentLoop?: unknown } = {}) {
   const safety = {
     getMutualBlockUserIds: jest.fn().mockResolvedValue(new Set<number>()),
   };
+  const safetyTools = {
+    checkSafetyPolicy: jest.fn().mockResolvedValue({
+      allowed: true,
+      level: 'low',
+      reasons: [],
+      requiredConfirmations: [],
+      redactedPayload: {},
+    }),
+    reportSafetyIssue: jest.fn().mockResolvedValue({
+      success: true,
+      reportId: 901,
+      status: 'pending',
+    }),
+    redactSensitiveOutput: jest.fn((input: Record<string, unknown>) => ({
+      success: true,
+      payload: input.payload ?? {},
+    })),
+  };
   const approvals = {
     create: jest.fn<Promise<Record<string, unknown>>, [ApprovalCreateInput]>(
       (input) =>
@@ -333,6 +351,7 @@ function makeService(options: { agentLoop?: unknown } = {}) {
     conversationTools,
     decisionTools,
     taskMemory,
+    safetyTools as never,
     options.agentLoop as never,
     l5Runtime as never,
   );
@@ -359,6 +378,7 @@ function makeService(options: { agentLoop?: unknown } = {}) {
     friends,
     activities,
     safety,
+    safetyTools,
     approvals,
     approvalDispatcher,
     longTermMemory,
@@ -1834,6 +1854,68 @@ describe('SocialAgentToolExecutorService', () => {
       success: true,
       status: 'sent',
     });
+  });
+
+  it('blocks approved message side effects when the safety tool rejects the payload', async () => {
+    const { service, taskRepo, messages, approvals, safetyTools } =
+      makeService();
+    const task = makeTask({
+      agentConnectionId: null,
+      permissionMode: AgentTaskPermissionMode.Confirm,
+    });
+    taskRepo.findOne.mockResolvedValue(task);
+    approvals.getById.mockResolvedValue({
+      id: 501,
+      userId: 1,
+      agentTaskId: 100,
+      status: 'approved',
+      skillName: SocialAgentToolName.SendMessageToCandidate,
+      actionType: 'send_invite',
+      payload: { targetUserId: 2 },
+      expiresAt: new Date(Date.now() + 10 * 60 * 1000),
+    });
+    safetyTools.checkSafetyPolicy.mockResolvedValueOnce({
+      allowed: false,
+      level: 'blocked',
+      reasons: ['检测到手机号、邮箱、微信或 QQ 等直接联系方式。'],
+      requiredConfirmations: ['safety_review_required'],
+      redactedPayload: { text: '[REDACTED_PHONE]' },
+      card: {
+        id: 'safety_policy:100:send_message_to_candidate',
+        type: 'safety_boundary',
+        schemaVersion: 'fitmeet.tool-ui.v1',
+        schemaType: 'safety.boundary',
+        title: '安全边界提醒',
+        body: '检测到直接联系方式。',
+        status: 'blocked',
+        data: { taskId: 100 },
+        actions: [],
+      },
+    });
+
+    const call = await service.executeToolAction(
+      100,
+      SocialAgentToolName.SendMessageToCandidate,
+      {
+        targetUserId: 2,
+        ...publicCandidateBoundary(2),
+        text: '今晚散步，电话 13800001111',
+        approvalId: 501,
+        metadata: { confirmationSource: 'social_agent_chat' },
+      },
+      1,
+    );
+
+    expect(call.status).toBe('blocked');
+    expect(call.error).toMatchObject({
+      code: 'SOCIAL_AGENT_SAFETY_POLICY_BLOCKED',
+      requiredConfirmations: ['safety_review_required'],
+    });
+    expect(call.output).toMatchObject({
+      cards: [expect.objectContaining({ type: 'safety_boundary' })],
+    });
+    expect(messages.startConversation).not.toHaveBeenCalled();
+    expect(messages.sendMessage).not.toHaveBeenCalled();
   });
 
   it('safely truncates long task event varchar fields while keeping full payload', async () => {
