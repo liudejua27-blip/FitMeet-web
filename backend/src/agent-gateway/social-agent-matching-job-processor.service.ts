@@ -43,6 +43,7 @@ import { CandidateSearchIndex } from './entities/candidate-search-index.entity';
 import { buildSocialAgentNoCandidatesCard } from './social-agent-no-candidates-card.presenter';
 import { SocialAgentMatchRelaxationService } from './social-agent-match-relaxation.service';
 import type { SocialAgentMatchingFallback } from './social-agent-match-relaxation.types';
+import { SocialCandidateAuditService } from './social-candidate-audit.service';
 
 const SOCIAL_REQUEST_ADVISORY_LOCK_NAMESPACE = 1_782_160_006;
 
@@ -80,6 +81,7 @@ type FinalizedMatchingJob = {
   emptyReason: string | null;
   message: string | null;
   matchingFallback: SocialAgentMatchingFallback | null;
+  candidateSnapshotId: number | null;
 };
 
 class CancelMatchingJobError extends Error {
@@ -119,6 +121,8 @@ export class SocialAgentMatchingJobProcessorService {
     private readonly realtime?: RealtimeEventService,
     @Optional()
     private readonly relaxation?: SocialAgentMatchRelaxationService,
+    @Optional()
+    private readonly candidateAudit?: SocialCandidateAuditService,
   ) {}
 
   async processDueJobs(input: {
@@ -468,19 +472,56 @@ export class SocialAgentMatchingJobProcessorService {
       await this.assertDiscoverQueryCanReadIntent(intent!.id, manager);
 
       const candidateRows = input.searchResult.candidates;
+      const taskId = this.taskIdFromJob(lockedJob);
+      const scoreVersion = this.scoreVersionFromCandidates(candidateRows);
+      const snapshot = this.candidateAudit
+        ? await this.candidateAudit.createSnapshot(
+            {
+              ownerUserId: validation.ownerUserId,
+              taskId,
+              socialRequestId: validation.socialRequest.id,
+              publicIntentId: lockedJob.publicIntentId,
+              matchingJobId: lockedJob.id,
+              snapshotType: 'matching_job_result',
+              sourceVersion: validation.sourceVersion,
+              scoreVersion,
+              query: input.searchResult.query,
+              constraints: {
+                publicIntentId: lockedJob.publicIntentId,
+                socialRequestId: validation.socialRequest.id,
+                sourceVersion: validation.sourceVersion,
+                candidateSearchIndex: {
+                  used: input.indexHints.used,
+                  sourceCount: input.indexHints.sourceCount,
+                },
+              },
+              candidates: candidateRows,
+              debug: {
+                debugReasons: input.searchResult.debugReasons,
+                debug: input.searchResult.debug,
+              },
+              metadata: {
+                emptyReason: input.searchResult.emptyReason,
+                message: input.searchResult.message,
+                matchingFallback: sanitizeForDisplay(input.matchingFallback),
+              },
+            },
+            manager,
+          )
+        : null;
       await this.candidatePool.persistCandidateRows(
         validation.socialRequest.id,
         candidateRows,
         manager,
       );
-      const taskId = this.taskIdFromJob(lockedJob);
-      const candidates = candidateRows.map((candidate) =>
-        toSocialAgentChatCandidate(
+      const candidates = candidateRows.map((candidate) => ({
+        ...toSocialAgentChatCandidate(
           taskId ?? 0,
           validation.socialRequest.id,
           candidate as never,
         ),
-      );
+        candidateSnapshotId: snapshot?.id ?? null,
+      }));
       const candidateCount = candidates.length;
       const noCandidateCards =
         candidateCount === 0 && taskId && input.matchingFallback
@@ -509,6 +550,7 @@ export class SocialAgentMatchingJobProcessorService {
         socialRequestId: validation.socialRequest.id,
         debugReasons: sanitizeForDisplay(input.searchResult.debugReasons),
         matchingFallback: sanitizeForDisplay(input.matchingFallback),
+        candidateSnapshotId: snapshot?.id ?? null,
         cards: noCandidateCards,
         candidateSearchIndex: {
           used: input.indexHints.used,
@@ -548,6 +590,7 @@ export class SocialAgentMatchingJobProcessorService {
           searchResult: input.searchResult,
           indexHints: input.indexHints,
           matchingFallback: input.matchingFallback,
+          candidateSnapshotId: snapshot?.id ?? null,
           noCandidateCards,
         });
       }
@@ -570,6 +613,7 @@ export class SocialAgentMatchingJobProcessorService {
           candidateCount === 0
             ? sanitizeForDisplay(input.matchingFallback)
             : undefined,
+        candidateSnapshotId: snapshot?.id ?? undefined,
         candidateSearchIndex: {
           used: input.indexHints.used,
           sourceCount: input.indexHints.sourceCount,
@@ -620,6 +664,7 @@ export class SocialAgentMatchingJobProcessorService {
         emptyReason: input.searchResult.emptyReason ?? null,
         message: input.searchResult.message ?? null,
         matchingFallback: input.matchingFallback,
+        candidateSnapshotId: snapshot?.id ?? null,
       };
     });
   }
@@ -634,6 +679,7 @@ export class SocialAgentMatchingJobProcessorService {
       searchResult: CandidatePoolSearchResult;
       indexHints: CandidateIndexHints;
       matchingFallback: SocialAgentMatchingFallback | null;
+      candidateSnapshotId: number | null;
       noCandidateCards: ReturnType<typeof buildSocialAgentNoCandidatesCard>[];
     },
   ): Promise<void> {
@@ -691,6 +737,7 @@ export class SocialAgentMatchingJobProcessorService {
         matchingJobId: input.job.id,
         matchingJobStatus: input.job.status,
         matchingFallback: sanitizeForDisplay(input.matchingFallback),
+        candidateSnapshotId: input.candidateSnapshotId,
         candidateSearchIndex: {
           used: input.indexHints.used,
           sourceCount: input.indexHints.sourceCount,
@@ -722,11 +769,13 @@ export class SocialAgentMatchingJobProcessorService {
           candidateUserId: candidate.candidateUserId ?? candidate.userId,
           socialRequestId: candidate.socialRequestId,
           candidateRecordId: candidate.candidateRecordId,
+          candidateSnapshotId: candidate.candidateSnapshotId ?? null,
           score: candidate.score,
         })),
         matchingJobId: input.job.id,
         matchingJobStatus: input.job.status,
         matchingFallback: sanitizeForDisplay(input.matchingFallback),
+        candidateSnapshotId: input.candidateSnapshotId,
         candidateSearchIndex: {
           used: input.indexHints.used,
           sourceCount: input.indexHints.sourceCount,
@@ -757,6 +806,7 @@ export class SocialAgentMatchingJobProcessorService {
           matchingJobId: input.job.id,
           publicIntentId: input.job.publicIntentId,
           matchingFallback: sanitizeForDisplay(input.matchingFallback),
+          candidateSnapshotId: input.candidateSnapshotId,
           candidateSearchIndex: {
             used: input.indexHints.used,
             sourceCount: input.indexHints.sourceCount,
@@ -967,6 +1017,7 @@ export class SocialAgentMatchingJobProcessorService {
       emptyReason: result.emptyReason,
       message: result.message,
       matchingFallback: sanitizeForDisplay(result.matchingFallback),
+      candidateSnapshotId: result.candidateSnapshotId,
       publicLoopStage:
         result.candidateCount > 0 ? 'candidates_recommended' : 'no_candidates',
     });
@@ -1020,6 +1071,16 @@ export class SocialAgentMatchingJobProcessorService {
 
   private taskIdFromJob(job: MatchingJob): number | null {
     return this.number(this.record(job.metadata).taskId);
+  }
+
+  private scoreVersionFromCandidates(
+    candidates: Array<Record<string, unknown>>,
+  ): string {
+    for (const candidate of candidates) {
+      const version = this.text(candidate.scoreVersion);
+      if (version) return version.slice(0, 80);
+    }
+    return 'fitmeet.match-score.v1';
   }
 
   private firstRecord(...values: unknown[]): Record<string, unknown> {

@@ -24,6 +24,7 @@ import { LifeGraphComplianceService } from '../life-graph/life-graph-compliance.
 import { SocialAgentMessageFeedbackService } from './social-agent-message-feedback.service';
 import { SocialAgentFeedbackEventService } from './social-agent-feedback-event.service';
 import { SocialAgentMetricsService } from './social-agent-metrics.service';
+import { SocialCandidateAuditService } from './social-candidate-audit.service';
 
 type UserSatisfactionBody = {
   score?: number;
@@ -48,6 +49,7 @@ export class AgentL5RuntimeController {
     private readonly messageFeedback: SocialAgentMessageFeedbackService,
     private readonly agentFeedbackEvents: SocialAgentFeedbackEventService,
     private readonly socialAgentMetrics: SocialAgentMetricsService,
+    private readonly socialCandidateAudit: SocialCandidateAuditService,
   ) {}
 
   @Get('dashboard')
@@ -76,6 +78,13 @@ export class AgentL5RuntimeController {
     const agentFeedbackEvents = await this.agentFeedbackEvents.listRecent({
       limit: Number(limit),
     });
+    const candidateSnapshots =
+      await this.socialCandidateAudit.listRecentSnapshots({
+        limit: Number(limit),
+      });
+    const candidateEvents = await this.socialCandidateAudit.listRecentEvents({
+      limit: Number(limit),
+    });
     return {
       ...dashboard,
       summary: {
@@ -100,10 +109,14 @@ export class AgentL5RuntimeController {
         negativeAgentFeedbackEvents: agentFeedbackEvents.filter(
           (item) => item.reasonCode !== 'good_fit',
         ).length,
+        candidateSnapshots: candidateSnapshots.length,
+        candidateEvents: candidateEvents.length,
       },
       autoRuns,
       messageFeedback,
       agentFeedbackEvents,
+      candidateSnapshots,
+      candidateEvents,
       workerLanes,
       workerJobs,
       workerHeartbeats,
@@ -124,6 +137,44 @@ export class AgentL5RuntimeController {
     return this.agentFeedbackEvents.listRecent({
       feedbackType: feedbackType || null,
       reasonCode: reasonCode || null,
+      limit: Number(limit),
+    });
+  }
+
+  @Get('candidate-snapshots')
+  @RequireAdminPermission('agent:l5:read')
+  listCandidateSnapshots(
+    @Request() _req: AuthenticatedRequest,
+    @Query('ownerUserId') ownerUserId?: string,
+    @Query('taskId') taskId?: string,
+    @Query('publicIntentId') publicIntentId?: string,
+    @Query('matchingJobId') matchingJobId?: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.socialCandidateAudit.listRecentSnapshots({
+      ownerUserId: ownerUserId ? Number(ownerUserId) : null,
+      taskId: taskId ? Number(taskId) : null,
+      publicIntentId: publicIntentId || null,
+      matchingJobId: matchingJobId ? Number(matchingJobId) : null,
+      limit: Number(limit),
+    });
+  }
+
+  @Get('candidate-events')
+  @RequireAdminPermission('agent:l5:read')
+  listCandidateEvents(
+    @Request() _req: AuthenticatedRequest,
+    @Query('ownerUserId') ownerUserId?: string,
+    @Query('taskId') taskId?: string,
+    @Query('snapshotId') snapshotId?: string,
+    @Query('eventType') eventType?: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.socialCandidateAudit.listRecentEvents({
+      ownerUserId: ownerUserId ? Number(ownerUserId) : null,
+      taskId: taskId ? Number(taskId) : null,
+      snapshotId: snapshotId ? Number(snapshotId) : null,
+      eventType: eventType || null,
       limit: Number(limit),
     });
   }

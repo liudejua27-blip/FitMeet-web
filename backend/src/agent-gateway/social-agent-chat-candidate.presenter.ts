@@ -116,6 +116,7 @@ export function toSocialAgentChatCandidate(
     targetUserId,
     userId: targetUserId,
     candidateUserId: targetUserId,
+    candidateSnapshotId: numberValue(record.candidateSnapshotId),
     publicIntentId: cleanDisplayText(record.publicIntentId, '') || null,
     activityId: numberValue(record.activityId),
     displayName,

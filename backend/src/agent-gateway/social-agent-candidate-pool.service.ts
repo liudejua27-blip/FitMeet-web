@@ -106,6 +106,7 @@ import type {
   SocialAgentPreferenceGeneralizationSummary,
   SocialAgentPreferenceWeight,
 } from './social-agent-preference-generalization.service';
+import { SocialCandidateAuditService } from './social-candidate-audit.service';
 
 export type {
   CandidatePoolIntent,
@@ -270,6 +271,8 @@ export class SocialAgentCandidatePoolService {
     private readonly metrics?: SocialAgentMetricsService,
     @Optional()
     private readonly interestEvents?: SocialAgentUserInterestEventService,
+    @Optional()
+    private readonly candidateAudit?: SocialCandidateAuditService,
   ) {}
 
   async searchSocial(
@@ -371,6 +374,24 @@ export class SocialAgentCandidatePoolService {
       activityCandidates: 0,
       finalCandidates: candidates,
     });
+    if (input.persistCandidates !== false && this.candidateAudit) {
+      await this.candidateAudit.createSnapshot({
+        ownerUserId: input.ownerUserId,
+        taskId: input.taskId ?? null,
+        socialRequestId: query.socialRequestId,
+        snapshotType: 'candidate_pool_search',
+        scoreVersion: FITMEET_MATCH_SCORE_VERSION,
+        query,
+        constraints: this.snapshotConstraints(query),
+        candidates,
+        debug,
+        metadata: {
+          candidateCount: candidates.length,
+          emptyReason: this.emptyAuditReason(candidates.length),
+          persistedCandidates: true,
+        },
+      });
+    }
     return buildCandidatePoolSearchResult({
       ownerUserId: input.ownerUserId,
       query,
@@ -447,6 +468,24 @@ export class SocialAgentCandidatePoolService {
       activityCandidates: realActivities.length,
       finalCandidates: [],
     });
+    if (input.persistCandidates !== false && this.candidateAudit) {
+      await this.candidateAudit.createSnapshot({
+        ownerUserId: input.ownerUserId,
+        taskId: input.taskId ?? null,
+        socialRequestId: query.socialRequestId,
+        snapshotType: 'activity_pool_search',
+        scoreVersion: FITMEET_MATCH_SCORE_VERSION,
+        query,
+        constraints: this.snapshotConstraints(query),
+        candidates: activityResults,
+        debug,
+        metadata: {
+          candidateCount: activityResults.length,
+          emptyReason: this.emptyAuditReason(activityResults.length),
+          persistedCandidates: false,
+        },
+      });
+    }
     return buildCandidatePoolActivitySearchResult({
       ownerUserId: input.ownerUserId,
       query,
@@ -1748,6 +1787,24 @@ export class SocialAgentCandidatePoolService {
     return buildCandidatePoolDebugSnapshot(input);
   }
 
+  private snapshotConstraints(
+    query: CandidatePoolResolvedQuery,
+  ): Record<string, unknown> {
+    return {
+      intent: query.intent,
+      city: query.city,
+      activityType: query.activityType,
+      timePreference: query.timePreference,
+      locationPreference: query.locationPreference,
+      interestTags: query.interestTags,
+      candidatePreference: query.candidatePreference ?? '',
+      candidatePreferencePolicy: query.candidatePreferencePolicy ?? '',
+      acceptsStrangers: query.acceptsStrangers,
+      candidateUserIds: query.candidateUserIds,
+      publicIntentIds: query.publicIntentIds,
+    };
+  }
+
   private async safeCount<T extends ObjectLiteral>(
     repo: Repository<T>,
   ): Promise<number> {
@@ -1829,6 +1886,10 @@ export class SocialAgentCandidatePoolService {
   private normalizeLimit(value: unknown): number {
     const limit = this.number(value) ?? DEFAULT_LIMIT;
     return Math.max(1, Math.min(30, limit));
+  }
+
+  private emptyAuditReason(count: number): 'no_real_candidates' | null {
+    return count > 0 ? null : 'no_real_candidates';
   }
 
   private number(value: unknown): number | null {

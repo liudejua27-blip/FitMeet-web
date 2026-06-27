@@ -13,8 +13,12 @@ describe('AgentL5RuntimeController', () => {
         activeAlerts: 0,
         messageFeedback: 0,
         subagentWorkerJobs: 0,
+        candidateSnapshots: 0,
+        candidateEvents: 0,
       }),
       messageFeedback: [],
+      candidateSnapshots: [],
+      candidateEvents: [],
       workerJobs: [],
       socialAgentMetrics: expect.objectContaining({
         cacheEfficiencySummary: expect.objectContaining({
@@ -76,6 +80,10 @@ function makeController() {
         llmOutputCacheSummary: {},
         toolResultCacheSummary: {},
       }),
+    } as never,
+    {
+      listRecentSnapshots: jest.fn().mockResolvedValue([]),
+      listRecentEvents: jest.fn().mockResolvedValue([]),
     } as never,
   );
 }
