@@ -130,11 +130,56 @@ describe('SocialAgentMatchingJobProcessorService', () => {
   });
 });
 
+it('uses candidate search index hints before running the candidate pool', async () => {
+  const harness = makeHarness({
+    candidates: [makeCandidate()],
+    indexRows: [
+      {
+        userId: 8,
+        publicIntentId: 'public_candidate_8',
+      },
+    ],
+  });
+
+  await expect(harness.service.processClaimedJob(makeJob())).resolves.toBe(
+    MatchingJobStatus.CandidatesReady,
+  );
+
+  expect(
+    harness.candidateSearchIndex.upsertFromPublicIntent,
+  ).toHaveBeenCalledWith('social_request_301');
+  expect(harness.candidateSearchIndex.search).toHaveBeenCalledWith(
+    expect.objectContaining({
+      ownerUserId: 7,
+      city: '青岛',
+      limit: 80,
+    }),
+  );
+  expect(harness.candidatePool.searchSocial).toHaveBeenCalledWith(
+    expect.objectContaining({
+      candidateUserIds: [8],
+      publicIntentIds: ['public_candidate_8'],
+    }),
+  );
+  expect(harness.manager.query).toHaveBeenCalledWith(
+    expect.stringContaining('UPDATE "matching_jobs"'),
+    expect.arrayContaining([
+      MatchingJobStatus.CandidatesReady,
+      1,
+      expect.stringContaining('"candidateSearchIndex"'),
+    ]),
+  );
+});
+
 function makeHarness(
   options: {
     candidates?: unknown[];
     publicIntent?: Record<string, unknown>;
     eventSaveError?: Error;
+    indexRows?: Array<{
+      userId?: number | null;
+      publicIntentId?: string | null;
+    }>;
   } = {},
 ) {
   const publicIntent = options.publicIntent ?? makePublicIntent();
@@ -166,6 +211,10 @@ function makeHarness(
       debug: {},
     })),
     persistCandidateRows: jest.fn(async () => undefined),
+  };
+  const candidateSearchIndex = {
+    upsertFromPublicIntent: jest.fn(async () => undefined),
+    search: jest.fn(async () => options.indexRows ?? []),
   };
   const task = {
     id: 101,
@@ -287,8 +336,10 @@ function makeHarness(
       eventRepo as never,
       publicIntentRepo as never,
       userSocialRequestRepo as never,
+      candidateSearchIndex as never,
       realtime as never,
     ),
+    candidateSearchIndex,
     manager,
     taskRepo,
     realtime,
