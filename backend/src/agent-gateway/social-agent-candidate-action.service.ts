@@ -83,6 +83,8 @@ import {
 import { AgentL5RuntimeService } from './agent-l5-runtime.service';
 import type { FitMeetAlphaCard } from './fitmeet-alpha-agent.types';
 import { SocialAgentUserInterestEventService } from './social-agent-user-interest-event.service';
+import { SocialCandidateAuditService } from './social-candidate-audit.service';
+import type { SocialCandidateEventType } from './entities/social-candidate-event.entity';
 
 type CandidateActionOptions = {
   signal?: AbortSignal | null;
@@ -109,6 +111,8 @@ export class SocialAgentCandidateActionService {
     private readonly l5Runtime?: AgentL5RuntimeService,
     @Optional()
     private readonly interestEvents?: SocialAgentUserInterestEventService,
+    @Optional()
+    private readonly candidateAudit?: SocialCandidateAuditService,
   ) {}
 
   async createActionApproval(input: {
@@ -239,6 +243,19 @@ export class SocialAgentCandidateActionService {
       candidateRecordId: this.number(payload.candidateRecordId),
       socialRequestId: this.number(payload.socialRequestId),
       idempotencyKey: cleanDisplayText(body.idempotencyKey, '') || null,
+    });
+    await this.recordCandidateAuditEvent({
+      ownerUserId,
+      task,
+      eventType: 'opener_previewed',
+      targetUserId,
+      candidate,
+      candidateRecordId: this.number(payload.candidateRecordId),
+      socialRequestId: this.number(payload.socialRequestId),
+      idempotencyKey:
+        cleanDisplayText(body.idempotencyKey, '') ||
+        `opener-preview:${task.id}:${targetUserId ?? 'candidate'}`,
+      payload: { action: schemaAction, draft },
     });
     await this.writeEvent(
       task,
@@ -412,6 +429,24 @@ export class SocialAgentCandidateActionService {
       friendRequestId: null,
       status: 'message_sent',
     });
+    await this.recordCandidateAuditEvent({
+      ownerUserId,
+      task,
+      eventType: 'invite_sent',
+      targetUserId,
+      candidate,
+      candidateRecordId,
+      socialRequestId,
+      idempotencyKey:
+        (body.idempotencyKey ?? cleanDisplayText(payload.idempotencyKey, '')) ||
+        `opener-send:${task.id}:${targetUserId}`,
+      payload: {
+        action: body.action,
+        pendingApprovalId: pendingMessageAction.id,
+        messageActionId: action.id,
+        conversationId: confirmedMessage.conversationId,
+      },
+    });
 
     const timelineCard = buildSocialAgentMeetLoopTimelineCard({
       taskId: task.id,
@@ -522,6 +557,19 @@ export class SocialAgentCandidateActionService {
       'done',
     );
     await this.taskRepo.save(task);
+    await this.recordCandidateAuditEvent({
+      ownerUserId,
+      task,
+      eventType: 'invite_rejected',
+      candidate: draft,
+      targetUserId: this.number(draft.targetUserId),
+      candidateRecordId: this.number(draft.candidateRecordId),
+      socialRequestId: this.number(draft.socialRequestId),
+      idempotencyKey:
+        cleanDisplayText(body.idempotencyKey, '') ||
+        `opener-reject:${task.id}:${requestedApprovalId ?? 'latest'}`,
+      payload: { action: body.action, requestedApprovalId },
+    });
 
     const result = this.cardActionRouteResult(task, assistantMessage, [], null);
     await this.writeEvent(
@@ -660,6 +708,23 @@ export class SocialAgentCandidateActionService {
       },
       AgentTaskEventActor.Agent,
     );
+    await this.recordCandidateAuditEvent({
+      ownerUserId,
+      task,
+      eventType: 'opener_regenerated',
+      targetUserId,
+      candidate,
+      candidateRecordId: this.number(candidate.candidateRecordId),
+      socialRequestId: this.number(candidate.socialRequestId),
+      idempotencyKey:
+        cleanDisplayText(body.idempotencyKey, '') ||
+        `opener-regenerate:${task.id}:${targetUserId ?? 'candidate'}`,
+      payload: {
+        action: body.action,
+        previousApprovalId:
+          pendingMessageAction?.id ?? requestedApprovalId ?? null,
+      },
+    });
     await this.recordAssistantMessage(task, assistantMessage, result);
     return result;
   }
@@ -747,6 +812,17 @@ export class SocialAgentCandidateActionService {
       socialRequestId: this.number(body.payload?.socialRequestId),
       idempotencyKey: cleanDisplayText(body.idempotencyKey, '') || null,
     });
+    await this.recordCandidateAuditEvent({
+      ownerUserId,
+      task,
+      eventType: this.auditEventTypeForCandidatePreference(action),
+      targetUserId,
+      candidate,
+      candidateRecordId: this.number(body.payload?.candidateRecordId),
+      socialRequestId: this.number(body.payload?.socialRequestId),
+      idempotencyKey: cleanDisplayText(body.idempotencyKey, '') || null,
+      payload: { action },
+    });
 
     const assistantMessage = this.candidatePreferenceAssistantMessage({
       action,
@@ -827,6 +903,28 @@ export class SocialAgentCandidateActionService {
       conversationId: resolvedConversationId,
       friendRequestId: resolvedFriendRequestId,
       status: resolvedConnectionStatus,
+    });
+    await this.recordCandidateAuditEvent({
+      ownerUserId,
+      task,
+      eventType: isPending
+        ? 'connect_approval_requested'
+        : 'connect_established',
+      targetUserId,
+      candidate: body.payload?.candidate as Record<string, unknown>,
+      candidateRecordId: this.number(body.payload?.candidateRecordId),
+      socialRequestId: this.number(body.payload?.socialRequestId),
+      idempotencyKey:
+        cleanDisplayText(body.idempotencyKey, '') ||
+        cleanDisplayText(body.payload?.idempotencyKey, '') ||
+        `candidate-connect:${taskId}:${targetUserId ?? 'candidate'}`,
+      payload: {
+        action: body.action,
+        status: resolvedConnectionStatus,
+        approvalId: isPending ? connectResult.approvalId : null,
+        conversationId: resolvedConversationId,
+        friendRequestId: resolvedFriendRequestId,
+      },
     });
     const candidateForApproval = readSocialAgentCardActionCandidate({
       payload: body.payload ?? {},
@@ -994,6 +1092,22 @@ export class SocialAgentCandidateActionService {
       friendRequestId: null,
       status: 'message_sent',
     });
+    await this.recordCandidateAuditEvent({
+      ownerUserId,
+      task,
+      eventType: 'invite_sent',
+      targetUserId,
+      candidate,
+      candidateRecordId,
+      socialRequestId,
+      idempotencyKey: `opener-send:${task.id}:${targetUserId}`,
+      payload: {
+        source: 'chat_confirmation',
+        pendingApprovalId: pendingMessageAction.id,
+        messageActionId: action.id,
+        conversationId: confirmedMessage.conversationId,
+      },
+    });
 
     return {
       task,
@@ -1073,6 +1187,17 @@ export class SocialAgentCandidateActionService {
         toolCallId: action.id,
       });
       await this.taskRepo.save(task);
+      await this.recordCandidateAuditEvent({
+        ownerUserId,
+        task,
+        eventType: 'candidate_saved',
+        targetUserId,
+        candidate: body.candidate ?? {},
+        candidateRecordId,
+        socialRequestId,
+        idempotencyKey: `candidate-save:${taskId}:${targetUserId}`,
+        payload: { toolCallId: action.id },
+      });
     }
     return action;
   }
@@ -1172,6 +1297,22 @@ export class SocialAgentCandidateActionService {
       },
     );
     await this.taskRepo.save(task);
+    await this.recordCandidateAuditEvent({
+      ownerUserId,
+      task,
+      eventType: requiresApproval ? 'invite_approval_requested' : 'invite_sent',
+      targetUserId,
+      candidate: body.candidate ?? {},
+      candidateRecordId,
+      socialRequestId,
+      idempotencyKey: `candidate-message:${taskId}:${targetUserId}`,
+      payload: {
+        messageActionId: messageAction.id,
+        approvalId,
+        status: messageResult.status,
+        conversationId: messageResult.conversationId,
+      },
+    });
 
     return messageResult;
   }
@@ -1290,6 +1431,22 @@ export class SocialAgentCandidateActionService {
       lastCompletedStep: 'connect_approval_created',
     });
     await this.taskRepo.save(task);
+    await this.recordCandidateAuditEvent({
+      ownerUserId,
+      task,
+      eventType: 'connect_approval_requested',
+      targetUserId,
+      candidate: body.candidate ?? {},
+      candidateRecordId,
+      socialRequestId,
+      idempotencyKey,
+      payload: {
+        action: 'candidate.connect',
+        approvalId: approval.id,
+        toolCallId: pendingToolCall.id,
+        opportunityId: cleanDisplayText(body.opportunityId, '') || null,
+      },
+    });
 
     const pendingFriendAction = {
       ...pendingToolCall,
@@ -1659,6 +1816,24 @@ export class SocialAgentCandidateActionService {
       openerDraft.transitionPatch,
     );
     await this.taskRepo.save(input.task);
+    await this.recordCandidateAuditEvent({
+      ownerUserId: input.ownerUserId,
+      task: input.task,
+      eventType: 'invite_approval_requested',
+      targetUserId: input.targetUserId,
+      candidate: input.candidate,
+      candidateRecordId: input.candidateRecordId,
+      socialRequestId: input.socialRequestId,
+      idempotencyKey:
+        (input.body.idempotencyKey ??
+          cleanDisplayText(payload.idempotencyKey, '')) ||
+        `opener-approval:${input.task.id}:${input.targetUserId}`,
+      payload: {
+        action: 'opener.confirm_send',
+        approvalId: approval.id,
+        messagePreview: input.text,
+      },
+    });
 
     const displayName =
       cleanDisplayText(
@@ -1862,12 +2037,99 @@ export class SocialAgentCandidateActionService {
     await this.interestEvents.recordEvent(eventInput);
   }
 
+  private async recordCandidateAuditEvent(input: {
+    ownerUserId: number;
+    task: AgentTask;
+    eventType: SocialCandidateEventType;
+    targetUserId?: number | null;
+    candidate?: Record<string, unknown> | null;
+    candidateRecordId?: number | null;
+    socialRequestId?: number | null;
+    matchingJobId?: number | null;
+    publicIntentId?: string | null;
+    idempotencyKey?: string | null;
+    payload?: Record<string, unknown> | null;
+    metadata?: Record<string, unknown> | null;
+  }): Promise<void> {
+    if (!this.candidateAudit) return;
+    const candidate = input.candidate ?? {};
+    const candidateRecordId =
+      input.candidateRecordId ?? this.number(candidate.candidateRecordId);
+    const socialRequestId =
+      input.socialRequestId ?? this.number(candidate.socialRequestId);
+    const targetUserId =
+      input.targetUserId ??
+      this.number(
+        candidate.targetUserId ?? candidate.candidateUserId ?? candidate.userId,
+      );
+    const taskResult = this.isRecord(input.task.result)
+      ? input.task.result
+      : {};
+    const chatRun = this.isRecord(taskResult.chatRun) ? taskResult.chatRun : {};
+    const matchingJobId =
+      input.matchingJobId ??
+      this.number(chatRun.matchingJobId ?? taskResult.matchingJobId);
+    const publicIntentId =
+      cleanDisplayText(
+        input.publicIntentId ??
+          candidate.publicIntentId ??
+          chatRun.publicIntentId,
+        '',
+      ) || null;
+    const snapshotId =
+      this.number(candidate.candidateSnapshotId) ??
+      this.number(chatRun.candidateSnapshotId);
+    const dedupeKey =
+      input.idempotencyKey ||
+      [
+        'candidate-event',
+        input.ownerUserId,
+        input.task.id,
+        input.eventType,
+        targetUserId ?? 'no-target',
+        candidateRecordId ?? socialRequestId ?? snapshotId ?? 'no-record',
+      ].join(':');
+    try {
+      await this.candidateAudit.recordEvent({
+        ownerUserId: input.ownerUserId,
+        taskId: input.task.id,
+        snapshotId,
+        socialRequestId,
+        publicIntentId,
+        matchingJobId,
+        candidateUserId: targetUserId,
+        candidateRecordId,
+        eventType: input.eventType,
+        idempotencyKey: dedupeKey,
+        source: this.cardActionAuditSource(),
+        payload: {
+          candidate,
+          ...(input.payload ?? {}),
+        },
+        metadata: input.metadata ?? {},
+      });
+    } catch (error) {
+      this.logger.warn(
+        JSON.stringify({
+          event: 'social_agent.candidate_action.audit_event_failed',
+          taskId: input.task.id,
+          eventType: input.eventType,
+          message: error instanceof Error ? error.message : String(error),
+        }),
+      );
+    }
+  }
+
   private isCandidateInviteApprovalAction(
     actionType: string | null | undefined,
   ): boolean {
     return (
       actionType === 'send_invite' || actionType === 'send_candidate_message'
     );
+  }
+
+  private cardActionAuditSource(): string {
+    return 'agent_card_action';
   }
 
   private connectCheckpointPayload(input: {
@@ -1987,6 +2249,23 @@ export class SocialAgentCandidateActionService {
         return '寻找更多类似候选人';
       default:
         return '记录候选人偏好';
+    }
+  }
+
+  private auditEventTypeForCandidatePreference(
+    action: string,
+  ): SocialCandidateEventType {
+    switch (action) {
+      case 'candidate.view_detail':
+        return 'candidate_viewed';
+      case 'candidate.like':
+        return 'candidate_saved';
+      case 'candidate.skip':
+        return 'candidate_skipped';
+      case 'candidate.more_like_this':
+        return 'more_like_this_requested';
+      default:
+        return 'candidate_viewed';
     }
   }
 

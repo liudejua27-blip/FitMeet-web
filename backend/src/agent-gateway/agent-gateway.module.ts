@@ -144,6 +144,8 @@ import { SocialAgentLongTermMemory } from './entities/social-agent-long-term-mem
 import { SocialAgentMessageFeedback } from './entities/social-agent-message-feedback.entity';
 import { AgentFeedbackEvent } from './entities/agent-feedback-event.entity';
 import { CandidateSearchIndex } from './entities/candidate-search-index.entity';
+import { SocialCandidateEvent } from './entities/social-candidate-event.entity';
+import { SocialCandidateSnapshot } from './entities/social-candidate-snapshot.entity';
 import {
   SocialAgentReminder,
   SocialAgentReminderPreference,
@@ -151,6 +153,7 @@ import {
 import { SocialAgentUserInterestEvent } from './entities/social-agent-user-interest-event.entity';
 import { SocialAgentUserInterestEventService } from './social-agent-user-interest-event.service';
 import { SocialAgentPreferenceGeneralizationService } from './social-agent-preference-generalization.service';
+import { SocialCandidateAuditService } from './social-candidate-audit.service';
 import { SocialAgentRagService } from './social-agent-rag.service';
 import { SocialAgentRouteContextService } from './social-agent-route-context.service';
 import { SocialAgentRouteCandidateConfirmationService } from './social-agent-route-candidate-confirmation.service';
@@ -289,6 +292,8 @@ import { AdminRbacModule } from '../admin-rbac/admin-rbac.module';
       SocialAgentMessageFeedback,
       AgentFeedbackEvent,
       CandidateSearchIndex,
+      SocialCandidateSnapshot,
+      SocialCandidateEvent,
       SocialAgentUserInterestEvent,
       SocialAgentReminderPreference,
       SocialAgentReminder,
@@ -416,6 +421,7 @@ import { AdminRbacModule } from '../admin-rbac/admin-rbac.module';
     SocialAgentLongTermMemoryService,
     SocialAgentUserInterestEventService,
     SocialAgentPreferenceGeneralizationService,
+    SocialCandidateAuditService,
     SocialAgentRagService,
     SocialAgentRouteContextService,
     SocialAgentRouteCandidateConfirmationService,
@@ -549,6 +555,7 @@ import { AdminRbacModule } from '../admin-rbac/admin-rbac.module';
     SocialAgentLongTermMemoryService,
     SocialAgentUserInterestEventService,
     SocialAgentPreferenceGeneralizationService,
+    SocialCandidateAuditService,
     SocialAgentRagService,
     SocialAgentRouteContextService,
     SocialAgentToolExecutorService,

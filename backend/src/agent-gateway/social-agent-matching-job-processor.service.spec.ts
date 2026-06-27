@@ -32,12 +32,24 @@ describe('SocialAgentMatchingJobProcessorService', () => {
       [expect.objectContaining({ candidateUserId: 8 })],
       harness.manager,
     );
+    expect(harness.candidateAudit.createSnapshot).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ownerUserId: 7,
+        taskId: 101,
+        socialRequestId: 301,
+        publicIntentId: 'social_request_301',
+        matchingJobId: 9001,
+        snapshotType: 'matching_job_result',
+        candidates: [expect.objectContaining({ candidateUserId: 8 })],
+      }),
+      harness.manager,
+    );
     expect(harness.manager.query).toHaveBeenCalledWith(
       expect.stringContaining('UPDATE "matching_jobs"'),
       expect.arrayContaining([
         MatchingJobStatus.CandidatesReady,
         1,
-        expect.any(String),
+        expect.stringContaining('"candidateSnapshotId":501'),
       ]),
     );
     expect(harness.taskRepo.save).toHaveBeenCalledWith(
@@ -63,6 +75,7 @@ describe('SocialAgentMatchingJobProcessorService', () => {
       expect.objectContaining({
         taskId: 101,
         candidateCount: 1,
+        candidateSnapshotId: 501,
         matchingJobStatus: MatchingJobStatus.CandidatesReady,
       }),
     );
@@ -363,6 +376,12 @@ function makeHarness(
       recommendedStrategyId: 'expand_distance',
     })),
   };
+  const candidateAudit = {
+    createSnapshot: jest.fn(async () => ({
+      id: 501,
+      candidateCount: options.candidates?.length ?? 0,
+    })),
+  };
   const publicIntentSave = jest.fn(async (value) => value);
   const manager = {
     query: jest.fn(async (sql: string, params?: unknown[]) => {
@@ -408,6 +427,12 @@ function makeHarness(
       }
       if (name === 'AgentTaskEvent') {
         return eventRepo;
+      }
+      if (name === 'SocialCandidateSnapshot') {
+        return {
+          create: jest.fn((value) => value),
+          save: jest.fn(async (value) => ({ ...value, id: 501 })),
+        };
       }
       return {};
     }),
@@ -460,8 +485,10 @@ function makeHarness(
       candidateSearchIndex as never,
       realtime as never,
       relaxation as never,
+      candidateAudit as never,
     ),
     candidateSearchIndex,
+    candidateAudit,
     manager,
     taskRepo,
     realtime,

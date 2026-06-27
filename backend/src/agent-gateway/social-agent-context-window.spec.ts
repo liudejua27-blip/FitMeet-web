@@ -17,9 +17,14 @@ describe('social-agent-context-window', () => {
     expect(socialAgentContextTurnLimit()).toBe(
       SOCIAL_AGENT_DEFAULT_CONTEXT_TURNS,
     );
+    const history = Array.from({ length: 100 }, (_, index) => `turn-${index}`);
+
+    expect(selectSocialAgentContextWindow(history)).toEqual(
+      history.slice(-SOCIAL_AGENT_DEFAULT_CONTEXT_TURNS),
+    );
   });
 
-  it('allows larger configured windows but clamps them to a safe maximum', () => {
+  it('does not let explicit tiny windows weaken LLM-facing memory', () => {
     expect(
       socialAgentContextTurnLimit(
         config({ SOCIAL_AGENT_CONTEXT_TURN_LIMIT: '8' }),

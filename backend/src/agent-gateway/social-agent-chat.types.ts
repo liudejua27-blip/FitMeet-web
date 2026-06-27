@@ -59,6 +59,7 @@ export interface SocialAgentChatCandidate {
   targetUserId: number;
   userId: number;
   candidateUserId?: number;
+  candidateSnapshotId?: number | null;
   publicIntentId?: string | null;
   activityId?: number | null;
   displayName?: string;
