@@ -2,23 +2,19 @@ import {
   SocialRequestCandidate,
   SocialRequestCandidateStatus,
 } from '../match/social-request-candidate.entity';
-import type { CandidatePoolCandidate } from './social-agent-candidate-pool.service';
-
-type CandidateRowSource = Pick<
-  CandidatePoolCandidate,
-  | 'matchScore'
-  | 'level'
-  | 'scoreBreakdown'
-  | 'matchReasons'
-  | 'commonTags'
-  | 'risk'
-  | 'suggestedOpener'
->;
-
-type CandidateRowTarget = Pick<
-  CandidatePoolCandidate,
-  'candidateRecordId' | 'socialRequestId'
->;
+import {
+  FITMEET_MATCH_SCORE_VERSION,
+  candidateClampScore,
+  candidateMatchLevel,
+} from './social-agent-candidate-scoring';
+import {
+  type CandidateRowSource,
+  type CandidateRowTarget,
+  candidateRowExposureReason,
+  candidateRowExplanation,
+  candidateRowRelationshipState,
+  candidateRowSourceId,
+} from './social-agent-candidate-row-metadata';
 
 export function applySocialAgentCandidateRowState(input: {
   row: SocialRequestCandidate;
@@ -26,9 +22,19 @@ export function applySocialAgentCandidateRowState(input: {
   existingStatus?: SocialRequestCandidateStatus | null;
 }): SocialRequestCandidate {
   const { candidate, existingStatus, row } = input;
-  row.score = candidate.matchScore;
-  row.level = candidate.level;
+  const score = candidateClampScore(candidate.matchScore);
+  row.score = score;
+  row.level = candidateMatchLevel(score);
   row.scoreBreakdown = candidate.scoreBreakdown;
+  row.sourceType = candidate.source ?? 'profile_candidate';
+  row.sourceId = candidateRowSourceId(candidate);
+  row.publicIntentId = candidate.publicIntentId ?? null;
+  row.activityId = candidate.activityId ?? null;
+  row.rankPosition = candidate.rankPosition ?? null;
+  row.scoreVersion = candidate.scoreVersion || FITMEET_MATCH_SCORE_VERSION;
+  row.explanation = candidateRowExplanation(candidate);
+  row.relationshipState = candidateRowRelationshipState(candidate);
+  row.exposureReason = candidateRowExposureReason(candidate);
   row.reasons = candidate.matchReasons;
   row.commonTags = candidate.commonTags;
   row.distanceKm = null;

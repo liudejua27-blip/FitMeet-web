@@ -2,6 +2,8 @@ import { cleanDisplayText } from '../common/display-text.util';
 import { sanitizeCity } from '../common/city.util';
 import { CandidateMatchLevel } from '../match/social-request-candidate.entity';
 
+export const FITMEET_MATCH_SCORE_VERSION = 'fitmeet_match_v1';
+
 export function candidateCommonTags(
   queryTags: string[],
   candidateTags: string[],
