@@ -305,6 +305,11 @@ describe('LifeGraphService', () => {
           fieldValue: '青岛',
           source: LifeGraphFieldSource.AiInferred,
           requiresUserConfirmation: true,
+          sensitivityLevel: 'medium',
+          decay: expect.objectContaining({
+            mode: 'stable',
+            reviewAfterDays: 180,
+          }),
         }),
         expect.objectContaining({
           category: LifeGraphFieldCategory.Identity,
@@ -315,6 +320,12 @@ describe('LifeGraphService', () => {
           category: LifeGraphFieldCategory.Lifestyle,
           fieldKey: 'availableTimes',
           fieldValue: ['周末下午'],
+          sensitivityLevel: 'low',
+          decay: expect.objectContaining({
+            mode: 'time_decay',
+            halfLifeDays: 90,
+            reviewAfterDays: 45,
+          }),
         }),
         expect.objectContaining({
           category: LifeGraphFieldCategory.FitnessActivity,

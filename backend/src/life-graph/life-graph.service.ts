@@ -1936,6 +1936,11 @@ export class LifeGraphService {
         status,
         conflict,
         oldValue: existing?.fieldValue ?? null,
+        sensitivityLevel: lifeGraphSocialFactSensitivity(
+          item.category,
+          item.fieldKey,
+        ),
+        decay: lifeGraphSocialFactDecay(item.category, item.fieldKey),
       };
       proposedFields.push(proposed);
       await this.writeAuditLog({
@@ -3194,6 +3199,76 @@ export class LifeGraphService {
       rejectedAt: proposal.rejectedAt?.toISOString() ?? null,
     };
   }
+}
+
+function lifeGraphSocialFactSensitivity(
+  category: LifeGraphFieldCategory,
+  fieldKey: string,
+): 'low' | 'medium' | 'high' {
+  if (
+    category === LifeGraphFieldCategory.TrustSafety ||
+    category === LifeGraphFieldCategory.PrivacyBoundary ||
+    SENSITIVE_SIGNAL_KEYS.has(fieldKey)
+  ) {
+    return 'high';
+  }
+  if (
+    category === LifeGraphFieldCategory.Identity ||
+    category === LifeGraphFieldCategory.InteractionMemory
+  ) {
+    return 'medium';
+  }
+  return 'low';
+}
+
+function lifeGraphSocialFactDecay(
+  category: LifeGraphFieldCategory,
+  fieldKey: string,
+): {
+  mode: 'time_decay' | 'stable';
+  halfLifeDays: number | null;
+  reviewAfterDays: number | null;
+  reason: string;
+} {
+  if (
+    category === LifeGraphFieldCategory.Identity ||
+    fieldKey === 'city' ||
+    fieldKey === 'timezone' ||
+    fieldKey === 'preferredLanguage'
+  ) {
+    return {
+      mode: 'stable',
+      halfLifeDays: null,
+      reviewAfterDays: 180,
+      reason: '身份和常驻信息变化较慢，但仍应定期确认。',
+    };
+  }
+  if (category === LifeGraphFieldCategory.InteractionMemory) {
+    return {
+      mode: 'time_decay',
+      halfLifeDays: 30,
+      reviewAfterDays: 14,
+      reason: '互动反馈是近期信号，会随时间降低权重。',
+    };
+  }
+  if (
+    category === LifeGraphFieldCategory.SocialIntent ||
+    category === LifeGraphFieldCategory.Lifestyle ||
+    category === LifeGraphFieldCategory.FitnessActivity
+  ) {
+    return {
+      mode: 'time_decay',
+      halfLifeDays: 90,
+      reviewAfterDays: 45,
+      reason: '兴趣、风格和可约时间会随阶段变化，需要复查。',
+    };
+  }
+  return {
+    mode: 'time_decay',
+    halfLifeDays: 60,
+    reviewAfterDays: 30,
+    reason: '社交事实默认按近期行为衰减。',
+  };
 }
 
 function imported(

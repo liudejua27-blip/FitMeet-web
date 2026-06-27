@@ -265,6 +265,13 @@ export class LifeGraphProposedFieldDto {
     | 'revoked_conflict';
   conflict: boolean;
   oldValue: unknown;
+  sensitivityLevel?: 'low' | 'medium' | 'high';
+  decay?: {
+    mode: 'time_decay' | 'stable';
+    halfLifeDays: number | null;
+    reviewAfterDays: number | null;
+    reason: string;
+  };
 }
 
 export class LifeGraphProposalDto {

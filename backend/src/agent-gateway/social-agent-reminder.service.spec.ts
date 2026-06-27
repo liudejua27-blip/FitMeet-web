@@ -356,6 +356,79 @@ describe('SocialAgentReminderService', () => {
     );
   });
 
+  it('turns a saved meet-loop lifecycle into a check-in reminder without external actions', async () => {
+    const { service, taskRepo, notifications } = build();
+    taskRepo.rows.push({
+      id: 45,
+      ownerUserId: 7,
+      title: '五四广场散步',
+      goal: '明晚七点五四广场散步',
+      taskType: 'activity_meet_loop',
+      status: AgentTaskStatus.WaitingReply,
+      updatedAt: new Date(Date.now() - 60 * 60 * 1000),
+      result: {
+        meetLoop: {
+          status: 'activity_confirmed',
+          loopStage: 'activity_confirmed',
+          waitingFor: 'activity_check_in',
+          activityId: 91,
+          candidateUserId: 13,
+        },
+      },
+    });
+    taskRepo.findOne.mockResolvedValueOnce(taskRepo.rows[0]);
+
+    await service.updatePreference(7, {
+      enabled: true,
+      topics: ['activity'],
+      scenes: ['activity_follow_up'],
+      quietStart: '00:00',
+      quietEnd: '00:00',
+      frequency: 'weekly',
+    });
+    const result = await service.runOnce(7);
+
+    expect(result.skipped).toBe(false);
+    expect(result.reminder).toMatchObject({
+      topic: 'activity',
+      title: '约练快开始了',
+      message: expect.stringContaining('到达公共场所后可以在 Agent 里签到'),
+      taskId: 45,
+      context: expect.objectContaining({
+        scene: 'activity_follow_up',
+        meetLoopLifecycleStage: 'checkin_available',
+        meetLoopLifecycleLabel: '可签到',
+        meetLoopWaitingFor: 'activity_check_in',
+        meetLoopNextAction: expect.stringContaining('签到'),
+        activityId: 91,
+        candidateUserId: 13,
+        suggestionOnly: true,
+        allowedActions: ['open_agent_chat', 'view_safe_opportunities'],
+        prohibitedActions: expect.arrayContaining([
+          'send_message',
+          'add_friend',
+          'create_activity',
+          'publish_activity',
+        ]),
+      }),
+    });
+    expect(result.reminder?.dedupeKey).toContain(
+      'meet_loop:checkin_available:45',
+    );
+    expect(notifications.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        targetId: result.reminder?.id,
+        pushPayload: expect.objectContaining({
+          route: '/agent/chat/45',
+          reminderContext: expect.objectContaining({
+            meetLoopLifecycleStage: 'checkin_available',
+            activityId: 91,
+          }),
+        }),
+      }),
+    );
+  });
+
   it('keeps reminder notification delivery in-app only even when payload is routed through notifications', async () => {
     const { service, profileRepo, notifications } = build();
     profileRepo.rows.push({
