@@ -36,6 +36,7 @@ function repo<T>(rows: T[] = []) {
 }
 
 const now = new Date('2026-05-23T08:00:00.000Z');
+const futureActivityEnd = new Date('2099-06-27T08:00:00.000Z');
 
 function realUser(id: number, overrides: Partial<User> = {}): User {
   return {
@@ -295,6 +296,59 @@ describe('SocialAgentCandidatePoolService', () => {
     expect(
       result.candidates[0].scoreBreakdown.interestSimilarity,
     ).toBeGreaterThan(0);
+  });
+
+  it('uses candidate search index filters to narrow profile and public-intent recall', async () => {
+    const { service } = makeService({
+      users: [realUser(1), realUser(2), realUser(3)],
+      profiles: [
+        profile(2, {
+          nickname: '索引外候选',
+          interestTags: ['散步'],
+          profileDiscoverable: true,
+          agentCanRecommendMe: true,
+        }),
+        profile(3, {
+          nickname: '索引命中候选',
+          interestTags: ['散步'],
+          profileDiscoverable: true,
+          agentCanRecommendMe: true,
+        }),
+      ],
+      publicIntents: [
+        publicIntent('intent_2', 2, {
+          title: '索引外公开约练',
+          requestType: '散步',
+          interestTags: ['散步'],
+        }),
+        publicIntent('intent_3', 3, {
+          title: '索引命中公开约练',
+          requestType: '散步',
+          interestTags: ['散步'],
+        }),
+      ],
+    });
+
+    const result = await service.searchSocial({
+      ownerUserId: 1,
+      city: '青岛',
+      interestTags: ['散步'],
+      rawText: '今晚找散步搭子',
+      candidateUserIds: [3],
+      publicIntentIds: ['intent_3'],
+    });
+
+    expect(
+      result.candidates.map((candidate) => candidate.candidateUserId),
+    ).not.toContain(2);
+    expect(
+      result.candidates.map((candidate) => candidate.publicIntentId),
+    ).not.toContain('intent_2');
+    expect(
+      result.candidates.map((candidate) => candidate.candidateUserId),
+    ).toContain(3);
+    expect(result.query.candidateUserIds).toEqual([3]);
+    expect(result.query.publicIntentIds).toEqual(['intent_3']);
   });
 
   it('uses candidate preference text to rank consented profile candidates', async () => {
@@ -811,7 +865,7 @@ describe('SocialAgentCandidatePoolService', () => {
           city: '青岛',
           status: SocialActivityStatus.Confirmed,
           startTime: now,
-          endTime: new Date('2026-06-27T08:00:00.000Z'),
+          endTime: futureActivityEnd,
           createdAt: now,
           updatedAt: now,
         },
@@ -866,7 +920,7 @@ describe('SocialAgentCandidatePoolService', () => {
           city: '青岛',
           status: SocialActivityStatus.Confirmed,
           startTime: now,
-          endTime: new Date('2026-06-27T08:00:00.000Z'),
+          endTime: futureActivityEnd,
           createdAt: now,
           updatedAt: now,
         },
@@ -926,7 +980,7 @@ describe('SocialAgentCandidatePoolService', () => {
           city: '青岛',
           status: SocialActivityStatus.Confirmed,
           startTime: now,
-          endTime: new Date('2026-06-27T08:00:00.000Z'),
+          endTime: futureActivityEnd,
           createdAt: now,
           updatedAt: now,
         },
@@ -940,7 +994,7 @@ describe('SocialAgentCandidatePoolService', () => {
           city: '青岛',
           status: SocialActivityStatus.Confirmed,
           startTime: now,
-          endTime: new Date('2026-06-27T08:00:00.000Z'),
+          endTime: futureActivityEnd,
           createdAt: now,
           updatedAt: now,
         },
@@ -984,7 +1038,7 @@ describe('SocialAgentCandidatePoolService', () => {
           city: '青岛',
           status: SocialActivityStatus.Confirmed,
           startTime: now,
-          endTime: new Date('2026-06-27T08:00:00.000Z'),
+          endTime: futureActivityEnd,
           createdAt: now,
           updatedAt: now,
         },

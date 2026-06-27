@@ -132,6 +132,7 @@ import { SocialCodexTraceEvalService } from './social-codex-trace-eval.service';
 import { AgentRunCheckpointService } from './agent-run-checkpoint.service';
 import { FitMeetAgentRuntimeService } from './fitmeet-agent-runtime.service';
 import { SocialAgentCandidatePoolService } from './social-agent-candidate-pool.service';
+import { CandidateSearchIndexService } from './candidate-search-index.service';
 import { SocialAgentLlmOutputCacheService } from './social-agent-llm-output-cache.service';
 import { SocialAgentSemanticResponseCacheService } from './social-agent-semantic-response-cache.service';
 import { SocialAgentToolResultCacheService } from './social-agent-tool-result-cache.service';
@@ -142,6 +143,7 @@ import { SocialAgentLongTermMemoryService } from './social-agent-long-term-memor
 import { SocialAgentLongTermMemory } from './entities/social-agent-long-term-memory.entity';
 import { SocialAgentMessageFeedback } from './entities/social-agent-message-feedback.entity';
 import { AgentFeedbackEvent } from './entities/agent-feedback-event.entity';
+import { CandidateSearchIndex } from './entities/candidate-search-index.entity';
 import {
   SocialAgentReminder,
   SocialAgentReminderPreference,
@@ -280,6 +282,7 @@ import { AdminRbacModule } from '../admin-rbac/admin-rbac.module';
       SocialAgentLongTermMemory,
       SocialAgentMessageFeedback,
       AgentFeedbackEvent,
+      CandidateSearchIndex,
       SocialAgentUserInterestEvent,
       SocialAgentReminderPreference,
       SocialAgentReminder,
@@ -397,6 +400,7 @@ import { AdminRbacModule } from '../admin-rbac/admin-rbac.module';
     SocialAgentEmbeddingCacheService,
     SocialAgentTokenBudgetContextPackerService,
     SocialAgentCandidatePoolService,
+    CandidateSearchIndexService,
     SocialAgentMetricsService,
     SocialAgentLongTermMemoryService,
     SocialAgentUserInterestEventService,
@@ -524,6 +528,7 @@ import { AdminRbacModule } from '../admin-rbac/admin-rbac.module';
     SocialAgentEmbeddingCacheService,
     SocialAgentTokenBudgetContextPackerService,
     SocialAgentCandidatePoolService,
+    CandidateSearchIndexService,
     SocialAgentLongTermMemoryService,
     SocialAgentUserInterestEventService,
     SocialAgentRagService,

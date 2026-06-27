@@ -38,6 +38,8 @@ import {
   SocialAgentCandidatePoolService,
 } from './social-agent-candidate-pool.service';
 import { buildSocialAgentCandidateDetailCard } from './social-agent-card-action.presenter';
+import { CandidateSearchIndexService } from './candidate-search-index.service';
+import { CandidateSearchIndex } from './entities/candidate-search-index.entity';
 
 const SOCIAL_REQUEST_ADVISORY_LOCK_NAMESPACE = 1_782_160_006;
 
@@ -55,6 +57,13 @@ type JobValidationResult = {
   socialRequest: UserSocialRequest;
   publicIntent: PublicSocialIntent;
   sourceVersion: string;
+};
+
+type CandidateIndexHints = {
+  candidateUserIds: number[];
+  publicIntentIds: string[];
+  sourceCount: number;
+  used: boolean;
 };
 
 type FinalizedMatchingJob = {
@@ -100,6 +109,8 @@ export class SocialAgentMatchingJobProcessorService {
     private readonly publicIntentRepo: Repository<PublicSocialIntent>,
     @InjectRepository(UserSocialRequest)
     private readonly userSocialRequestRepo: Repository<UserSocialRequest>,
+    @Optional()
+    private readonly candidateSearchIndex?: CandidateSearchIndexService,
     @Optional()
     private readonly realtime?: RealtimeEventService,
   ) {}
@@ -165,11 +176,17 @@ export class SocialAgentMatchingJobProcessorService {
     const heartbeat = this.startLeaseHeartbeat(job, options.leaseMs);
     try {
       const validation = await this.validateJob(job);
-      const searchResult = await this.searchCandidates(job, validation);
+      const indexHints = await this.resolveCandidateIndexHints(validation);
+      const searchResult = await this.searchCandidates(
+        job,
+        validation,
+        indexHints,
+      );
       const finalized = await this.finalizeSearchResult({
         job,
         validation,
         searchResult,
+        indexHints,
       });
       this.emitMatchingResult(finalized);
       return finalized.job.status;
@@ -239,6 +256,7 @@ export class SocialAgentMatchingJobProcessorService {
   private async searchCandidates(
     job: MatchingJob,
     validation: JobValidationResult,
+    indexHints: CandidateIndexHints,
   ): Promise<CandidatePoolSearchResult> {
     const request = validation.socialRequest;
     const intent = validation.publicIntent;
@@ -283,7 +301,39 @@ export class SocialAgentMatchingJobProcessorService {
           : null,
       limit: 10,
       persistCandidates: false,
+      candidateUserIds: indexHints.used ? indexHints.candidateUserIds : null,
+      publicIntentIds: indexHints.used ? indexHints.publicIntentIds : null,
     });
+  }
+
+  private async resolveCandidateIndexHints(
+    validation: JobValidationResult,
+  ): Promise<CandidateIndexHints> {
+    if (!this.candidateSearchIndex) return emptyCandidateIndexHints();
+    await this.candidateSearchIndex.upsertFromPublicIntent(
+      validation.publicIntent.id,
+    );
+    const query = {
+      ownerUserId: validation.ownerUserId,
+      city: validation.socialRequest.city || validation.publicIntent.city,
+      activityTypes: [
+        validation.socialRequest.activityType,
+        validation.publicIntent.requestType,
+      ],
+      interestTags: this.stringList(validation.socialRequest.interestTags)
+        .length
+        ? this.stringList(validation.socialRequest.interestTags)
+        : this.stringList(validation.publicIntent.interestTags),
+      timeBuckets: [validation.publicIntent.timePreference],
+      limit: 80,
+    };
+    let rows = await this.candidateSearchIndex.search(query);
+    if (rows.length === 0) {
+      await this.candidateSearchIndex.syncActiveProfiles({ limit: 500 });
+      await this.candidateSearchIndex.syncActivePublicIntents({ limit: 500 });
+      rows = await this.candidateSearchIndex.search(query);
+    }
+    return buildCandidateIndexHints(rows);
   }
 
   private async validateJob(job: MatchingJob): Promise<JobValidationResult> {
@@ -360,6 +410,7 @@ export class SocialAgentMatchingJobProcessorService {
     job: ClaimedMatchingJob;
     validation: JobValidationResult;
     searchResult: CandidatePoolSearchResult;
+    indexHints: CandidateIndexHints;
   }): Promise<FinalizedMatchingJob> {
     return this.taskRepo.manager.transaction(async (manager) => {
       await this.lockSocialRequestAggregate(
@@ -427,6 +478,12 @@ export class SocialAgentMatchingJobProcessorService {
         publicIntentId: lockedJob.publicIntentId,
         socialRequestId: validation.socialRequest.id,
         debugReasons: sanitizeForDisplay(input.searchResult.debugReasons),
+        candidateSearchIndex: {
+          used: input.indexHints.used,
+          sourceCount: input.indexHints.sourceCount,
+          candidateUserIds: input.indexHints.candidateUserIds,
+          publicIntentIds: input.indexHints.publicIntentIds,
+        },
       };
       const completedJob = {
         ...lockedJob,
@@ -457,6 +514,7 @@ export class SocialAgentMatchingJobProcessorService {
           validation,
           candidates,
           searchResult: input.searchResult,
+          indexHints: input.indexHints,
         });
       }
 
@@ -474,6 +532,10 @@ export class SocialAgentMatchingJobProcessorService {
         matchingJobStatus: status,
         candidateCount,
         matchedCount: candidateCount,
+        candidateSearchIndex: {
+          used: input.indexHints.used,
+          sourceCount: input.indexHints.sourceCount,
+        },
         matchedAt: completedAt.toISOString(),
       };
       await manager
@@ -531,6 +593,7 @@ export class SocialAgentMatchingJobProcessorService {
       validation: JobValidationResult;
       candidates: SocialAgentChatCandidate[];
       searchResult: CandidatePoolSearchResult;
+      indexHints: CandidateIndexHints;
     },
   ): Promise<void> {
     const taskId = this.taskIdFromJob(input.job);
@@ -584,6 +647,12 @@ export class SocialAgentMatchingJobProcessorService {
         debugReasons: sanitizeForDisplay(input.searchResult.debugReasons),
         matchingJobId: input.job.id,
         matchingJobStatus: input.job.status,
+        candidateSearchIndex: {
+          used: input.indexHints.used,
+          sourceCount: input.indexHints.sourceCount,
+          candidateUserIds: input.indexHints.candidateUserIds,
+          publicIntentIds: input.indexHints.publicIntentIds,
+        },
         refreshedAt: now,
         statusReason: task.statusReason,
         cards: candidateCards,
@@ -613,6 +682,10 @@ export class SocialAgentMatchingJobProcessorService {
         })),
         matchingJobId: input.job.id,
         matchingJobStatus: input.job.status,
+        candidateSearchIndex: {
+          used: input.indexHints.used,
+          sourceCount: input.indexHints.sourceCount,
+        },
         updatedAt: now,
       },
     };
@@ -638,6 +711,10 @@ export class SocialAgentMatchingJobProcessorService {
           message: input.searchResult.message,
           matchingJobId: input.job.id,
           publicIntentId: input.job.publicIntentId,
+          candidateSearchIndex: {
+            used: input.indexHints.used,
+            sourceCount: input.indexHints.sourceCount,
+          },
           createdAt: now,
         }) as Record<string, unknown>,
       }),
@@ -931,4 +1008,54 @@ export class SocialAgentMatchingJobProcessorService {
   private text(value: unknown): string {
     return cleanDisplayText(value, '').trim().toLowerCase();
   }
+}
+
+function emptyCandidateIndexHints(): CandidateIndexHints {
+  return {
+    candidateUserIds: [],
+    publicIntentIds: [],
+    sourceCount: 0,
+    used: false,
+  };
+}
+
+function buildCandidateIndexHints(
+  rows: CandidateSearchIndex[],
+): CandidateIndexHints {
+  const candidateUserIds = uniqueNumbers(rows.map((row) => row.userId));
+  const publicIntentIds = uniqueStrings(
+    rows.map((row) => row.publicIntentId ?? ''),
+  );
+  return {
+    candidateUserIds,
+    publicIntentIds,
+    sourceCount: rows.length,
+    used: rows.length > 0,
+  };
+}
+
+function uniqueNumbers(values: unknown[]): number[] {
+  const seen = new Set<number>();
+  const out: number[] = [];
+  for (const value of values) {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed) || parsed <= 0) continue;
+    const id = Math.floor(parsed);
+    if (seen.has(id)) continue;
+    seen.add(id);
+    out.push(id);
+  }
+  return out;
+}
+
+function uniqueStrings(values: unknown[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const value of values) {
+    const text = cleanDisplayText(value, '');
+    if (!text || seen.has(text)) continue;
+    seen.add(text);
+    out.push(text);
+  }
+  return out;
 }
