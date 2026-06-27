@@ -300,6 +300,12 @@ function makeService(options: { agentLoop?: unknown } = {}) {
     messages as never,
     toolInput,
     taskMemory,
+    {
+      runOnce: jest.fn(async (input) => ({
+        result: await input.execute(),
+        reused: false,
+      })),
+    } as never,
   );
   const messageEventTools = new SocialAgentMessageEventToolService(
     messages as never,

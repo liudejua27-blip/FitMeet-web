@@ -32,20 +32,27 @@ function makeService() {
     startConversation: jest.fn(),
     sendMessage: jest.fn(),
   };
+  const sideEffects = {
+    runOnce: jest.fn(async (input) => ({
+      result: await input.execute(),
+      reused: false,
+    })),
+  };
   const toolInput = new SocialAgentToolInputParserService();
   const service = new SocialAgentActivityToolService(
     activities as never,
     messages as never,
     toolInput,
     new SocialAgentTaskMemoryService(toolInput),
+    sideEffects as never,
   );
 
-  return { service, activities, messages };
+  return { service, activities, messages, sideEffects };
 }
 
 describe('SocialAgentActivityToolService', () => {
   it('creates activities with meet-loop safety defaults and no precise location leak', async () => {
-    const { service, activities } = makeService();
+    const { service, activities, sideEffects } = makeService();
     activities.create.mockResolvedValue({
       id: 77,
       status: 'pending_confirm',
@@ -82,6 +89,19 @@ describe('SocialAgentActivityToolService', () => {
         ]),
       }),
     );
+    expect(sideEffects.runOnce).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actorUserId: 1,
+        taskId: 100,
+        effectType: 'create_activity',
+        idempotencyKey:
+          'activity:100:activity:create_activity:2:saturday easy run::qingdao:公共场所待确认',
+        resourceType: 'activity',
+        resourceId:
+          'activity:create_activity:2:saturday easy run::qingdao:公共场所待确认',
+        execute: expect.any(Function),
+      }),
+    );
     expect(result.output).toMatchObject({ id: 77 });
     expect(result.loopUpdates).toMatchObject({
       sourceTool: SocialAgentToolName.CreateActivity,
@@ -92,7 +112,7 @@ describe('SocialAgentActivityToolService', () => {
   });
 
   it('skips duplicate activity invites using social loop memory keys', async () => {
-    const { service, activities } = makeService();
+    const { service, activities, sideEffects } = makeService();
 
     const result = await service.createActivity(
       makeTask({
@@ -114,6 +134,7 @@ describe('SocialAgentActivityToolService', () => {
     );
 
     expect(activities.create).not.toHaveBeenCalled();
+    expect(sideEffects.runOnce).not.toHaveBeenCalled();
     expect(result).toEqual({
       output: {
         skipped: true,
@@ -128,7 +149,7 @@ describe('SocialAgentActivityToolService', () => {
   });
 
   it('creates offline meetings and returns message memory patches', async () => {
-    const { service, activities, messages } = makeService();
+    const { service, activities, messages, sideEffects } = makeService();
     const activity = {
       id: 33,
       title: 'Weekend running meetup',
@@ -165,6 +186,13 @@ describe('SocialAgentActivityToolService', () => {
           activityId: 33,
           targetUserId: 2,
         }),
+      }),
+    );
+    expect(sideEffects.runOnce).toHaveBeenCalledWith(
+      expect.objectContaining({
+        effectType: 'create_activity',
+        idempotencyKey:
+          'activity:100:activity:offline_meeting:2:weekend running meetup::beijing:chaoyang park west gate',
       }),
     );
     expect(messages.sendMessage).toHaveBeenCalledWith(
@@ -205,7 +233,7 @@ describe('SocialAgentActivityToolService', () => {
   });
 
   it('joins activities by id', async () => {
-    const { service, activities } = makeService();
+    const { service, activities, sideEffects } = makeService();
     activities.join.mockResolvedValue({ id: 99, status: 'confirmed' });
 
     await expect(
@@ -217,6 +245,16 @@ describe('SocialAgentActivityToolService', () => {
       joined: true,
     });
     expect(activities.join).toHaveBeenCalledWith(99, 1);
+    expect(sideEffects.runOnce).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actorUserId: 1,
+        taskId: 100,
+        effectType: 'join_activity',
+        idempotencyKey: 'join_activity:100:99',
+        resourceType: 'activity',
+        resourceId: 99,
+      }),
+    );
   });
 
   it('rejects offline meetings without a target and joins without an id', async () => {

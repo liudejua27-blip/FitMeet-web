@@ -41,17 +41,24 @@ function makeHarness() {
   const outboxWorker = {
     processPending: jest.fn().mockResolvedValue({ processed: 1 }),
   };
+  const sideEffects = {
+    runOnce: jest.fn(async (input) => ({
+      result: await input.execute(),
+      reused: false,
+    })),
+  };
   const service = new SocialAgentApplicationActionService(
     applications as never,
     contactPolicy as never,
+    sideEffects as never,
     outboxWorker as never,
   );
-  return { applications, contactPolicy, outboxWorker, service };
+  return { applications, contactPolicy, outboxWorker, sideEffects, service };
 }
 
 describe('SocialAgentApplicationActionService', () => {
   it('accepts an owner application, processes outbox, and returns a messages handoff', async () => {
-    const { applications, contactPolicy, outboxWorker, service } =
+    const { applications, contactPolicy, outboxWorker, sideEffects, service } =
       makeHarness();
 
     const result = await service.performApplicationAction({
@@ -71,6 +78,17 @@ describe('SocialAgentApplicationActionService', () => {
       42,
       { reason: undefined },
       'accept:42',
+    );
+    expect(sideEffects.runOnce).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actorUserId: 7,
+        taskId: 101,
+        effectType: 'public_intent_application.accept',
+        idempotencyKey: 'accept:42',
+        resourceType: 'public_intent_application',
+        resourceId: 42,
+        execute: expect.any(Function),
+      }),
     );
     expect(outboxWorker.processPending).toHaveBeenCalledWith(5);
     expect(contactPolicy.getRelationshipState).toHaveBeenCalledWith(7, 11);
@@ -100,7 +118,7 @@ describe('SocialAgentApplicationActionService', () => {
   });
 
   it('rejects an owner application without creating a conversation handoff', async () => {
-    const { applications, outboxWorker, service } = makeHarness();
+    const { applications, outboxWorker, sideEffects, service } = makeHarness();
 
     const result = await service.performApplicationAction({
       ownerUserId: 7,
@@ -117,6 +135,17 @@ describe('SocialAgentApplicationActionService', () => {
       42,
       { reason: undefined },
       'agent:public-intent-application:42:reject',
+    );
+    expect(sideEffects.runOnce).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actorUserId: 7,
+        taskId: 101,
+        effectType: 'public_intent_application.reject',
+        idempotencyKey: 'agent:public-intent-application:42:reject',
+        resourceType: 'public_intent_application',
+        resourceId: 42,
+        execute: expect.any(Function),
+      }),
     );
     expect(outboxWorker.processPending).not.toHaveBeenCalled();
     expect(result.publicLoop).toEqual(

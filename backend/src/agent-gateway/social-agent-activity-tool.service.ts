@@ -24,6 +24,7 @@ import {
 } from './social-agent-task-memory.service';
 import { SocialAgentToolInputParserService } from './social-agent-tool-input-parser.service';
 import { SocialAgentToolName } from './social-agent-tool.types';
+import { SocialSideEffectService } from './social-side-effect.service';
 
 export type SocialAgentActivityToolResult = {
   output: unknown;
@@ -38,6 +39,7 @@ export class SocialAgentActivityToolService {
     private readonly messages: MessagesService,
     private readonly toolInput: SocialAgentToolInputParserService,
     private readonly taskMemory: SocialAgentTaskMemoryService,
+    private readonly sideEffects: SocialSideEffectService,
   ) {}
 
   async createActivity(
@@ -80,64 +82,91 @@ export class SocialAgentActivityToolService {
       };
     }
 
-    const activity = await this.activities.create(task.ownerUserId, dto);
-    const baseLoopUpdates: Partial<SocialAgentLoopMemory> = {
-      activityInviteKeys: this.taskMemory.appendSocialLoopKey(
-        task,
-        'activityInviteKeys',
-        activityDedupeKey,
-      ),
-      sourceTool: toolName,
-    };
-
-    if (toolName !== SocialAgentToolName.OfflineMeeting) {
-      return { output: activity, loopUpdates: baseLoopUpdates };
-    }
-
-    const offlineTargetUserId = invitedUserId;
-    if (!offlineTargetUserId) {
-      throw new BadRequestException(
-        'targetUserId or invitedUserId is required',
-      );
-    }
-
-    const invite = await this.sendOfflineMeetingInvite(
-      task,
-      input,
-      stepId,
-      activity,
-      offlineTargetUserId,
-    );
-
-    return {
-      output: {
-        id: activity.id,
-        activityId: activity.id,
-        status: activity.status,
-        invitedUserId: offlineTargetUserId,
-        conversationId: invite.conversationId,
-        messageId: invite.messageId,
-        activity,
-        inviteMessage: invite.message,
+    const idempotencyKey =
+      this.readIdempotencyKey(input) ||
+      `activity:${task.id}:${activityDedupeKey}`;
+    const { result } = await this.sideEffects.runOnce<
+      SocialAgentActivityToolResult & Record<string, unknown>
+    >({
+      actorUserId: task.ownerUserId,
+      taskId: task.id,
+      effectType: 'create_activity',
+      idempotencyKey,
+      resourceType: 'activity',
+      resourceId: activityDedupeKey,
+      payloadHash: activityDedupeKey,
+      payload: {
+        toolName,
+        dto,
+        invitedUserId: invitedUserId ?? null,
       },
-      loopUpdates: {
-        ...baseLoopUpdates,
-        conversationId: invite.conversationId,
-        targetUserId: offlineTargetUserId,
-        lastMessageId: invite.messageId,
-        lastAgentMessageId: invite.messageId,
-        sourceTool: SocialAgentToolName.OfflineMeeting,
-        activityId: activity.id,
-      },
-      sentMessage: {
-        id: invite.messageId,
-        conversationId: invite.conversationId,
-        targetUserId: offlineTargetUserId,
-        textPreview: this.taskMemory.preview(invite.text),
-        toolName: SocialAgentToolName.OfflineMeeting,
+      metadata: {
+        source: 'social_agent_activity_tool',
+        toolName,
         stepId,
       },
-    };
+      execute: async () => {
+        const activity = await this.activities.create(task.ownerUserId, dto);
+        const baseLoopUpdates: Partial<SocialAgentLoopMemory> = {
+          activityInviteKeys: this.taskMemory.appendSocialLoopKey(
+            task,
+            'activityInviteKeys',
+            activityDedupeKey,
+          ),
+          sourceTool: toolName,
+        };
+
+        if (toolName !== SocialAgentToolName.OfflineMeeting) {
+          return { output: activity, loopUpdates: baseLoopUpdates };
+        }
+
+        const offlineTargetUserId = invitedUserId;
+        if (!offlineTargetUserId) {
+          throw new BadRequestException(
+            'targetUserId or invitedUserId is required',
+          );
+        }
+
+        const invite = await this.sendOfflineMeetingInvite(
+          task,
+          input,
+          stepId,
+          activity,
+          offlineTargetUserId,
+        );
+
+        return {
+          output: {
+            id: activity.id,
+            activityId: activity.id,
+            status: activity.status,
+            invitedUserId: offlineTargetUserId,
+            conversationId: invite.conversationId,
+            messageId: invite.messageId,
+            activity,
+            inviteMessage: invite.message,
+          },
+          loopUpdates: {
+            ...baseLoopUpdates,
+            conversationId: invite.conversationId,
+            targetUserId: offlineTargetUserId,
+            lastMessageId: invite.messageId,
+            lastAgentMessageId: invite.messageId,
+            sourceTool: SocialAgentToolName.OfflineMeeting,
+            activityId: activity.id,
+          },
+          sentMessage: {
+            id: invite.messageId,
+            conversationId: invite.conversationId,
+            targetUserId: offlineTargetUserId,
+            textPreview: this.taskMemory.preview(invite.text),
+            toolName: SocialAgentToolName.OfflineMeeting,
+            stepId,
+          },
+        };
+      },
+    });
+    return result;
   }
 
   async joinActivity(
@@ -146,12 +175,34 @@ export class SocialAgentActivityToolService {
   ): Promise<unknown> {
     const activityId = this.toolInput.number(input.activityId ?? input.id);
     if (!activityId) throw new BadRequestException('activityId is required');
-    const activity = await this.activities.join(activityId, task.ownerUserId);
-    return {
-      ...this.toolInput.asRecord(activity),
-      activityId,
-      joined: true,
-    };
+    const idempotencyKey =
+      this.readIdempotencyKey(input) ||
+      `join_activity:${task.id}:${activityId}`;
+    const { result } = await this.sideEffects.runOnce({
+      actorUserId: task.ownerUserId,
+      taskId: task.id,
+      effectType: 'join_activity',
+      idempotencyKey,
+      resourceType: 'activity',
+      resourceId: activityId,
+      payload: { activityId },
+      metadata: {
+        source: 'social_agent_activity_tool',
+        toolName: SocialAgentToolName.JoinActivity,
+      },
+      execute: async () => {
+        const activity = await this.activities.join(
+          activityId,
+          task.ownerUserId,
+        );
+        return {
+          ...this.toolInput.asRecord(activity),
+          activityId,
+          joined: true,
+        };
+      },
+    });
+    return result;
   }
 
   private buildActivityDto(
@@ -273,5 +324,17 @@ export class SocialAgentActivityToolService {
     }
     parts.push('请在 FitMeet 中确认是否参加。');
     return parts.join('\n');
+  }
+
+  private readIdempotencyKey(input: Record<string, unknown>): string {
+    const direct = this.toolInput.string(input.idempotencyKey);
+    if (direct) return direct.slice(0, 180);
+    const metadata = this.toolInput.isRecord(input.metadata)
+      ? input.metadata
+      : null;
+    const nested = metadata
+      ? this.toolInput.string(metadata.idempotencyKey)
+      : null;
+    return (nested ?? '').slice(0, 180);
   }
 }
