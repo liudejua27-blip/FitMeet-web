@@ -154,6 +154,7 @@ export const FITMEET_ALPHA_AGENT_TOOL_OWNERS: Record<
     'get_candidate_detail',
     'send_message_to_candidate',
     'connect_candidate',
+    'list_friends',
     'create_activity',
     'get_conversation_messages',
   ],

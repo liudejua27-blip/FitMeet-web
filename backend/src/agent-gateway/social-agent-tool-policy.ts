@@ -250,6 +250,7 @@ export function getSocialAgentToolActionType(
     case SocialAgentToolName.SearchMatches:
     case SocialAgentToolName.ExplainMatches:
     case SocialAgentToolName.ViewMatchHistory:
+    case SocialAgentToolName.ListFriends:
       return AgentActionType.RunMatch;
     case SocialAgentToolName.DraftOpener:
       return AgentActionType.GenerateInvite;
@@ -474,6 +475,7 @@ export function getSocialAgentPermissionActionForTool(
     case SocialAgentToolName.SearchActivities:
     case SocialAgentToolName.SearchMatches:
     case SocialAgentToolName.ViewMatchHistory:
+    case SocialAgentToolName.ListFriends:
       return SocialAgentAction.SearchProfiles;
     case SocialAgentToolName.DraftOpener:
       return SocialAgentAction.DraftMessage;

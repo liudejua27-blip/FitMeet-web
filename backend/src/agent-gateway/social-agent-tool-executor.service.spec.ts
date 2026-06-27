@@ -183,6 +183,7 @@ function makeService(options: { agentLoop?: unknown } = {}) {
     reserveOpener: jest.fn().mockResolvedValue({ status: 'opener_available' }),
   };
   const friends = { ensureFollowing: jest.fn() };
+  const friendList = { listFriends: jest.fn() };
   const activities = { create: jest.fn(), join: jest.fn() };
   const safety = {
     getMutualBlockUserIds: jest.fn().mockResolvedValue(new Set<number>()),
@@ -360,6 +361,10 @@ function makeService(options: { agentLoop?: unknown } = {}) {
     safetyTools as never,
     options.agentLoop as never,
     l5Runtime as never,
+    config as never,
+    undefined,
+    undefined,
+    friendList as never,
   );
 
   return {
@@ -382,6 +387,7 @@ function makeService(options: { agentLoop?: unknown } = {}) {
     ai,
     messages,
     friends,
+    friendList,
     activities,
     safety,
     safetyTools,
@@ -891,6 +897,55 @@ describe('SocialAgentToolExecutorService', () => {
           'public_discoverable_profiles_and_user_consented_public_tags_only',
       }),
     );
+  });
+
+  it('dispatches list_friends as an owner-scoped read tool', async () => {
+    const { service, taskRepo, friendList, friends } = makeService();
+    const task = makeTask({
+      ownerUserId: 7,
+      permissionMode: AgentTaskPermissionMode.Assist,
+      plan: [
+        {
+          id: 'step_1',
+          toolName: 'list_friends',
+          action: 'search_profiles',
+          status: 'planned',
+          input: { limit: 12 },
+        },
+      ],
+    });
+    taskRepo.findOne.mockResolvedValue(task);
+    friendList.listFriends.mockResolvedValue({
+      friends: [
+        {
+          userId: 8,
+          displayName: '周末搭子',
+          nextBestAction: 'open_conversation',
+        },
+      ],
+      total: 1,
+      source: 'friendships_contacts_conversations',
+    });
+
+    const result = await service.executeTask(100);
+
+    expect(result.toolCalls[0]).toMatchObject({
+      toolName: SocialAgentToolName.ListFriends,
+      status: 'succeeded',
+      output: {
+        friends: [
+          expect.objectContaining({
+            userId: 8,
+            nextBestAction: 'open_conversation',
+          }),
+        ],
+      },
+    });
+    expect(friendList.listFriends).toHaveBeenCalledWith({
+      ownerUserId: 7,
+      limit: 12,
+    });
+    expect(friends.ensureFollowing).not.toHaveBeenCalled();
   });
 
   it('passes task context into candidate explanation reasoning', async () => {

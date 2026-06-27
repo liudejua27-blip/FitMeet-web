@@ -16,6 +16,7 @@ export enum SocialAgentToolName {
   SearchMatches = 'search_matches',
   ExplainMatches = 'explain_matches',
   ViewMatchHistory = 'view_match_history',
+  ListFriends = 'list_friends',
   DraftOpener = 'draft_opener',
   SendMessageToCandidate = 'send_message_to_candidate',
   SendMessage = 'send_message',
