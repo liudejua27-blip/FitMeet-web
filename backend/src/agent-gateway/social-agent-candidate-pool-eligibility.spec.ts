@@ -65,6 +65,8 @@ function query(
     socialRequestId: null,
     rawText: '',
     acceptsStrangers: null,
+    candidateUserIds: [],
+    publicIntentIds: [],
     ...overrides,
   };
 }

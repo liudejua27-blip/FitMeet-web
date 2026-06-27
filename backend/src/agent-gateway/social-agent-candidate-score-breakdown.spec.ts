@@ -28,6 +28,8 @@ function query(
     socialRequestId: 101,
     rawText: '周末找青岛低压力跑步搭子',
     acceptsStrangers: null,
+    candidateUserIds: [],
+    publicIntentIds: [],
     ...overrides,
   };
 }
