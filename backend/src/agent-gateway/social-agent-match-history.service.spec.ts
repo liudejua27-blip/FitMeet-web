@@ -8,6 +8,7 @@ import { MatchingJob, MatchingJobStatus } from './entities/matching-job.entity';
 import { SocialCandidateEvent } from './entities/social-candidate-event.entity';
 import { SocialCandidateSnapshot } from './entities/social-candidate-snapshot.entity';
 import { SocialAgentMatchHistoryService } from './social-agent-match-history.service';
+import { UserSocialRequest } from '../social-requests/social-request.entity';
 
 describe('SocialAgentMatchHistoryService', () => {
   it('aggregates candidate snapshots, candidate rows, events, and matching jobs', async () => {
@@ -61,10 +62,12 @@ describe('SocialAgentMatchHistoryService', () => {
     };
     const candidateRepo = { find: jest.fn().mockResolvedValue([candidate]) };
     const matchingJobRepo = { find: jest.fn().mockResolvedValue([job]) };
+    const socialRequestRepo = { find: jest.fn() };
     const service = new SocialAgentMatchHistoryService(
       audit as never,
       candidateRepo as never,
       matchingJobRepo as never,
+      socialRequestRepo as never,
     );
 
     const result = await service.viewMatchHistory({
@@ -146,10 +149,20 @@ describe('SocialAgentMatchHistoryService', () => {
         }),
       ]),
     };
+    const socialRequestRepo = {
+      find: jest.fn().mockResolvedValue([
+        makeSocialRequest({
+          id: 301,
+          userId: 7,
+          updatedAt: new Date('2026-06-02T00:00:00.000Z'),
+        }),
+      ]),
+    };
     const service = new SocialAgentMatchHistoryService(
       audit as never,
       candidateRepo as never,
       { find: jest.fn() } as never,
+      socialRequestRepo as never,
     );
 
     const result = await service.viewMatchHistory({
@@ -157,8 +170,17 @@ describe('SocialAgentMatchHistoryService', () => {
       limit: 100,
     });
 
+    expect(socialRequestRepo.find).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { userId: 7 },
+        take: 150,
+      }),
+    );
     expect(candidateRepo.find).toHaveBeenCalledWith(
-      expect.objectContaining({ take: 50 }),
+      expect.objectContaining({
+        where: { socialRequestId: expect.any(Object) },
+        take: 50,
+      }),
     );
     expect(audit.listRecentEvents).not.toHaveBeenCalled();
     expect(result).toMatchObject({
@@ -172,6 +194,33 @@ describe('SocialAgentMatchHistoryService', () => {
           createdAt: '2026-06-01T00:00:00.000Z',
         },
       ],
+    });
+  });
+
+  it('does not expose candidate rows when the owner has no social requests', async () => {
+    const audit = {
+      listRecentSnapshots: jest.fn().mockResolvedValue([]),
+      listRecentEvents: jest.fn(),
+    };
+    const candidateRepo = { find: jest.fn() };
+    const socialRequestRepo = { find: jest.fn().mockResolvedValue([]) };
+    const service = new SocialAgentMatchHistoryService(
+      audit as never,
+      candidateRepo as never,
+      { find: jest.fn() } as never,
+      socialRequestRepo as never,
+    );
+
+    const result = await service.viewMatchHistory({
+      ownerUserId: 7,
+      limit: 5,
+    });
+
+    expect(candidateRepo.find).not.toHaveBeenCalled();
+    expect(result).toEqual({
+      matches: [],
+      total: 0,
+      source: 'candidate_rows',
     });
   });
 });
@@ -281,4 +330,15 @@ function makeJob(overrides: Partial<MatchingJob>): MatchingJob {
     updatedAt: new Date('2026-06-01T00:00:00.000Z'),
     ...overrides,
   } as MatchingJob;
+}
+
+function makeSocialRequest(
+  overrides: Partial<UserSocialRequest>,
+): UserSocialRequest {
+  return {
+    id: 301,
+    userId: 7,
+    updatedAt: new Date('2026-06-01T00:00:00.000Z'),
+    ...overrides,
+  } as UserSocialRequest;
 }

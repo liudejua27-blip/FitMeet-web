@@ -10,6 +10,7 @@ import {
 } from './entities/social-candidate-event.entity';
 import { SocialCandidateSnapshot } from './entities/social-candidate-snapshot.entity';
 import { SocialCandidateAuditService } from './social-candidate-audit.service';
+import { UserSocialRequest } from '../social-requests/social-request.entity';
 
 export type SocialAgentMatchHistoryCandidate = {
   candidateUserId: number | null;
@@ -73,6 +74,8 @@ export class SocialAgentMatchHistoryService {
     private readonly candidateRepo: Repository<SocialRequestCandidate>,
     @InjectRepository(MatchingJob)
     private readonly matchingJobRepo: Repository<MatchingJob>,
+    @InjectRepository(UserSocialRequest)
+    private readonly socialRequestRepo: Repository<UserSocialRequest>,
   ) {}
 
   async viewMatchHistory(input: {
@@ -105,16 +108,33 @@ export class SocialAgentMatchHistoryService {
       };
     }
 
-    const candidates = await this.candidateRepo.find({
-      where: {},
-      order: { updatedAt: 'DESC', id: 'DESC' },
-      take: limit,
+    const candidates = await this.loadOwnerCandidateRows({
+      ownerUserId: input.ownerUserId,
+      limit,
     });
     return {
       matches: this.entriesFromCandidateRows(candidates),
       total: candidates.length,
       source: 'candidate_rows',
     };
+  }
+
+  private async loadOwnerCandidateRows(input: {
+    ownerUserId: number;
+    limit: number;
+  }): Promise<SocialRequestCandidate[]> {
+    const requests = await this.socialRequestRepo.find({
+      where: { userId: input.ownerUserId },
+      order: { updatedAt: 'DESC', id: 'DESC' },
+      take: input.limit * 3,
+    });
+    const socialRequestIds = requests.map((request) => request.id);
+    if (socialRequestIds.length === 0) return [];
+    return this.candidateRepo.find({
+      where: { socialRequestId: In(socialRequestIds) },
+      order: { updatedAt: 'DESC', id: 'DESC' },
+      take: input.limit,
+    });
   }
 
   private async loadCandidatesForSnapshots(
