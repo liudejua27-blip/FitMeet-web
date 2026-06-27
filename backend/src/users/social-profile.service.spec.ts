@@ -460,7 +460,7 @@ describe('SocialProfileService', () => {
       weekendAvailability: '',
       createdAt: new Date(),
       updatedAt: new Date(),
-    } as UserSocialProfile);
+    } as unknown as UserSocialProfile);
 
     const completion = await service.getCompletion(1);
 
@@ -512,7 +512,7 @@ describe('SocialProfileService', () => {
       weekendAvailability: '',
       createdAt: new Date(),
       updatedAt: new Date(),
-    } as UserSocialProfile);
+    } as unknown as UserSocialProfile);
 
     const completion = await service.getCompletion(1);
 
