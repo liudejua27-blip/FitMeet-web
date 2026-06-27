@@ -17,6 +17,10 @@ import { User } from './user.entity';
 import { UserSocialProfile } from './user-social-profile.entity';
 import { ProfileUpdateProposal } from './profile-update-proposal.entity';
 import { UpdateSocialProfileDto } from './dto/update-social-profile.dto';
+import {
+  normalizeSocialProfilePrivacyControls,
+  SOCIAL_PROFILE_PRIVACY_DEFAULTS,
+} from './social-profile-privacy-controls';
 
 type AiProfileAnswer = {
   key?: string;
@@ -678,6 +682,7 @@ export class SocialProfileService {
       weekdayAvailability: '',
       weekendAvailability: '',
       privacyBoundary: '',
+      ...SOCIAL_PROFILE_PRIVACY_DEFAULTS,
       createdAt: new Date(0),
       updatedAt: new Date(0),
       profileDiscoverable: false,
@@ -752,6 +757,34 @@ export class SocialProfileService {
     if (dto.rejectRules !== undefined) out.rejectRules = dto.rejectRules.trim();
     if (dto.privacyBoundary !== undefined)
       out.privacyBoundary = dto.privacyBoundary.trim();
+    if (
+      dto.candidateDisplayMode !== undefined ||
+      dto.candidateAvatarVisibility !== undefined ||
+      dto.candidateCoarseArea !== undefined ||
+      dto.contactDisclosurePolicy !== undefined ||
+      dto.preciseLocationPolicy !== undefined ||
+      dto.strangerOpenerPolicy !== undefined ||
+      dto.strangerInvitePolicy !== undefined ||
+      dto.strangerFriendPolicy !== undefined
+    ) {
+      const controls = normalizeSocialProfilePrivacyControls(dto);
+      if (dto.candidateDisplayMode !== undefined)
+        out.candidateDisplayMode = controls.candidateDisplayMode;
+      if (dto.candidateAvatarVisibility !== undefined)
+        out.candidateAvatarVisibility = controls.candidateAvatarVisibility;
+      if (dto.candidateCoarseArea !== undefined)
+        out.candidateCoarseArea = controls.candidateCoarseArea;
+      if (dto.contactDisclosurePolicy !== undefined)
+        out.contactDisclosurePolicy = controls.contactDisclosurePolicy;
+      if (dto.preciseLocationPolicy !== undefined)
+        out.preciseLocationPolicy = controls.preciseLocationPolicy;
+      if (dto.strangerOpenerPolicy !== undefined)
+        out.strangerOpenerPolicy = controls.strangerOpenerPolicy;
+      if (dto.strangerInvitePolicy !== undefined)
+        out.strangerInvitePolicy = controls.strangerInvitePolicy;
+      if (dto.strangerFriendPolicy !== undefined)
+        out.strangerFriendPolicy = controls.strangerFriendPolicy;
+    }
     if (dto.profileDiscoverable !== undefined)
       out.profileDiscoverable = Boolean(dto.profileDiscoverable);
     if (dto.agentCanRecommendMe !== undefined)
@@ -817,6 +850,7 @@ export class SocialProfileService {
       preferredTraits: profile.preferredTraits ?? [],
       relationshipGoals: profile.relationshipGoals ?? [],
       privacyBoundary: profile.privacyBoundary,
+      privacyControls: normalizeSocialProfilePrivacyControls(profile),
       profileDiscoverable: profile.profileDiscoverable,
       agentCanRecommendMe: profile.agentCanRecommendMe,
       hideSensitiveTags: profile.hideSensitiveTags,
@@ -850,6 +884,14 @@ export class SocialProfileService {
       'socialPreference',
       'rejectRules',
       'privacyBoundary',
+      'candidateDisplayMode',
+      'candidateAvatarVisibility',
+      'candidateCoarseArea',
+      'contactDisclosurePolicy',
+      'preciseLocationPolicy',
+      'strangerOpenerPolicy',
+      'strangerInvitePolicy',
+      'strangerFriendPolicy',
       'profileDiscoverable',
       'agentCanRecommendMe',
       'agentCanStartChatAfterApproval',
@@ -1449,12 +1491,14 @@ export class SocialProfileService {
   async getPrivacy(userId: number) {
     const profile = await this.get(userId);
     const completion = this.getCompletionFromProfile(profile);
+    const privacyControls = normalizeSocialProfilePrivacyControls(profile);
     return {
       profileDiscoverable: profile.profileDiscoverable,
       agentCanRecommendMe: profile.agentCanRecommendMe,
       allowAgentRecommend: profile.agentCanRecommendMe,
       agentCanStartChatAfterApproval: profile.agentCanStartChatAfterApproval,
       hideSensitiveTags: profile.hideSensitiveTags,
+      ...privacyControls,
       matchPoolEnabled:
         profile.profileDiscoverable || profile.agentCanRecommendMe,
       completion,
@@ -1474,6 +1518,14 @@ export class SocialProfileService {
       allowAgentRecommend?: boolean;
       agentCanStartChatAfterApproval?: boolean;
       hideSensitiveTags?: boolean;
+      candidateDisplayMode?: string;
+      candidateAvatarVisibility?: string;
+      candidateCoarseArea?: string;
+      contactDisclosurePolicy?: string;
+      preciseLocationPolicy?: string;
+      strangerOpenerPolicy?: string;
+      strangerInvitePolicy?: string;
+      strangerFriendPolicy?: string;
       ownerConfirmed?: boolean;
       matchingConsent?: boolean;
       profileVisibilityConsent?: boolean;
@@ -1492,6 +1544,22 @@ export class SocialProfileService {
       );
     if (body.hideSensitiveTags !== undefined)
       dto.hideSensitiveTags = Boolean(body.hideSensitiveTags);
+    if (body.candidateDisplayMode !== undefined)
+      dto.candidateDisplayMode = body.candidateDisplayMode;
+    if (body.candidateAvatarVisibility !== undefined)
+      dto.candidateAvatarVisibility = body.candidateAvatarVisibility;
+    if (body.candidateCoarseArea !== undefined)
+      dto.candidateCoarseArea = body.candidateCoarseArea;
+    if (body.contactDisclosurePolicy !== undefined)
+      dto.contactDisclosurePolicy = body.contactDisclosurePolicy;
+    if (body.preciseLocationPolicy !== undefined)
+      dto.preciseLocationPolicy = body.preciseLocationPolicy;
+    if (body.strangerOpenerPolicy !== undefined)
+      dto.strangerOpenerPolicy = body.strangerOpenerPolicy;
+    if (body.strangerInvitePolicy !== undefined)
+      dto.strangerInvitePolicy = body.strangerInvitePolicy;
+    if (body.strangerFriendPolicy !== undefined)
+      dto.strangerFriendPolicy = body.strangerFriendPolicy;
     if (this.enablesProfileVisibility(dto)) {
       this.assertOwnerAuthorizedProfileVisibility(body);
     }

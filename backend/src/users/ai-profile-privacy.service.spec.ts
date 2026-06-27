@@ -206,6 +206,44 @@ describe('SocialProfileService — privacy & sensitive tags', () => {
     );
   });
 
+  it('persists anonymous candidate privacy controls without enabling matching', async () => {
+    let persisted = baseProfile();
+    profileRepo.findOne.mockImplementation(() => Promise.resolve(persisted));
+    profileRepo.save.mockImplementation((data) => {
+      persisted = data;
+      return data;
+    });
+
+    const privacy = await service.updatePrivacy(1, {
+      candidateDisplayMode: 'nickname_until_confirmed',
+      candidateAvatarVisibility: 'public',
+      candidateCoarseArea: '青岛市南区',
+      contactDisclosurePolicy: 'owner_approved',
+      preciseLocationPolicy: 'after_confirmation',
+      strangerOpenerPolicy: 'opener_allowed_after_match',
+      strangerInvitePolicy: 'invite_requires_confirmation',
+      strangerFriendPolicy: 'friend_requires_confirmation',
+    });
+
+    expect(profileRepo.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        candidateDisplayMode: 'nickname_until_confirmed',
+        candidateAvatarVisibility: 'public',
+        candidateCoarseArea: '青岛市南区',
+        contactDisclosurePolicy: 'owner_approved',
+        preciseLocationPolicy: 'after_confirmation',
+        strangerOpenerPolicy: 'opener_allowed_after_match',
+      }),
+    );
+    expect(privacy).toMatchObject({
+      candidateDisplayMode: 'nickname_until_confirmed',
+      candidateAvatarVisibility: 'public',
+      candidateCoarseArea: '青岛市南区',
+      contactDisclosurePolicy: 'owner_approved',
+      preciseLocationPolicy: 'after_confirmation',
+    });
+  });
+
   it('seeds pending decisions for new sensitive tags after upsert', async () => {
     profileRepo.findOne.mockResolvedValue(null);
 

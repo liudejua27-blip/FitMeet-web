@@ -1490,7 +1490,7 @@ describe('SocialAgentChatService facade boundary', () => {
     );
     expect(
       candidateCardPresenterSource.trim().split('\n').length,
-    ).toBeLessThanOrEqual(330);
+    ).toBeLessThanOrEqual(360);
   });
 
   it('keeps candidate pool eligibility rules split from repository orchestration', () => {

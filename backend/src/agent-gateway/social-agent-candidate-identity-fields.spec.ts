@@ -39,4 +39,25 @@ describe('social-agent-candidate-identity-fields', () => {
       updatedAt: null,
     });
   });
+
+  it('uses caller-provided avatar when candidate privacy hides the real avatar', () => {
+    expect(
+      buildCandidateIdentityFields({
+        user: {
+          id: 24,
+          avatar: 'https://cdn.fitmeet/real.png',
+          color: '#168a55',
+          updatedAt: null,
+        },
+        displayName: '同城搭子 25',
+        city: '青岛市南区',
+        avatar: '',
+      }),
+    ).toMatchObject({
+      displayName: '同城搭子 25',
+      nickname: '同城搭子 25',
+      avatar: '',
+      city: '青岛市南区',
+    });
+  });
 });

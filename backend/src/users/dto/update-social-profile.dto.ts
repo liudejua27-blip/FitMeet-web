@@ -162,6 +162,46 @@ export class UpdateSocialProfileDto {
   privacyBoundary?: string;
 
   @IsOptional()
+  @IsString()
+  @MaxLength(40)
+  candidateDisplayMode?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(40)
+  candidateAvatarVisibility?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  candidateCoarseArea?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(40)
+  contactDisclosurePolicy?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(40)
+  preciseLocationPolicy?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(40)
+  strangerOpenerPolicy?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(40)
+  strangerInvitePolicy?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(40)
+  strangerFriendPolicy?: string;
+
+  @IsOptional()
   @IsBoolean()
   profileDiscoverable?: boolean;
 

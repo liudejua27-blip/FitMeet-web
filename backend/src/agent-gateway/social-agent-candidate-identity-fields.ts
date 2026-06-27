@@ -23,6 +23,7 @@ export function buildCandidateIdentityFields(input: {
   user: CandidateIdentityUser;
   displayName: string;
   city: string;
+  avatar?: string;
 }): CandidateIdentityFields {
   return {
     targetUserId: input.user.id,
@@ -30,7 +31,7 @@ export function buildCandidateIdentityFields(input: {
     userId: input.user.id,
     displayName: input.displayName,
     nickname: input.displayName,
-    avatar: cleanDisplayText(input.user.avatar, ''),
+    avatar: cleanDisplayText(input.avatar ?? input.user.avatar, ''),
     color: cleanDisplayText(input.user.color, '#202124'),
     city: input.city,
     updatedAt: input.user.updatedAt ? input.user.updatedAt.toISOString() : null,

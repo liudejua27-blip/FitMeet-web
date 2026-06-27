@@ -11,6 +11,10 @@ import { buildSocialMatchDynamicExplanation } from './social-agent-candidate-dyn
 import { buildCandidateEmotionalInsight } from './social-agent-candidate-emotional-insight';
 import { buildCandidateMatchedSignals } from './social-agent-candidate-display-fields';
 import { buildCandidateIdentityFields } from './social-agent-candidate-identity-fields';
+import {
+  buildCandidatePrivacyPresentation,
+  type CandidatePrivacyPresentation,
+} from './social-agent-candidate-privacy.presenter';
 import type { CandidatePoolCandidate } from './social-agent-candidate-pool.service';
 import type { CandidatePoolResolvedQuery } from './social-agent-candidate-pool-query';
 import type { CandidatePoolSource } from './social-agent-candidate-pool-activity-result';
@@ -76,6 +80,12 @@ export function buildCandidatePoolCandidate(input: {
     ...input.matchReasons,
   ]).join(' ');
   const sceneType = input.sceneRisk.normalizeScene(null, sceneText);
+  const privacy = buildCandidatePrivacyPresentation({
+    user: input.user,
+    profile: input.profile,
+    displayName: input.displayName,
+    city: input.city,
+  });
   const policy = input.sceneRisk.evaluate({
     sceneType,
     actionType: 'send_message',
@@ -94,8 +104,8 @@ export function buildCandidatePoolCandidate(input: {
       interestTags: queryTags.length > 0 ? queryTags : input.interestTags,
     },
     candidate: {
-      displayName: input.displayName,
-      city: input.city,
+      displayName: privacy.displayName,
+      city: privacy.city,
       commonTags: uniqueVisibleStrings(presentationCommonTags),
       interestTags: uniqueVisibleStrings(presentationInterestTags),
     },
@@ -106,8 +116,8 @@ export function buildCandidatePoolCandidate(input: {
     lifeGraphSignals: input.lifeGraphSignals,
   });
   const dynamicExplanation = buildSocialMatchDynamicExplanation({
-    displayName: input.displayName,
-    city: input.city,
+    displayName: privacy.displayName,
+    city: privacy.city,
     interestTags: input.interestTags,
     commonTags: input.commonTags,
     matchReasons: input.matchReasons,
@@ -117,6 +127,7 @@ export function buildCandidatePoolCandidate(input: {
   });
   return buildCandidatePoolCandidateCard({
     input,
+    privacy,
     explanation,
     dynamicExplanation,
     riskWarnings: candidateRisk.riskWarnings,
@@ -127,6 +138,7 @@ export function buildCandidatePoolCandidate(input: {
 
 function buildCandidatePoolCandidateCard(input: {
   input: Parameters<typeof buildCandidatePoolCandidate>[0];
+  privacy: CandidatePrivacyPresentation;
   explanation: CandidateExplanation;
   dynamicExplanation: ReturnType<typeof buildSocialMatchDynamicExplanation>;
   riskWarnings: string[];
@@ -134,6 +146,7 @@ function buildCandidatePoolCandidateCard(input: {
   highRisk: boolean;
 }): CandidatePoolCandidate {
   const i = input.input;
+  const privacy = input.privacy;
   const d = input.dynamicExplanation;
   const suggestedOpener = input.explanation.suggestedOpener;
   const relationshipGoal = firstVisibleProfileText(
@@ -170,8 +183,9 @@ function buildCandidatePoolCandidateCard(input: {
     activityId: i.activityId,
     ...buildCandidateIdentityFields({
       user: i.user,
-      displayName: i.displayName,
-      city: i.city,
+      displayName: privacy.displayName,
+      city: privacy.city,
+      avatar: privacy.avatar,
     }),
     interestTags: visibleInterests.length ? visibleInterests : i.interestTags,
     profileCompleteness: i.profileCompleteness,
@@ -187,7 +201,8 @@ function buildCandidatePoolCandidateCard(input: {
     suggestedMessage: suggestedOpener,
     commonTags: visibleCommonTags.length ? visibleCommonTags : i.commonTags,
     distanceKm: null,
-    area: queryContext.locationPreference || i.city || null,
+    area:
+      privacy.coarseArea || queryContext.locationPreference || i.city || null,
     activityType: queryContext.activityType || null,
     sport: queryContext.activityType || null,
     timePreference: queryContext.timePreference || null,
@@ -218,14 +233,18 @@ function buildCandidatePoolCandidateCard(input: {
         i.source === 'profile_candidate'
           ? '公开可发现且已允许 Agent 推荐'
           : '来自公开社交意图',
-      privacyLabel: '资料已脱敏，不展示手机号、精确位置或私聊内容',
+      privacyLabel: privacy.privacyLabel,
       strangerPolicyLabel,
     },
     relationshipGoal,
     idealType,
     invitePolicy,
+    privacySignals: privacy.privacySignals,
+    contactPolicy: privacy.contactPolicyLabel,
+    preciseLocationPolicy: privacy.preciseLocationPolicyLabel,
+    strangerActionPolicies: privacy.strangerActionPolicyLabels,
     coldStartSignals: [
-      i.city ? `同城：${i.city}` : '',
+      privacy.coarseArea ? `区域：${privacy.coarseArea}` : '',
       strangerPolicyLabel,
       i.commonTags.length
         ? `共同兴趣：${i.commonTags.slice(0, 2).join('、')}`
