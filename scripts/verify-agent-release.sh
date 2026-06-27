@@ -21,7 +21,7 @@ is_truthy() {
 }
 
 step "Audit Agent release worktree cleanup boundaries"
-"${ROOT_DIR}/scripts/agent-release-worktree-audit.sh"
+bash "${ROOT_DIR}/scripts/agent-release-worktree-audit.sh"
 
 step "Verify FitMeet Agent skill contracts and eval cases"
 node "${ROOT_DIR}/scripts/verify-agent-skills.mjs"

@@ -59,6 +59,7 @@ require_file_contains() {
 require_cmd pnpm
 require_cmd rsync
 require_cmd zip
+require_cmd zipinfo
 if ! command -v sha256sum >/dev/null 2>&1 && ! command -v shasum >/dev/null 2>&1; then
   echo "[FAIL] Missing required command: sha256sum or shasum" >&2
   exit 1
@@ -71,7 +72,7 @@ rm -f "${INSTALLER_OUTPUT}"
 
 if [ "${RUN_AGENT_RELEASE_WORKTREE_AUDIT}" = "true" ]; then
   step "Audit release worktree is clean"
-  "${ROOT_DIR}/scripts/agent-release-worktree-audit.sh" --strict
+  bash "${ROOT_DIR}/scripts/agent-release-worktree-audit.sh" --strict
 else
   step "Skip release worktree strict audit"
   echo "[WARN] RUN_AGENT_RELEASE_WORKTREE_AUDIT=${RUN_AGENT_RELEASE_WORKTREE_AUDIT}. Do not use this skip for production ECS packages." >&2
@@ -99,7 +100,7 @@ pnpm --dir "${ROOT_DIR}/backend" install --frozen-lockfile
 
 if [ "$RUN_AGENT_RELEASE_VERIFY" = "true" ]; then
   step "Run Agent release verification"
-  "${ROOT_DIR}/scripts/verify-agent-release.sh"
+  bash "${ROOT_DIR}/scripts/verify-agent-release.sh"
 else
   step "Skip Agent release verification"
 fi
@@ -516,6 +517,21 @@ require_entry() {
   fi
 }
 
+require_executable_entry() {
+  local label="$1"
+  local entry="$2"
+  local mode
+  mode="$(zipinfo -l "${OUTPUT}" "${entry}" 2>/dev/null | awk 'NR == 1 { print $1; exit }')"
+  if [[ -z "${mode}" ]]; then
+    echo "[FAIL] Missing executable ${label}: ${entry}" >&2
+    exit 1
+  fi
+  if [[ "${mode:3:1}${mode:6:1}${mode:9:1}" != *x* ]]; then
+    echo "[FAIL] Release zip entry is not executable: ${entry} (${mode})" >&2
+    exit 1
+  fi
+}
+
 require_entry "frontend/dist/index.html" '^FitMeet-web/frontend/dist/index\.html$'
 require_entry "frontend/dist/assets" '^FitMeet-web/frontend/dist/assets/'
 require_entry "backend/Dockerfile.prod" '^FitMeet-web/backend/Dockerfile\.prod$'
@@ -559,6 +575,18 @@ require_entry "Agent meet loop skill" '^FitMeet-web/docs/agent-skills/meet-loop\
 require_entry "Agent Life Graph memory skill" '^FitMeet-web/docs/agent-skills/life-graph-memory\.md$'
 require_entry "docs/deployment-vercel-railway.md" '^FitMeet-web/docs/deployment-vercel-railway\.md$'
 require_entry "release metadata" '^FitMeet-web/release\.json$'
+
+for entry in "${entries[@]}"; do
+  if [[ "${entry}" =~ ^FitMeet-web/scripts/.*\.sh$ ]]; then
+    require_executable_entry "${entry}" "${entry}"
+  fi
+done
+require_executable_entry "scripts/verify-production.sh" "FitMeet-web/scripts/verify-production.sh"
+require_executable_entry "scripts/verify-agent-goal-production.sh" "FitMeet-web/scripts/verify-agent-goal-production.sh"
+require_executable_entry "scripts/ecs-release-diagnose.sh" "FitMeet-web/scripts/ecs-release-diagnose.sh"
+require_executable_entry "scripts/ecs-backend-pnpm.sh" "FitMeet-web/scripts/ecs-backend-pnpm.sh"
+require_executable_entry "scripts/deploy-production.sh" "FitMeet-web/scripts/deploy-production.sh"
+require_executable_entry "scripts/ecs-host-preflight.sh" "FitMeet-web/scripts/ecs-host-preflight.sh"
 
 require_entry "Social Codex context hydrator" '^FitMeet-web/backend/src/agent-gateway/social-agent-context-hydrator\.service\.ts$'
 require_entry "Social Codex context window helper" '^FitMeet-web/backend/src/agent-gateway/social-agent-context-window\.ts$'

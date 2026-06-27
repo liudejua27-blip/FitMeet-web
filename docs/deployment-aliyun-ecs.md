@@ -136,7 +136,7 @@ port 80/443 availability, Docker Compose interpolation, and production env
 readiness when `pnpm` is already available:
 
 ```bash
-APP_DIR=/opt/FitMeet-web ./scripts/ecs-host-preflight.sh
+APP_DIR=/opt/FitMeet-web bash ./scripts/ecs-host-preflight.sh
 ```
 
 For a pure host/file/SSL check before installing pnpm, use
@@ -152,9 +152,9 @@ pnpm -C backend install --frozen-lockfile
 pnpm -C backend run check:prod-env -- ../.env.production
 docker compose -f docker-compose.prod.yml --env-file .env.production up -d postgres redis mongo zookeeper kafka
 docker compose -f docker-compose.prod.yml --env-file .env.production build backend subagent-worker
-./scripts/ecs-backend-pnpm.sh -- uploads:check:prod
-./scripts/ecs-backend-pnpm.sh -- migration:run:prod
-./scripts/ecs-backend-pnpm.sh -- db:check-critical-tables:prod
+bash ./scripts/ecs-backend-pnpm.sh -- uploads:check:prod
+bash ./scripts/ecs-backend-pnpm.sh -- migration:run:prod
+bash ./scripts/ecs-backend-pnpm.sh -- db:check-critical-tables:prod
 docker compose -f docker-compose.prod.yml --env-file .env.production up -d --no-build backend subagent-worker nginx
 docker compose -f docker-compose.prod.yml --env-file .env.production ps
 ```
@@ -173,7 +173,7 @@ RUN_RELEASE_PREFLIGHT=false \
 BUILD_FRONTEND=false \
 PUBLIC_BASE_URL=https://www.ourfitmeet.cn \
 PUBLIC_API_BASE_URL=https://www.ourfitmeet.cn/api \
-./scripts/deploy-production.sh
+bash ./scripts/deploy-production.sh
 ```
 
 The deploy script runs the same host preflight by default, starts only data
@@ -196,11 +196,11 @@ BASE_URL=https://www.ourfitmeet.cn \
 API_BASE_URL=https://www.ourfitmeet.cn/api \
 FITMEET_LAUNCH_TOPOLOGY=ecs \
 SCAN_COMPOSE_LOGS=true \
-./scripts/ecs-post-deploy-smoke.sh --scan-compose-logs
+bash ./scripts/ecs-post-deploy-smoke.sh --scan-compose-logs
 
 BASE_URL=https://www.ourfitmeet.cn \
 API_BASE_URL=https://www.ourfitmeet.cn/api \
-./scripts/verify-agent-goal-production.sh
+bash ./scripts/verify-agent-goal-production.sh
 ```
 
 This validates the product-grade Agent launch gate:
@@ -240,8 +240,8 @@ Run migrations explicitly before app startup if you are not using the deploy
 script:
 
 ```bash
-./scripts/ecs-backend-pnpm.sh -- migration:run:prod
-./scripts/ecs-backend-pnpm.sh -- db:check-critical-tables:prod
+bash ./scripts/ecs-backend-pnpm.sh -- migration:run:prod
+bash ./scripts/ecs-backend-pnpm.sh -- db:check-critical-tables:prod
 ```
 
 ## Verification
@@ -258,7 +258,7 @@ TIMEOUT_SECONDS=8 ./scripts/launch-status.sh --topology ecs --skip-ios-testfligh
 BASE_URL=https://www.ourfitmeet.cn \
 API_BASE_URL=https://www.ourfitmeet.cn/api \
 FITMEET_LAUNCH_TOPOLOGY=ecs \
-./scripts/verify-production.sh
+bash ./scripts/verify-production.sh
 ```
 
 For the specific Agent/Discover regression gate from the Social Codex launch,
@@ -278,7 +278,7 @@ EXPECTED_RELEASE_COMMIT="$EXPECTED_RELEASE_COMMIT" \
 EXPECTED_RELEASE_BUILT_AT="$EXPECTED_RELEASE_BUILT_AT" \
 FITMEET_AGENT_BROWSER_QA_EMAIL=agent-qa-owner@ourfitmeet.cn \
 FITMEET_AGENT_BROWSER_QA_PASSWORD='***' \
-./scripts/verify-agent-goal-production.sh
+bash ./scripts/verify-agent-goal-production.sh
 ```
 
 If this verifier fails because `/public/social-intents` is empty on a fresh
@@ -291,7 +291,7 @@ When production writes are allowed:
 BASE_URL=https://www.ourfitmeet.cn \
 API_BASE_URL=https://www.ourfitmeet.cn/api \
 FITMEET_LAUNCH_TOPOLOGY=ecs \
-./scripts/verify-production.sh --run-public-intent-write
+bash ./scripts/verify-production.sh --run-public-intent-write
 ```
 
 Or run the combined ECS smoke entrypoint:
@@ -300,7 +300,7 @@ Or run the combined ECS smoke entrypoint:
 BASE_URL=https://www.ourfitmeet.cn \
 API_BASE_URL=https://www.ourfitmeet.cn/api \
 FITMEET_LAUNCH_TOPOLOGY=ecs \
-./scripts/ecs-post-deploy-smoke.sh --run-public-intent-write
+bash ./scripts/ecs-post-deploy-smoke.sh --run-public-intent-write
 ```
 
 iOS needs a matching Release API base if ECS is the final backend:

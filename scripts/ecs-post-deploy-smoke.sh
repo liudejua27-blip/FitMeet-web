@@ -159,7 +159,7 @@ if [[ "${RUN_PUBLIC_INTENT_WRITE}" == "true" ]]; then
 fi
 
 info "Verifying ${BASE_URL} with API ${API_BASE_URL}."
-TIMEOUT_SECONDS="${TIMEOUT_SECONDS}" ./scripts/verify-production.sh "${verify_args[@]}"
+TIMEOUT_SECONDS="${TIMEOUT_SECONDS}" bash ./scripts/verify-production.sh "${verify_args[@]}"
 
 if should_scan_compose_logs; then
   info "Scanning recent backend/subagent-worker logs for production failure patterns."

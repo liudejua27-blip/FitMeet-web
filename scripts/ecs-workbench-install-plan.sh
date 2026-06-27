@@ -119,20 +119,20 @@ cd ${remote_dir_q}
 ls -lh ${archive_name} ${checksum_name} ${installer_name}
 sha256sum -c ./${checksum_name}
 chmod +x ./${installer_name}
-./${installer_name} --archive ./${archive_name} --checksum ./${checksum_name} --target ${target_dir_q}
-./${installer_name} --archive ./${archive_name} --checksum ./${checksum_name} --target ${target_dir_q} --install
+bash ./${installer_name} --archive ./${archive_name} --checksum ./${checksum_name} --target ${target_dir_q}
+bash ./${installer_name} --archive ./${archive_name} --checksum ./${checksum_name} --target ${target_dir_q} --install
 cd ${target_dir_q}
 if [ ! -f .env.production ]; then cp deploy/env.production.ecs.example .env.production; fi
 printf '\\nNext: edit %s/.env.production, copy nginx/ssl/fullchain.pem and nginx/ssl/privkey.pem, then run:\\n' ${target_dir_q}
-printf '  APP_DIR=%s ./scripts/ecs-host-preflight.sh\\n' ${target_dir_q}
-printf '  APP_DIR=%s RUN_RELEASE_PREFLIGHT=false BUILD_FRONTEND=false PUBLIC_BASE_URL=https://www.ourfitmeet.cn PUBLIC_API_BASE_URL=https://www.ourfitmeet.cn/api ./scripts/deploy-production.sh\\n' ${target_dir_q}
+printf '  APP_DIR=%s bash ./scripts/ecs-host-preflight.sh\\n' ${target_dir_q}
+printf '  APP_DIR=%s RUN_RELEASE_PREFLIGHT=false BUILD_FRONTEND=false PUBLIC_BASE_URL=https://www.ourfitmeet.cn PUBLIC_API_BASE_URL=https://www.ourfitmeet.cn/api bash ./scripts/deploy-production.sh\\n' ${target_dir_q}
 printf '\\nOne-off backend commands should use the production container wrapper:\\n'
-printf '  ./scripts/ecs-backend-pnpm.sh -- uploads:check:prod\\n'
-printf '  ./scripts/ecs-backend-pnpm.sh -- migration:run:prod\\n'
-printf '  ./scripts/ecs-backend-pnpm.sh -- db:check-critical-tables:prod\\n'
+printf '  bash ./scripts/ecs-backend-pnpm.sh -- uploads:check:prod\\n'
+printf '  bash ./scripts/ecs-backend-pnpm.sh -- migration:run:prod\\n'
+printf '  bash ./scripts/ecs-backend-pnpm.sh -- db:check-critical-tables:prod\\n'
 printf '\\nAfter deployment, run:\\n'
 printf '  EXPECTED_RELEASE_COMMIT="\$(node -e '\\''const fs=require("fs");const r=JSON.parse(fs.readFileSync("release.json","utf8"));process.stdout.write(String(r.commit||"unknown"))'\\'')"\\n'
 printf '  EXPECTED_RELEASE_BUILT_AT="\$(node -e '\\''const fs=require("fs");const r=JSON.parse(fs.readFileSync("release.json","utf8"));process.stdout.write(String(r.builtAt||""))'\\'')"\\n'
-printf '  BASE_URL=https://www.ourfitmeet.cn API_BASE_URL=https://www.ourfitmeet.cn/api EXPECTED_RELEASE_COMMIT="\$EXPECTED_RELEASE_COMMIT" EXPECTED_RELEASE_BUILT_AT="\$EXPECTED_RELEASE_BUILT_AT" ./scripts/verify-agent-goal-production.sh\\n'
+printf '  BASE_URL=https://www.ourfitmeet.cn API_BASE_URL=https://www.ourfitmeet.cn/api EXPECTED_RELEASE_COMMIT="\$EXPECTED_RELEASE_COMMIT" EXPECTED_RELEASE_BUILT_AT="\$EXPECTED_RELEASE_BUILT_AT" bash ./scripts/verify-agent-goal-production.sh\\n'
 
 EOF

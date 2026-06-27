@@ -186,10 +186,10 @@ fi
 printf '\nCommands:\n'
 printf '  ssh %s "mkdir -p %s"\n' "$ECS_SSH_TARGET" "$remote_dir_q"
 printf '  scp %s %s %s %s:%s/\n' "$ARCHIVE" "$CHECKSUM_FILE" "$INSTALLER" "$ECS_SSH_TARGET" "$remote_dir_q"
-printf '  ssh %s "cd %s && chmod +x ./fitmeet-ecs-install-release.sh && sha256sum -c ./fitmeet-ecs-deploy.zip.sha256 && ./fitmeet-ecs-install-release.sh --archive ./fitmeet-ecs-deploy.zip --checksum ./fitmeet-ecs-deploy.zip.sha256 --target %s"\n' "$ECS_SSH_TARGET" "$remote_dir_q" "$target_dir_q"
-printf '  ssh %s "cd %s && ./fitmeet-ecs-install-release.sh --archive ./fitmeet-ecs-deploy.zip --checksum ./fitmeet-ecs-deploy.zip.sha256 --target %s --install"\n' "$ECS_SSH_TARGET" "$remote_dir_q" "$target_dir_q"
-printf '  ssh %s "cd %s && EXPECTED_RELEASE_COMMIT=%s PUBLIC_API_BASE_URL=https://www.ourfitmeet.cn/api ./scripts/ecs-release-diagnose.sh"\n' "$ECS_SSH_TARGET" "$target_dir_q" "$release_commit_short"
-printf '  ssh %s "cd %s && BASE_URL=https://www.ourfitmeet.cn API_BASE_URL=https://www.ourfitmeet.cn/api EXPECTED_RELEASE_COMMIT=%s ./scripts/verify-production.sh && BASE_URL=https://www.ourfitmeet.cn API_BASE_URL=https://www.ourfitmeet.cn/api EXPECTED_RELEASE_COMMIT=%s ./scripts/verify-agent-goal-production.sh"\n' "$ECS_SSH_TARGET" "$target_dir_q" "$release_commit_short" "$release_commit_short"
+printf '  ssh %s "cd %s && chmod +x ./fitmeet-ecs-install-release.sh && sha256sum -c ./fitmeet-ecs-deploy.zip.sha256 && bash ./fitmeet-ecs-install-release.sh --archive ./fitmeet-ecs-deploy.zip --checksum ./fitmeet-ecs-deploy.zip.sha256 --target %s"\n' "$ECS_SSH_TARGET" "$remote_dir_q" "$target_dir_q"
+printf '  ssh %s "cd %s && bash ./fitmeet-ecs-install-release.sh --archive ./fitmeet-ecs-deploy.zip --checksum ./fitmeet-ecs-deploy.zip.sha256 --target %s --install"\n' "$ECS_SSH_TARGET" "$remote_dir_q" "$target_dir_q"
+printf '  ssh %s "cd %s && EXPECTED_RELEASE_COMMIT=%s PUBLIC_API_BASE_URL=https://www.ourfitmeet.cn/api bash ./scripts/ecs-release-diagnose.sh"\n' "$ECS_SSH_TARGET" "$target_dir_q" "$release_commit_short"
+printf '  ssh %s "cd %s && BASE_URL=https://www.ourfitmeet.cn API_BASE_URL=https://www.ourfitmeet.cn/api EXPECTED_RELEASE_COMMIT=%s bash ./scripts/verify-production.sh && BASE_URL=https://www.ourfitmeet.cn API_BASE_URL=https://www.ourfitmeet.cn/api EXPECTED_RELEASE_COMMIT=%s bash ./scripts/verify-agent-goal-production.sh"\n' "$ECS_SSH_TARGET" "$target_dir_q" "$release_commit_short" "$release_commit_short"
 
 if [[ "$CHECK_SSH" == "true" ]]; then
   printf '\nChecking SSH access...\n'
@@ -209,8 +209,8 @@ scp "$ARCHIVE" "$CHECKSUM_FILE" "$INSTALLER" "${ECS_SSH_TARGET}:${REMOTE_DIR%/}/
 
 ok "Uploaded FitMeet ECS release files to ${ECS_SSH_TARGET}:${REMOTE_DIR%/}/"
 printf '\nNext server command:\n'
-printf '  ssh %s "cd %s && chmod +x ./fitmeet-ecs-install-release.sh && ./fitmeet-ecs-install-release.sh --archive ./fitmeet-ecs-deploy.zip --checksum ./fitmeet-ecs-deploy.zip.sha256 --target %s"\n' "$ECS_SSH_TARGET" "$remote_dir_q" "$target_dir_q"
+printf '  ssh %s "cd %s && chmod +x ./fitmeet-ecs-install-release.sh && bash ./fitmeet-ecs-install-release.sh --archive ./fitmeet-ecs-deploy.zip --checksum ./fitmeet-ecs-deploy.zip.sha256 --target %s"\n' "$ECS_SSH_TARGET" "$remote_dir_q" "$target_dir_q"
 printf '\nAfter installing and deploying, verify the public release commit:\n'
-printf '  ssh %s "cd %s && EXPECTED_RELEASE_COMMIT=%s PUBLIC_API_BASE_URL=https://www.ourfitmeet.cn/api ./scripts/ecs-release-diagnose.sh"\n' "$ECS_SSH_TARGET" "$target_dir_q" "$release_commit_short"
-printf '  BASE_URL=https://www.ourfitmeet.cn API_BASE_URL=https://www.ourfitmeet.cn/api EXPECTED_RELEASE_COMMIT=%s ./scripts/verify-production.sh\n' "$release_commit_short"
-printf '  BASE_URL=https://www.ourfitmeet.cn API_BASE_URL=https://www.ourfitmeet.cn/api EXPECTED_RELEASE_COMMIT=%s ./scripts/verify-agent-goal-production.sh\n' "$release_commit_short"
+printf '  ssh %s "cd %s && EXPECTED_RELEASE_COMMIT=%s PUBLIC_API_BASE_URL=https://www.ourfitmeet.cn/api bash ./scripts/ecs-release-diagnose.sh"\n' "$ECS_SSH_TARGET" "$target_dir_q" "$release_commit_short"
+printf '  BASE_URL=https://www.ourfitmeet.cn API_BASE_URL=https://www.ourfitmeet.cn/api EXPECTED_RELEASE_COMMIT=%s bash ./scripts/verify-production.sh\n' "$release_commit_short"
+printf '  BASE_URL=https://www.ourfitmeet.cn API_BASE_URL=https://www.ourfitmeet.cn/api EXPECTED_RELEASE_COMMIT=%s bash ./scripts/verify-agent-goal-production.sh\n' "$release_commit_short"

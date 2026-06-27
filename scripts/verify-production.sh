@@ -104,7 +104,7 @@ fail_release_metadata() {
 [hint] The public API is not serving the expected release (${EXPECTED_RELEASE_COMMIT}).
 [hint] On the ECS host, run:
 [hint]   cd /opt/FitMeet-web
-[hint]   EXPECTED_RELEASE_COMMIT=${EXPECTED_RELEASE_COMMIT} PUBLIC_API_BASE_URL=${API_BASE_URL} ./scripts/ecs-release-diagnose.sh
+[hint]   EXPECTED_RELEASE_COMMIT=${EXPECTED_RELEASE_COMMIT} PUBLIC_API_BASE_URL=${API_BASE_URL} bash ./scripts/ecs-release-diagnose.sh
 [hint] If backend-container matches but public does not, check nginx/upstream or another stack serving the domain.
 [hint] If backend-container is also unknown/mismatched, rerun deploy-production.sh with the latest release zip installed.
 EOF
