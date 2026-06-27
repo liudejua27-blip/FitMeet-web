@@ -8,6 +8,11 @@ import {
   normalizeSocialAgentRankingPreference,
   type SocialAgentRankingPreference,
 } from './social-agent-ranking-preference';
+import {
+  isSocialAgentLoopState,
+  transitionSocialAgentLoopState,
+  type SocialAgentLoopState,
+} from './social-agent-loop-state.machine';
 
 export type SocialAgentShortTermStep = Record<string, unknown> & {
   id: string;
@@ -325,6 +330,14 @@ export type SocialAgentTaskMemory = {
     previousState: SocialAgentState | '';
     stateReason: SocialAgentStateTransitionReason | '';
     stateUpdatedAt: string;
+    loopState: SocialAgentLoopState;
+    previousLoopState: SocialAgentLoopState | '';
+    loopStateReason: SocialAgentStateTransitionReason | '';
+    loopStateUpdatedAt: string;
+    loopSideEffects: string[];
+    loopRequiresApproval: boolean;
+    loopIdempotencyScope: string;
+    loopValidationWarnings: string[];
     objective: string;
     nextStep: string;
     shouldSearchNow: boolean;
@@ -388,6 +401,14 @@ function defaultTaskMemory(): SocialAgentTaskMemory {
       previousState: '',
       stateReason: '',
       stateUpdatedAt: new Date(0).toISOString(),
+      loopState: 'IDLE',
+      previousLoopState: '',
+      loopStateReason: '',
+      loopStateUpdatedAt: new Date(0).toISOString(),
+      loopSideEffects: [],
+      loopRequiresApproval: false,
+      loopIdempotencyScope: '',
+      loopValidationWarnings: [],
       objective: '',
       nextStep: '',
       shouldSearchNow: false,
@@ -513,6 +534,41 @@ export function readSocialAgentTaskMemory(
               typeof stored.currentTask.stateUpdatedAt === 'string'
                 ? stored.currentTask.stateUpdatedAt
                 : base.currentTask.stateUpdatedAt,
+            loopState: isSocialAgentLoopState(stored.currentTask.loopState)
+              ? stored.currentTask.loopState
+              : base.currentTask.loopState,
+            previousLoopState: isSocialAgentLoopState(
+              stored.currentTask.previousLoopState,
+            )
+              ? stored.currentTask.previousLoopState
+              : '',
+            loopStateReason: isSocialAgentStateReason(
+              stored.currentTask.loopStateReason,
+            )
+              ? stored.currentTask.loopStateReason
+              : '',
+            loopStateUpdatedAt:
+              typeof stored.currentTask.loopStateUpdatedAt === 'string'
+                ? stored.currentTask.loopStateUpdatedAt
+                : base.currentTask.loopStateUpdatedAt,
+            loopSideEffects: Array.isArray(stored.currentTask.loopSideEffects)
+              ? stored.currentTask.loopSideEffects
+                  .filter((item): item is string => typeof item === 'string')
+                  .slice(0, 12)
+              : base.currentTask.loopSideEffects,
+            loopRequiresApproval:
+              stored.currentTask.loopRequiresApproval === true,
+            loopIdempotencyScope:
+              typeof stored.currentTask.loopIdempotencyScope === 'string'
+                ? stored.currentTask.loopIdempotencyScope
+                : base.currentTask.loopIdempotencyScope,
+            loopValidationWarnings: Array.isArray(
+              stored.currentTask.loopValidationWarnings,
+            )
+              ? stored.currentTask.loopValidationWarnings
+                  .filter((item): item is string => typeof item === 'string')
+                  .slice(0, 12)
+              : base.currentTask.loopValidationWarnings,
             profileSaved: stored.currentTask.profileSaved === true,
             awaitingSearchConfirmation:
               stored.currentTask.awaitingSearchConfirmation === true,
@@ -786,6 +842,17 @@ export function transitionSocialAgentState(
   const memory = readSocialAgentTaskMemory(task);
   const previousState = memory.currentTask.state || 'idle';
   const nextState = stateForTransition(previousState, reason, patch);
+  const previousLoopState = memory.currentTask.loopState || 'IDLE';
+  const loopTransition = transitionSocialAgentLoopState({
+    previous: previousLoopState,
+    reason,
+    patch,
+  });
+  if (!loopTransition.allowed) {
+    throw new Error(
+      `illegal_social_agent_loop_transition:${loopTransition.violations.join('; ')}`,
+    );
+  }
   memory.currentTask = {
     ...memory.currentTask,
     ...patch,
@@ -793,6 +860,14 @@ export function transitionSocialAgentState(
     previousState,
     stateReason: reason,
     stateUpdatedAt: new Date().toISOString(),
+    loopState: loopTransition.to,
+    previousLoopState,
+    loopStateReason: reason,
+    loopStateUpdatedAt: new Date().toISOString(),
+    loopSideEffects: loopTransition.sideEffects,
+    loopRequiresApproval: loopTransition.requiresApproval,
+    loopIdempotencyScope: loopTransition.idempotencyScope,
+    loopValidationWarnings: loopTransition.violations,
   };
   writeSocialAgentTaskMemory(task, memory);
   return memory;
