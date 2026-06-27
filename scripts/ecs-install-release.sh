@@ -86,6 +86,16 @@ archive_entries() {
   unzip -Z1 "$ARCHIVE"
 }
 
+require_executable_archive_entry() {
+  local entry="$1"
+  local mode
+  mode="$(zipinfo -l "$ARCHIVE" "$entry" 2>/dev/null | awk 'NR == 1 { print $1; exit }')"
+  [[ -n "$mode" ]] || fail "Archive does not contain executable script: $entry"
+  if [[ "${mode:3:1}${mode:6:1}${mode:9:1}" != *x* ]]; then
+    fail "Archive script is not executable: $entry ($mode)"
+  fi
+}
+
 read_staged_release_field() {
   local field="$1"
   local fallback="$2"
@@ -133,6 +143,7 @@ sync_release_env_metadata() {
 }
 
 require_cmd unzip
+require_cmd zipinfo
 require_cmd rsync
 if ! command -v sha256sum >/dev/null 2>&1 && ! command -v shasum >/dev/null 2>&1; then
   fail "Missing required command: sha256sum or shasum"
@@ -159,6 +170,16 @@ grep -qx 'FitMeet-web/backend/dist/main.js' <<<"$entries" ||
   fail "Archive does not contain FitMeet-web/backend/dist/main.js"
 grep -qx 'FitMeet-web/deploy/env.production.ecs.example' <<<"$entries" ||
   fail "Archive does not contain FitMeet-web/deploy/env.production.ecs.example"
+while IFS= read -r script_entry; do
+  [[ -n "$script_entry" ]] || continue
+  require_executable_archive_entry "$script_entry"
+done < <(grep -E '^FitMeet-web/scripts/.*\.sh$' <<<"$entries")
+require_executable_archive_entry 'FitMeet-web/scripts/verify-production.sh'
+require_executable_archive_entry 'FitMeet-web/scripts/verify-agent-goal-production.sh'
+require_executable_archive_entry 'FitMeet-web/scripts/ecs-release-diagnose.sh'
+require_executable_archive_entry 'FitMeet-web/scripts/ecs-backend-pnpm.sh'
+require_executable_archive_entry 'FitMeet-web/scripts/deploy-production.sh'
+require_executable_archive_entry 'FitMeet-web/scripts/ecs-host-preflight.sh'
 ok "Archive structure looks like a FitMeet ECS release"
 
 target_parent="$(dirname "$TARGET_DIR")"
@@ -214,6 +235,11 @@ rsync -a --delete \
   --exclude 'nginx/ssl/' \
   "$staged_dir/" "$TARGET_DIR/"
 
+if [[ -d "$TARGET_DIR/scripts" ]]; then
+  find "$TARGET_DIR/scripts" -type f -name '*.sh' -exec chmod +x {} +
+  ok "Ensured release shell scripts are executable"
+fi
+
 sync_release_env_metadata
 
 if [[ ! -f "$TARGET_DIR/.env.production" ]]; then
@@ -226,17 +252,17 @@ fi
 ok "Installed FitMeet release into $TARGET_DIR"
 printf '\nNext server commands:\n'
 printf '  cd %s\n' "$TARGET_DIR"
-printf '  APP_DIR=%s ./scripts/ecs-host-preflight.sh\n' "$TARGET_DIR"
-printf '  APP_DIR=%s RUN_RELEASE_PREFLIGHT=false BUILD_FRONTEND=false RUN_DB_MIGRATIONS=true PUBLIC_BASE_URL=https://www.ourfitmeet.cn PUBLIC_API_BASE_URL=https://www.ourfitmeet.cn/api ./scripts/deploy-production.sh\n' "$TARGET_DIR"
+printf '  APP_DIR=%s bash ./scripts/ecs-host-preflight.sh\n' "$TARGET_DIR"
+printf '  APP_DIR=%s RUN_RELEASE_PREFLIGHT=false BUILD_FRONTEND=false RUN_DB_MIGRATIONS=true PUBLIC_BASE_URL=https://www.ourfitmeet.cn PUBLIC_API_BASE_URL=https://www.ourfitmeet.cn/api bash ./scripts/deploy-production.sh\n' "$TARGET_DIR"
 printf '\nOne-off backend commands on ECS should run through the production container, not host pnpm:\n'
-printf '  ./scripts/ecs-backend-pnpm.sh -- uploads:check:prod\n'
-printf '  ./scripts/ecs-backend-pnpm.sh -- migration:run:prod\n'
-printf '  ./scripts/ecs-backend-pnpm.sh -- db:check-critical-tables:prod\n'
+printf '  bash ./scripts/ecs-backend-pnpm.sh -- uploads:check:prod\n'
+printf '  bash ./scripts/ecs-backend-pnpm.sh -- migration:run:prod\n'
+printf '  bash ./scripts/ecs-backend-pnpm.sh -- db:check-critical-tables:prod\n'
 printf '\nPost-deploy release verification:\n'
 printf '  EXPECTED_RELEASE_COMMIT="$(node -e '"'"'const fs=require("fs");const r=JSON.parse(fs.readFileSync("release.json","utf8"));process.stdout.write(String(r.commit||"unknown"))'"'"')"\n'
 printf '  EXPECTED_RELEASE_BUILT_AT="$(node -e '"'"'const fs=require("fs");const r=JSON.parse(fs.readFileSync("release.json","utf8"));process.stdout.write(String(r.builtAt||""))'"'"')"\n'
-printf '  BASE_URL=https://www.ourfitmeet.cn API_BASE_URL=https://www.ourfitmeet.cn/api EXPECTED_RELEASE_COMMIT="$EXPECTED_RELEASE_COMMIT" ./scripts/verify-production.sh\n'
-printf '  BASE_URL=https://www.ourfitmeet.cn API_BASE_URL=https://www.ourfitmeet.cn/api EXPECTED_RELEASE_COMMIT="$EXPECTED_RELEASE_COMMIT" EXPECTED_RELEASE_BUILT_AT="$EXPECTED_RELEASE_BUILT_AT" ./scripts/verify-agent-goal-production.sh\n'
-printf '  EXPECTED_RELEASE_COMMIT="$EXPECTED_RELEASE_COMMIT" PUBLIC_API_BASE_URL=https://www.ourfitmeet.cn/api ./scripts/ecs-release-diagnose.sh\n'
+printf '  BASE_URL=https://www.ourfitmeet.cn API_BASE_URL=https://www.ourfitmeet.cn/api EXPECTED_RELEASE_COMMIT="$EXPECTED_RELEASE_COMMIT" bash ./scripts/verify-production.sh\n'
+printf '  BASE_URL=https://www.ourfitmeet.cn API_BASE_URL=https://www.ourfitmeet.cn/api EXPECTED_RELEASE_COMMIT="$EXPECTED_RELEASE_COMMIT" EXPECTED_RELEASE_BUILT_AT="$EXPECTED_RELEASE_BUILT_AT" bash ./scripts/verify-agent-goal-production.sh\n'
+printf '  EXPECTED_RELEASE_COMMIT="$EXPECTED_RELEASE_COMMIT" PUBLIC_API_BASE_URL=https://www.ourfitmeet.cn/api bash ./scripts/ecs-release-diagnose.sh\n'
 printf '  curl -fsS https://www.ourfitmeet.cn/api/health\n'
 printf '\nIf /api/health does not show release.commit, the backend container is still running an old image.\n'

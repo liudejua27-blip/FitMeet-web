@@ -34,9 +34,9 @@ if [ ! -f "nginx/ssl/fullchain.pem" ] || [ ! -f "nginx/ssl/privkey.pem" ]; then
   exit 1
 fi
 
-if [ -x "scripts/ecs-host-preflight.sh" ] && [ "${RUN_ECS_HOST_PREFLIGHT:-true}" = "true" ]; then
+if [ -f "scripts/ecs-host-preflight.sh" ] && [ "${RUN_ECS_HOST_PREFLIGHT:-true}" = "true" ]; then
   echo "[pre] Run ECS host preflight"
-  ./scripts/ecs-host-preflight.sh
+  bash ./scripts/ecs-host-preflight.sh
 fi
 
 echo "[1/7] Prepare code"
@@ -73,7 +73,7 @@ echo "[release] commit=${FITMEET_RELEASE_COMMIT} source=${FITMEET_RELEASE_SOURCE
 
 if [ "$RUN_RELEASE_PREFLIGHT" = "true" ]; then
   echo "[3/7] Run Web release preflight"
-  ./scripts/release-preflight.sh --web-only
+  bash ./scripts/release-preflight.sh --web-only
 else
   echo "[3/7] Skip Web release preflight because RUN_RELEASE_PREFLIGHT=$RUN_RELEASE_PREFLIGHT"
   if [ ! -x "backend/node_modules/.bin/ts-node" ]; then
@@ -219,7 +219,7 @@ echo "[post] Scan backend and worker logs"
 scan_deploy_logs
 
 echo "[DONE] Run production verification from your local machine:"
-echo "BASE_URL=$PUBLIC_BASE_URL API_BASE_URL=$PUBLIC_API_BASE_URL EXPECTED_RELEASE_COMMIT=$FITMEET_RELEASE_COMMIT ./scripts/verify-production.sh"
-echo "BASE_URL=$PUBLIC_BASE_URL API_BASE_URL=$PUBLIC_API_BASE_URL EXPECTED_RELEASE_COMMIT=$FITMEET_RELEASE_COMMIT VERIFY_USER_EMAIL='<email>' VERIFY_USER_PASSWORD='<password>' ./scripts/verify-production.sh"
+echo "BASE_URL=$PUBLIC_BASE_URL API_BASE_URL=$PUBLIC_API_BASE_URL EXPECTED_RELEASE_COMMIT=$FITMEET_RELEASE_COMMIT bash ./scripts/verify-production.sh"
+echo "BASE_URL=$PUBLIC_BASE_URL API_BASE_URL=$PUBLIC_API_BASE_URL EXPECTED_RELEASE_COMMIT=$FITMEET_RELEASE_COMMIT VERIFY_USER_EMAIL='<email>' VERIFY_USER_PASSWORD='<password>' bash ./scripts/verify-production.sh"
 echo "powershell -ExecutionPolicy Bypass -File .\\scripts\\verify-production.ps1 -BaseUrl $PUBLIC_BASE_URL -ApiBaseUrl $PUBLIC_API_BASE_URL"
 echo "curl $PUBLIC_API_BASE_URL/health"
