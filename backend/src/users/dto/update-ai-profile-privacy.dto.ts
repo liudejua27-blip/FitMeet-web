@@ -1,4 +1,4 @@
-import { IsBoolean, IsOptional } from 'class-validator';
+import { IsBoolean, IsOptional, IsString, MaxLength } from 'class-validator';
 
 /**
  * PATCH /api/users/me/social-profile/privacy
@@ -23,6 +23,50 @@ export class UpdateProfilePrivacyDto {
   @IsOptional()
   @IsBoolean()
   agentCanStartChatAfterApproval?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  hideSensitiveTags?: boolean;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(40)
+  candidateDisplayMode?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(40)
+  candidateAvatarVisibility?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  candidateCoarseArea?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(40)
+  contactDisclosurePolicy?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(40)
+  preciseLocationPolicy?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(40)
+  strangerOpenerPolicy?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(40)
+  strangerInvitePolicy?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(40)
+  strangerFriendPolicy?: string;
 
   @IsOptional()
   @IsBoolean()

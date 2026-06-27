@@ -198,6 +198,10 @@ export type CandidatePoolCandidate = {
   relationshipGoal: string | null;
   idealType: string | null;
   invitePolicy: string;
+  privacySignals?: string[];
+  contactPolicy?: string;
+  preciseLocationPolicy?: string;
+  strangerActionPolicies?: string[];
   coldStartSignals: string[];
   whyYouMayLike: string;
   whyNow: string;

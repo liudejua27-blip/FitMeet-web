@@ -33,6 +33,62 @@ const missingFieldLabels: Record<string, string> = {
   currentSocialGoal: '当前目标',
 };
 
+type PrivacyPatch = Partial<
+  Pick<
+    SocialProfilePrivacyState,
+    | 'candidateDisplayMode'
+    | 'candidateAvatarVisibility'
+    | 'contactDisclosurePolicy'
+    | 'preciseLocationPolicy'
+  >
+>;
+
+const privacyControlGroups: Array<{
+  key: keyof PrivacyPatch;
+  label: string;
+  description: string;
+  options: Array<{ value: string; label: string }>;
+}> = [
+  {
+    key: 'candidateDisplayMode',
+    label: '候选展示名',
+    description: '控制别人确认前看到你的名字方式。',
+    options: [
+      { value: 'anonymous_until_confirmed', label: '匿名名' },
+      { value: 'nickname_until_confirmed', label: '展示昵称' },
+    ],
+  },
+  {
+    key: 'candidateAvatarVisibility',
+    label: '头像可见性',
+    description: '默认确认前隐藏真实头像。',
+    options: [
+      { value: 'hidden_until_confirmed', label: '确认前隐藏' },
+      { value: 'public', label: '公开头像' },
+    ],
+  },
+  {
+    key: 'contactDisclosurePolicy',
+    label: '联系方式',
+    description: '联系方式不会直接出现在发现页。',
+    options: [
+      { value: 'in_app_after_match', label: '站内沟通' },
+      { value: 'owner_approved', label: '再次确认' },
+      { value: 'never_public', label: '永不公开' },
+    ],
+  },
+  {
+    key: 'preciseLocationPolicy',
+    label: '精确位置',
+    description: '候选卡只显示城市或粗略区域。',
+    options: [
+      { value: 'coarse_only', label: '只显示粗略区域' },
+      { value: 'after_confirmation', label: '确认后透露' },
+      { value: 'never', label: '不展示' },
+    ],
+  },
+];
+
 export function AgentPersonalInfoPage() {
   const user = useAuthStore((state) => state.user);
   const [socialProfile, setSocialProfile] = useState<UserSocialProfile | null>(null);
@@ -40,6 +96,8 @@ export function AgentPersonalInfoPage() {
   const [lifeGraph, setLifeGraph] = useState<LifeGraphResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [savingPrivacyKey, setSavingPrivacyKey] = useState<string | null>(null);
+  const [privacyMessage, setPrivacyMessage] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -173,6 +231,26 @@ export function AgentPersonalInfoPage() {
       .map((key) => missingFieldLabels[key] ?? key)
       .slice(0, 4);
   }, [lifeGraph?.completeness?.missingFields, privacy?.completion?.missingFields]);
+
+  async function updatePrivacyControl(
+    key: keyof PrivacyPatch,
+    value: string | boolean,
+  ) {
+    setSavingPrivacyKey(key);
+    setPrivacyMessage(null);
+    try {
+      const next = await socialProfileApi.updatePrivacy({ [key]: value });
+      setPrivacy(next);
+      setSocialProfile((current) =>
+        current ? ({ ...current, [key]: value } as UserSocialProfile) : current,
+      );
+      setPrivacyMessage('隐私设置已保存。');
+    } catch (err) {
+      setPrivacyMessage(err instanceof Error ? err.message : '隐私设置保存失败，请稍后重试。');
+    } finally {
+      setSavingPrivacyKey(null);
+    }
+  }
 
   return (
     <div className="min-h-screen bg-[#080705] text-[#f7f1e7]">
@@ -313,6 +391,12 @@ export function AgentPersonalInfoPage() {
                 <InfoRow key={item.label} label={item.label} value={item.value} />
               ))}
             </div>
+            <PrivacyControlGrid
+              privacy={privacy}
+              savingKey={savingPrivacyKey}
+              message={privacyMessage}
+              onChange={updatePrivacyControl}
+            />
             <Link
               to="/safety"
               className="mt-4 inline-flex items-center gap-2 rounded-lg border border-white/15 px-3 py-2 text-sm font-semibold text-[#e8dfcf] transition hover:border-[#34d399]/60"
@@ -380,6 +464,70 @@ function InfoRow({ label, value }: { label: string; value: string }) {
       <strong className="max-w-[62%] text-right text-sm font-semibold text-[#f7f1e7]">
         {value}
       </strong>
+    </div>
+  );
+}
+
+function PrivacyControlGrid({
+  message,
+  onChange,
+  privacy,
+  savingKey,
+}: {
+  message: string | null;
+  onChange: (key: keyof PrivacyPatch, value: string) => void;
+  privacy: SocialProfilePrivacyState | null;
+  savingKey: string | null;
+}) {
+  if (!privacy) return null;
+  return (
+    <div className="mt-4 rounded-lg border border-[#34d399]/15 bg-[#34d399]/[0.06] p-3">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h3 className="text-sm font-black text-[#d8fff4]">候选卡匿名展示</h3>
+          <p className="mt-1 text-xs leading-5 text-[#9dcfc2]">
+            这些设置只影响别人看到你的候选卡，不会自动开启匹配或发布卡片。
+          </p>
+        </div>
+        <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-[#34d399]" aria-hidden="true" />
+      </div>
+      <div className="mt-3 grid gap-3">
+        {privacyControlGroups.map((group) => (
+          <div key={group.key} className="rounded-lg border border-white/10 bg-black/20 p-3">
+            <div className="flex flex-wrap items-start justify-between gap-2">
+              <div>
+                <strong className="text-sm text-white">{group.label}</strong>
+                <p className="mt-1 text-xs leading-5 text-[#9f968c]">{group.description}</p>
+              </div>
+              <div className="flex flex-wrap justify-end gap-2">
+                {group.options.map((option) => {
+                  const selected = privacy[group.key] === option.value;
+                  return (
+                    <button
+                      key={option.value}
+                      type="button"
+                      disabled={savingKey === group.key || selected}
+                      onClick={() => onChange(group.key, option.value)}
+                      className={`rounded-full border px-3 py-1.5 text-xs font-semibold transition ${
+                        selected
+                          ? 'border-[#34d399]/50 bg-[#34d399]/20 text-[#b9f9e6]'
+                          : 'border-white/10 bg-white/[0.04] text-[#d7cec2] hover:border-[#34d399]/45'
+                      } disabled:cursor-not-allowed disabled:opacity-70`}
+                    >
+                      {savingKey === group.key && !selected ? '保存中' : option.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+      {message ? (
+        <p className="mt-3 rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-xs text-[#d7cec2]">
+          {message}
+        </p>
+      ) : null}
     </div>
   );
 }

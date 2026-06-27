@@ -1086,8 +1086,32 @@ export const fitMeetCoreOpenApi = {
         profileVersion: { type: 'number' },
       }),
       SocialProfilePrivacy: objectSchema({
-        profileVisibility: { type: 'string' },
-        matchingEnabled: { type: 'boolean' },
+        profileDiscoverable: { type: 'boolean' },
+        agentCanRecommendMe: { type: 'boolean' },
+        allowAgentRecommend: { type: 'boolean' },
+        agentCanStartChatAfterApproval: { type: 'boolean' },
+        hideSensitiveTags: { type: 'boolean' },
+        candidateDisplayMode: {
+          type: 'string',
+          enum: ['anonymous_until_confirmed', 'nickname_until_confirmed'],
+        },
+        candidateAvatarVisibility: {
+          type: 'string',
+          enum: ['hidden_until_confirmed', 'public'],
+        },
+        candidateCoarseArea: { type: 'string' },
+        contactDisclosurePolicy: {
+          type: 'string',
+          enum: ['in_app_after_match', 'owner_approved', 'never_public'],
+        },
+        preciseLocationPolicy: {
+          type: 'string',
+          enum: ['coarse_only', 'after_confirmation', 'never'],
+        },
+        strangerOpenerPolicy: { type: 'string' },
+        strangerInvitePolicy: { type: 'string' },
+        strangerFriendPolicy: { type: 'string' },
+        matchPoolEnabled: { type: 'boolean' },
       }),
       SocialProfileQuestionList: objectSchema({
         questions: arraySchema({ type: 'object', additionalProperties: true }),
@@ -1136,8 +1160,34 @@ export const fitMeetCoreOpenApi = {
         ['photos'],
       ),
       UpdateSocialProfilePrivacyRequest: objectSchema({
-        profileVisibility: { type: 'string' },
-        matchingEnabled: { type: 'boolean' },
+        profileDiscoverable: { type: 'boolean' },
+        agentCanRecommendMe: { type: 'boolean' },
+        allowAgentRecommend: { type: 'boolean' },
+        agentCanStartChatAfterApproval: { type: 'boolean' },
+        hideSensitiveTags: { type: 'boolean' },
+        candidateDisplayMode: {
+          type: 'string',
+          enum: ['anonymous_until_confirmed', 'nickname_until_confirmed'],
+        },
+        candidateAvatarVisibility: {
+          type: 'string',
+          enum: ['hidden_until_confirmed', 'public'],
+        },
+        candidateCoarseArea: { type: 'string' },
+        contactDisclosurePolicy: {
+          type: 'string',
+          enum: ['in_app_after_match', 'owner_approved', 'never_public'],
+        },
+        preciseLocationPolicy: {
+          type: 'string',
+          enum: ['coarse_only', 'after_confirmation', 'never'],
+        },
+        strangerOpenerPolicy: { type: 'string' },
+        strangerInvitePolicy: { type: 'string' },
+        strangerFriendPolicy: { type: 'string' },
+        ownerConfirmed: { type: 'boolean' },
+        matchingConsent: { type: 'boolean' },
+        profileVisibilityConsent: { type: 'boolean' },
       }),
       UpdateSocialProfileRequest: objectSchema({
         purpose: { type: 'string' },

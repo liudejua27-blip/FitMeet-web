@@ -144,6 +144,58 @@ export class UserSocialProfile {
   @Column({ default: '' })
   privacyBoundary: string;
 
+  /** 候选卡确认前展示名策略 */
+  @Column({
+    type: 'varchar',
+    length: 40,
+    default: 'anonymous_until_confirmed',
+  })
+  candidateDisplayMode: string;
+
+  /** 候选卡确认前头像可见性 */
+  @Column({
+    type: 'varchar',
+    length: 40,
+    default: 'hidden_until_confirmed',
+  })
+  candidateAvatarVisibility: string;
+
+  /** 候选卡展示用粗略区域，避免透出精确位置 */
+  @Column({ type: 'varchar', length: 120, default: '' })
+  candidateCoarseArea: string;
+
+  /** 联系方式披露策略 */
+  @Column({ type: 'varchar', length: 40, default: 'in_app_after_match' })
+  contactDisclosurePolicy: string;
+
+  /** 精确位置披露策略 */
+  @Column({ type: 'varchar', length: 40, default: 'coarse_only' })
+  preciseLocationPolicy: string;
+
+  /** 陌生人开场白策略 */
+  @Column({
+    type: 'varchar',
+    length: 40,
+    default: 'opener_requires_confirmation',
+  })
+  strangerOpenerPolicy: string;
+
+  /** 陌生人邀请策略 */
+  @Column({
+    type: 'varchar',
+    length: 40,
+    default: 'invite_requires_confirmation',
+  })
+  strangerInvitePolicy: string;
+
+  /** 陌生人加好友策略 */
+  @Column({
+    type: 'varchar',
+    length: 40,
+    default: 'friend_requires_confirmation',
+  })
+  strangerFriendPolicy: string;
+
   /** 是否进入资料发现池 */
   @Column({ default: false })
   profileDiscoverable: boolean;

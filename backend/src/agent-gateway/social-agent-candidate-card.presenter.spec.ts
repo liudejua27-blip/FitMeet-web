@@ -195,9 +195,9 @@ describe('buildCandidatePoolCandidate', () => {
       targetUserId: 42,
       candidateUserId: 42,
       userId: 42,
-      displayName: 'Alex',
-      nickname: 'Alex',
-      avatar: 'https://cdn.fitmeet.app/avatar.png',
+      displayName: '青岛搭子 43',
+      nickname: '青岛搭子 43',
+      avatar: '',
       city: '青岛',
       dataQuality: 'complete',
       matchScore: 82,
@@ -210,7 +210,7 @@ describe('buildCandidatePoolCandidate', () => {
         profileDiscoverable: true,
         agentCanRecommendMe: true,
         sourceLabel: '公开可发现且已允许 Agent 推荐',
-        privacyLabel: '资料已脱敏，不展示手机号、精确位置或私聊内容',
+        privacyLabel: '联系方式仅在站内匹配后沟通；仅展示城市或粗略区域',
         strangerPolicyLabel: '你已同意查看公开可发现的陌生人机会',
       },
       relationshipGoal: '低压力认识新朋友',
@@ -231,7 +231,7 @@ describe('buildCandidatePoolCandidate', () => {
     );
     expect(candidate.coldStartSignals).toEqual(
       expect.arrayContaining([
-        '同城：青岛',
+        '区域：青岛',
         '你已同意查看公开可发现的陌生人机会',
         '共同兴趣：跑步',
       ]),
@@ -246,12 +246,16 @@ describe('buildCandidatePoolCandidate', () => {
       '公开资料已允许 Agent 推荐',
       '共同公开兴趣：跑步',
     ]);
-    expect(candidate.recommendationConsent.privacyLabel).toContain(
-      '不展示手机号',
+    expect(candidate.privacySignals).toEqual(
+      expect.arrayContaining([
+        '确认前匿名展示',
+        '头像确认前隐藏',
+        '粗略区域：青岛',
+      ]),
     );
-    expect(candidate.recommendationConsent.privacyLabel).toContain('精确位置');
-    expect(candidate.recommendationConsent.privacyLabel).toContain('私聊内容');
-    expect(candidate.whyYouMayLike).toContain('Alex');
+    expect(candidate.recommendationConsent.privacyLabel).toContain('联系方式');
+    expect(candidate.recommendationConsent.privacyLabel).toContain('粗略区域');
+    expect(candidate.whyYouMayLike).toContain('青岛搭子 43');
     expect(candidate.whyYouMayLike).toContain('青岛');
     expect(risk.normalizeScene).toHaveBeenCalledWith(
       null,
@@ -304,7 +308,7 @@ describe('buildCandidatePoolCandidate', () => {
       timeLabel: '今天晚上',
       timeWindow: '今天晚上',
       locationText: '青岛大学附近',
-      area: '青岛大学附近',
+      area: '青岛',
       suggestedOpener: '围绕散步开场',
       suggestedMessage: '围绕散步开场',
     });
@@ -321,6 +325,59 @@ describe('buildCandidatePoolCandidate', () => {
           interestTags: ['散步'],
         }),
       }),
+    );
+  });
+
+  it('respects owner privacy controls when nickname and avatar are public', () => {
+    const candidate = buildCandidatePoolCandidate({
+      source: 'profile_candidate',
+      user: user(),
+      profile: profile({
+        candidateDisplayMode: 'nickname_until_confirmed',
+        candidateAvatarVisibility: 'public',
+        candidateCoarseArea: '青岛市南区',
+        contactDisclosurePolicy: 'owner_approved',
+        preciseLocationPolicy: 'after_confirmation',
+      }),
+      city: '青岛',
+      displayName: 'Alex',
+      interestTags: ['跑步'],
+      profileCompleteness: 0.92,
+      matchScore: 82,
+      scoreBreakdown: { distance: 14 },
+      commonTags: ['跑步'],
+      matchReasons: ['同城'],
+      publicIntentId: null,
+      socialRequestId: 100,
+      activityId: null,
+      query: {
+        acceptsStrangers: true,
+        city: '青岛',
+        activityType: '跑步',
+        timePreference: '周末下午',
+        locationPreference: '青岛市南区',
+        rawText: '周末下午在青岛市南区跑步',
+        interestTags: ['跑步'],
+      },
+      sceneRisk: sceneRisk('low'),
+      candidateExplanation: { explain: jest.fn(() => explanation()) },
+    });
+
+    expect(candidate).toMatchObject({
+      displayName: 'Alex',
+      nickname: 'Alex',
+      avatar: 'https://cdn.fitmeet.app/avatar.png',
+      city: '青岛市南区',
+      area: '青岛市南区',
+      contactPolicy: '联系方式需对方再次确认后披露',
+      preciseLocationPolicy: '精确位置需双方确认后再透露',
+    });
+    expect(candidate.privacySignals).toEqual(
+      expect.arrayContaining([
+        '确认前仅展示昵称',
+        '头像公开展示',
+        '粗略区域：青岛市南区',
+      ]),
     );
   });
 

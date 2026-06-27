@@ -28,6 +28,14 @@ export interface UserSocialProfile {
   socialPreference: string;
   rejectRules: string;
   privacyBoundary: string;
+  candidateDisplayMode: string;
+  candidateAvatarVisibility: string;
+  candidateCoarseArea: string;
+  contactDisclosurePolicy: string;
+  preciseLocationPolicy: string;
+  strangerOpenerPolicy: string;
+  strangerInvitePolicy: string;
+  strangerFriendPolicy: string;
   profileDiscoverable: boolean;
   agentCanRecommendMe: boolean;
   agentCanStartChatAfterApproval: boolean;
@@ -147,6 +155,14 @@ export interface SocialProfilePrivacyState {
   allowAgentRecommend?: boolean;
   agentCanStartChatAfterApproval: boolean;
   hideSensitiveTags: boolean;
+  candidateDisplayMode: string;
+  candidateAvatarVisibility: string;
+  candidateCoarseArea: string;
+  contactDisclosurePolicy: string;
+  preciseLocationPolicy: string;
+  strangerOpenerPolicy: string;
+  strangerInvitePolicy: string;
+  strangerFriendPolicy: string;
   matchPoolEnabled: boolean;
   completion?: SocialProfileCompletion;
   authorization?: SocialProfileCompletion['authorization'];
@@ -213,7 +229,21 @@ export const socialProfileApi = {
       body: JSON.stringify(data),
     }),
   privacy: () => api.request<SocialProfilePrivacyState>('/users/me/social-profile/privacy'),
-  updatePrivacy: (data: Partial<Pick<SocialProfilePrivacyState, 'profileDiscoverable' | 'agentCanRecommendMe' | 'agentCanStartChatAfterApproval' | 'hideSensitiveTags'>> & {
+  updatePrivacy: (data: Partial<Pick<
+    SocialProfilePrivacyState,
+    | 'profileDiscoverable'
+    | 'agentCanRecommendMe'
+    | 'agentCanStartChatAfterApproval'
+    | 'hideSensitiveTags'
+    | 'candidateDisplayMode'
+    | 'candidateAvatarVisibility'
+    | 'candidateCoarseArea'
+    | 'contactDisclosurePolicy'
+    | 'preciseLocationPolicy'
+    | 'strangerOpenerPolicy'
+    | 'strangerInvitePolicy'
+    | 'strangerFriendPolicy'
+  >> & {
     ownerConfirmed?: boolean;
     matchingConsent?: boolean;
     profileVisibilityConsent?: boolean;

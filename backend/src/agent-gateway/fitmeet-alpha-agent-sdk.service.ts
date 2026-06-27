@@ -375,6 +375,7 @@ export class FitMeetAlphaAgentSdkService {
       });
       const safetyBadges = this.uniqueStrings([
         ...consentBadges,
+        ...this.stringList(candidate.privacySignals),
         '位置已模糊',
         '公共场所优先',
         '发送前确认',
@@ -447,6 +448,7 @@ export class FitMeetAlphaAgentSdkService {
             explanationSteps,
             rankingBreakdown,
             safetyBadges,
+            privacySignals: this.stringList(candidate.privacySignals),
             recommendationConsent:
               Object.keys(recommendationConsent).length > 0
                 ? recommendationConsent
@@ -472,6 +474,7 @@ export class FitMeetAlphaAgentSdkService {
           idealType,
           invitePolicy,
           safetyBadges,
+          privacySignals: this.stringList(candidate.privacySignals),
           trustSignals: consentBadges,
           recommendationConsent:
             Object.keys(recommendationConsent).length > 0
@@ -2077,6 +2080,7 @@ export class FitMeetAlphaAgentSdkService {
         ? '已开启 Agent 匹配'
         : '匹配权限需继续确认',
       this.text(input.recommendationConsent.privacyLabel) || '资料已脱敏',
+      ...this.stringList(input.candidate.privacySignals),
       blockedSignals.length === 0
         ? '无拉黑/投诉风险信号'
         : '存在风险信号，需降低触达强度',
