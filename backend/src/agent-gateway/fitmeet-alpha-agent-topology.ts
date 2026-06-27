@@ -146,10 +146,12 @@ export const FITMEET_ALPHA_AGENT_TOOL_OWNERS: Record<
     'get_user_profile',
     'update_profile_from_agent_context',
     'append_profile_memory',
+    'update_long_term_memory',
   ],
   'Match Agent': [
     'search_real_candidates',
     'search_public_intents',
+    'optimize_recommendation_with_memory',
     'create_social_request',
     'get_candidate_detail',
     'send_message_to_candidate',

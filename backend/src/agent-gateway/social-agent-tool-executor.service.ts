@@ -892,6 +892,7 @@ export class SocialAgentToolExecutorService {
         SocialAgentToolName.UpdateAiProfileFromAnswers,
         SocialAgentToolName.UpdateProfileFromAgentContext,
         SocialAgentToolName.ReadLongTermMemory,
+        SocialAgentToolName.UpdateLongTermMemory,
       ].includes(toolName)
     ) {
       return 'Life Graph Agent';
@@ -904,6 +905,7 @@ export class SocialAgentToolExecutorService {
         SocialAgentToolName.ExplainMatches,
         SocialAgentToolName.SaveCandidate,
         SocialAgentToolName.GetCandidatePoolDebug,
+        SocialAgentToolName.OptimizeRecommendationWithMemory,
       ].includes(toolName)
     ) {
       return 'Match Agent';
@@ -1264,6 +1266,7 @@ export class SocialAgentToolExecutorService {
         return 'cancel_payment_intent_or_refund_via_manual_review';
       case SocialAgentToolName.UpdateAiProfileFromAnswers:
       case SocialAgentToolName.UpdateProfileFromAgentContext:
+      case SocialAgentToolName.UpdateLongTermMemory:
         return 'revert_profile_or_life_graph_field_from_audit';
       default:
         return null;
@@ -1809,6 +1812,10 @@ export class SocialAgentToolExecutorService {
         return this.rejectAction(task, input);
       case SocialAgentToolName.ReadLongTermMemory:
         return this.longTermMemory.readSnapshot(task.ownerUserId);
+      case SocialAgentToolName.UpdateLongTermMemory:
+        return this.updateLongTermMemory(task, input);
+      case SocialAgentToolName.OptimizeRecommendationWithMemory:
+        return this.optimizeRecommendationWithMemory(task, input);
       case SocialAgentToolName.SummarizeCurrentTask:
         return this.summarizeCurrentTask(task, input);
       case SocialAgentToolName.GetCandidatePoolDebug:
@@ -2823,6 +2830,79 @@ export class SocialAgentToolExecutorService {
     return this.approvals.reject(approvalId, task.ownerUserId);
   }
 
+  private async updateLongTermMemory(
+    task: AgentTask,
+    input: Record<string, unknown>,
+  ): Promise<unknown> {
+    return this.longTermMemory.updateConfirmedMemory({
+      userId: task.ownerUserId,
+      taskId: task.id,
+      memoryKey: this.toolInput.string(input.memoryKey) ?? '',
+      value: this.memoryValueFromToolInput(input.value),
+      reason: this.toolInput.string(input.reason),
+      proposalId:
+        this.toolInput.string(input.proposalId) ??
+        this.toolInput.number(input.proposalId) ??
+        null,
+      confirmed:
+        this.toolInput.bool(input.confirmed) === true ||
+        Boolean(
+          this.toolInput.number(input.approvalId ?? input.approvalRequestId),
+        ),
+      source: 'agent_tool_confirmed_memory_proposal',
+      tags: this.toolInput.stringArray(input.tags),
+    });
+  }
+
+  private async optimizeRecommendationWithMemory(
+    task: AgentTask,
+    input: Record<string, unknown>,
+  ): Promise<unknown> {
+    const candidateIds = this.numberArray(input.candidateIds).slice(0, 50);
+    if (candidateIds.length === 0) {
+      return this.longTermMemory.optimizeRecommendationWithMemory({
+        userId: task.ownerUserId,
+        candidates: [],
+      });
+    }
+
+    const candidates = await this.candidateRepo
+      .createQueryBuilder('candidate')
+      .innerJoin('candidate.socialRequest', 'socialRequest')
+      .where('candidate.id IN (:...candidateIds)', { candidateIds })
+      .andWhere('socialRequest.userId = :ownerUserId', {
+        ownerUserId: task.ownerUserId,
+      })
+      .getMany();
+
+    const byId = new Map(
+      candidates.map((candidate) => [candidate.id, candidate]),
+    );
+    const ordered = candidateIds
+      .map((id) => byId.get(id))
+      .filter((candidate): candidate is SocialRequestCandidate =>
+        Boolean(candidate),
+      )
+      .map((candidate) => ({
+        id: candidate.id,
+        candidateUserId: candidate.candidateUserId,
+        commonTags: Array.isArray(candidate.commonTags)
+          ? candidate.commonTags
+          : [],
+        reasons: Array.isArray(candidate.reasons) ? candidate.reasons : [],
+        explanation: this.toolInput.isRecord(candidate.explanation)
+          ? candidate.explanation
+          : {},
+        scoreBreakdown: this.numericRecord(candidate.scoreBreakdown),
+        distanceKm: candidate.distanceKm,
+      }));
+
+    return this.longTermMemory.optimizeRecommendationWithMemory({
+      userId: task.ownerUserId,
+      candidates: ordered,
+    });
+  }
+
   private async summarizeCurrentTask(
     task: AgentTask,
     input: Record<string, unknown>,
@@ -2844,6 +2924,36 @@ export class SocialAgentToolExecutorService {
         ? await this.longTermMemory.summarizeTask(task)
         : null,
     };
+  }
+
+  private memoryValueFromToolInput(
+    value: unknown,
+  ): string | string[] | boolean {
+    if (typeof value === 'boolean') return value;
+    if (Array.isArray(value)) return this.toolInput.stringArray(value);
+    return this.toolInput.string(value) ?? '';
+  }
+
+  private numberArray(value: unknown): number[] {
+    const raw = Array.isArray(value) ? value : value != null ? [value] : [];
+    const out: number[] = [];
+    for (const item of raw) {
+      const parsed = this.toolInput.number(item);
+      if (parsed == null) continue;
+      const id = Math.trunc(parsed);
+      if (id > 0 && !out.includes(id)) out.push(id);
+    }
+    return out;
+  }
+
+  private numericRecord(value: unknown): Record<string, number> {
+    if (!this.toolInput.isRecord(value)) return {};
+    const out: Record<string, number> = {};
+    for (const [key, raw] of Object.entries(value)) {
+      const parsed = this.toolInput.number(raw);
+      if (parsed != null) out[key] = parsed;
+    }
+    return out;
   }
 
   private async getCandidatePoolDebug(

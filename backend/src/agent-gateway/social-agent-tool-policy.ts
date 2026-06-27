@@ -32,6 +32,7 @@ export const SOCIAL_AGENT_MANDATORY_APPROVAL_TOOLS: readonly SocialAgentToolName
     SocialAgentToolName.ShareLocation,
     SocialAgentToolName.Payment,
     SocialAgentToolName.PublishSocialRequest,
+    SocialAgentToolName.UpdateLongTermMemory,
   ];
 
 const MANDATORY_APPROVAL_TOOLS = new Set<SocialAgentToolName>(
@@ -106,6 +107,9 @@ export function requiresMandatorySocialAgentApproval(
   if (toolName === SocialAgentToolName.UpdateProfileFromAgentContext) {
     return false;
   }
+  if (toolName === SocialAgentToolName.UpdateLongTermMemory) {
+    return true;
+  }
   return false;
 }
 
@@ -126,6 +130,7 @@ export function isConfirmableSocialAgentTool(
     SocialAgentToolName.Payment,
     SocialAgentToolName.PublishSocialRequest,
     SocialAgentToolName.CreateSocialRequest,
+    SocialAgentToolName.UpdateLongTermMemory,
   ].includes(toolName);
 }
 
@@ -251,6 +256,7 @@ export function getSocialAgentToolActionType(
     case SocialAgentToolName.ExplainMatches:
     case SocialAgentToolName.ViewMatchHistory:
     case SocialAgentToolName.ListFriends:
+    case SocialAgentToolName.OptimizeRecommendationWithMemory:
       return AgentActionType.RunMatch;
     case SocialAgentToolName.DraftOpener:
       return AgentActionType.GenerateInvite;
@@ -277,6 +283,7 @@ export function getSocialAgentToolActionType(
       return AgentActionType.GenerateProfileQuestion;
     case SocialAgentToolName.UpdateAiProfileFromAnswers:
     case SocialAgentToolName.UpdateProfileFromAgentContext:
+    case SocialAgentToolName.UpdateLongTermMemory:
       return AgentActionType.UpdateProfile;
     case SocialAgentToolName.GetMyProfile:
     case SocialAgentToolName.GetAiProfile:
@@ -328,6 +335,7 @@ export function getSocialAgentToolRiskLevel(
       SocialAgentToolName.ConnectCandidate,
       SocialAgentToolName.InviteActivity,
       SocialAgentToolName.PublishSocialRequest,
+      SocialAgentToolName.UpdateLongTermMemory,
       SocialAgentToolName.RejectAction,
     ].includes(toolName)
   ) {
@@ -352,11 +360,13 @@ export function getSocialAgentToolSceneActionType(
     case SocialAgentToolName.GetAiProfile:
     case SocialAgentToolName.UpdateAiProfileFromAnswers:
     case SocialAgentToolName.UpdateProfileFromAgentContext:
+    case SocialAgentToolName.UpdateLongTermMemory:
       return 'profile';
     case SocialAgentToolName.SearchPublicIntents:
     case SocialAgentToolName.SearchActivities:
     case SocialAgentToolName.SearchMatches:
     case SocialAgentToolName.ExplainMatches:
+    case SocialAgentToolName.OptimizeRecommendationWithMemory:
       return 'search_candidates';
     case SocialAgentToolName.DraftOpener:
       return 'generate_opener';
@@ -466,6 +476,7 @@ export function getSocialAgentPermissionActionForTool(
     case SocialAgentToolName.GenerateProfileQuestions:
     case SocialAgentToolName.UpdateAiProfileFromAnswers:
     case SocialAgentToolName.UpdateProfileFromAgentContext:
+    case SocialAgentToolName.UpdateLongTermMemory:
     case SocialAgentToolName.ExplainMatches:
       return SocialAgentAction.GenerateContent;
     case SocialAgentToolName.PublishSocialRequest:
@@ -476,6 +487,7 @@ export function getSocialAgentPermissionActionForTool(
     case SocialAgentToolName.SearchMatches:
     case SocialAgentToolName.ViewMatchHistory:
     case SocialAgentToolName.ListFriends:
+    case SocialAgentToolName.OptimizeRecommendationWithMemory:
       return SocialAgentAction.SearchProfiles;
     case SocialAgentToolName.DraftOpener:
       return SocialAgentAction.DraftMessage;

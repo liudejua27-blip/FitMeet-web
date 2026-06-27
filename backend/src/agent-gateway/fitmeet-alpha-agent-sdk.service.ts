@@ -1142,12 +1142,17 @@ export class FitMeetAlphaAgentSdkService {
       return ['classify_fitmeet_social_need', 'calculate_fitness_math'];
     }
     if (agent === 'Life Graph Agent') {
-      return ['get_user_profile', 'update_profile_from_agent_context'];
+      return [
+        'get_user_profile',
+        'update_profile_from_agent_context',
+        'update_long_term_memory',
+      ];
     }
     if (agent === 'Match Agent') {
       return [
         'create_social_request',
         'search_real_candidates',
+        'optimize_recommendation_with_memory',
         'send_message_to_candidate',
         'connect_candidate',
         'list_friends',

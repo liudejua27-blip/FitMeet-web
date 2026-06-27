@@ -247,6 +247,8 @@ function makeService(options: { agentLoop?: unknown } = {}) {
   const longTermMemory = {
     readSnapshot: jest.fn(),
     summarizeTask: jest.fn(),
+    updateConfirmedMemory: jest.fn(),
+    optimizeRecommendationWithMemory: jest.fn(),
   };
   const targetResolver = new SocialAgentTargetResolverService(
     candidateRepo as never,
@@ -1213,6 +1215,141 @@ describe('SocialAgentToolExecutorService', () => {
     expect(result.toolCalls[3].output?.activities).toEqual([
       expect.objectContaining({ activityId: 9 }),
     ]);
+  });
+
+  it('requires approval before writing long-term memory', async () => {
+    const { service, taskRepo, longTermMemory, approvals } = makeService();
+    const task = makeTask({
+      permissionMode: AgentTaskPermissionMode.Confirm,
+      plan: [
+        {
+          id: 'memory_write',
+          toolName: 'update_long_term_memory',
+          status: 'planned',
+          input: {
+            memoryKey: 'interest',
+            value: '羽毛球',
+            proposalId: 'proposal_1',
+            confirmed: true,
+          },
+        },
+      ],
+    });
+    taskRepo.findOne.mockResolvedValue(task);
+
+    const result = await service.executeTask(100);
+
+    expect(result.succeededSteps).toBe(1);
+    expect(approvals.create).toHaveBeenCalledTimes(1);
+    expect(longTermMemory.updateConfirmedMemory).not.toHaveBeenCalled();
+    expect(result.toolCalls[0].output).toEqual(
+      expect.objectContaining({
+        pendingApproval: true,
+      }),
+    );
+  });
+
+  it('writes confirmed long-term memory after approval credential', async () => {
+    const { service, taskRepo, longTermMemory } = makeService();
+    const task = makeTask({
+      permissionMode: AgentTaskPermissionMode.Confirm,
+      plan: [
+        {
+          id: 'memory_write',
+          toolName: 'update_long_term_memory',
+          status: 'planned',
+          input: {
+            memoryKey: 'availability',
+            value: ['周末下午'],
+            proposalId: 'proposal_2',
+            approvalId: 501,
+          },
+        },
+      ],
+    });
+    taskRepo.findOne.mockResolvedValue(task);
+    longTermMemory.updateConfirmedMemory.mockResolvedValue({
+      success: true,
+      status: 'updated',
+      confirmationRequired: false,
+      proposalId: 'proposal_2',
+      memoryKey: 'availability',
+      updatedFields: ['preferences.availability'],
+      storedIn: 'social_agent_long_term_memory',
+    });
+
+    const result = await service.executeTask(100);
+
+    expect(result.succeededSteps).toBe(1);
+    expect(longTermMemory.updateConfirmedMemory).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: 1,
+        taskId: 100,
+        memoryKey: 'availability',
+        value: ['周末下午'],
+        proposalId: 'proposal_2',
+        confirmed: true,
+      }),
+    );
+  });
+
+  it('optimizes recommendations using only owner-scoped candidate rows', async () => {
+    const { service, taskRepo, candidateRepo, longTermMemory } = makeService();
+    const queryBuilder = {
+      innerJoin: jest.fn().mockReturnThis(),
+      where: jest.fn().mockReturnThis(),
+      andWhere: jest.fn().mockReturnThis(),
+      getMany: jest.fn().mockResolvedValue([
+        {
+          id: 10,
+          candidateUserId: 20,
+          commonTags: ['羽毛球'],
+          reasons: ['周末下午可约'],
+          explanation: { why: '低压力运动搭子' },
+          scoreBreakdown: { distance: 8 },
+          distanceKm: 2,
+        },
+      ]),
+    };
+    candidateRepo.createQueryBuilder = jest.fn(() => queryBuilder);
+    const task = makeTask({
+      permissionMode: AgentTaskPermissionMode.Assist,
+      plan: [
+        {
+          id: 'memory_rank',
+          toolName: 'optimize_recommendation_with_memory',
+          status: 'planned',
+          input: { candidateIds: [10, 11, 10] },
+        },
+      ],
+    });
+    taskRepo.findOne.mockResolvedValue(task);
+    longTermMemory.optimizeRecommendationWithMemory.mockResolvedValue({
+      rankedCandidateIds: [10],
+      adjustments: [],
+      memorySignalsUsed: {},
+      source: 'owner_long_term_memory',
+    });
+
+    const result = await service.executeTask(100);
+
+    expect(result.succeededSteps).toBe(1);
+    expect(queryBuilder.andWhere).toHaveBeenCalledWith(
+      'socialRequest.userId = :ownerUserId',
+      { ownerUserId: 1 },
+    );
+    expect(
+      longTermMemory.optimizeRecommendationWithMemory,
+    ).toHaveBeenCalledWith({
+      userId: 1,
+      candidates: [
+        expect.objectContaining({
+          id: 10,
+          candidateUserId: 20,
+          commonTags: ['羽毛球'],
+        }),
+      ],
+    });
   });
 
   it('executes first-stage write tools through existing services', async () => {

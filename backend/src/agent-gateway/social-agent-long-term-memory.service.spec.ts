@@ -645,4 +645,115 @@ describe('SocialAgentLongTermMemoryService', () => {
     expect(snapshot.taskCount).toBe(0);
     expect(snapshot.preferences.interests).toEqual([]);
   });
+
+  it('requires a confirmed proposal before writing long-term memory', async () => {
+    const repo = makeRepo();
+    const service = new SocialAgentLongTermMemoryService(repo as never);
+
+    const result = await service.updateConfirmedMemory({
+      userId: 42,
+      taskId: 100,
+      memoryKey: 'interest',
+      value: '羽毛球',
+      proposalId: 'proposal_1',
+      confirmed: false,
+    });
+
+    expect(result).toMatchObject({
+      success: false,
+      status: 'confirmation_required',
+      confirmationRequired: true,
+    });
+    expect(repo.save).not.toHaveBeenCalled();
+    expect((await service.readSnapshot(42)).preferences.interests).toEqual([]);
+  });
+
+  it('writes confirmed proposal fields into current memory and history', async () => {
+    const repo = makeRepo();
+    const service = new SocialAgentLongTermMemoryService(repo as never);
+
+    const result = await service.updateConfirmedMemory({
+      userId: 42,
+      taskId: 101,
+      memoryKey: 'availability',
+      value: ['周末下午', '工作日晚上'],
+      reason: '用户确认可约时间',
+      proposalId: 'proposal_101',
+      confirmed: true,
+      tags: ['agent_confirmed'],
+    });
+
+    expect(result).toMatchObject({
+      success: true,
+      status: 'updated',
+      confirmationRequired: false,
+      storedIn: 'social_agent_long_term_memory',
+    });
+    expect(result.updatedFields).toContain('preferences.availability');
+    const snapshot = await service.readSnapshot(42);
+    expect(snapshot.availability).toEqual(['周末下午', '工作日晚上']);
+    expect(snapshot.activityPreferences.favoriteTimePreferences).toEqual([
+      '周末下午',
+      '工作日晚上',
+    ]);
+    expect(snapshot.preferences.preferenceHistory).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          field: 'availability',
+          value: '周末下午',
+          taskId: 101,
+          confirmed: true,
+        }),
+      ]),
+    );
+  });
+
+  it('optimizes current candidates with owner long-term memory signals', async () => {
+    const repo = makeRepo();
+    const service = new SocialAgentLongTermMemoryService(repo as never);
+    await service.updateConfirmedMemory({
+      userId: 42,
+      taskId: 201,
+      memoryKey: 'interest',
+      value: '羽毛球',
+      proposalId: 'proposal_interest',
+      confirmed: true,
+    });
+    await service.updateConfirmedMemory({
+      userId: 42,
+      taskId: 202,
+      memoryKey: 'socialStyle',
+      value: '低压力',
+      proposalId: 'proposal_style',
+      confirmed: true,
+    });
+
+    const result = await service.optimizeRecommendationWithMemory({
+      userId: 42,
+      candidates: [
+        {
+          id: 1,
+          candidateUserId: 11,
+          commonTags: ['跑步'],
+          reasons: ['今晚可约'],
+          explanation: {},
+        },
+        {
+          id: 2,
+          candidateUserId: 12,
+          commonTags: ['羽毛球', '低压力'],
+          reasons: ['公共场所轻松约练'],
+          explanation: {},
+        },
+      ],
+    });
+
+    expect(result.rankedCandidateIds[0]).toBe(2);
+    expect(result.adjustments[0]).toMatchObject({
+      candidateId: 2,
+      candidateUserId: 12,
+    });
+    expect(result.adjustments[0].reasons.join(' ')).toContain('羽毛球');
+    expect(result.source).toBe('owner_long_term_memory');
+  });
 });

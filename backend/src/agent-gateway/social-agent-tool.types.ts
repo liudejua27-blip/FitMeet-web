@@ -34,6 +34,8 @@ export enum SocialAgentToolName {
   ApproveAction = 'approve_action',
   RejectAction = 'reject_action',
   ReadLongTermMemory = 'read_long_term_memory',
+  UpdateLongTermMemory = 'update_long_term_memory',
+  OptimizeRecommendationWithMemory = 'optimize_recommendation_with_memory',
   SummarizeCurrentTask = 'summarize_current_task',
   GetCandidatePoolDebug = 'get_candidate_pool_debug',
   ReadTaskConversationMessages = 'read_task_conversation_messages',

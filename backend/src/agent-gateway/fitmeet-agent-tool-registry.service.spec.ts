@@ -155,6 +155,38 @@ describe('FitMeetAgentToolRegistryService', () => {
     );
   });
 
+  it('registers confirmed long-term memory tools as implemented owner-scoped tools', () => {
+    expect(service.getTool('update_long_term_memory')).toMatchObject({
+      name: 'update_long_term_memory',
+      category: FitMeetAgentToolCategory.Memory,
+      riskLevel: AgentActionRiskLevel.Medium,
+      requiresApproval: true,
+      requiresConfirmation: true,
+      permissionAction: SocialAgentAction.GenerateContent,
+      executorToolName: 'update_long_term_memory',
+      runtimeStatus: 'implemented',
+      plannerEnabled: true,
+      dataScope: 'owner_agent_memory_only',
+      sideEffects: ['memory_write'],
+    });
+
+    expect(
+      service.getTool('optimize_recommendation_with_memory'),
+    ).toMatchObject({
+      name: 'optimize_recommendation_with_memory',
+      category: FitMeetAgentToolCategory.Memory,
+      riskLevel: AgentActionRiskLevel.Low,
+      requiresApproval: false,
+      requiresConfirmation: false,
+      permissionAction: SocialAgentAction.SearchProfiles,
+      executorToolName: 'optimize_recommendation_with_memory',
+      runtimeStatus: 'implemented',
+      plannerEnabled: true,
+      dataScope: 'owner_memory_and_current_candidates_only',
+      sideEffects: [],
+    });
+  });
+
   it('returns only implemented planner-visible tools for planning', () => {
     const plannerTools = service.listPlannerTools(
       AgentTaskPermissionMode.Assist,
@@ -169,6 +201,9 @@ describe('FitMeetAgentToolRegistryService', () => {
     expect(plannerTools.every((tool) => tool.plannerEnabled)).toBe(true);
     expect(plannerTools.map((tool) => tool.name)).not.toContain(
       'update_long_term_memory',
+    );
+    expect(plannerTools.map((tool) => tool.name)).toContain(
+      'optimize_recommendation_with_memory',
     );
     expect(plannerTools.map((tool) => tool.name)).not.toContain(
       'approve_action',
@@ -229,6 +264,12 @@ describe('FitMeetAgentToolRegistryService', () => {
     expect(service.resolveExecutorToolName('list_friends')).toBe(
       'list_friends',
     );
+    expect(service.resolveExecutorToolName('update_long_term_memory')).toBe(
+      'update_long_term_memory',
+    );
+    expect(
+      service.resolveExecutorToolName('optimize_recommendation_with_memory'),
+    ).toBe('optimize_recommendation_with_memory');
     expect(service.resolveExecutorToolName('get_agent_message_events')).toBe(
       'get_agent_message_events',
     );

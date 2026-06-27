@@ -56,6 +56,58 @@ export type LongTermMemorySnapshot = {
   updatedAt: string | null;
 };
 
+export type ConfirmedLongTermMemoryUpdateInput = {
+  userId: number;
+  taskId?: number | null;
+  memoryKey: string;
+  value: string | string[] | boolean;
+  reason?: string;
+  proposalId?: string | number | null;
+  confirmed?: boolean;
+  source?: string;
+  tags?: string[];
+};
+
+export type LongTermMemoryUpdateResult = {
+  success: boolean;
+  status: 'updated' | 'confirmation_required' | 'ignored';
+  confirmationRequired: boolean;
+  proposalId: string | number | null;
+  memoryKey: string;
+  updatedFields: string[];
+  storedIn: string;
+  snapshot?: LongTermMemorySnapshot;
+};
+
+export type LongTermMemoryCandidateForRanking = {
+  id: number;
+  candidateUserId?: number | null;
+  commonTags?: string[];
+  reasons?: string[];
+  explanation?: Record<string, unknown> | null;
+  scoreBreakdown?: Record<string, number> | null;
+  distanceKm?: number | null;
+};
+
+export type LongTermMemoryRecommendationOptimizationResult = {
+  rankedCandidateIds: number[];
+  adjustments: Array<{
+    candidateId: number;
+    candidateUserId: number | null;
+    memoryScore: number;
+    reasons: string[];
+  }>;
+  memorySignalsUsed: {
+    interests: string[];
+    socialStyle: string;
+    communicationStyle: string;
+    preferredTraits: string[];
+    availability: string[];
+    boundaries: string[];
+  };
+  source: 'owner_long_term_memory';
+};
+
 export type TaskSummaryEntry = {
   taskId: number;
   goal: string;
@@ -176,6 +228,306 @@ export class SocialAgentLongTermMemoryService {
       return emptySnapshot(userId);
     }
     return this.toSnapshot(row);
+  }
+
+  async updateConfirmedMemory(
+    input: ConfirmedLongTermMemoryUpdateInput,
+  ): Promise<LongTermMemoryUpdateResult> {
+    const memoryKey = normalizeMemoryKey(input.memoryKey);
+    const proposalId = input.proposalId ?? null;
+    if (!memoryKey || input.confirmed !== true || proposalId == null) {
+      return {
+        success: false,
+        status: 'confirmation_required',
+        confirmationRequired: true,
+        proposalId,
+        memoryKey,
+        updatedFields: [],
+        storedIn: 'none',
+      };
+    }
+
+    const values = normalizeMemoryValues(input.value);
+    if (values.length === 0) {
+      return {
+        success: true,
+        status: 'ignored',
+        confirmationRequired: false,
+        proposalId,
+        memoryKey,
+        updatedFields: [],
+        storedIn: 'none',
+      };
+    }
+
+    let row = await this.repo.findOne({ where: { userId: input.userId } });
+    if (!row) {
+      row = this.repo.create({
+        userId: input.userId,
+        preferences: {},
+        boundaries: {},
+        activityPreferences: {},
+        matchSignals: {},
+        taskSummaries: [],
+        taskCount: 0,
+      });
+    }
+
+    const updatedFields: string[] = [];
+    const prefs = toRecord(row.preferences);
+    const activity = toRecord(row.activityPreferences);
+    const bounds = toRecord(row.boundaries);
+    const facts = profileFacts(prefs.profileFacts);
+    const now = new Date().toISOString();
+    const taskId =
+      typeof input.taskId === 'number' && input.taskId > 0 ? input.taskId : 0;
+    const summary: TaskSummaryEntry = {
+      taskId: taskId || Number(String(proposalId).replace(/\D/g, '')) || 1,
+      goal: input.reason?.slice(0, 200) || 'confirmed_memory_update',
+      status: 'confirmed',
+      outcome: 'succeeded',
+      at: now,
+    };
+
+    const history = preferenceHistoryArray(prefs.preferenceHistory);
+    const appendHistory = (
+      field: LongTermPreferenceHistoryItem['field'],
+      value: string,
+      source: LongTermPreferenceHistoryItem['source'] = 'stable_profile_fact',
+    ) => {
+      history.push(preferenceHistoryItem(field, value, source, summary));
+    };
+
+    switch (memoryKey) {
+      case 'interest':
+      case 'activitytype':
+      case 'favoriteactivitytype':
+      case 'favoriteactivitytypes':
+        prefs.interests = mergeStringList(
+          stringList(prefs.interests),
+          values,
+          32,
+        );
+        activity.favoriteActivityTypes = mergeStringList(
+          stringList(activity.favoriteActivityTypes),
+          values,
+          10,
+        );
+        for (const value of values) appendHistory('interest', value);
+        updatedFields.push('preferences.interests');
+        break;
+      case 'socialstyle':
+        prefs.socialStyle = values[0];
+        appendHistory('socialStyle', values[0], 'task_memory');
+        updatedFields.push('preferences.socialStyle');
+        break;
+      case 'communicationstyle':
+        prefs.communicationStyle = values[0];
+        appendHistory('communicationStyle', values[0], 'task_memory');
+        updatedFields.push('preferences.communicationStyle');
+        break;
+      case 'preferredtrait':
+      case 'preferredtraits':
+      case 'targetpreference':
+        prefs.preferredTraits = mergeStringList(
+          stringList(prefs.preferredTraits),
+          values,
+          24,
+        );
+        for (const value of values) appendHistory('preferredTrait', value);
+        updatedFields.push('preferences.preferredTraits');
+        break;
+      case 'socialgoal':
+      case 'goal':
+        prefs.socialGoals = mergeStringList(
+          stringList(prefs.socialGoals),
+          values,
+          20,
+        );
+        for (const value of values) appendHistory('socialGoal', value);
+        updatedFields.push('preferences.socialGoals');
+        break;
+      case 'availability':
+      case 'timepreference':
+      case 'availabletimes':
+        prefs.availability = mergeStringList(
+          stringList(prefs.availability),
+          values,
+          20,
+        );
+        activity.favoriteTimePreferences = mergeStringList(
+          stringList(activity.favoriteTimePreferences),
+          values,
+          10,
+        );
+        for (const value of values) appendHistory('availability', value);
+        updatedFields.push('preferences.availability');
+        break;
+      case 'city':
+        facts.city = values[0];
+        activity.favoriteCities = mergeStringList(
+          stringList(activity.favoriteCities),
+          [values[0]],
+          10,
+        );
+        updatedFields.push('profileFacts.city');
+        break;
+      case 'nearbyarea':
+      case 'locationpreference':
+        facts.nearbyArea = values[0];
+        activity.favoriteLocationPreferences = mergeStringList(
+          stringList(activity.favoriteLocationPreferences),
+          [values[0]],
+          10,
+        );
+        updatedFields.push('profileFacts.nearbyArea');
+        break;
+      case 'publicplaceonly':
+      case 'nonightmeet':
+      case 'noautomessage':
+      case 'nocontactexchange':
+        bounds[memoryKey] = toBooleanMemoryValue(input.value);
+        updatedFields.push(`boundaries.${memoryKey}`);
+        break;
+      default:
+        facts[input.memoryKey] = values.length === 1 ? values[0] : values;
+        updatedFields.push(`profileFacts.${input.memoryKey}`);
+        break;
+    }
+
+    prefs.profileFacts = facts;
+    prefs.preferenceHistory = mergePreferenceHistory(
+      preferenceHistoryArray(prefs.preferenceHistory),
+      history,
+    );
+    prefs.confirmedMemoryUpdates = [
+      ...confirmedMemoryUpdateArray(prefs.confirmedMemoryUpdates),
+      {
+        proposalId,
+        memoryKey: input.memoryKey,
+        updatedFields,
+        reason: input.reason || '',
+        source: input.source || 'confirmed_memory_proposal',
+        tags: Array.isArray(input.tags) ? input.tags.slice(0, 12) : [],
+        at: now,
+      },
+    ].slice(-PREFERENCE_HISTORY_LIMIT);
+
+    row.preferences = prefs;
+    row.boundaries = bounds;
+    row.activityPreferences = activity;
+    const saved = await this.repo.save(row);
+    return {
+      success: true,
+      status: 'updated',
+      confirmationRequired: false,
+      proposalId,
+      memoryKey: input.memoryKey,
+      updatedFields,
+      storedIn: 'social_agent_long_term_memory',
+      snapshot: this.toSnapshot(saved),
+    };
+  }
+
+  async optimizeRecommendationWithMemory(input: {
+    userId: number;
+    candidates: LongTermMemoryCandidateForRanking[];
+  }): Promise<LongTermMemoryRecommendationOptimizationResult> {
+    const snapshot = await this.readSnapshot(input.userId);
+    const signals = buildMemorySignals(snapshot);
+    const adjustments = input.candidates.map((candidate, index) => {
+      const text = candidatePublicText(candidate);
+      let memoryScore = Math.max(0, input.candidates.length - index);
+      const reasons: string[] = [];
+
+      for (const interest of signals.interests) {
+        if (containsSignal(text, interest)) {
+          memoryScore += 6;
+          reasons.push(`兴趣匹配：${interest}`);
+        }
+      }
+      for (const trait of signals.preferredTraits) {
+        if (containsSignal(text, trait)) {
+          memoryScore += 4;
+          reasons.push(`偏好匹配：${trait}`);
+        }
+      }
+      if (signals.socialStyle && containsSignal(text, signals.socialStyle)) {
+        memoryScore += 4;
+        reasons.push(`社交风格更接近：${signals.socialStyle}`);
+      }
+      if (
+        signals.communicationStyle &&
+        containsSignal(text, signals.communicationStyle)
+      ) {
+        memoryScore += 3;
+        reasons.push(`沟通方式更接近：${signals.communicationStyle}`);
+      }
+      for (const availability of signals.availability) {
+        if (containsSignal(text, availability)) {
+          memoryScore += 4;
+          reasons.push(`时间偏好匹配：${availability}`);
+        }
+      }
+      if (
+        snapshot.boundaries.publicPlaceOnly &&
+        /公共|公园|场馆|商场/.test(text)
+      ) {
+        memoryScore += 2;
+        reasons.push('符合公共场所偏好');
+      }
+      if (snapshot.boundaries.noNightMeet && /夜|晚上|凌晨/.test(text)) {
+        memoryScore -= 6;
+        reasons.push('降低夜间安排权重');
+      }
+      if (
+        snapshot.matchSignals.successfulMatches.some(
+          (sample) => sample.candidateUserId === candidate.candidateUserId,
+        )
+      ) {
+        memoryScore += 8;
+        reasons.push('历史互动信号较好');
+      }
+      if (
+        snapshot.matchSignals.failedMatches.some(
+          (sample) => sample.candidateUserId === candidate.candidateUserId,
+        )
+      ) {
+        memoryScore -= 12;
+        reasons.push('历史反馈降低推荐权重');
+      }
+
+      return {
+        candidateId: candidate.id,
+        candidateUserId: candidate.candidateUserId ?? null,
+        memoryScore,
+        reasons,
+      };
+    });
+
+    adjustments.sort(
+      (a, b) => b.memoryScore - a.memoryScore || a.candidateId - b.candidateId,
+    );
+    return {
+      rankedCandidateIds: adjustments.map((item) => item.candidateId),
+      adjustments,
+      memorySignalsUsed: {
+        interests: signals.interests,
+        socialStyle: signals.socialStyle,
+        communicationStyle: signals.communicationStyle,
+        preferredTraits: signals.preferredTraits,
+        availability: signals.availability,
+        boundaries: [
+          ...(snapshot.boundaries.publicPlaceOnly ? ['publicPlaceOnly'] : []),
+          ...(snapshot.boundaries.noNightMeet ? ['noNightMeet'] : []),
+          ...(snapshot.boundaries.noAutoMessage ? ['noAutoMessage'] : []),
+          ...(snapshot.boundaries.noContactExchange
+            ? ['noContactExchange']
+            : []),
+        ],
+      },
+      source: 'owner_long_term_memory',
+    };
   }
 
   private deriveOutcome(task: AgentTask): TaskSummaryEntry['outcome'] {
@@ -713,6 +1065,86 @@ function profileFacts(value: unknown): Record<string, string | string[]> {
     }
   }
   return out;
+}
+
+function normalizeMemoryKey(value: unknown): string {
+  return typeof value === 'string'
+    ? value.replace(/[^a-z0-9]/gi, '').toLowerCase()
+    : '';
+}
+
+function normalizeMemoryValues(value: unknown): string[] {
+  if (typeof value === 'boolean') return [value ? 'true' : 'false'];
+  if (typeof value === 'string') return value.trim() ? [value.trim()] : [];
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => (typeof item === 'string' ? item.trim() : ''))
+    .filter(Boolean);
+}
+
+function toBooleanMemoryValue(value: unknown): boolean {
+  if (typeof value === 'boolean') return value;
+  if (typeof value !== 'string') return false;
+  return ['true', '1', 'yes', 'y', '是', '需要', '公开场所'].includes(
+    value.trim().toLowerCase(),
+  );
+}
+
+function confirmedMemoryUpdateArray(
+  value: unknown,
+): Array<Record<string, unknown>> {
+  if (!Array.isArray(value)) return [];
+  return value.filter(
+    (item): item is Record<string, unknown> =>
+      typeof item === 'object' && item !== null && !Array.isArray(item),
+  );
+}
+
+function buildMemorySignals(snapshot: LongTermMemorySnapshot): {
+  interests: string[];
+  socialStyle: string;
+  communicationStyle: string;
+  preferredTraits: string[];
+  availability: string[];
+} {
+  return {
+    interests: [
+      ...snapshot.preferences.interests,
+      ...snapshot.activityPreferences.favoriteActivityTypes,
+    ].filter(uniqueString),
+    socialStyle: snapshot.preferences.socialStyle,
+    communicationStyle: snapshot.preferences.communicationStyle,
+    preferredTraits: snapshot.preferences.preferredTraits,
+    availability: [
+      ...snapshot.availability,
+      ...snapshot.activityPreferences.favoriteTimePreferences,
+    ].filter(uniqueString),
+  };
+}
+
+function uniqueString(value: string, index: number, list: string[]): boolean {
+  return value.trim().length > 0 && list.indexOf(value) === index;
+}
+
+function candidatePublicText(
+  candidate: LongTermMemoryCandidateForRanking,
+): string {
+  return [
+    ...stringList(candidate.commonTags),
+    ...stringList(candidate.reasons),
+    JSON.stringify(candidate.explanation ?? {}),
+    JSON.stringify(candidate.scoreBreakdown ?? {}),
+    typeof candidate.distanceKm === 'number'
+      ? `${candidate.distanceKm.toFixed(1)}km`
+      : '',
+  ]
+    .join(' ')
+    .toLowerCase();
+}
+
+function containsSignal(text: string, signal: string): boolean {
+  const normalized = signal.trim().toLowerCase();
+  return normalized.length > 0 && text.includes(normalized);
 }
 
 function stringValue(value: unknown): string {
