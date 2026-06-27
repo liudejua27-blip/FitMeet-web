@@ -451,6 +451,94 @@ describe('SocialAgentCandidatePoolService', () => {
     ).toBeGreaterThan(0);
   });
 
+  it('persists FitMeet match v1 score metadata and feedback adjustments', async () => {
+    const interestEvents = {
+      summarizeForUser: jest.fn().mockResolvedValue({
+        ownerUserId: 1,
+        eventCount: 3,
+        positiveTargetUserIds: [2],
+        negativeTargetUserIds: [3],
+        highAffinityTargetUserIds: [2],
+        rejectedTargetUserIds: [3],
+        overExposedTargetUserIds: [3],
+        activityTagWeights: [],
+        candidatePreferenceWeights: [],
+        cityWeights: [],
+        locationWeights: [],
+        timeWindowWeights: [],
+      }),
+    };
+    const { service, candidates } = makeService({
+      users: [realUser(1), realUser(2), realUser(3)],
+      profiles: [
+        profile(2, {
+          nickname: '强正反馈候选',
+          interestTags: ['散步'],
+        }),
+        profile(3, {
+          nickname: '已跳过候选',
+          interestTags: ['散步'],
+        }),
+      ],
+      socialRequests: [
+        {
+          id: 301,
+          userId: 1,
+          city: '青岛',
+          rawText: '青岛散步',
+          interestTags: ['散步'],
+        },
+      ],
+      interestEvents,
+    });
+
+    const result = await service.searchSocial({
+      ownerUserId: 1,
+      socialRequestId: 301,
+      city: '青岛',
+      interestTags: ['散步'],
+      rawText: '青岛散步',
+    });
+
+    expect(result.candidates[0]).toMatchObject({
+      candidateUserId: 2,
+      scoreVersion: 'fitmeet_match_v1',
+      rankPosition: 1,
+      scoreBreakdown: expect.objectContaining({
+        reciprocity: 6,
+        freshness: expect.any(Number),
+        diversity: expect.any(Number),
+      }),
+      preferenceHistorySignals: expect.arrayContaining([
+        expect.stringContaining('明确正反馈'),
+      ]),
+    });
+    expect(
+      result.candidates.find((candidate) => candidate.candidateUserId === 3)
+        ?.scoreBreakdown,
+    ).toMatchObject({
+      rejectionPenalty: -30,
+      overExposurePenalty: -8,
+    });
+    expect(candidates.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        socialRequestId: 301,
+        candidateUserId: 2,
+        sourceType: 'profile_candidate',
+        sourceId: '2',
+        rankPosition: 1,
+        scoreVersion: 'fitmeet_match_v1',
+        explanation: expect.objectContaining({
+          scoreVersion: 'fitmeet_match_v1',
+        }),
+        relationshipState: expect.objectContaining({
+          recommendationConsent: expect.any(Object),
+        }),
+        exposureReason: expect.any(String),
+      }),
+    );
+  });
+
   it('uses location and time behavior signals for public intent ranking', async () => {
     const interestEvents = {
       summarizeForUser: jest.fn().mockResolvedValue({

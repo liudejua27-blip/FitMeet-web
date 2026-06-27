@@ -142,6 +142,7 @@ describe('SocialAgentUserInterestEventService', () => {
       ]),
     );
     expect(summary.positiveTargetUserIds[0]).toBe(33);
+    expect(summary.highAffinityTargetUserIds[0]).toBe(33);
     expect(summary.activityTagWeights).toEqual([
       { tag: '羽毛球', weight: 6 },
       { tag: '散步', weight: 4 },
@@ -190,6 +191,9 @@ describe('SocialAgentUserInterestEventService', () => {
       eventCount: 2,
       positiveTargetUserIds: [22],
       negativeTargetUserIds: [33],
+      highAffinityTargetUserIds: [22],
+      rejectedTargetUserIds: [33],
+      overExposedTargetUserIds: [],
       activityTagWeights: [
         { tag: '散步', weight: 4 },
         { tag: '健身', weight: -3 },
@@ -233,5 +237,35 @@ describe('SocialAgentUserInterestEventService', () => {
       { tag: '散步', weight: 4 },
       { tag: '羽毛球', weight: 1 },
     ]);
+  });
+
+  it('tracks repeated exposure separately from high-affinity actions', async () => {
+    const repo = makeRepo();
+    const service = new SocialAgentUserInterestEventService(repo as never);
+
+    await service.recordEvent({
+      ownerUserId: 7,
+      eventType: 'view_profile',
+      targetUserId: 22,
+      dedupeKey: 'view-1',
+    });
+    await service.recordEvent({
+      ownerUserId: 7,
+      eventType: 'discover_click',
+      targetUserId: 22,
+      dedupeKey: 'view-2',
+    });
+    await service.recordEvent({
+      ownerUserId: 7,
+      eventType: 'connect_candidate',
+      targetUserId: 33,
+      dedupeKey: 'connect-33',
+    });
+
+    const summary = await service.summarizeForUser({ ownerUserId: 7 });
+
+    expect(summary.overExposedTargetUserIds[0]).toBe(22);
+    expect(summary.highAffinityTargetUserIds).toEqual([33]);
+    expect(summary.rejectedTargetUserIds).toEqual([]);
   });
 });

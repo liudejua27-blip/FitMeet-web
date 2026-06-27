@@ -33,6 +33,7 @@ import {
 import type { CandidateProfileDataQuality } from './social-agent-candidate-profile-presenter';
 import { extractCandidateTags } from './social-agent-candidate-query-parser';
 import {
+  FITMEET_MATCH_SCORE_VERSION,
   candidateClampScore,
   candidateCommonTags,
   candidateMatchLevel,
@@ -167,6 +168,8 @@ export type CandidatePoolCandidate = {
   timeWindow?: string | null;
   sharedInterests?: string[];
   scoreBreakdown: Record<string, number>;
+  scoreVersion?: string;
+  rankPosition?: number | null;
   candidateRecordId?: number | null;
   status?: SocialRequestCandidateStatus;
   matchedSignals: string[];
@@ -346,8 +349,9 @@ export class SocialAgentCandidatePoolService {
       merged,
       userInterestSummary,
     );
+    const finalRanked = this.applyRankingMetadata(behaviorRanked);
     const limit = this.normalizeLimit(input.limit);
-    const candidates = behaviorRanked.slice(0, limit);
+    const candidates = finalRanked.slice(0, limit);
     if (input.persistCandidates !== false) {
       await this.persistCandidateRows(query.socialRequestId, candidates);
     }
@@ -893,7 +897,7 @@ export class SocialAgentCandidatePoolService {
       commonTags,
       preferenceFit: scoreBreakdown.preferenceFit ?? 0,
     });
-    return buildCandidatePoolCandidate({
+    const candidate = buildCandidatePoolCandidate({
       source: 'public_intent',
       user,
       profile,
@@ -920,6 +924,10 @@ export class SocialAgentCandidatePoolService {
       sceneRisk: this.sceneRisk,
       candidateExplanation: this.candidateExplanation,
     });
+    return {
+      ...candidate,
+      updatedAt: this.candidateUpdatedAt(intent.updatedAt),
+    };
   }
 
   private toLegacyRequestCandidate(
@@ -976,7 +984,7 @@ export class SocialAgentCandidatePoolService {
       commonTags,
       preferenceFit: scoreBreakdown.preferenceFit ?? 0,
     });
-    return buildCandidatePoolCandidate({
+    const candidate = buildCandidatePoolCandidate({
       source: 'public_intent',
       user,
       profile,
@@ -1002,6 +1010,10 @@ export class SocialAgentCandidatePoolService {
       sceneRisk: this.sceneRisk,
       candidateExplanation: this.candidateExplanation,
     });
+    return {
+      ...candidate,
+      updatedAt: this.candidateUpdatedAt(request.updatedAt),
+    };
   }
 
   private cachedPublicProfileSummary(input: {
@@ -1118,13 +1130,43 @@ export class SocialAgentCandidatePoolService {
   ): CandidatePoolCandidate {
     const signals: string[] = [];
     let adjustment = 0;
-    if (summary.positiveTargetUserIds.includes(candidate.candidateUserId)) {
+    let rejectionPenalty = 0;
+    let reciprocityScore = 0;
+    let overExposurePenalty = 0;
+    const positiveTargetUserIds = summary.positiveTargetUserIds ?? [];
+    const negativeTargetUserIds = summary.negativeTargetUserIds ?? [];
+    const rejectedTargetUserIds = summary.rejectedTargetUserIds ?? [];
+    const highAffinityTargetUserIds = summary.highAffinityTargetUserIds ?? [];
+    const overExposedTargetUserIds = summary.overExposedTargetUserIds ?? [];
+    if (positiveTargetUserIds.includes(candidate.candidateUserId)) {
       adjustment += 10;
       signals.push('你之前对这位候选表现过兴趣');
     }
-    if (summary.negativeTargetUserIds.includes(candidate.candidateUserId)) {
-      adjustment -= 25;
+    if (negativeTargetUserIds.includes(candidate.candidateUserId)) {
+      rejectionPenalty = -25;
+      adjustment += rejectionPenalty;
       signals.push('你之前跳过过这位候选，本次会降低排序');
+    }
+    if (rejectedTargetUserIds.includes(candidate.candidateUserId)) {
+      const extraPenalty = -30 - rejectionPenalty;
+      if (extraPenalty < 0) {
+        rejectionPenalty += extraPenalty;
+        adjustment += extraPenalty;
+      }
+      signals.push('你明确拒绝过这类候选，优先降权');
+    }
+    if (highAffinityTargetUserIds.includes(candidate.candidateUserId)) {
+      reciprocityScore += 6;
+      adjustment += reciprocityScore;
+      signals.push('你之前对这类互动有明确正反馈');
+    }
+    if (
+      overExposedTargetUserIds.includes(candidate.candidateUserId) &&
+      !highAffinityTargetUserIds.includes(candidate.candidateUserId)
+    ) {
+      overExposurePenalty = -8;
+      adjustment += overExposurePenalty;
+      signals.push('这位候选近期已多次出现，本次降低重复曝光');
     }
     const tagScore = this.weightedTextOverlapScore({
       candidate,
@@ -1182,9 +1224,62 @@ export class SocialAgentCandidatePoolService {
       scoreBreakdown: {
         ...candidate.scoreBreakdown,
         behaviorPreference: Math.round(adjustment),
+        rejectionPenalty,
+        reciprocity: reciprocityScore,
+        overExposurePenalty,
       },
       preferenceHistorySignals,
     };
+  }
+
+  private applyRankingMetadata(
+    candidates: CandidatePoolCandidate[],
+  ): CandidatePoolCandidate[] {
+    const sourceSeen = new Map<CandidatePoolSource, number>();
+    const adjusted = candidates.map((candidate) => {
+      const seen = sourceSeen.get(candidate.source) ?? 0;
+      sourceSeen.set(candidate.source, seen + 1);
+      const freshness = this.candidateFreshnessScore(candidate.updatedAt);
+      const diversity = seen >= 3 ? -3 : 0;
+      const nextScore = candidateClampScore(
+        candidate.matchScore + freshness + diversity,
+      );
+      const nextSignals = this.uniqueStrings([
+        ...(freshness > 0 ? ['近期公开资料或约练有更新'] : []),
+        ...(diversity < 0 ? ['同来源候选较多，本次做轻微多样化排序'] : []),
+        ...candidate.preferenceHistorySignals,
+      ]).slice(0, 8);
+      return {
+        ...candidate,
+        matchScore: nextScore,
+        score: nextScore,
+        level: candidateMatchLevel(nextScore),
+        scoreVersion: FITMEET_MATCH_SCORE_VERSION,
+        scoreBreakdown: {
+          ...candidate.scoreBreakdown,
+          freshness,
+          diversity,
+        },
+        preferenceHistorySignals: nextSignals,
+      };
+    });
+    return adjusted
+      .sort((a, b) => b.matchScore - a.matchScore)
+      .map((candidate, index) => ({
+        ...candidate,
+        rankPosition: index + 1,
+      }));
+  }
+
+  private candidateFreshnessScore(updatedAt: string | null): number {
+    if (!updatedAt) return 0;
+    const date = new Date(updatedAt);
+    if (Number.isNaN(date.getTime())) return 0;
+    const days = Math.max(0, (Date.now() - date.getTime()) / 86_400_000);
+    if (days <= 7) return 3;
+    if (days <= 30) return 1;
+    if (days > 180) return -2;
+    return 0;
   }
 
   private weightedTextOverlapScore(input: {
@@ -1278,6 +1373,15 @@ export class SocialAgentCandidatePoolService {
     if (!value) return 'none';
     const date = value instanceof Date ? value : new Date(value);
     if (Number.isNaN(date.getTime())) return cleanDisplayText(value, 'unknown');
+    return date.toISOString();
+  }
+
+  private candidateUpdatedAt(
+    value: Date | string | null | undefined,
+  ): string | null {
+    if (!value) return null;
+    const date = value instanceof Date ? value : new Date(value);
+    if (Number.isNaN(date.getTime())) return null;
     return date.toISOString();
   }
 

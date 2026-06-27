@@ -19,7 +19,10 @@ import {
   buildCandidateRiskSnapshot,
   firstCandidateRiskWarning,
 } from './social-agent-candidate-risk';
-import { candidateMatchLevel } from './social-agent-candidate-scoring';
+import {
+  FITMEET_MATCH_SCORE_VERSION,
+  candidateMatchLevel,
+} from './social-agent-candidate-scoring';
 
 type CandidateCardSceneRisk = Pick<
   SceneRiskPolicyService,
@@ -193,6 +196,8 @@ function buildCandidatePoolCandidateCard(input: {
     timeWindow: queryContext.timePreference || null,
     sharedInterests: visibleInterests,
     scoreBreakdown: i.scoreBreakdown,
+    scoreVersion: FITMEET_MATCH_SCORE_VERSION,
+    rankPosition: null,
     candidateRecordId: null,
     status: SocialRequestCandidateStatus.Suggested,
     matchedSignals: buildCandidateMatchedSignals({
@@ -243,6 +248,8 @@ function buildCandidatePoolCandidateCard(input: {
       highRisk: input.highRisk,
     }),
     lifeGraphExplanation: input.explanation.lifeGraphExplanation,
+    updatedAt:
+      (i.profile?.updatedAt ?? i.user.updatedAt)?.toISOString?.() ?? null,
   };
 }
 

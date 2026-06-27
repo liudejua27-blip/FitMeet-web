@@ -32,6 +32,9 @@ export type SocialAgentUserInterestSummary = {
   eventCount: number;
   positiveTargetUserIds: number[];
   negativeTargetUserIds: number[];
+  highAffinityTargetUserIds: number[];
+  rejectedTargetUserIds: number[];
+  overExposedTargetUserIds: number[];
   activityTagWeights: Array<{ tag: string; weight: number }>;
   candidatePreferenceWeights: Array<{ tag: string; weight: number }>;
   cityWeights: Array<{ tag: string; weight: number }>;
@@ -105,6 +108,9 @@ export class SocialAgentUserInterestEventService {
       eventCount: rows.length,
       positiveTargetUserIds: [],
       negativeTargetUserIds: [],
+      highAffinityTargetUserIds: [],
+      rejectedTargetUserIds: [],
+      overExposedTargetUserIds: [],
       activityTagWeights: [],
       candidatePreferenceWeights: [],
       cityWeights: [],
@@ -113,6 +119,9 @@ export class SocialAgentUserInterestEventService {
     };
     const positiveTargetIds = new Map<number, number>();
     const negativeTargetIds = new Map<number, number>();
+    const highAffinityTargetIds = new Map<number, number>();
+    const rejectedTargetIds = new Map<number, number>();
+    const exposureTargetIds = new Map<number, number>();
     const activityWeights = new Map<string, number>();
     const preferenceWeights = new Map<string, number>();
     const cityWeights = new Map<string, number>();
@@ -134,6 +143,13 @@ export class SocialAgentUserInterestEventService {
           (negativeTargetIds.get(row.targetUserId) ?? 0) + Math.abs(weight),
         );
       }
+      this.addTargetSignal({
+        row,
+        weight,
+        highAffinityTargetIds,
+        rejectedTargetIds,
+        exposureTargetIds,
+      });
       this.addWeights(activityWeights, row.activityTags, weight);
       this.addWeights(preferenceWeights, row.candidatePreferenceTags, weight);
       this.addWeight(cityWeights, row.city, weight);
@@ -143,6 +159,9 @@ export class SocialAgentUserInterestEventService {
 
     summary.positiveTargetUserIds = this.sortedIds(positiveTargetIds);
     summary.negativeTargetUserIds = this.sortedIds(negativeTargetIds);
+    summary.highAffinityTargetUserIds = this.sortedIds(highAffinityTargetIds);
+    summary.rejectedTargetUserIds = this.sortedIds(rejectedTargetIds);
+    summary.overExposedTargetUserIds = this.sortedIds(exposureTargetIds);
     summary.activityTagWeights = this.sortedWeights(activityWeights);
     summary.candidatePreferenceWeights = this.sortedWeights(preferenceWeights);
     summary.cityWeights = this.sortedWeights(cityWeights);
@@ -276,6 +295,65 @@ export class SocialAgentUserInterestEventService {
       .sort((a, b) => b[1] - a[1])
       .map(([id]) => id)
       .slice(0, 20);
+  }
+
+  private addTargetSignal(input: {
+    row: SocialAgentUserInterestEvent;
+    weight: number;
+    highAffinityTargetIds: Map<number, number>;
+    rejectedTargetIds: Map<number, number>;
+    exposureTargetIds: Map<number, number>;
+  }): void {
+    const targetUserId = input.row.targetUserId;
+    if (!targetUserId) return;
+    if (this.isHighAffinityEvent(input.row.eventType)) {
+      input.highAffinityTargetIds.set(
+        targetUserId,
+        (input.highAffinityTargetIds.get(targetUserId) ?? 0) +
+          Math.max(input.weight, 1),
+      );
+    }
+    if (this.isRejectionEvent(input.row.eventType)) {
+      input.rejectedTargetIds.set(
+        targetUserId,
+        (input.rejectedTargetIds.get(targetUserId) ?? 0) +
+          Math.max(Math.abs(input.weight), 1),
+      );
+    }
+    if (this.isExposureEvent(input.row.eventType)) {
+      input.exposureTargetIds.set(
+        targetUserId,
+        (input.exposureTargetIds.get(targetUserId) ?? 0) + 1,
+      );
+    }
+  }
+
+  private isHighAffinityEvent(
+    eventType: SocialAgentUserInterestEventType,
+  ): boolean {
+    return [
+      'save_candidate',
+      'more_like_this',
+      'send_invite',
+      'invite_accepted',
+      'connect_candidate',
+      'activity_complete',
+      'review_positive',
+    ].includes(eventType);
+  }
+
+  private isRejectionEvent(
+    eventType: SocialAgentUserInterestEventType,
+  ): boolean {
+    return ['skip_candidate', 'review_negative'].includes(eventType);
+  }
+
+  private isExposureEvent(
+    eventType: SocialAgentUserInterestEventType,
+  ): boolean {
+    return ['view_profile', 'generate_opener', 'discover_click'].includes(
+      eventType,
+    );
   }
 
   private sortedWeights(

@@ -51,6 +51,9 @@ export enum CandidateMatchLevel {
 )
 @Index(['socialRequestId', 'status'])
 @Index(['socialRequestId', 'score'])
+@Index(['socialRequestId', 'scoreVersion'])
+@Index(['socialRequestId', 'sourceType', 'sourceId'])
+@Index(['socialRequestId', 'userAction'])
 export class SocialRequestCandidate {
   @PrimaryGeneratedColumn()
   id: number;
@@ -81,6 +84,39 @@ export class SocialRequestCandidate {
 
   @Column({ type: 'jsonb', default: () => "'{}'" })
   scoreBreakdown: Record<string, number>;
+
+  @Column({ type: 'varchar', length: 40, default: 'profile' })
+  sourceType: string;
+
+  @Column({ type: 'varchar', length: 120, default: '' })
+  sourceId: string;
+
+  @Column({ type: 'varchar', length: 80, nullable: true })
+  publicIntentId: string | null;
+
+  @Column({ type: 'int', nullable: true })
+  activityId: number | null;
+
+  @Column({ type: 'int', nullable: true })
+  rankPosition: number | null;
+
+  @Column({ type: 'varchar', length: 40, default: 'fitmeet_match_v1' })
+  scoreVersion: string;
+
+  @Column({ type: 'jsonb', default: () => "'{}'" })
+  explanation: Record<string, unknown>;
+
+  @Column({ type: 'jsonb', default: () => "'{}'" })
+  relationshipState: Record<string, unknown>;
+
+  @Column({ type: 'varchar', length: 120, default: '' })
+  exposureReason: string;
+
+  @Column({ type: 'varchar', length: 40, default: '' })
+  userAction: string;
+
+  @Column({ type: 'timestamptz', nullable: true })
+  userActionAt: Date | null;
 
   @Column({ type: 'jsonb', default: () => "'[]'" })
   reasons: string[];
