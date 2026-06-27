@@ -42,6 +42,7 @@ import {
   SocialAgentWorkflowRouterService,
   type SocialAgentWorkflowRouterDecision,
 } from './social-agent-workflow-router.service';
+import { SocialAgentDomainClassifierService } from './social-agent-domain-classifier.service';
 
 type PrepareRouteDecisionInput = {
   ownerUserId: number;
@@ -82,6 +83,8 @@ export class SocialAgentRouteDecisionService {
     private readonly taskSlots?: SocialAgentTaskMemoryStateMachineService,
     @Optional()
     private readonly workflowRouter?: SocialAgentWorkflowRouterService,
+    @Optional()
+    private readonly domainClassifier?: SocialAgentDomainClassifierService,
   ) {}
 
   async prepare(
@@ -113,13 +116,26 @@ export class SocialAgentRouteDecisionService {
     const conversationHistory =
       this.nonEmptyRecordArray(hydratedContext?.recentMessages) ??
       this.conversationHistory(task);
-    const taskContext = this.routeContext.buildTaskContext({
-      task,
-      body,
-      longTermSnapshot,
-      memoryContext,
-      hydratedContext,
-    });
+    const domainIntent =
+      this.domainClassifier?.classify(message) ?? 'PURE_CHAT';
+    const taskContext = {
+      ...this.routeContext.buildTaskContext({
+        task,
+        body,
+        longTermSnapshot,
+        memoryContext,
+        hydratedContext,
+      }),
+      socialDomain: {
+        intent: domainIntent,
+        promptKey:
+          domainIntent === 'SPORTS_MATCH'
+            ? 'sports_match'
+            : domainIntent === 'TRAVEL_COMPANION'
+              ? 'travel_companion'
+              : 'pure_chat',
+      },
+    };
     const routeInput = {
       message,
       taskContext,

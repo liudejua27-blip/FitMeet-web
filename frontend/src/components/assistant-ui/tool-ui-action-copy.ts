@@ -16,6 +16,9 @@ export const TOOL_UI_SCHEMA_ACTIONS = [
   'candidate.feedback.time_mismatch',
   'candidate.feedback.style_mismatch',
   'candidate.connect',
+  'matching.relax_distance',
+  'matching.relax_time',
+  'matching.relax_tags',
   'candidate.generate_opener',
   'candidate.more_like_this',
   'opener.confirm_send',
@@ -90,6 +93,21 @@ export const TOOL_UI_CARD_ACTION_COPY: Record<ToolUISchemaAction, ToolUICardActi
     busy: '正在准备邀请',
     done: '已准备邀请',
     result: '已准备好友申请，确认前不会触达对方。',
+  },
+  'matching.relax_distance': {
+    busy: '正在扩大距离重新匹配',
+    done: '已扩大距离',
+    result: '已扩大距离并重新开始匹配，我会继续等待结果。',
+  },
+  'matching.relax_time': {
+    busy: '正在放宽时间重新匹配',
+    done: '已放宽时间',
+    result: '已放宽时间并重新开始匹配，我会继续等待结果。',
+  },
+  'matching.relax_tags': {
+    busy: '正在减少偏好限制',
+    done: '已减少偏好限制',
+    result: '已减少非核心偏好限制并重新开始匹配。',
   },
   'candidate.generate_opener': {
     busy: '正在生成开场白',

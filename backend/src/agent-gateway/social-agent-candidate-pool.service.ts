@@ -194,6 +194,7 @@ export type CandidatePoolCandidate = {
   boundaryNotes: string[];
   openerStrategy: string;
   dynamicSignalReasons: string[];
+  explanationSteps?: string[];
   recentPublicActivity?: string[];
   preferenceHistorySignals: string[];
   continuousFilterHints: string[];

@@ -97,6 +97,7 @@ export interface SocialAgentChatCandidate {
     degradationReason?: string | null;
   };
   candidateExplanation?: CandidateExplanation;
+  explanationSteps?: string[];
   emotionalInsight?: {
     fitReason: string;
     openerAdvice: string;

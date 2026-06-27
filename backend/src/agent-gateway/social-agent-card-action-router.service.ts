@@ -20,6 +20,9 @@ import { SocialAgentLifeGraphCardActionService } from './social-agent-life-graph
 import { SocialAgentMeetLoopService } from './social-agent-meet-loop.service';
 import { SocialAgentDraftPublicationService } from './social-agent-draft-publication.service';
 import { SocialAgentMetricsService } from './social-agent-metrics.service';
+import { PublicIntentPrivacyGuardService } from './public-intent-privacy-guard.service';
+import { SocialIntentRateLimitService } from './social-intent-rate-limit.service';
+import { SocialAgentMatchRelaxationActionService } from './social-agent-match-relaxation-action.service';
 
 type HandleMessage = (
   body: SocialAgentRouteMessageBody,
@@ -38,6 +41,12 @@ export class SocialAgentCardActionRouterService {
     private readonly draftPublication?: SocialAgentDraftPublicationService,
     @Optional()
     private readonly metrics?: SocialAgentMetricsService,
+    @Optional()
+    private readonly privacyGuard?: PublicIntentPrivacyGuardService,
+    @Optional()
+    private readonly rateLimit?: SocialIntentRateLimitService,
+    @Optional()
+    private readonly matchingRelaxation?: SocialAgentMatchRelaxationActionService,
   ) {}
 
   async perform(input: {
@@ -134,6 +143,35 @@ export class SocialAgentCardActionRouterService {
         taskId,
         normalizedBody,
       );
+    }
+
+    if (this.isMatchingRelaxationAction(action)) {
+      if (!this.matchingRelaxation) {
+        throw new BadRequestException(
+          'Matching relaxation runtime is unavailable',
+        );
+      }
+      const applied = await this.matchingRelaxation.applyRelaxation({
+        ownerUserId,
+        taskId,
+        payload: this.record(normalizedBody.payload),
+      });
+      return this.simpleRouteResult({
+        taskId,
+        assistantMessage:
+          applied.reused === true
+            ? '已经按这个方向重新开始匹配，我会继续等待结果。'
+            : '好的，我已经按你选择的方向放宽条件，并重新开始匹配。',
+        cards: [],
+        publicLoop: {
+          stage: 'matching_queued',
+          publicIntentId: applied.publicIntentId,
+          discoverHref: `/discover?publicIntentId=${encodeURIComponent(applied.publicIntentId)}`,
+          publicIntentHref: `/public-intent/${encodeURIComponent(applied.publicIntentId)}`,
+          messagesHref: null,
+          requiredConfirmation: false,
+        },
+      });
     }
 
     if (
@@ -241,6 +279,14 @@ export class SocialAgentCardActionRouterService {
     return (
       action === 'social_intent.decline_publish' ||
       action === 'social_intent.dismiss'
+    );
+  }
+
+  private isMatchingRelaxationAction(action: string) {
+    return (
+      action === 'matching.relax_distance' ||
+      action === 'matching.relax_time' ||
+      action === 'matching.relax_tags'
     );
   }
 
@@ -408,6 +454,9 @@ export class SocialAgentCardActionRouterService {
       'candidate.more_like_this',
       'candidate.skip',
       'candidate.like',
+      'matching.relax_distance',
+      'matching.relax_time',
+      'matching.relax_tags',
       'candidate.generate_opener',
       'opener.regenerate',
       'opener.reject',
@@ -472,6 +521,18 @@ export class SocialAgentCardActionRouterService {
       return 'opener.reject';
     }
     if (
+      normalized === 'matching.relax_distance' ||
+      normalized === 'relax_distance'
+    ) {
+      return 'matching.relax_distance';
+    }
+    if (normalized === 'matching.relax_time' || normalized === 'relax_time') {
+      return 'matching.relax_time';
+    }
+    if (normalized === 'matching.relax_tags' || normalized === 'relax_tags') {
+      return 'matching.relax_tags';
+    }
+    if (
       normalized === 'see_more' ||
       normalized === 'more_like_this' ||
       normalized === 'expand_radius' ||
@@ -526,6 +587,7 @@ export class SocialAgentCardActionRouterService {
     if (this.isPublishAction(action)) return 'FitMeet Main Agent' as const;
     if (this.isPublishDismissAction(action))
       return 'FitMeet Main Agent' as const;
+    if (action.startsWith('matching.')) return 'FitMeet Main Agent' as const;
     if (action.startsWith('life_graph.')) return 'Life Graph Agent' as const;
     if (
       action.startsWith('activity.') ||
@@ -658,10 +720,54 @@ export class SocialAgentCardActionRouterService {
     if (!this.draftPublication) {
       throw new BadRequestException('Discover publish runtime is unavailable');
     }
+    const publishDraft = this.publishDraftFromPayload(payload);
+    const privacyResult = this.privacyGuard?.inspect(publishDraft);
+    if (privacyResult?.blocked) {
+      return this.simpleRouteResult({
+        taskId,
+        assistantMessage: privacyResult.message,
+        cards: [
+          this.privacyGuard!.buildBlockedCard({
+            taskId,
+            result: privacyResult,
+            payload,
+          }),
+        ],
+        publicLoop: {
+          stage: 'publish_confirmation_required',
+          publicIntentId: null,
+          discoverHref: null,
+          publicIntentHref: null,
+          messagesHref: null,
+          requiredConfirmation: true,
+        },
+      });
+    }
+    const rateLimit = await this.rateLimit?.check(ownerUserId);
+    if (rateLimit && !rateLimit.allowed) {
+      return this.simpleRouteResult({
+        taskId,
+        assistantMessage: `公开发布频率已达到每小时 ${rateLimit.limit} 次上限，稍后可以继续。`,
+        cards: [
+          this.rateLimit!.buildRateLimitedCard({
+            taskId,
+            result: rateLimit,
+          }),
+        ],
+        publicLoop: {
+          stage: 'publish_confirmation_required',
+          publicIntentId: null,
+          discoverHref: null,
+          publicIntentHref: null,
+          messagesHref: null,
+          requiredConfirmation: true,
+        },
+      });
+    }
     const result = await this.draftPublication.publishDraft(
       ownerUserId,
       taskId,
-      this.publishDraftFromPayload(payload),
+      publishDraft,
     );
     const publishStatus = this.text(result.status);
     const pendingApproval = this.record(result.pendingApproval);

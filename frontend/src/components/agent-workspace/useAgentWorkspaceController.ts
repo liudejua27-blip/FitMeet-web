@@ -680,7 +680,9 @@ function shouldPollMatchingSnapshot(
   if (!response) return false;
   if (response.publicLoop?.stage === 'dismissed') return false;
   if (response.publicLoop?.stage === 'candidates_recommended') return false;
+  if (response.publicLoop?.stage === 'no_candidates') return false;
   if (response.workflow?.state === 'CANDIDATES_READY') return false;
+  if (response.workflow?.state === 'NO_CANDIDATES') return false;
   const normalizedTaskStatus = (taskStatus ?? '').trim().toLowerCase();
   if (normalizedTaskStatus === 'cancelled' || normalizedTaskStatus === 'failed') return false;
   const matchingJobStatus = response.cards
@@ -690,6 +692,14 @@ function shouldPollMatchingSnapshot(
     })
     .find((value) => typeof value === 'string');
   if (matchingJobStatus === 'queued' || matchingJobStatus === 'running') return true;
+  if (
+    response.publicLoop?.stage === 'matching_queued' ||
+    response.publicLoop?.stage === 'exploring_index' ||
+    response.publicLoop?.stage === 'ranking_candidates' ||
+    response.publicLoop?.stage === 'safety_checking'
+  ) {
+    return true;
+  }
   if (response.publicLoop?.stage === 'discover_visible') return true;
   if (response.workflow?.state === 'DISCOVER_VISIBLE') return true;
   return /正在匹配|正在筛选|等待匹配/.test(response.assistantMessage);

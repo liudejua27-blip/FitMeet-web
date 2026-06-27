@@ -4,6 +4,9 @@ export type ToolUISchemaType =
   | 'social_match.candidate'
   | 'social_match.activity'
   | 'social_match.empty'
+  | 'social_match.no_candidates'
+  | 'social_match.privacy_guard'
+  | 'social_match.rate_limited'
   | 'social_match.slot_completion'
   | 'profile.completion'
   | 'life_graph.diff'
@@ -31,6 +34,9 @@ export type ToolUISchemaAction =
   | 'candidate.feedback.time_mismatch'
   | 'candidate.feedback.style_mismatch'
   | 'candidate.connect'
+  | 'matching.relax_distance'
+  | 'matching.relax_time'
+  | 'matching.relax_tags'
   | 'candidate.generate_opener'
   | 'candidate.more_like_this'
   | 'opener.confirm_send'
@@ -824,7 +830,14 @@ export function productComponentForSchemaType(
 ): ToolUIProductComponent {
   if (schemaType === 'social_match.candidate') return 'CandidateCards';
   if (schemaType === 'social_match.activity') return 'OpportunityCard';
-  if (schemaType === 'social_match.empty') return 'CandidateEmptyStateCard';
+  if (
+    schemaType === 'social_match.empty' ||
+    schemaType === 'social_match.no_candidates' ||
+    schemaType === 'social_match.privacy_guard' ||
+    schemaType === 'social_match.rate_limited'
+  ) {
+    return 'CandidateEmptyStateCard';
+  }
   if (schemaType === 'social_match.slot_completion') return 'GenericCard';
   if (schemaType === 'profile.completion') return 'ProfileCompletionCard';
   if (schemaType === 'life_graph.diff') return 'LifeGraphDiffCard';
@@ -839,7 +852,13 @@ export function summarizeToolUICardCollection(
   const candidateCount = cards.filter(
     (card) => card.schemaType === 'social_match.candidate',
   ).length;
-  const emptyCount = cards.filter((card) => card.schemaType === 'social_match.empty').length;
+  const emptyCount = cards.filter(
+    (card) =>
+      card.schemaType === 'social_match.empty' ||
+      card.schemaType === 'social_match.no_candidates' ||
+      card.schemaType === 'social_match.privacy_guard' ||
+      card.schemaType === 'social_match.rate_limited',
+  ).length;
   const slotCompletionCount = cards.filter(
     (card) => card.schemaType === 'social_match.slot_completion',
   ).length;
@@ -923,6 +942,9 @@ export function schemaDefaultTitle(schemaType: ToolUISchemaType) {
   if (schemaType === 'social_match.candidate') return '候选机会';
   if (schemaType === 'social_match.activity') return '活动机会';
   if (schemaType === 'social_match.empty') return '暂时没有找到合适的人';
+  if (schemaType === 'social_match.no_candidates') return '暂时没有找到合适候选';
+  if (schemaType === 'social_match.privacy_guard') return '隐私安全提醒';
+  if (schemaType === 'social_match.rate_limited') return '发布频率提醒';
   if (schemaType === 'social_match.slot_completion') return '补齐约练卡信息';
   if (schemaType === 'profile.completion') return '个人信息补全';
   if (schemaType === 'life_graph.diff') return '资料更新建议';
@@ -937,6 +959,9 @@ export function toolUISchemaTypeFromUnknown(value: unknown): ToolUISchemaType | 
     text === 'social_match.candidate' ||
     text === 'social_match.activity' ||
     text === 'social_match.empty' ||
+    text === 'social_match.no_candidates' ||
+    text === 'social_match.privacy_guard' ||
+    text === 'social_match.rate_limited' ||
     text === 'social_match.slot_completion' ||
     text === 'profile.completion' ||
     text === 'life_graph.diff' ||
@@ -961,6 +986,9 @@ export function toolUISchemaActionFromUnknown(value: unknown): ToolUISchemaActio
     text === 'candidate.feedback.time_mismatch' ||
     text === 'candidate.feedback.style_mismatch' ||
     text === 'candidate.connect' ||
+    text === 'matching.relax_distance' ||
+    text === 'matching.relax_time' ||
+    text === 'matching.relax_tags' ||
     text === 'candidate.generate_opener' ||
     text === 'candidate.more_like_this' ||
     text === 'opener.confirm_send' ||
@@ -1004,6 +1032,9 @@ function toolUISchemaActionFromLegacyAction(value: string | null): ToolUISchemaA
   if (value === 'see_more') return 'candidate.more_like_this';
   if (value === 'expand_radius') return 'candidate.more_like_this';
   if (value === 'relax_preference') return 'candidate.more_like_this';
+  if (value === 'matching.relax_distance') return 'matching.relax_distance';
+  if (value === 'matching.relax_time') return 'matching.relax_time';
+  if (value === 'matching.relax_tags') return 'matching.relax_tags';
   if (value === 'send_message') return 'opener.confirm_send';
   if (value === 'view_activity') return 'activity.view_detail';
   if (value === 'publish_social_request') return 'publish_to_discover';
@@ -1086,6 +1117,15 @@ export function defaultOpportunityActionsForSchema(
       { schemaAction: 'publish_to_discover', requiresConfirmation: true, source: 'default' },
       { schemaAction: 'candidate.more_like_this', requiresConfirmation: false, source: 'default' },
       { schemaAction: 'activity.modify_time', requiresConfirmation: false, source: 'default' },
+    ];
+  }
+  if (schemaType === 'social_match.no_candidates') {
+    return [
+      { schemaAction: 'matching.relax_distance', requiresConfirmation: false, source: 'default' },
+      { schemaAction: 'matching.relax_time', requiresConfirmation: false, source: 'default' },
+      { schemaAction: 'matching.relax_tags', requiresConfirmation: false, source: 'default' },
+      { schemaAction: 'activity.modify_time', requiresConfirmation: false, source: 'default' },
+      { schemaAction: 'social_intent.decline_publish', requiresConfirmation: false, source: 'default' },
     ];
   }
   return [];

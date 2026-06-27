@@ -30,6 +30,9 @@ export function ToolUICardCollectionBlock({
     card.schemaType === 'social_match.candidate' ||
     card.schemaType === 'social_match.activity' ||
     card.schemaType === 'social_match.empty' ||
+    card.schemaType === 'social_match.no_candidates' ||
+    card.schemaType === 'social_match.privacy_guard' ||
+    card.schemaType === 'social_match.rate_limited' ||
     card.schemaType === 'social_match.slot_completion';
   const isProductCardFlow = cards.every(isProductCard);
   const isSingleProductCard = cards.length === 1 && isProductCardFlow;

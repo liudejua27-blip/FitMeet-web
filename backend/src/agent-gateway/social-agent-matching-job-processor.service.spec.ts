@@ -83,6 +83,32 @@ describe('SocialAgentMatchingJobProcessorService', () => {
       expect.objectContaining({
         status: AgentTaskStatus.WaitingResult,
         statusReason: 'matching_job_no_candidates',
+        result: expect.objectContaining({
+          cards: expect.arrayContaining([
+            expect.objectContaining({
+              schemaType: 'social_match.no_candidates',
+            }),
+          ]),
+          chatRun: expect.objectContaining({
+            matchingFallback: expect.objectContaining({
+              version: 'fitmeet.matching-fallback.v1',
+            }),
+          }),
+        }),
+      }),
+    );
+    expect(harness.realtime.emitAgentEvent).toHaveBeenCalledWith(
+      7,
+      'agent:candidates',
+      expect.objectContaining({
+        taskId: 101,
+        candidateCount: 0,
+        publicLoopStage: 'no_candidates',
+        cards: expect.arrayContaining([
+          expect.objectContaining({
+            schemaType: 'social_match.no_candidates',
+          }),
+        ]),
       }),
     );
   });
@@ -298,6 +324,45 @@ function makeHarness(
     }),
   };
   const realtime = { emitAgentEvent: jest.fn() };
+  const relaxation = {
+    buildFallback: jest.fn(async () => ({
+      version: 'fitmeet.matching-fallback.v1',
+      generatedAt: new Date().toISOString(),
+      originalConstraints: {
+        city: '青岛',
+        activityType: 'badminton',
+        timePreference: '周末下午',
+        radiusKm: 5,
+      },
+      strategies: [
+        {
+          id: 'expand_distance',
+          label: '扩大距离',
+          changedConstraints: { radiusKm: 15 },
+          candidateCount: 2,
+          previewText: '扩大到 15km 后可能有 2 个候选。',
+          action: 'matching.relax_distance',
+        },
+        {
+          id: 'expand_time',
+          label: '放宽时间',
+          changedConstraints: { timePreference: '整个周末' },
+          candidateCount: 1,
+          previewText: '放宽时间后可能有 1 个候选。',
+          action: 'matching.relax_time',
+        },
+        {
+          id: 'relax_tags',
+          label: '减少偏好限制',
+          changedConstraints: { interestTags: ['羽毛球'] },
+          candidateCount: 0,
+          previewText: '减少偏好限制后重新试。',
+          action: 'matching.relax_tags',
+        },
+      ],
+      recommendedStrategyId: 'expand_distance',
+    })),
+  };
   const publicIntentSave = jest.fn(async (value) => value);
   const manager = {
     query: jest.fn(async (sql: string, params?: unknown[]) => {
@@ -394,11 +459,13 @@ function makeHarness(
       userSocialRequestRepo as never,
       candidateSearchIndex as never,
       realtime as never,
+      relaxation as never,
     ),
     candidateSearchIndex,
     manager,
     taskRepo,
     realtime,
+    relaxation,
   };
 }
 
