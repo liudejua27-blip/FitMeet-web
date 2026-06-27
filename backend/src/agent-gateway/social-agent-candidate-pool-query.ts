@@ -50,7 +50,7 @@ export type CandidatePoolResolvedQuery = {
   acceptsStrangers: boolean | null;
   candidateUserIds: number[];
   publicIntentIds: string[];
-  rankingPreference: SocialAgentRankingPreference;
+  rankingPreference?: SocialAgentRankingPreference;
 };
 
 export function buildCandidatePoolResolvedQuery(input: {
