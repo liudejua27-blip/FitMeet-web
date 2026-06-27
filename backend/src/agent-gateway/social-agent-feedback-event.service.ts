@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, Optional } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, FindOptionsWhere, Repository } from 'typeorm';
 
@@ -18,6 +18,7 @@ import {
   AgentTaskEventType,
 } from './entities/agent-task.entity';
 import { SocialAgentUserInterestEventService } from './social-agent-user-interest-event.service';
+import { SocialAgentPreferenceGeneralizationService } from './social-agent-preference-generalization.service';
 
 export type AgentFeedbackEventInput = {
   taskId?: number | null;
@@ -61,6 +62,9 @@ const FEEDBACK_TYPES = new Set<AgentFeedbackType>([
 
 const REASON_CODES = new Set<AgentFeedbackReasonCode>([
   'good_fit',
+  'more_like_this',
+  'save_candidate',
+  'connect_candidate',
   'bad_fit',
   'too_far',
   'time_mismatch',
@@ -96,6 +100,8 @@ export class SocialAgentFeedbackEventService {
     private readonly feedbackRepo: Repository<AgentFeedbackEvent>,
     private readonly dataSource: DataSource,
     private readonly interestEvents: SocialAgentUserInterestEventService,
+    @Optional()
+    private readonly preferenceGeneralization?: SocialAgentPreferenceGeneralizationService,
   ) {}
 
   async submit(ownerUserId: number, input: AgentFeedbackEventInput) {
@@ -185,6 +191,9 @@ export class SocialAgentFeedbackEventService {
     });
 
     await this.recordInterestSignal(saved).catch(() => undefined);
+    await this.preferenceGeneralization
+      ?.recordFeedback(saved)
+      .catch(() => undefined);
 
     return {
       ok: true,
@@ -411,15 +420,16 @@ export class SocialAgentFeedbackEventService {
 
   private async recordInterestSignal(row: AgentFeedbackEvent) {
     if (row.feedbackType !== 'candidate_quality') return;
-    const eventType =
-      row.reasonCode === 'good_fit' ? 'save_candidate' : 'skip_candidate';
+    const eventType = this.isPositiveCandidateFeedback(row.reasonCode)
+      ? 'save_candidate'
+      : 'skip_candidate';
     await this.interestEvents.recordEvent({
       ownerUserId: row.userId,
       agentTaskId: row.taskId,
       eventType,
       targetUserId: row.candidateId,
       candidateRecordId: row.candidateRecordId,
-      weight: row.reasonCode === 'good_fit' ? 4 : -4,
+      weight: this.isPositiveCandidateFeedback(row.reasonCode) ? 4 : -4,
       source: 'agent_feedback_event',
       dedupeKey: `agent-feedback:${row.id}`,
       metadata: {
@@ -442,6 +452,12 @@ export class SocialAgentFeedbackEventService {
     switch (reasonCode) {
       case 'good_fit':
         return '合适';
+      case 'more_like_this':
+        return '想看更多类似';
+      case 'save_candidate':
+        return '收藏候选';
+      case 'connect_candidate':
+        return '联系候选';
       case 'bad_fit':
         return '不合适';
       case 'too_far':
@@ -481,6 +497,17 @@ export class SocialAgentFeedbackEventService {
       >,
       createdAt: row.createdAt.toISOString(),
     };
+  }
+
+  private isPositiveCandidateFeedback(
+    reasonCode: AgentFeedbackReasonCode,
+  ): boolean {
+    return [
+      'good_fit',
+      'more_like_this',
+      'save_candidate',
+      'connect_candidate',
+    ].includes(reasonCode);
   }
 
   private record(value: unknown): Record<string, unknown> {

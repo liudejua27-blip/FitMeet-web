@@ -150,6 +150,7 @@ import {
 } from './entities/social-agent-reminder.entity';
 import { SocialAgentUserInterestEvent } from './entities/social-agent-user-interest-event.entity';
 import { SocialAgentUserInterestEventService } from './social-agent-user-interest-event.service';
+import { SocialAgentPreferenceGeneralizationService } from './social-agent-preference-generalization.service';
 import { SocialAgentRagService } from './social-agent-rag.service';
 import { SocialAgentRouteContextService } from './social-agent-route-context.service';
 import { SocialAgentRouteCandidateConfirmationService } from './social-agent-route-candidate-confirmation.service';
@@ -414,6 +415,7 @@ import { AdminRbacModule } from '../admin-rbac/admin-rbac.module';
     SocialAgentMetricsService,
     SocialAgentLongTermMemoryService,
     SocialAgentUserInterestEventService,
+    SocialAgentPreferenceGeneralizationService,
     SocialAgentRagService,
     SocialAgentRouteContextService,
     SocialAgentRouteCandidateConfirmationService,
@@ -546,6 +548,7 @@ import { AdminRbacModule } from '../admin-rbac/admin-rbac.module';
     CandidateSearchIndexService,
     SocialAgentLongTermMemoryService,
     SocialAgentUserInterestEventService,
+    SocialAgentPreferenceGeneralizationService,
     SocialAgentRagService,
     SocialAgentRouteContextService,
     SocialAgentToolExecutorService,

@@ -102,6 +102,10 @@ import {
   SocialAgentUserInterestEventService,
   type SocialAgentUserInterestSummary,
 } from './social-agent-user-interest-event.service';
+import type {
+  SocialAgentPreferenceGeneralizationSummary,
+  SocialAgentPreferenceWeight,
+} from './social-agent-preference-generalization.service';
 
 export type {
   CandidatePoolIntent,
@@ -834,6 +838,7 @@ export class SocialAgentCandidatePoolService {
       recentPublicActivity: this.profileCandidatePublicActivitySignals({
         city,
         commonTags,
+        styleSignals: [profile?.socialStyle, profile?.socialPreference],
         updatedAt: profile?.updatedAt ?? user.updatedAt,
       }),
       publicIntentId: null,
@@ -1077,6 +1082,7 @@ export class SocialAgentCandidatePoolService {
   private profileCandidatePublicActivitySignals(input: {
     city: string;
     commonTags: string[];
+    styleSignals?: unknown[];
     updatedAt: Date | string | null | undefined;
   }): string[] {
     return this.uniqueStrings([
@@ -1085,6 +1091,7 @@ export class SocialAgentCandidatePoolService {
       input.commonTags.length
         ? `共同公开兴趣：${input.commonTags.slice(0, 2).join('、')}`
         : '',
+      ...(input.styleSignals ?? []),
       this.updatedAtSignal(input.updatedAt),
     ]).slice(0, 4);
   }
@@ -1122,13 +1129,16 @@ export class SocialAgentCandidatePoolService {
     }
     return candidates
       .map((candidate) => this.applyUserInterestSignal(candidate, summary))
+      .filter((candidate): candidate is CandidatePoolCandidate =>
+        Boolean(candidate),
+      )
       .sort((a, b) => b.matchScore - a.matchScore);
   }
 
   private applyUserInterestSignal(
     candidate: CandidatePoolCandidate,
     summary: SocialAgentUserInterestSummary,
-  ): CandidatePoolCandidate {
+  ): CandidatePoolCandidate | null {
     const signals: string[] = [];
     let adjustment = 0;
     let rejectionPenalty = 0;
@@ -1212,6 +1222,13 @@ export class SocialAgentCandidatePoolService {
       maxNegative: 4,
     });
     adjustment += timeWindowScore;
+    const generalized = this.generalizedPreferenceAdjustment(
+      candidate,
+      summary.preferenceGeneralization,
+    );
+    if (generalized.excluded) return null;
+    adjustment += generalized.adjustment;
+    signals.push(...generalized.signals);
     const newScore = candidateClampScore(candidate.matchScore + adjustment);
     const preferenceHistorySignals = this.uniqueStrings([
       ...signals,
@@ -1228,9 +1245,134 @@ export class SocialAgentCandidatePoolService {
         rejectionPenalty,
         reciprocity: reciprocityScore,
         overExposurePenalty,
+        generalizedPreferenceFit: generalized.generalizedPreferenceFit,
+        radiusHardFilter: generalized.radiusHardFilter,
+        timeBucketPenalty: generalized.timeBucketPenalty,
+        styleAffinity: generalized.styleAffinity,
       },
       preferenceHistorySignals,
     };
+  }
+
+  private generalizedPreferenceAdjustment(
+    candidate: CandidatePoolCandidate,
+    matrix: SocialAgentPreferenceGeneralizationSummary | null,
+  ): {
+    adjustment: number;
+    generalizedPreferenceFit: number;
+    radiusHardFilter: number;
+    timeBucketPenalty: number;
+    styleAffinity: number;
+    signals: string[];
+    excluded: boolean;
+  } {
+    const empty = {
+      adjustment: 0,
+      generalizedPreferenceFit: 0,
+      radiusHardFilter: 0,
+      timeBucketPenalty: 0,
+      styleAffinity: 0,
+      signals: [] as string[],
+      excluded: false,
+    };
+    if (!matrix) return empty;
+    const signals: string[] = [];
+    let adjustment = 0;
+    let generalizedPreferenceFit = 0;
+    let radiusHardFilter = 0;
+    let timeBucketPenalty = 0;
+    let styleAffinity = 0;
+
+    const target = matrix.targetUserWeights.find(
+      (item) => item.userId === candidate.candidateUserId,
+    );
+    if (target) {
+      const targetScore = this.clamp(target.weight, -30, 16);
+      adjustment += targetScore;
+      generalizedPreferenceFit += targetScore;
+      signals.push(
+        targetScore > 0
+          ? '你之前对这位候选有正向反馈'
+          : '你之前明确降低过这位候选的推荐优先级',
+      );
+    }
+
+    const preferredRadiusKm = matrix.preferredRadiusKm;
+    if (
+      typeof preferredRadiusKm === 'number' &&
+      preferredRadiusKm > 0 &&
+      typeof candidate.distanceKm === 'number' &&
+      candidate.distanceKm > preferredRadiusKm
+    ) {
+      radiusHardFilter = -100;
+      signals.push('这位候选距离超出你最近反馈后的偏好范围');
+      return {
+        ...empty,
+        radiusHardFilter,
+        signals,
+        excluded: true,
+      };
+    }
+
+    const tagScore = this.weightedTextOverlapScore({
+      candidate,
+      weights: [
+        ...matrix.activityTagWeights,
+        ...matrix.cityWeights,
+        ...matrix.areaWeights,
+      ],
+      positiveLabel: '你之前更喜欢类似特征',
+      negativeLabel: '你之前减少过类似特征推荐',
+      signals,
+      maxPositive: 10,
+      maxNegative: 12,
+    });
+    adjustment += tagScore;
+    generalizedPreferenceFit += tagScore;
+
+    timeBucketPenalty = this.generalizedWeightedScore({
+      candidate,
+      weights: matrix.timeBucketWeights,
+      positiveLabel: '你之前更喜欢这个时间段',
+      negativeLabel: '你之前反馈过类似时间不合适',
+      signals,
+      maxPositive: 5,
+      maxNegative: 10,
+    });
+    adjustment += timeBucketPenalty;
+
+    styleAffinity = this.generalizedWeightedScore({
+      candidate,
+      weights: matrix.styleWeights,
+      positiveLabel: '这类互动风格更符合你最近的反馈',
+      negativeLabel: '这类互动风格与你最近反馈不太一致',
+      signals,
+      maxPositive: 8,
+      maxNegative: 12,
+    });
+    adjustment += styleAffinity;
+
+    return {
+      adjustment,
+      generalizedPreferenceFit,
+      radiusHardFilter,
+      timeBucketPenalty,
+      styleAffinity,
+      signals: this.uniqueStrings(signals).slice(0, 6),
+      excluded: false,
+    };
+  }
+
+  private generalizedWeightedScore(input: {
+    candidate: CandidatePoolCandidate;
+    weights: SocialAgentPreferenceWeight[];
+    positiveLabel: string;
+    negativeLabel: string;
+    signals: string[];
+    maxPositive: number;
+    maxNegative: number;
+  }): number {
+    return this.weightedTextOverlapScore(input);
   }
 
   private applyRankingMetadata(
@@ -1361,6 +1503,10 @@ export class SocialAgentCandidatePoolService {
           .filter(Boolean)
           .some((part) => part.length >= 2 && haystack.includes(part))),
     );
+  }
+
+  private clamp(value: number, min: number, max: number): number {
+    return Math.max(min, Math.min(max, value));
   }
 
   private updatedAtSignal(value: Date | string | null | undefined): string {

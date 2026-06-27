@@ -22,6 +22,9 @@ export type AgentFeedbackType =
 
 export type AgentFeedbackReasonCode =
   | 'good_fit'
+  | 'more_like_this'
+  | 'save_candidate'
+  | 'connect_candidate'
   | 'bad_fit'
   | 'too_far'
   | 'time_mismatch'
