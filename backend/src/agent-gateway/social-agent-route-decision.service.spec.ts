@@ -319,7 +319,7 @@ describe('SocialAgentRouteDecisionService', () => {
     ).toHaveBeenCalledWith(7, result.task, undefined);
   });
 
-  it('uses the configured context window for intent routing and brain planning', async () => {
+  it('uses compact router context for intent routing and brain planning', async () => {
     const ownedTask = makeTask({
       memory: {
         socialAgentConversation: {
@@ -345,7 +345,7 @@ describe('SocialAgentRouteDecisionService', () => {
     expect(intentRouter.route).toHaveBeenCalledWith(
       expect.objectContaining({
         conversationHistory: expect.arrayContaining([
-          expect.objectContaining({ text: '第 9 条上下文' }),
+          expect.objectContaining({ text: '第 85 条上下文' }),
           expect.objectContaining({ text: '第 88 条上下文' }),
         ]),
       }),
@@ -353,11 +353,11 @@ describe('SocialAgentRouteDecisionService', () => {
     const routedInput = intentRouter.route.mock.calls.at(-1)?.[0] as {
       conversationHistory: unknown[];
     };
-    expect(routedInput.conversationHistory).toHaveLength(80);
+    expect(routedInput.conversationHistory).toHaveLength(4);
     expect(brain.planTurn).toHaveBeenCalledWith(
       expect.objectContaining({
         conversationHistory: expect.arrayContaining([
-          expect.objectContaining({ text: '第 9 条上下文' }),
+          expect.objectContaining({ text: '第 85 条上下文' }),
           expect.objectContaining({ text: '第 88 条上下文' }),
         ]),
       }),
@@ -365,7 +365,7 @@ describe('SocialAgentRouteDecisionService', () => {
     const brainInput = brain.planTurn.mock.calls.at(-1)?.[0] as {
       conversationHistory: unknown[];
     };
-    expect(brainInput.conversationHistory).toHaveLength(80);
+    expect(brainInput.conversationHistory).toHaveLength(4);
   });
 
   it('uses hydrated context as the single history source for router and Brain', async () => {
@@ -415,6 +415,7 @@ describe('SocialAgentRouteDecisionService', () => {
       userId: 7,
       taskId: 101,
       threadId: 101,
+      mode: 'router',
     });
     expect(routeContext.buildMemoryContext).toHaveBeenCalledWith(
       expect.any(Object),

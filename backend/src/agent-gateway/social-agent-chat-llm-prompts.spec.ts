@@ -3,7 +3,6 @@ import {
   AgentTaskPermissionMode,
   AgentTaskStatus,
 } from './entities/agent-task.entity';
-import { SOCIAL_AGENT_DEFAULT_CONTEXT_TURNS } from './social-agent-context-window';
 import {
   buildSocialAgentAgentBrainMessages,
   buildSocialAgentDirectReplyMessages,
@@ -137,7 +136,7 @@ function userPayload(messages: Array<{ role: string; content: string }>) {
 }
 
 describe('social-agent-chat-llm-prompts', () => {
-  it('keeps the full production context window for direct DeepSeek replies', () => {
+  it('uses compact context for direct DeepSeek replies', () => {
     const messages = buildSocialAgentDirectReplyMessages({
       message: '刚才我说的是今天晚上散步，不是周末。',
       route: route('correction_or_clarification'),
@@ -149,11 +148,9 @@ describe('social-agent-chat-llm-prompts', () => {
     });
 
     const payload = userPayload(messages);
-    expect(payload.conversationHistory).toHaveLength(
-      SOCIAL_AGENT_DEFAULT_CONTEXT_TURNS,
-    );
+    expect(payload.conversationHistory).toHaveLength(8);
     expect(payload.conversationHistory).toEqual(
-      expect.arrayContaining([expect.objectContaining({ text: 'turn-6' })]),
+      expect.arrayContaining([expect.objectContaining({ text: 'turn-78' })]),
     );
   });
 
@@ -339,7 +336,7 @@ describe('social-agent-chat-llm-prompts', () => {
     });
   });
 
-  it('keeps the full production context window for Agent Brain replies', () => {
+  it('uses compact context for Agent Brain replies', () => {
     const messages = buildSocialAgentAgentBrainMessages({
       message: '保存我的画像，后面继续找青岛大学附近的人。',
       task: makeTask(),
@@ -353,11 +350,9 @@ describe('social-agent-chat-llm-prompts', () => {
     });
 
     const payload = userPayload(messages);
-    expect(payload.conversationHistory).toHaveLength(
-      SOCIAL_AGENT_DEFAULT_CONTEXT_TURNS,
-    );
+    expect(payload.conversationHistory).toHaveLength(10);
     expect(payload.conversationHistory).toEqual(
-      expect.arrayContaining([expect.objectContaining({ text: 'turn-6' })]),
+      expect.arrayContaining([expect.objectContaining({ text: 'turn-76' })]),
     );
   });
 

@@ -4,7 +4,7 @@ import { ConfigService } from '@nestjs/config';
 import { sanitizeCity } from '../common/city.util';
 import { SocialProfileService } from '../users/social-profile.service';
 import { AgentTask } from './entities/agent-task.entity';
-import { socialAgentContextTurnLimit } from './social-agent-context-window';
+import { socialAgentLlmContextTurnLimit } from './social-agent-context-window';
 import {
   SocialAgentBrainService,
   type SocialAgentBrainTurnDecision,
@@ -332,6 +332,7 @@ export class SocialAgentRouteDecisionService {
         userId: input.ownerUserId,
         taskId: input.task.id,
         threadId: input.body.clientContext?.threadId ?? input.task.id,
+        mode: 'router',
       });
     } catch (error) {
       this.metrics.recordError('context_hydration_failed');
@@ -398,7 +399,7 @@ export class SocialAgentRouteDecisionService {
   private conversationHistory(task: AgentTask): Array<Record<string, unknown>> {
     return readSocialAgentConversationHistory(
       task,
-      socialAgentContextTurnLimit(this.config),
+      socialAgentLlmContextTurnLimit(this.config, 'router'),
     );
   }
 

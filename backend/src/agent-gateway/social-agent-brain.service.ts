@@ -10,7 +10,7 @@ import {
 import {
   normalizeSocialAgentContextTurn,
   selectSocialAgentContextWindow,
-  socialAgentContextTurnLimit,
+  socialAgentLlmContextTurnLimit,
 } from './social-agent-context-window';
 import {
   SocialAgentIntentRouterResult,
@@ -797,7 +797,7 @@ export class SocialAgentBrainService {
           memoryContext: input.memoryContext ?? null,
           conversationHistory: selectSocialAgentContextWindow(
             input.conversationHistory,
-            socialAgentContextTurnLimit(this.config),
+            socialAgentLlmContextTurnLimit(this.config, 'ordinary_chat'),
           ).map(normalizeSocialAgentContextTurn),
         }),
       },
