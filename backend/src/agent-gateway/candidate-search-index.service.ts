@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
 
 import { UserSocialProfile } from '../users/user-social-profile.entity';
 import {
@@ -23,8 +23,22 @@ export type CandidateSearchIndexQuery = {
   limit?: number;
 };
 
+export type CandidateSearchIndexSyncSummary = {
+  scanned: number;
+  active: number;
+  inactive: number;
+  failed: number;
+};
+
 const DEFAULT_SEARCH_LIMIT = 50;
 const MAX_SEARCH_LIMIT = 200;
+const DEFAULT_SYNC_LIMIT = 200;
+const MAX_SYNC_LIMIT = 1000;
+const ACTIVE_PUBLIC_INTENT_STATUSES = [
+  SocialRequestStatus.Active,
+  SocialRequestStatus.Searching,
+  SocialRequestStatus.Matched,
+];
 
 @Injectable()
 export class CandidateSearchIndexService {
@@ -49,15 +63,89 @@ export class CandidateSearchIndexService {
       return null;
     }
 
+    return this.upsertProfileProjection(profile);
+  }
+
+  async syncActiveProfiles(
+    input: {
+      limit?: number;
+    } = {},
+  ): Promise<CandidateSearchIndexSyncSummary> {
+    const limit = clampSyncLimit(input.limit);
+    const knownRows = await this.indexRepo.find({
+      where: {
+        sourceType: CandidateSearchIndexSourceType.Profile,
+        status: CandidateSearchIndexStatus.Active,
+      },
+      order: { sourceUpdatedAt: 'ASC', updatedAt: 'ASC' },
+      take: Math.ceil(limit / 2),
+    });
+    const optedInProfiles = await this.profileRepo.find({
+      where: [{ profileDiscoverable: true }, { agentCanRecommendMe: true }],
+      order: { updatedAt: 'DESC' },
+      take: limit,
+    });
+    const userIds = new Set<number>();
+    for (const row of knownRows) {
+      const userId = Number(row.sourceId);
+      if (Number.isInteger(userId) && userId > 0) userIds.add(userId);
+    }
+    for (const profile of optedInProfiles) {
+      if (Number.isInteger(profile.userId) && profile.userId > 0) {
+        userIds.add(profile.userId);
+      }
+    }
+    return this.syncKeys([...userIds], (userId) =>
+      this.upsertFromSocialProfile(userId),
+    );
+  }
+
+  async syncActivePublicIntents(
+    input: {
+      limit?: number;
+    } = {},
+  ): Promise<CandidateSearchIndexSyncSummary> {
+    const limit = clampSyncLimit(input.limit);
+    const knownRows = await this.indexRepo.find({
+      where: {
+        sourceType: CandidateSearchIndexSourceType.PublicIntent,
+        status: CandidateSearchIndexStatus.Active,
+      },
+      order: { sourceUpdatedAt: 'ASC', updatedAt: 'ASC' },
+      take: Math.ceil(limit / 2),
+    });
+    const activeIntents = await this.publicIntentRepo.find({
+      where: {
+        mode: 'public',
+        status: In(ACTIVE_PUBLIC_INTENT_STATUSES),
+      },
+      order: { updatedAt: 'DESC' },
+      take: limit,
+    });
+    const publicIntentIds = new Set<string>();
+    for (const row of knownRows) {
+      if (row.sourceId) publicIntentIds.add(row.sourceId);
+    }
+    for (const intent of activeIntents) {
+      if (intent.id) publicIntentIds.add(intent.id);
+    }
+    return this.syncKeys([...publicIntentIds], (publicIntentId) =>
+      this.upsertFromPublicIntent(publicIntentId),
+    );
+  }
+
+  private async upsertProfileProjection(
+    profile: UserSocialProfile,
+  ): Promise<CandidateSearchIndex | null> {
     const optedIn =
       profile.profileDiscoverable === true ||
       profile.agentCanRecommendMe === true;
 
     const projection = await this.saveProjection({
       sourceType: CandidateSearchIndexSourceType.Profile,
-      sourceId: String(userId),
+      sourceId: String(profile.userId),
       sourceVersion: String(profile.profileVersion ?? 0),
-      userId,
+      userId: profile.userId,
       publicIntentId: null,
       linkedSocialRequestId: null,
       isRealUser: true,
@@ -269,6 +357,28 @@ export class CandidateSearchIndexService {
     );
     return this.indexRepo.save(entity);
   }
+
+  private async syncKeys<T>(
+    keys: T[],
+    project: (key: T) => Promise<CandidateSearchIndex | null>,
+  ): Promise<CandidateSearchIndexSyncSummary> {
+    const summary: CandidateSearchIndexSyncSummary = {
+      scanned: keys.length,
+      active: 0,
+      inactive: 0,
+      failed: 0,
+    };
+    for (const key of keys) {
+      try {
+        const projected = await project(key);
+        if (projected) summary.active += 1;
+        else summary.inactive += 1;
+      } catch {
+        summary.failed += 1;
+      }
+    }
+    return summary;
+  }
 }
 
 function isEligiblePublicIntent(intent: PublicSocialIntent): boolean {
@@ -383,6 +493,12 @@ function clampLimit(value: unknown): number {
   const parsed = Number(value);
   if (!Number.isFinite(parsed) || parsed <= 0) return DEFAULT_SEARCH_LIMIT;
   return Math.min(Math.round(parsed), MAX_SEARCH_LIMIT);
+}
+
+function clampSyncLimit(value: unknown): number {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) return DEFAULT_SYNC_LIMIT;
+  return Math.min(Math.round(parsed), MAX_SYNC_LIMIT);
 }
 
 function estimateProfileCompleteness(profile: UserSocialProfile): number {

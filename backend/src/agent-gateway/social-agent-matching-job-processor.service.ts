@@ -313,7 +313,7 @@ export class SocialAgentMatchingJobProcessorService {
     await this.candidateSearchIndex.upsertFromPublicIntent(
       validation.publicIntent.id,
     );
-    const rows = await this.candidateSearchIndex.search({
+    const query = {
       ownerUserId: validation.ownerUserId,
       city: validation.socialRequest.city || validation.publicIntent.city,
       activityTypes: [
@@ -326,7 +326,13 @@ export class SocialAgentMatchingJobProcessorService {
         : this.stringList(validation.publicIntent.interestTags),
       timeBuckets: [validation.publicIntent.timePreference],
       limit: 80,
-    });
+    };
+    let rows = await this.candidateSearchIndex.search(query);
+    if (rows.length === 0) {
+      await this.candidateSearchIndex.syncActiveProfiles({ limit: 500 });
+      await this.candidateSearchIndex.syncActivePublicIntents({ limit: 500 });
+      rows = await this.candidateSearchIndex.search(query);
+    }
     return buildCandidateIndexHints(rows);
   }
 

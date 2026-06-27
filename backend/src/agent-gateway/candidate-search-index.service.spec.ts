@@ -13,6 +13,7 @@ import {
 describe('CandidateSearchIndexService', () => {
   function makeRepo<T extends object>() {
     return {
+      find: jest.fn(),
       findOne: jest.fn(),
       delete: jest.fn(),
       update: jest.fn(),
@@ -158,6 +159,142 @@ describe('CandidateSearchIndexService', () => {
     await expect(
       service.upsertFromPublicIntent('public_removed'),
     ).resolves.toBeNull();
+    expect(indexRepo.update).toHaveBeenCalledWith(
+      {
+        sourceType: CandidateSearchIndexSourceType.PublicIntent,
+        sourceId: 'public_removed',
+      },
+      expect.objectContaining({
+        status: CandidateSearchIndexStatus.Removed,
+      }),
+    );
+  });
+
+  it('syncs opted-in profiles and refreshes stale active profile rows', async () => {
+    const { service, indexRepo, profileRepo } = makeService();
+    indexRepo.find.mockResolvedValueOnce([
+      candidate({
+        sourceType: CandidateSearchIndexSourceType.Profile,
+        sourceId: '9',
+        userId: 9,
+      }),
+    ]);
+    profileRepo.find.mockResolvedValueOnce([
+      {
+        userId: 7,
+        profileVersion: 3,
+        nickname: '青岛跑步搭子',
+        city: '青岛',
+        nearbyArea: '五四广场',
+        interestTags: ['跑步'],
+        profileDiscoverable: true,
+        agentCanRecommendMe: true,
+        updatedAt: new Date('2026-06-26T10:00:00.000Z'),
+      },
+    ]);
+    profileRepo.findOne.mockImplementation(async (input) => {
+      const userId = Number(input?.where?.userId);
+      if (userId === 7) {
+        return {
+          userId: 7,
+          profileVersion: 3,
+          nickname: '青岛跑步搭子',
+          city: '青岛',
+          nearbyArea: '五四广场',
+          interestTags: ['跑步'],
+          profileDiscoverable: true,
+          agentCanRecommendMe: true,
+          updatedAt: new Date('2026-06-26T10:00:00.000Z'),
+        };
+      }
+      if (userId === 9) {
+        return {
+          userId: 9,
+          profileVersion: 4,
+          city: '青岛',
+          profileDiscoverable: false,
+          agentCanRecommendMe: false,
+          updatedAt: new Date('2026-06-26T11:00:00.000Z'),
+        };
+      }
+      return null;
+    });
+    indexRepo.findOne.mockResolvedValue(null);
+
+    await expect(service.syncActiveProfiles({ limit: 20 })).resolves.toEqual({
+      scanned: 2,
+      active: 1,
+      inactive: 1,
+      failed: 0,
+    });
+    expect(profileRepo.find).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: [{ profileDiscoverable: true }, { agentCanRecommendMe: true }],
+        take: 20,
+      }),
+    );
+    expect(indexRepo.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sourceType: CandidateSearchIndexSourceType.Profile,
+        sourceId: '7',
+        status: CandidateSearchIndexStatus.Active,
+      }),
+    );
+    expect(indexRepo.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sourceType: CandidateSearchIndexSourceType.Profile,
+        sourceId: '9',
+        status: CandidateSearchIndexStatus.Paused,
+      }),
+    );
+  });
+
+  it('syncs active public intents and removes stale public intent rows', async () => {
+    const { service, indexRepo, publicIntentRepo } = makeService();
+    indexRepo.find.mockResolvedValueOnce([
+      candidate({
+        sourceType: CandidateSearchIndexSourceType.PublicIntent,
+        sourceId: 'public_removed',
+        publicIntentId: 'public_removed',
+      }),
+    ]);
+    publicIntentRepo.find.mockResolvedValueOnce([
+      publicIntent({ id: 'public_active' }),
+    ]);
+    publicIntentRepo.findOne.mockImplementation(async (input) => {
+      const id = input?.where?.id;
+      if (id === 'public_active') return publicIntent({ id: 'public_active' });
+      if (id === 'public_removed') {
+        return publicIntent({
+          id: 'public_removed',
+          status: SocialRequestStatus.Inactive,
+        });
+      }
+      return null;
+    });
+    indexRepo.findOne.mockResolvedValue(null);
+
+    await expect(
+      service.syncActivePublicIntents({ limit: 20 }),
+    ).resolves.toEqual({
+      scanned: 2,
+      active: 1,
+      inactive: 1,
+      failed: 0,
+    });
+    expect(publicIntentRepo.find).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ mode: 'public' }),
+        take: 20,
+      }),
+    );
+    expect(indexRepo.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sourceType: CandidateSearchIndexSourceType.PublicIntent,
+        sourceId: 'public_active',
+        status: CandidateSearchIndexStatus.Active,
+      }),
+    );
     expect(indexRepo.update).toHaveBeenCalledWith(
       {
         sourceType: CandidateSearchIndexSourceType.PublicIntent,
