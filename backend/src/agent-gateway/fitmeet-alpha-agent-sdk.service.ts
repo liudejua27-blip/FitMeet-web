@@ -1150,6 +1150,7 @@ export class FitMeetAlphaAgentSdkService {
         'search_real_candidates',
         'send_message_to_candidate',
         'connect_candidate',
+        'list_friends',
         'create_activity',
       ];
     }
