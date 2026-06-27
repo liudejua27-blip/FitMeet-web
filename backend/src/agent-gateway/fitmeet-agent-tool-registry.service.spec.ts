@@ -131,6 +131,30 @@ describe('FitMeetAgentToolRegistryService', () => {
     );
   });
 
+  it('registers list_friends as an implemented owner-scoped relationship read tool', () => {
+    const tool = service.getTool('list_friends');
+
+    expect(tool).toMatchObject({
+      name: 'list_friends',
+      category: FitMeetAgentToolCategory.Friend,
+      riskLevel: AgentActionRiskLevel.Low,
+      requiresApproval: false,
+      permission: 'read_only',
+      permissionAction: SocialAgentAction.SearchProfiles,
+      executorToolName: 'list_friends',
+      runtimeStatus: 'implemented',
+      plannerEnabled: true,
+      dataScope: 'owner_friend_graph_only',
+      sideEffects: [],
+    });
+    expect(tool?.outputSchema).toEqual(
+      expect.objectContaining({
+        type: 'object',
+        required: expect.arrayContaining(['friends']),
+      }),
+    );
+  });
+
   it('returns only implemented planner-visible tools for planning', () => {
     const plannerTools = service.listPlannerTools(
       AgentTaskPermissionMode.Assist,
@@ -201,6 +225,9 @@ describe('FitMeetAgentToolRegistryService', () => {
     );
     expect(service.resolveExecutorToolName('view_match_history')).toBe(
       'view_match_history',
+    );
+    expect(service.resolveExecutorToolName('list_friends')).toBe(
+      'list_friends',
     );
     expect(service.resolveExecutorToolName('get_agent_message_events')).toBe(
       'get_agent_message_events',

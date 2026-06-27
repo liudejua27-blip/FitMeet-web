@@ -79,6 +79,7 @@ import {
   SocialAgentSafetyToolService,
 } from './social-agent-safety-tool.service';
 import { SocialAgentMatchHistoryService } from './social-agent-match-history.service';
+import { SocialAgentFriendListService } from './social-agent-friend-list.service';
 import { AgentSideEffectLedgerService } from './agent-side-effect-ledger.service';
 import { summarizeSocialAgentToolCalls } from './social-agent-tool-execution-summary';
 import { buildSocialAgentProfileContextPatch } from './social-agent-profile-context-patch';
@@ -234,6 +235,8 @@ export class SocialAgentToolExecutorService {
     private readonly sideEffectLedger?: AgentSideEffectLedgerService,
     @Optional()
     private readonly matchHistory?: SocialAgentMatchHistoryService,
+    @Optional()
+    private readonly friendList?: SocialAgentFriendListService,
   ) {}
 
   async executeTask(
@@ -1760,6 +1763,14 @@ export class SocialAgentToolExecutorService {
         return this.matchHistory.viewMatchHistory({
           ownerUserId: task.ownerUserId,
           taskId: task.id,
+          limit: this.toolInput.number(input.limit),
+        });
+      case SocialAgentToolName.ListFriends:
+        if (!this.friendList) {
+          throw new BadRequestException('Friend list runtime is unavailable');
+        }
+        return this.friendList.listFriends({
+          ownerUserId: task.ownerUserId,
           limit: this.toolInput.number(input.limit),
         });
       case SocialAgentToolName.DraftOpener:
