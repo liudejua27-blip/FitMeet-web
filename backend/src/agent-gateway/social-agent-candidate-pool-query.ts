@@ -8,6 +8,10 @@ import {
   extractCandidateTime,
 } from './social-agent-candidate-query-parser';
 import { readSocialAgentTaskMemory } from './social-agent-memory.util';
+import {
+  normalizeSocialAgentRankingPreference,
+  type SocialAgentRankingPreference,
+} from './social-agent-ranking-preference';
 
 export type CandidatePoolIntent = 'social_search' | 'activity_search';
 
@@ -29,6 +33,7 @@ export type CandidatePoolQuery = {
   publicIntentIds?: string[] | null;
   limit?: number | null;
   persistCandidates?: boolean;
+  rankingPreference?: Partial<SocialAgentRankingPreference> | null;
 };
 
 export type CandidatePoolResolvedQuery = {
@@ -45,6 +50,7 @@ export type CandidatePoolResolvedQuery = {
   acceptsStrangers: boolean | null;
   candidateUserIds: number[];
   publicIntentIds: string[];
+  rankingPreference?: SocialAgentRankingPreference;
 };
 
 export function buildCandidatePoolResolvedQuery(input: {
@@ -72,6 +78,7 @@ export function buildCandidatePoolResolvedQuery(input: {
     query.candidatePreferencePolicy,
     'public_discoverable_profiles_and_user_consented_public_tags_only',
   );
+  const memory = task ? readSocialAgentTaskMemory(task) : null;
   const rawText = cleanDisplayText(
     query.rawText ??
       (hasCurrentTaskSlotContext
@@ -134,6 +141,9 @@ export function buildCandidatePoolResolvedQuery(input: {
     acceptsStrangers,
     candidateUserIds: uniqueCandidatePoolNumbers(query.candidateUserIds),
     publicIntentIds: uniqueCandidatePoolStrings(query.publicIntentIds ?? []),
+    rankingPreference: normalizeSocialAgentRankingPreference(
+      query.rankingPreference ?? memory?.rankingPreference,
+    ),
   };
 }
 

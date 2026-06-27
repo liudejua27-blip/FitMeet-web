@@ -9,6 +9,10 @@ import type { AgentTask } from './entities/agent-task.entity';
 import type { FitMeetAlphaCard } from './fitmeet-alpha-agent.types';
 import { readSocialAgentTaskMemory } from './social-agent-memory.util';
 import { readSocialAgentOpportunityDraftClarification } from './social-agent-opportunity-draft-memory';
+import {
+  normalizeSocialAgentRankingPreference,
+  rankingPreferenceLabels,
+} from './social-agent-ranking-preference';
 
 export type SocialAgentOpportunityDraft = CreateSocialRequestDto & {
   locationName: string;
@@ -327,6 +331,13 @@ export function buildSocialAgentSlotCompletionCard(input: {
   sourceText?: string | null;
 }): FitMeetAlphaCard {
   const missing = input.missing.map((item) => text(item)).filter(Boolean);
+  const taskMemory = readSocialAgentTaskMemory(input.task);
+  const missingSlots = buildSlotClarificationMissingSlots(missing);
+  const completedSlots = buildSlotClarificationCompletedSlots(input.task);
+  const rankingPreference = normalizeSocialAgentRankingPreference(
+    taskMemory.rankingPreference,
+  );
+  const slotPatch = buildSlotClarificationPatch(input.task);
   const missingCopy = missing.length ? missing.join('、') : '必要信息';
   return {
     id: `activity_slot_completion:${input.task.id}`,
@@ -346,6 +357,29 @@ export function buildSocialAgentSlotCompletionCard(input: {
         ? 'safety_boundary'
         : 'opportunity_slot_completion',
       missing,
+      missingSlots,
+      completedSlots,
+      optionalSlots: [
+        {
+          key: 'intensity',
+          label: '活动强度',
+          required: false,
+          skippable: true,
+          prompt: '可选：低强度、正常、竞技一点',
+        },
+        {
+          key: 'candidatePreference',
+          label: '候选偏好',
+          required: false,
+          skippable: true,
+          prompt: '可选：更近一点、时间更重要、能聊得来优先',
+        },
+      ],
+      rankingPreference: {
+        ...rankingPreference,
+        labels: rankingPreferenceLabels(rankingPreference),
+      },
+      slotPatch,
       sourceText: text(input.sourceText),
       defaultSafetyMessage: '按默认安全设置处理',
       customSafetyPrompt:
@@ -363,6 +397,9 @@ export function buildSocialAgentSlotCompletionCard(input: {
           taskId: input.task.id,
           message: '按默认安全设置处理',
           waitingFor: 'safety_boundary',
+          missingSlots,
+          slotPatch,
+          rankingPreference,
         },
       },
       {
@@ -375,6 +412,9 @@ export function buildSocialAgentSlotCompletionCard(input: {
           taskId: input.task.id,
           message: '我想自定义安全边界',
           waitingFor: 'safety_boundary',
+          missingSlots,
+          slotPatch,
+          rankingPreference,
         },
       },
       {
@@ -387,10 +427,95 @@ export function buildSocialAgentSlotCompletionCard(input: {
           taskId: input.task.id,
           message: '取消这次约练卡发布',
           waitingFor: 'opportunity_slot_completion',
+          missingSlots,
+          slotPatch,
+          rankingPreference,
         },
       },
     ],
   };
+}
+
+function buildSlotClarificationMissingSlots(missing: string[]) {
+  return missing.map((label) => {
+    const key = slotClarificationKey(label);
+    return {
+      key,
+      label,
+      required: true,
+      skippable: false,
+      prompt: slotClarificationPrompt(key),
+    };
+  });
+}
+
+function buildSlotClarificationCompletedSlots(task: AgentTask) {
+  const patch = buildSlotClarificationPatch(task);
+  const entries: Array<[string, string, string | null]> = [
+    ['city', '城市/大致区域', patch.city],
+    ['activity', '活动', patch.activity],
+    ['time', '时间', patch.time],
+    ['location', '地点', patch.location],
+    ['safety_boundary', '安全边界', patch.safetyBoundary],
+    ['candidatePreference', '候选偏好', patch.candidatePreference],
+  ];
+  return entries
+    .filter(([, , value]) => Boolean(text(value)))
+    .map(([key, label, value]) => ({
+      key,
+      label,
+      value: text(value),
+    }));
+}
+
+function buildSlotClarificationPatch(task: AgentTask) {
+  const memory = readSocialAgentTaskMemory(task);
+  const slots = memory.taskSlots ?? {};
+  const summary = memory.taskSlotSummary ?? {};
+  return {
+    city:
+      text(memory.activeEntities.city) ||
+      slotText(slots, summary, 'city') ||
+      slotText(slots, summary, 'geo_area'),
+    activity:
+      text(memory.activeEntities.activityType) ||
+      slotText(slots, summary, 'activity'),
+    time:
+      text(memory.activeEntities.timePreference) ||
+      slotText(slots, summary, 'time_window'),
+    location:
+      text(memory.activeEntities.locationPreference) ||
+      slotText(slots, summary, 'location_text') ||
+      slotText(slots, summary, 'geo_area'),
+    safetyBoundary: slotText(slots, summary, 'safety_boundary'),
+    candidatePreference: slotText(slots, summary, 'candidate_preference'),
+  };
+}
+
+function slotClarificationKey(label: string): string {
+  if (/城市|区域/.test(label)) return 'city';
+  if (/活动/.test(label)) return 'activity';
+  if (/时间/.test(label)) return 'time';
+  if (/地点|位置/.test(label)) return 'location';
+  if (/安全|边界/.test(label)) return 'safety_boundary';
+  return label;
+}
+
+function slotClarificationPrompt(key: string): string {
+  switch (key) {
+    case 'city':
+      return '例如：青岛、市南区、青岛大学附近';
+    case 'activity':
+      return '例如：散步、羽毛球、跑步、健身';
+    case 'time':
+      return '例如：今晚 7 点、周末下午、明天下午';
+    case 'location':
+      return '例如：五四广场、中山公园、学校附近';
+    case 'safety_boundary':
+      return '例如：按默认安全设置处理，或只在公共场所见面';
+    default:
+      return '可以一句话补齐，也可以跳过可选项。';
+  }
 }
 
 export function shouldCreateOpportunityCardBeforeCandidates(

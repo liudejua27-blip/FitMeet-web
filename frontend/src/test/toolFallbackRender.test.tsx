@@ -798,6 +798,65 @@ describe('assistant-ui tool fallback rendering', () => {
     expect(screen.getAllByTestId('assistant-ui-schema-card')).toHaveLength(3);
   });
 
+  it('renders slot completion as a structured clarification card', async () => {
+    render(
+      <AssistantDataFallback
+        type="data"
+        status={{ type: 'complete' }}
+        name="fitmeet-cards"
+        data={{
+          cards: [
+            {
+              id: 'slot-card-1',
+              schemaType: 'social_match.slot_completion',
+              schemaVersion: 'fitmeet.tool-ui.v1',
+              title: '补齐约练卡信息',
+              body: '生成约练卡前还差：时间、地点、安全边界。',
+              data: {
+                schemaType: 'social_match.slot_completion',
+                workflowState: 'COLLECTING_SLOTS',
+                waitingFor: 'safety_boundary',
+                missingSlots: [
+                  { key: 'time', label: '时间', prompt: '例如：今晚 7 点' },
+                  { key: 'location', label: '地点', prompt: '例如：五四广场' },
+                  {
+                    key: 'safety_boundary',
+                    label: '安全边界',
+                    prompt: '是否只在公共场所活动',
+                  },
+                ],
+                completedSlots: [{ key: 'activity', label: '活动', value: '散步' }],
+                optionalSlots: [{ key: 'candidatePreference', label: '候选偏好' }],
+                rankingPreference: {
+                  labels: ['距离优先', '同频优先'],
+                  reason: '更近一点，能聊得来优先',
+                },
+              },
+              actions: [
+                {
+                  id: 'use-default-safety',
+                  label: '使用默认安全设置',
+                  schemaAction: 'slot_completion.use_default_safety',
+                },
+              ],
+            },
+          ],
+        }}
+      />,
+    );
+
+    const card = await screen.findByTestId('assistant-ui-slot-clarification-card');
+    expect(card).toHaveTextContent('还差这些信息');
+    expect(card).toHaveTextContent('安全边界');
+    expect(card).toHaveTextContent('已确认');
+    expect(card).toHaveTextContent('散步');
+    expect(card).toHaveTextContent('距离优先');
+    expect(screen.getByTestId('assistant-ui-generative-cards')).toHaveAttribute(
+      'data-product-components',
+      'SlotClarificationCard',
+    );
+  });
+
   it('normalizes raw card actions so backend risk flag drift does not leak approval UI', async () => {
     render(
       <AssistantDataFallback

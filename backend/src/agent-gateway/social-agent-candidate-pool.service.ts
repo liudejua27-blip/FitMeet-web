@@ -107,6 +107,12 @@ import type {
   SocialAgentPreferenceWeight,
 } from './social-agent-preference-generalization.service';
 import { SocialCandidateAuditService } from './social-candidate-audit.service';
+import {
+  normalizeSocialAgentRankingPreference,
+  rankingPreferenceIsDefault,
+  rankingPreferenceLabels,
+  type SocialAgentRankingPreference,
+} from './social-agent-ranking-preference';
 
 export type {
   CandidatePoolIntent,
@@ -357,7 +363,10 @@ export class SocialAgentCandidatePoolService {
       merged,
       userInterestSummary,
     );
-    const finalRanked = this.applyRankingMetadata(behaviorRanked);
+    const finalRanked = this.applyRankingMetadata(
+      behaviorRanked,
+      query.rankingPreference,
+    );
     const limit = this.normalizeLimit(input.limit);
     const candidates = finalRanked.slice(0, limit);
     if (input.persistCandidates !== false) {
@@ -1416,6 +1425,7 @@ export class SocialAgentCandidatePoolService {
 
   private applyRankingMetadata(
     candidates: CandidatePoolCandidate[],
+    rankingPreference?: SocialAgentRankingPreference | null,
   ): CandidatePoolCandidate[] {
     const sourceSeen = new Map<CandidatePoolSource, number>();
     const adjusted = candidates.map((candidate) => {
@@ -1423,13 +1433,22 @@ export class SocialAgentCandidatePoolService {
       sourceSeen.set(candidate.source, seen + 1);
       const freshness = this.candidateFreshnessScore(candidate.updatedAt);
       const diversity = seen >= 3 ? -3 : 0;
+      const taskRanking = this.taskRankingPreferenceScore(
+        candidate,
+        rankingPreference,
+      );
       const nextScore = candidateClampScore(
-        candidate.matchScore + freshness + diversity,
+        candidate.matchScore + freshness + diversity + taskRanking.adjustment,
       );
       const nextSignals = this.uniqueStrings([
         ...(freshness > 0 ? ['近期公开资料或约练有更新'] : []),
         ...(diversity < 0 ? ['同来源候选较多，本次做轻微多样化排序'] : []),
+        ...taskRanking.signals,
         ...candidate.preferenceHistorySignals,
+      ]).slice(0, 8);
+      const explanationSteps = this.uniqueStrings([
+        ...taskRanking.explanationSteps,
+        ...(candidate.explanationSteps ?? []),
       ]).slice(0, 8);
       return {
         ...candidate,
@@ -1441,8 +1460,19 @@ export class SocialAgentCandidatePoolService {
           ...candidate.scoreBreakdown,
           freshness,
           diversity,
+          taskRankingPreference: taskRanking.adjustment,
+          taskRankingDistance: taskRanking.distance,
+          taskRankingTime: taskRanking.time,
+          taskRankingInterest: taskRanking.interest,
+          taskRankingLanguage: taskRanking.language,
+          taskRankingSocialStyle: taskRanking.socialStyle,
         },
         preferenceHistorySignals: nextSignals,
+        explanationSteps,
+        whyYouMayLike:
+          taskRanking.explanationSteps[0] && candidate.whyYouMayLike
+            ? `${candidate.whyYouMayLike} ${taskRanking.explanationSteps[0]}`
+            : candidate.whyYouMayLike,
       };
     });
     return adjusted
@@ -1462,6 +1492,117 @@ export class SocialAgentCandidatePoolService {
     if (days <= 30) return 1;
     if (days > 180) return -2;
     return 0;
+  }
+
+  private taskRankingPreferenceScore(
+    candidate: CandidatePoolCandidate,
+    preference?: SocialAgentRankingPreference | null,
+  ): {
+    adjustment: number;
+    distance: number;
+    time: number;
+    interest: number;
+    language: number;
+    socialStyle: number;
+    signals: string[];
+    explanationSteps: string[];
+  } {
+    const normalized = normalizeSocialAgentRankingPreference(preference);
+    const empty = {
+      adjustment: 0,
+      distance: 0,
+      time: 0,
+      interest: 0,
+      language: 0,
+      socialStyle: 0,
+      signals: [] as string[],
+      explanationSteps: [] as string[],
+    };
+    if (rankingPreferenceIsDefault(normalized)) return empty;
+    const labels = rankingPreferenceLabels(normalized);
+    const distance = this.weightedRankingSignal({
+      weight: normalized.distance,
+      signal: this.distancePreferenceSignal(candidate),
+      max: 8,
+    });
+    const time = this.weightedRankingSignal({
+      weight: normalized.time,
+      signal: candidate.timePreference || candidate.timeLabel ? 5 : 0,
+      max: 7,
+    });
+    const interest = this.weightedRankingSignal({
+      weight: normalized.interest,
+      signal: Math.min(
+        6,
+        (candidate.sharedInterests?.length ?? candidate.commonTags.length) * 2,
+      ),
+      max: 7,
+    });
+    const language = this.weightedRankingSignal({
+      weight: normalized.language,
+      signal: this.languagePreferenceSignal(candidate),
+      max: 4,
+    });
+    const socialStyle = this.weightedRankingSignal({
+      weight: normalized.socialStyle,
+      signal: this.socialStylePreferenceSignal(candidate),
+      max: 7,
+    });
+    const adjustment = Math.round(
+      distance + time + interest + language + socialStyle,
+    );
+    if (adjustment === 0) return empty;
+    const signals = labels.map((label) => `本轮排序偏好：${label}`);
+    const explanationSteps = labels.map(
+      (label) => `因为你更看重${label}，我把这类候选排得更靠前。`,
+    );
+    return {
+      adjustment,
+      distance,
+      time,
+      interest,
+      language,
+      socialStyle,
+      signals,
+      explanationSteps,
+    };
+  }
+
+  private weightedRankingSignal(input: {
+    weight: number;
+    signal: number;
+    max: number;
+  }): number {
+    if (input.weight <= 1 || input.signal <= 0) return 0;
+    return Math.min(input.max, Math.round(input.signal * (input.weight - 1)));
+  }
+
+  private distancePreferenceSignal(candidate: CandidatePoolCandidate): number {
+    if (typeof candidate.distanceKm === 'number' && candidate.distanceKm > 0) {
+      if (candidate.distanceKm <= 1.5) return 8;
+      if (candidate.distanceKm <= 3) return 6;
+      if (candidate.distanceKm <= 5) return 3;
+      return 0;
+    }
+    return candidate.area || candidate.distanceLabel || candidate.city ? 2 : 0;
+  }
+
+  private languagePreferenceSignal(candidate: CandidatePoolCandidate): number {
+    const text = this.candidateBehaviorText(candidate);
+    if (/(中文|普通话|英语|英文|language|english|mandarin)/i.test(text)) {
+      return 4;
+    }
+    return 0;
+  }
+
+  private socialStylePreferenceSignal(
+    candidate: CandidatePoolCandidate,
+  ): number {
+    const text = this.candidateBehaviorText(candidate);
+    if (/(低压力|轻松|慢热|安静|同频|不尬聊|休闲|养生|聊天)/.test(text)) {
+      return 6;
+    }
+    return candidate.preferenceHistorySignals.length > 0 ? 2 : 0;
   }
 
   private weightedTextOverlapScore(input: {

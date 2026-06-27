@@ -45,7 +45,9 @@ describe('tool-ui-schema', () => {
     expect(productComponentForSchemaType('social_match.rate_limited')).toBe(
       'CandidateEmptyStateCard',
     );
-    expect(productComponentForSchemaType('social_match.slot_completion')).toBe('GenericCard');
+    expect(productComponentForSchemaType('social_match.slot_completion')).toBe(
+      'SlotClarificationCard',
+    );
     expect(productComponentForSchemaType('life_graph.diff')).toBe('LifeGraphDiffCard');
     expect(productComponentForSchemaType('meet_loop.timeline')).toBe('MeetLoopTimeline');
     expect(productComponentForSchemaType('safety.approval')).toBe('ApprovalPanel');
@@ -140,7 +142,7 @@ describe('tool-ui-schema', () => {
         'CandidateCards',
         'CandidateEmptyStateCard',
         'OpportunityCard',
-        'GenericCard',
+        'SlotClarificationCard',
         'ApprovalPanel',
       ],
     });
@@ -797,9 +799,7 @@ describe('tool-ui-schema', () => {
         requiresConfirmation: false,
       },
     ]);
-    expect(JSON.stringify(view)).not.toMatch(
-      /tool[_\s-]?call|traceId|planner|raw JSON|debug/i,
-    );
+    expect(JSON.stringify(view)).not.toMatch(/tool[_\s-]?call|traceId|planner|raw JSON|debug/i);
     expect(JSON.stringify(view)).toContain('不会编造候选');
   });
 
@@ -1167,9 +1167,7 @@ describe('tool-ui-schema', () => {
     expect(candidate.area).toBe('青岛市南区');
     expect(candidate.interests).toEqual(['跑步', '轻松社交']);
     expect(candidate.safetyBadges).toEqual(['资料已脱敏', '不展示精确位置']);
-    expect(candidate.suggestedOpener).toBe(
-      '周末下午如果方便，可以先在公共路线轻松跑一圈。',
-    );
+    expect(candidate.suggestedOpener).toBe('周末下午如果方便，可以先在公共路线轻松跑一圈。');
     expect(candidate.safetyBoundary).toBe('仅站内沟通，发送邀请前必须确认。');
     expect(activity.location).toBe('青岛大学体育馆');
     expect(activity.time).toBe('周六 16:00');
@@ -1856,11 +1854,7 @@ describe('tool-ui-schema', () => {
       tags: ['跑步', '公开活动'],
       safetyBadges: ['公共场所', '人数上限'],
       reasons: ['时间匹配', '社交压力更低'],
-      explanationSteps: [
-        '来源：来自公开活动',
-        '匹配：时间和地点都匹配',
-        '安全：先查看公开详情',
-      ],
+      explanationSteps: ['来源：来自公开活动', '匹配：时间和地点都匹配', '安全：先查看公开详情'],
       activityProtocol: [
         {
           key: 'public_place',
