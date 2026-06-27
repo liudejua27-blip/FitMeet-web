@@ -14,6 +14,10 @@ const cancelInternalWorkerJobKey =
   `cancel${internalWorkerTitle}WorkerJob` as 'cancelSubagentWorkerJob';
 
 export const fitMeetCoreEndpoints = {
+  system: {
+    health: '/health',
+    readiness: '/ready',
+  },
   auth: {
     register: '/auth/register',
     login: '/auth/login',
@@ -25,13 +29,67 @@ export const fitMeetCoreEndpoints = {
     getProfile: '/auth/profile',
   },
   users: {
+    getPublicUser: (id: number | string) => `/users/${encodeURIComponent(String(id))}` as const,
     updateProfile: '/users/profile',
+    updateLocation: '/users/me/location',
+  },
+  onboarding: {
+    status: '/users/me/onboarding-status',
+    complete: '/users/me/onboarding/complete',
+    profilePhotos: '/users/me/profile-photos',
+    deleteProfilePhoto: (photoId: number | string) =>
+      `/users/me/profile-photos/${encodeURIComponent(String(photoId))}` as const,
+  },
+  socialProfile: {
+    current: '/users/me/social-profile',
+    questions: '/users/me/social-profile/questions',
+    answers: '/users/me/social-profile/answers',
+    aiDraft: '/users/me/social-profile/ai-draft',
+    aiSave: '/users/me/social-profile/ai-save',
+    completion: '/users/me/social-profile/completion',
+    privacy: '/users/me/social-profile/privacy',
+    pendingSensitiveTags: '/users/me/social-profile/sensitive-tags/pending',
+    confirmSensitiveTag: '/users/me/social-profile/sensitive-tags/confirm',
+    rejectSensitiveTag: '/users/me/social-profile/sensitive-tags/reject',
   },
   discover: {
     publicSocialIntents: '/public/social-intents',
     publicSocialIntent: (id: string) => `/public/social-intents/${encodeURIComponent(id)}` as const,
     publicSocialIntentMatches: (id: string) =>
       `/public/social-intents/${encodeURIComponent(id)}/matches` as const,
+    publicSocialIntentApplications: (id: string) =>
+      `/public/social-intents/${encodeURIComponent(id)}/applications` as const,
+    myPublicIntentApplications: '/users/me/public-intent-applications',
+    acceptPublicIntentApplication: (id: number | string) =>
+      `/public-intent-applications/${encodeURIComponent(String(id))}/accept` as const,
+    rejectPublicIntentApplication: (id: number | string) =>
+      `/public-intent-applications/${encodeURIComponent(String(id))}/reject` as const,
+    cancelPublicIntentApplication: (id: number | string) =>
+      `/public-intent-applications/${encodeURIComponent(String(id))}/cancel` as const,
+  },
+  friends: {
+    list: '/friends',
+    deleteFriend: (id: number | string) => `/friends/${encodeURIComponent(String(id))}` as const,
+    createConnectionRequest: '/connections/requests',
+    listConnectionRequests: '/connections/requests',
+    acceptConnectionRequest: (id: number | string) =>
+      `/connections/requests/${encodeURIComponent(String(id))}/accept` as const,
+    rejectConnectionRequest: (id: number | string) =>
+      `/connections/requests/${encodeURIComponent(String(id))}/reject` as const,
+    cancelConnectionRequest: (id: number | string) =>
+      `/connections/requests/${encodeURIComponent(String(id))}/cancel` as const,
+    relationshipState: (id: number | string) =>
+      `/relationships/users/${encodeURIComponent(String(id))}` as const,
+    followUser: (id: number | string) => `/users/${encodeURIComponent(String(id))}/follow` as const,
+    isFollowing: (id: number | string) =>
+      `/users/${encodeURIComponent(String(id))}/following` as const,
+    followingIds: '/following/ids',
+  },
+  meets: {
+    listOrCreate: '/meets',
+    detail: (id: number | string) => `/meets/${encodeURIComponent(String(id))}` as const,
+    join: (id: number | string) => `/meets/${encodeURIComponent(String(id))}/join` as const,
+    myRecords: '/meets/records/me',
   },
   messages: {
     startConversation: '/messages/start',
@@ -180,9 +238,24 @@ export const fitMeetCoreEndpoints = {
     image: '/uploads/image',
     video: '/uploads/video',
   },
+  waitlist: {
+    join: '/waitlist',
+    adminEntries: '/waitlist/admin/entries',
+  },
+  safety: {
+    createReport: '/safety/reports',
+    blockUser: (id: number | string) => `/safety/blocks/${encodeURIComponent(String(id))}` as const,
+    unblockUser: (id: number | string) =>
+      `/safety/blocks/${encodeURIComponent(String(id))}` as const,
+    blockedIds: '/safety/blocks/ids',
+  },
 } as const;
 
 export const fitMeetCoreEndpointTemplates = {
+  system: {
+    health: '/health',
+    readiness: '/ready',
+  },
   auth: {
     register: '/auth/register',
     login: '/auth/login',
@@ -194,12 +267,37 @@ export const fitMeetCoreEndpointTemplates = {
     getProfile: '/auth/profile',
   },
   users: {
+    getPublicUser: '/users/{id}',
     updateProfile: '/users/profile',
+    updateLocation: '/users/me/location',
+  },
+  onboarding: {
+    status: '/users/me/onboarding-status',
+    complete: '/users/me/onboarding/complete',
+    profilePhotos: '/users/me/profile-photos',
+    deleteProfilePhoto: '/users/me/profile-photos/{photoId}',
+  },
+  socialProfile: {
+    current: '/users/me/social-profile',
+    questions: '/users/me/social-profile/questions',
+    answers: '/users/me/social-profile/answers',
+    aiDraft: '/users/me/social-profile/ai-draft',
+    aiSave: '/users/me/social-profile/ai-save',
+    completion: '/users/me/social-profile/completion',
+    privacy: '/users/me/social-profile/privacy',
+    pendingSensitiveTags: '/users/me/social-profile/sensitive-tags/pending',
+    confirmSensitiveTag: '/users/me/social-profile/sensitive-tags/confirm',
+    rejectSensitiveTag: '/users/me/social-profile/sensitive-tags/reject',
   },
   discover: {
     publicSocialIntents: '/public/social-intents',
     publicSocialIntent: '/public/social-intents/{id}',
     publicSocialIntentMatches: '/public/social-intents/{id}/matches',
+    publicSocialIntentApplications: '/public/social-intents/{id}/applications',
+    myPublicIntentApplications: '/users/me/public-intent-applications',
+    acceptPublicIntentApplication: '/public-intent-applications/{id}/accept',
+    rejectPublicIntentApplication: '/public-intent-applications/{id}/reject',
+    cancelPublicIntentApplication: '/public-intent-applications/{id}/cancel',
   },
   messages: {
     startConversation: '/messages/start',
@@ -269,6 +367,25 @@ export const fitMeetCoreEndpointTemplates = {
     open: '/social-agent/reminders/{id}/open',
     dismiss: '/social-agent/reminders/{id}/dismiss',
   },
+  friends: {
+    list: '/friends',
+    deleteFriend: '/friends/{userId}',
+    createConnectionRequest: '/connections/requests',
+    listConnectionRequests: '/connections/requests',
+    acceptConnectionRequest: '/connections/requests/{id}/accept',
+    rejectConnectionRequest: '/connections/requests/{id}/reject',
+    cancelConnectionRequest: '/connections/requests/{id}/cancel',
+    relationshipState: '/relationships/users/{userId}',
+    followUser: '/users/{id}/follow',
+    isFollowing: '/users/{id}/following',
+    followingIds: '/following/ids',
+  },
+  meets: {
+    listOrCreate: '/meets',
+    detail: '/meets/{id}',
+    join: '/meets/{id}/join',
+    myRecords: '/meets/records/me',
+  },
   socialAgentL5: {
     dashboard: `${socialAgentL5Base}/dashboard`,
     replaySamples: `${socialAgentL5Base}/replay-samples`,
@@ -297,16 +414,131 @@ export const fitMeetCoreEndpointTemplates = {
     image: '/uploads/image',
     video: '/uploads/video',
   },
+  waitlist: {
+    join: '/waitlist',
+    adminEntries: '/waitlist/admin/entries',
+  },
+  safety: {
+    createReport: '/safety/reports',
+    blockUser: '/safety/blocks/{id}',
+    unblockUser: '/safety/blocks/{id}',
+    blockedIds: '/safety/blocks/ids',
+  },
 } as const;
+
+export type FitMeetCoreHttpMethod = 'get' | 'post' | 'put' | 'patch' | 'delete';
+
+export const fitMeetCoreEndpointMethods = {
+  '/health': ['get'],
+  '/ready': ['get'],
+  '/auth/register': ['post'],
+  '/auth/login': ['post'],
+  '/auth/sms/send': ['post'],
+  '/auth/sms/verify': ['post'],
+  '/auth/wechat/url': ['get'],
+  '/auth/wechat/login': ['post'],
+  '/auth/refresh': ['post'],
+  '/auth/profile': ['get'],
+  '/users/{id}': ['get'],
+  '/users/profile': ['put'],
+  '/users/me/location': ['put'],
+  '/users/me/onboarding-status': ['get'],
+  '/users/me/onboarding/complete': ['post'],
+  '/users/me/profile-photos': ['get', 'put'],
+  '/users/me/profile-photos/{photoId}': ['delete'],
+  '/users/me/social-profile': ['get', 'put'],
+  '/users/me/social-profile/questions': ['get'],
+  '/users/me/social-profile/answers': ['post'],
+  '/users/me/social-profile/ai-draft': ['post'],
+  '/users/me/social-profile/ai-save': ['post'],
+  '/users/me/social-profile/completion': ['get'],
+  '/users/me/social-profile/privacy': ['get', 'patch'],
+  '/users/me/social-profile/sensitive-tags/pending': ['get'],
+  '/users/me/social-profile/sensitive-tags/confirm': ['post'],
+  '/users/me/social-profile/sensitive-tags/reject': ['post'],
+  '/public/social-intents': ['get'],
+  '/public/social-intents/{id}': ['get'],
+  '/public/social-intents/{id}/matches': ['get'],
+  '/public/social-intents/{id}/applications': ['get', 'post'],
+  '/users/me/public-intent-applications': ['get'],
+  '/public-intent-applications/{id}/accept': ['post'],
+  '/public-intent-applications/{id}/reject': ['post'],
+  '/public-intent-applications/{id}/cancel': ['post'],
+  '/meets': ['get', 'post'],
+  '/meets/{id}': ['get'],
+  '/meets/{id}/join': ['post'],
+  '/meets/records/me': ['get'],
+  '/messages/start': ['post'],
+  '/messages/conversations': ['get'],
+  '/messages/conversations/{conversationId}': ['get'],
+  '/messages/conversations/{conversationId}/send': ['post'],
+  '/messages/public-intents/{id}/start': ['post'],
+  '/messages/unread': ['get'],
+  '/friends': ['get'],
+  '/friends/{userId}': ['delete'],
+  '/connections/requests': ['get', 'post'],
+  '/connections/requests/{id}/accept': ['post'],
+  '/connections/requests/{id}/reject': ['post'],
+  '/connections/requests/{id}/cancel': ['post'],
+  '/relationships/users/{userId}': ['get'],
+  '/users/{id}/follow': ['post'],
+  '/users/{id}/following': ['get'],
+  '/following/ids': ['get'],
+  '/social-agent/chat/session': ['get'],
+  '/social-agent/chat/run': ['post'],
+  '/social-agent/chat/run-async': ['post'],
+  '/social-agent/chat/messages/stream': ['post'],
+  '/social-agent/chat/route-message/stream': ['post'],
+  '/social-agent/chat/tasks/{taskId}/session': ['get'],
+  '/social-agent/chat/tasks/{taskId}/messages/stream': ['post'],
+  '/social-agent/chat/tasks/{taskId}/publish-social-request': ['post'],
+  '/social-agent/chat/tasks/{taskId}/save-candidate': ['post'],
+  '/social-agent/chat/tasks/{taskId}/send-message': ['post'],
+  '/social-agent/chat/tasks/{taskId}/connect-candidate': ['post'],
+  '/social-agent/chat/checkpoints/{checkpointId}/retry/stream': ['post'],
+  '/social-agent/chat/checkpoints/{checkpointId}/replay/stream': ['post'],
+  '/social-agent/chat/checkpoints/{checkpointId}/fork/stream': ['post'],
+  '/social-agent/tasks/current': ['get'],
+  '/social-agent/tasks/{taskId}/timeline': ['get'],
+  '/social-agent/tasks/{taskId}/events': ['get'],
+  '/social-agent/tasks/{taskId}/replan': ['post'],
+  '/social-agent/reminders': ['get'],
+  '/social-agent/reminders/preferences': ['get'],
+  '/agent/checkpoints/tasks/{taskId}/latest': ['get'],
+  '/agent/checkpoints/{checkpointId}/retry': ['post'],
+  '/agent/checkpoints/{checkpointId}/replay': ['post'],
+  '/agent/checkpoints/{checkpointId}/fork': ['post'],
+  '/social-agent/l5/dashboard': ['get'],
+  '/social-agent/l5/replay-samples': ['get'],
+  '/social-agent/l5/subagent-memory': ['get'],
+  '/social-agent/l5/meet-loop-states': ['get'],
+  '/safety/reports': ['post'],
+  '/safety/blocks/{id}': ['post', 'delete'],
+  '/safety/blocks/ids': ['get'],
+  '/uploads/image': ['post'],
+  '/uploads/video': ['post'],
+  '/waitlist': ['post'],
+  '/waitlist/admin/entries': ['get'],
+} as const satisfies Record<string, readonly FitMeetCoreHttpMethod[]>;
 
 export type FitMeetCoreEndpointGroup = keyof typeof fitMeetCoreEndpoints;
 export type FitMeetCoreStaticEndpoint =
+  | (typeof fitMeetCoreEndpoints.system)[keyof typeof fitMeetCoreEndpoints.system]
   | (typeof fitMeetCoreEndpoints.auth)[keyof typeof fitMeetCoreEndpoints.auth]
-  | (typeof fitMeetCoreEndpoints.users)[keyof typeof fitMeetCoreEndpoints.users]
+  | (typeof fitMeetCoreEndpoints.users)['updateProfile']
+  | (typeof fitMeetCoreEndpoints.users)['updateLocation']
+  | (typeof fitMeetCoreEndpoints.onboarding)['status']
+  | (typeof fitMeetCoreEndpoints.onboarding)['complete']
+  | (typeof fitMeetCoreEndpoints.onboarding)['profilePhotos']
+  | (typeof fitMeetCoreEndpoints.socialProfile)[keyof typeof fitMeetCoreEndpoints.socialProfile]
   | (typeof fitMeetCoreEndpoints.discover)['publicSocialIntents']
   | (typeof fitMeetCoreEndpoints.messages)['startConversation']
   | (typeof fitMeetCoreEndpoints.messages)['getConversations']
   | (typeof fitMeetCoreEndpoints.messages)['getUnreadCount']
+  | (typeof fitMeetCoreEndpoints.friends)['list']
+  | (typeof fitMeetCoreEndpoints.friends)['followingIds']
+  | (typeof fitMeetCoreEndpoints.meets)['listOrCreate']
+  | (typeof fitMeetCoreEndpoints.meets)['myRecords']
   | (typeof fitMeetCoreEndpoints.socialAgentChat)['messages']
   | (typeof fitMeetCoreEndpoints.socialAgentChat)['messagesStream']
   | (typeof fitMeetCoreEndpoints.socialAgentChat)['run']
@@ -323,4 +555,7 @@ export type FitMeetCoreStaticEndpoint =
   | (typeof fitMeetCoreEndpoints.socialAgentReminders)['disable']
   | (typeof fitMeetCoreEndpoints.socialAgentL5)[keyof typeof fitMeetCoreEndpoints.socialAgentL5]
   | (typeof fitMeetCoreEndpoints.socialAgentSelfImprove)[keyof typeof fitMeetCoreEndpoints.socialAgentSelfImprove]
-  | (typeof fitMeetCoreEndpoints.uploads)[keyof typeof fitMeetCoreEndpoints.uploads];
+  | (typeof fitMeetCoreEndpoints.uploads)[keyof typeof fitMeetCoreEndpoints.uploads]
+  | (typeof fitMeetCoreEndpoints.waitlist)[keyof typeof fitMeetCoreEndpoints.waitlist]
+  | (typeof fitMeetCoreEndpoints.safety)['createReport']
+  | (typeof fitMeetCoreEndpoints.safety)['blockedIds'];

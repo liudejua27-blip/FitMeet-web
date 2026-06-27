@@ -1,16 +1,54 @@
+type HttpMethod = 'get' | 'post' | 'put' | 'patch' | 'delete';
+type JsonSchema = Record<string, unknown>;
+type RequestContentType = 'application/json' | 'multipart/form-data';
+type OpenApiParameter = {
+  name: string;
+  in: 'path' | 'header';
+  required: boolean;
+  schema: JsonSchema;
+};
+type OpenApiOperation = {
+  tags: string[];
+  operationId: string;
+  summary?: string;
+  security?: Array<Record<string, unknown[]>>;
+  parameters?: OpenApiParameter[];
+  requestBody?: {
+    required: boolean;
+    content: Record<string, { schema: JsonSchema }>;
+  };
+  responses: Record<string, unknown>;
+};
+type OperationPathItem = Partial<Record<HttpMethod, OpenApiOperation>>;
+
+type OperationOptions = {
+  summary?: string;
+  requestSchema?: JsonSchema;
+  requestContentType?: RequestContentType;
+  responseSchema?: JsonSchema;
+  parameters?: OpenApiParameter[];
+  auth?: boolean;
+  status?: '200' | '201' | '204';
+};
+
+const httpMethods = ['get', 'post', 'put', 'patch', 'delete'] as const;
+const bearerSecurity: Array<Record<string, unknown[]>> = [{ bearerAuth: [] }];
+
 export const fitMeetCoreOpenApi = {
   openapi: '3.1.0',
   info: {
     title: 'FitMeet Core API',
-    version: '2026-06-23-core',
+    version: '2026-06-25-core-contract-hardening',
     description:
       'Core contract for FitMeet Web, Agent, Discover, messages, profile, safety, uploads, and admin essentials.',
   },
   servers: [{ url: '/api' }],
+  security: bearerSecurity,
   tags: [
     { name: 'system' },
     { name: 'auth' },
     { name: 'users' },
+    { name: 'onboarding' },
     { name: 'social-profile' },
     { name: 'discover' },
     { name: 'messages' },
@@ -23,234 +61,1277 @@ export const fitMeetCoreOpenApi = {
     { name: 'waitlist' },
     { name: 'admin' },
   ],
-  paths: {
-    '/health': path('system', 'getHealth'),
-    '/ready': path('system', 'getReadiness'),
-    '/auth/register': path('auth', 'register', 'post'),
-    '/auth/login': path('auth', 'login', 'post'),
-    '/auth/sms/send': path('auth', 'sendSmsCode', 'post'),
-    '/auth/sms/verify': path('auth', 'verifySmsCode', 'post'),
-    '/auth/wechat/url': path('auth', 'getWechatLoginUrl'),
-    '/auth/wechat/login': path('auth', 'wechatLogin', 'post'),
-    '/auth/refresh': path('auth', 'refreshToken', 'post'),
-    '/auth/profile': path('auth', 'getProfile'),
-    '/users/{id}': path('users', 'getPublicUser'),
-    '/users/profile': path('users', 'updateProfile', 'put'),
-    '/users/me/location': path('users', 'updateLocation', 'put'),
-    '/users/me/social-profile': path(
-      'social-profile',
-      'getOrUpdateSocialProfile',
+  paths: withPathParameters({
+    '/health': path('get', 'system', 'getHealth', {
+      auth: false,
+      responseSchema: ref('SystemHealth'),
+    }),
+    '/ready': path('get', 'system', 'getReadiness', {
+      auth: false,
+      responseSchema: ref('SystemHealth'),
+    }),
+    '/auth/register': path('post', 'auth', 'register', {
+      auth: false,
+      requestSchema: ref('AuthCredentialsRequest'),
+      responseSchema: ref('AuthTokenResponse'),
+    }),
+    '/auth/login': path('post', 'auth', 'login', {
+      auth: false,
+      requestSchema: ref('AuthCredentialsRequest'),
+      responseSchema: ref('AuthTokenResponse'),
+    }),
+    '/auth/sms/send': path('post', 'auth', 'sendSmsCode', {
+      auth: false,
+      requestSchema: ref('SmsSendRequest'),
+      responseSchema: ref('ActionAccepted'),
+    }),
+    '/auth/sms/verify': path('post', 'auth', 'verifySmsCode', {
+      auth: false,
+      requestSchema: ref('SmsVerifyRequest'),
+      responseSchema: ref('AuthTokenResponse'),
+    }),
+    '/auth/wechat/url': path('get', 'auth', 'getWechatLoginUrl', {
+      auth: false,
+      responseSchema: ref('WechatLoginUrlResponse'),
+    }),
+    '/auth/wechat/login': path('post', 'auth', 'wechatLogin', {
+      auth: false,
+      requestSchema: ref('WechatLoginRequest'),
+      responseSchema: ref('AuthTokenResponse'),
+    }),
+    '/auth/refresh': path('post', 'auth', 'refreshToken', {
+      auth: false,
+      requestSchema: ref('RefreshTokenRequest'),
+      responseSchema: ref('AuthTokenResponse'),
+    }),
+    '/auth/profile': path('get', 'auth', 'getProfile', {
+      responseSchema: ref('AuthProfile'),
+    }),
+    '/users/{id}': path('get', 'users', 'getPublicUser', {
+      auth: false,
+      responseSchema: ref('PublicUserProfile'),
+    }),
+    '/users/profile': path('put', 'users', 'updateProfile', {
+      requestSchema: ref('UpdateProfileRequest'),
+      responseSchema: ref('AuthProfile'),
+    }),
+    '/users/me/location': path('put', 'users', 'updateLocation', {
+      requestSchema: ref('UpdateLocationRequest'),
+      responseSchema: ref('ActionAccepted'),
+    }),
+    '/users/me/onboarding-status': path(
+      'get',
+      'onboarding',
+      'getOnboardingStatus',
+      {
+        responseSchema: ref('OnboardingStatusResponse'),
+      },
+    ),
+    '/users/me/onboarding/complete': path(
+      'post',
+      'onboarding',
+      'completeOnboarding',
+      {
+        requestSchema: ref('CompleteOnboardingRequest'),
+        responseSchema: ref('CompleteOnboardingResponse'),
+        parameters: [
+          {
+            name: 'Idempotency-Key',
+            in: 'header',
+            required: true,
+            schema: { type: 'string' },
+          },
+        ],
+      },
+    ),
+    '/users/me/profile-photos': operations(
+      operation('get', 'onboarding', 'listProfilePhotos', {
+        responseSchema: ref('ProfilePhotoList'),
+      }),
+      operation('put', 'onboarding', 'replaceProfilePhotos', {
+        requestSchema: ref('UpdateProfilePhotosRequest'),
+        responseSchema: ref('ProfilePhotoList'),
+      }),
+    ),
+    '/users/me/profile-photos/{photoId}': path(
+      'delete',
+      'onboarding',
+      'deleteProfilePhoto',
+      { responseSchema: ref('ProfilePhotoDeleteResponse') },
+    ),
+    '/users/me/social-profile': operations(
+      operation('get', 'social-profile', 'getSocialProfile', {
+        responseSchema: ref('SocialProfile'),
+      }),
+      operation('put', 'social-profile', 'updateSocialProfile', {
+        requestSchema: ref('UpdateSocialProfileRequest'),
+        responseSchema: ref('SocialProfile'),
+      }),
     ),
     '/users/me/social-profile/questions': path(
+      'get',
       'social-profile',
       'getSocialProfileQuestions',
+      { responseSchema: ref('SocialProfileQuestionList') },
+    ),
+    '/users/me/social-profile/answers': path(
+      'post',
+      'social-profile',
+      'saveSocialProfileAnswer',
+      {
+        requestSchema: ref('SocialProfileAnswerRequest'),
+        responseSchema: ref('SocialProfile'),
+      },
     ),
     '/users/me/social-profile/ai-draft': path(
+      'post',
       'social-profile',
       'draftSocialProfile',
-      'post',
+      {
+        requestSchema: ref('SocialProfileAiDraftRequest'),
+        responseSchema: ref('SocialProfileAiDraftResponse'),
+      },
     ),
     '/users/me/social-profile/ai-save': path(
+      'post',
       'social-profile',
       'saveSocialProfileDraft',
-      'post',
+      {
+        requestSchema: ref('SocialProfileAiSaveRequest'),
+        responseSchema: ref('SocialProfile'),
+      },
     ),
     '/users/me/social-profile/completion': path(
+      'get',
       'social-profile',
       'getSocialProfileCompletion',
+      { responseSchema: ref('SocialProfileCompletion') },
     ),
-    '/users/me/social-profile/privacy': path(
-      'social-profile',
-      'getOrUpdateSocialProfilePrivacy',
+    '/users/me/social-profile/privacy': operations(
+      operation('get', 'social-profile', 'getSocialProfilePrivacy', {
+        responseSchema: ref('SocialProfilePrivacy'),
+      }),
+      operation('patch', 'social-profile', 'updateSocialProfilePrivacy', {
+        requestSchema: ref('UpdateSocialProfilePrivacyRequest'),
+        responseSchema: ref('SocialProfilePrivacy'),
+      }),
     ),
     '/users/me/social-profile/sensitive-tags/pending': path(
+      'get',
       'social-profile',
       'getPendingSensitiveTags',
+      { responseSchema: ref('SensitiveTagList') },
     ),
     '/users/me/social-profile/sensitive-tags/confirm': path(
+      'post',
       'social-profile',
       'confirmSensitiveTag',
-      'post',
+      {
+        requestSchema: ref('SensitiveTagActionRequest'),
+        responseSchema: ref('SocialProfile'),
+      },
     ),
     '/users/me/social-profile/sensitive-tags/reject': path(
+      'post',
       'social-profile',
       'rejectSensitiveTag',
-      'post',
+      {
+        requestSchema: ref('SensitiveTagActionRequest'),
+        responseSchema: ref('SocialProfile'),
+      },
     ),
-    '/public/social-intents': path('discover', 'listPublicSocialIntents'),
-    '/public/social-intents/{id}': path('discover', 'getPublicSocialIntent'),
+    '/public/social-intents': path(
+      'get',
+      'discover',
+      'listPublicSocialIntents',
+      {
+        auth: false,
+        responseSchema: ref('PublicSocialIntentPage'),
+      },
+    ),
+    '/public/social-intents/{id}': path(
+      'get',
+      'discover',
+      'getPublicSocialIntent',
+      {
+        auth: false,
+        responseSchema: ref('PublicSocialIntent'),
+      },
+    ),
     '/public/social-intents/{id}/matches': path(
+      'get',
       'discover',
       'getPublicSocialIntentMatches',
+      { auth: false, responseSchema: ref('PublicSocialIntentMatchList') },
     ),
-    '/meets': path('meets', 'listOrCreateMeets'),
-    '/meets/{id}': path('meets', 'getMeet'),
-    '/meets/{id}/join': path('meets', 'joinMeet', 'post'),
-    '/meets/records/me': path('meets', 'getMyMeetRecords'),
-    '/messages/start': path('messages', 'startConversation', 'post'),
-    '/messages/conversations': path('messages', 'listConversations'),
+    '/public/social-intents/{id}/applications': operations(
+      operation('post', 'discover', 'createPublicIntentApplication', {
+        requestSchema: ref('CreatePublicIntentApplicationRequest'),
+        responseSchema: ref('PublicIntentApplication'),
+        parameters: [idempotencyHeader()],
+      }),
+      operation('get', 'discover', 'listPublicIntentApplications', {
+        responseSchema: ref('PublicIntentApplicationList'),
+      }),
+    ),
+    '/users/me/public-intent-applications': path(
+      'get',
+      'discover',
+      'listMyPublicIntentApplications',
+      { responseSchema: ref('PublicIntentApplicationList') },
+    ),
+    '/public-intent-applications/{id}/accept': path(
+      'post',
+      'discover',
+      'acceptPublicIntentApplication',
+      {
+        requestSchema: ref('ResolvePublicIntentApplicationRequest'),
+        responseSchema: ref('AcceptPublicIntentApplicationResponse'),
+        parameters: [idempotencyHeader()],
+      },
+    ),
+    '/public-intent-applications/{id}/reject': path(
+      'post',
+      'discover',
+      'rejectPublicIntentApplication',
+      {
+        requestSchema: ref('ResolvePublicIntentApplicationRequest'),
+        responseSchema: ref('PublicIntentApplication'),
+        parameters: [idempotencyHeader()],
+      },
+    ),
+    '/public-intent-applications/{id}/cancel': path(
+      'post',
+      'discover',
+      'cancelPublicIntentApplication',
+      {
+        requestSchema: ref('ResolvePublicIntentApplicationRequest'),
+        responseSchema: ref('PublicIntentApplication'),
+        parameters: [idempotencyHeader()],
+      },
+    ),
+    '/meets': operations(
+      operation('get', 'meets', 'listMeets', {
+        responseSchema: ref('MeetPage'),
+      }),
+      operation('post', 'meets', 'createMeet', {
+        requestSchema: ref('CreateMeetRequest'),
+        responseSchema: ref('Meet'),
+      }),
+    ),
+    '/meets/{id}': path('get', 'meets', 'getMeet', {
+      responseSchema: ref('Meet'),
+    }),
+    '/meets/{id}/join': path('post', 'meets', 'joinMeet', {
+      responseSchema: ref('MeetJoinResponse'),
+    }),
+    '/meets/records/me': path('get', 'meets', 'getMyMeetRecords', {
+      responseSchema: ref('MeetRecordPage'),
+    }),
+    '/messages/start': path('post', 'messages', 'startConversation', {
+      requestSchema: ref('StartConversationRequest'),
+      responseSchema: ref('Conversation'),
+      parameters: [idempotencyHeader()],
+    }),
+    '/messages/conversations': path('get', 'messages', 'listConversations', {
+      responseSchema: ref('ConversationPage'),
+    }),
     '/messages/conversations/{conversationId}': path(
+      'get',
       'messages',
       'listMessages',
+      {
+        responseSchema: ref('MessagePage'),
+      },
     ),
     '/messages/conversations/{conversationId}/send': path(
+      'post',
       'messages',
       'sendMessage',
-      'post',
+      {
+        requestSchema: ref('SendMessageRequest'),
+        responseSchema: ref('Message'),
+      },
     ),
     '/messages/public-intents/{id}/start': path(
+      'post',
       'messages',
       'startPublicIntentConversation',
-      'post',
+      { responseSchema: ref('Conversation') },
     ),
-    '/messages/unread': path('messages', 'getUnreadCount'),
-    '/friends': path('friends', 'listFriends'),
-    '/friends/users/{id}/follow': path('friends', 'toggleFollow', 'post'),
-    '/friends/following-ids': path('friends', 'getFollowingIds'),
-    '/social-agent/chat/session': path('social-agent', 'restoreChatSession'),
-    '/social-agent/chat/run': path('social-agent', 'runChat', 'post'),
+    '/messages/unread': path('get', 'messages', 'getUnreadCount', {
+      responseSchema: ref('UnreadCountResponse'),
+    }),
+    '/friends': path('get', 'friends', 'listFriends', {
+      responseSchema: ref('FriendPage'),
+    }),
+    '/friends/{userId}': path('delete', 'friends', 'deleteFriend', {
+      responseSchema: ref('FriendDeleteResponse'),
+    }),
+    '/connections/requests': operations(
+      operation('post', 'friends', 'createConnectionRequest', {
+        requestSchema: ref('CreateConnectionRequest'),
+        responseSchema: ref('ConnectionRequest'),
+        parameters: [idempotencyHeader()],
+      }),
+      operation('get', 'friends', 'listConnectionRequests', {
+        responseSchema: ref('ConnectionRequestList'),
+      }),
+    ),
+    '/connections/requests/{id}/accept': path(
+      'post',
+      'friends',
+      'acceptConnectionRequest',
+      {
+        requestSchema: ref('ResolveConnectionRequest'),
+        responseSchema: ref('ConnectionRequest'),
+        parameters: [idempotencyHeader()],
+      },
+    ),
+    '/connections/requests/{id}/reject': path(
+      'post',
+      'friends',
+      'rejectConnectionRequest',
+      {
+        requestSchema: ref('ResolveConnectionRequest'),
+        responseSchema: ref('ConnectionRequest'),
+        parameters: [idempotencyHeader()],
+      },
+    ),
+    '/connections/requests/{id}/cancel': path(
+      'post',
+      'friends',
+      'cancelConnectionRequest',
+      {
+        requestSchema: ref('ResolveConnectionRequest'),
+        responseSchema: ref('ConnectionRequest'),
+        parameters: [idempotencyHeader()],
+      },
+    ),
+    '/relationships/users/{userId}': path(
+      'get',
+      'friends',
+      'getRelationshipState',
+      {
+        responseSchema: ref('RelationshipState'),
+      },
+    ),
+    '/users/{id}/follow': path('post', 'friends', 'toggleFollow', {
+      responseSchema: ref('FollowState'),
+    }),
+    '/users/{id}/following': path('get', 'friends', 'isFollowing', {
+      responseSchema: ref('FollowingState'),
+    }),
+    '/following/ids': path('get', 'friends', 'getFollowingIds', {
+      responseSchema: ref('IdListResponse'),
+    }),
+    '/social-agent/chat/session': path(
+      'get',
+      'social-agent',
+      'restoreChatSession',
+      {
+        responseSchema: ref('SocialAgentSession'),
+      },
+    ),
+    '/social-agent/chat/run': path('post', 'social-agent', 'runChat', {
+      requestSchema: ref('SocialAgentRunRequest'),
+      responseSchema: ref('SocialAgentRunResponse'),
+    }),
     '/social-agent/chat/run-async': path(
+      'post',
       'social-agent',
       'runChatAsync',
-      'post',
+      {
+        requestSchema: ref('SocialAgentRunRequest'),
+        responseSchema: ref('SocialAgentAsyncRunResponse'),
+      },
     ),
     '/social-agent/chat/messages/stream': path(
+      'post',
       'social-agent',
       'streamChatMessage',
-      'post',
+      {
+        requestSchema: ref('SocialAgentMessageRequest'),
+        responseSchema: ref('StreamResponse'),
+      },
     ),
     '/social-agent/chat/route-message/stream': path(
+      'post',
       'social-agent',
       'streamRoutedChatMessage',
-      'post',
+      {
+        requestSchema: ref('SocialAgentMessageRequest'),
+        responseSchema: ref('StreamResponse'),
+      },
     ),
     '/social-agent/chat/tasks/{taskId}/session': path(
+      'get',
       'social-agent',
       'restoreTaskSession',
+      { responseSchema: ref('SocialAgentSession') },
     ),
     '/social-agent/chat/tasks/{taskId}/messages/stream': path(
+      'post',
       'social-agent',
       'streamTaskMessage',
-      'post',
+      {
+        requestSchema: ref('SocialAgentMessageRequest'),
+        responseSchema: ref('StreamResponse'),
+      },
     ),
     '/social-agent/chat/tasks/{taskId}/publish-social-request': path(
+      'post',
       'social-agent',
       'publishOpportunityCard',
-      'post',
+      { responseSchema: ref('ActionAccepted') },
     ),
     '/social-agent/chat/tasks/{taskId}/save-candidate': path(
+      'post',
       'social-agent',
       'saveCandidate',
-      'post',
+      { responseSchema: ref('CandidateActionResponse') },
     ),
     '/social-agent/chat/tasks/{taskId}/send-message': path(
+      'post',
       'social-agent',
       'sendCandidateMessage',
-      'post',
+      {
+        requestSchema: ref('CandidateMessageRequest'),
+        responseSchema: ref('CandidateActionResponse'),
+      },
     ),
     '/social-agent/chat/tasks/{taskId}/connect-candidate': path(
+      'post',
       'social-agent',
       'connectCandidate',
-      'post',
+      { responseSchema: ref('CandidateActionResponse') },
     ),
     '/social-agent/chat/checkpoints/{checkpointId}/retry/stream': path(
+      'post',
       'social-agent',
       'retryCheckpoint',
-      'post',
+      { responseSchema: ref('StreamResponse') },
     ),
     '/social-agent/chat/checkpoints/{checkpointId}/replay/stream': path(
+      'post',
       'social-agent',
       'replayCheckpoint',
-      'post',
+      { responseSchema: ref('StreamResponse') },
     ),
     '/social-agent/chat/checkpoints/{checkpointId}/fork/stream': path(
+      'post',
       'social-agent',
       'forkCheckpoint',
-      'post',
+      { responseSchema: ref('StreamResponse') },
     ),
-    '/social-agent/tasks/current': path('social-agent', 'getCurrentTask'),
+    '/social-agent/tasks/current': path(
+      'get',
+      'social-agent',
+      'getCurrentTask',
+      {
+        responseSchema: ref('SocialAgentTask'),
+      },
+    ),
     '/social-agent/tasks/{taskId}/timeline': path(
+      'get',
       'social-agent',
       'getTaskTimeline',
+      { responseSchema: ref('SocialAgentTimeline') },
     ),
     '/social-agent/tasks/{taskId}/events': path(
+      'get',
       'social-agent',
       'getTaskEvents',
+      {
+        responseSchema: ref('SocialAgentEventPage'),
+      },
     ),
     '/social-agent/tasks/{taskId}/replan': path(
+      'post',
       'social-agent',
       'replanTask',
-      'post',
+      {
+        responseSchema: ref('ActionAccepted'),
+      },
     ),
-    '/social-agent/reminders': path('social-agent', 'listReminders'),
+    '/social-agent/reminders': path('get', 'social-agent', 'listReminders', {
+      responseSchema: ref('ReminderPage'),
+    }),
     '/social-agent/reminders/preferences': path(
+      'get',
       'social-agent',
       'getReminderPreferences',
+      { responseSchema: ref('ReminderPreferences') },
     ),
     '/agent/checkpoints/tasks/{taskId}/latest': path(
+      'get',
       'agent-control',
       'getLatestCheckpoint',
+      { responseSchema: ref('AgentCheckpoint') },
     ),
     '/agent/checkpoints/{checkpointId}/retry': path(
+      'post',
       'agent-control',
       'retryCheckpoint',
-      'post',
+      { responseSchema: ref('ActionAccepted') },
     ),
     '/agent/checkpoints/{checkpointId}/replay': path(
+      'post',
       'agent-control',
       'replayCheckpoint',
-      'post',
+      { responseSchema: ref('ActionAccepted') },
     ),
     '/agent/checkpoints/{checkpointId}/fork': path(
+      'post',
       'agent-control',
       'forkCheckpoint',
-      'post',
+      { responseSchema: ref('ActionAccepted') },
     ),
-    '/social-agent/l5/dashboard': path('admin', 'getAgentL5Dashboard'),
+    '/social-agent/l5/dashboard': path('get', 'admin', 'getAgentL5Dashboard', {
+      responseSchema: ref('AdminDashboard'),
+    }),
     '/social-agent/l5/replay-samples': path(
+      'get',
       'admin',
       'listAgentL5ReplaySamples',
+      {
+        responseSchema: ref('AdminListResponse'),
+      },
     ),
-    '/social-agent/l5/subagent-memory': path('admin', 'listSubagentMemory'),
-    '/social-agent/l5/meet-loop-states': path('admin', 'listMeetLoopStates'),
-    '/safety/settings': path('safety', 'getOrUpdateSafetySettings'),
-    '/safety/reports': path('safety', 'createOrListSafetyReports'),
-    '/safety/blocks': path('safety', 'createOrListBlocks'),
-    '/uploads/image': path('uploads', 'uploadImage', 'post'),
-    '/uploads/video': path('uploads', 'uploadVideo', 'post'),
-    '/waitlist': path('waitlist', 'joinWaitlist', 'post'),
-    '/waitlist/admin/entries': path('admin', 'listWaitlistEntries'),
-  },
+    '/social-agent/l5/subagent-memory': path(
+      'get',
+      'admin',
+      'listSubagentMemory',
+      {
+        responseSchema: ref('AdminListResponse'),
+      },
+    ),
+    '/social-agent/l5/meet-loop-states': path(
+      'get',
+      'admin',
+      'listMeetLoopStates',
+      {
+        responseSchema: ref('AdminListResponse'),
+      },
+    ),
+    '/safety/reports': path('post', 'safety', 'createReport', {
+      requestSchema: ref('CreateReportRequest'),
+      responseSchema: ref('SafetyReport'),
+    }),
+    '/safety/blocks/{id}': operations(
+      operation('post', 'safety', 'blockUser', {
+        responseSchema: ref('SafetyBlockActionResponse'),
+      }),
+      operation('delete', 'safety', 'unblockUser', {
+        responseSchema: ref('SafetyBlockActionResponse'),
+      }),
+    ),
+    '/safety/blocks/ids': path('get', 'safety', 'getBlockedUserIds', {
+      responseSchema: ref('IdListResponse'),
+    }),
+    '/uploads/image': path('post', 'uploads', 'uploadImage', {
+      requestSchema: ref('UploadImageRequest'),
+      requestContentType: 'multipart/form-data',
+      responseSchema: ref('UploadImageResponse'),
+    }),
+    '/uploads/video': path('post', 'uploads', 'uploadVideo', {
+      requestSchema: ref('UploadVideoRequest'),
+      requestContentType: 'multipart/form-data',
+      responseSchema: ref('UploadVideoResponse'),
+    }),
+    '/waitlist': path('post', 'waitlist', 'joinWaitlist', {
+      auth: false,
+      requestSchema: ref('WaitlistRequest'),
+      responseSchema: ref('WaitlistEntry'),
+    }),
+    '/waitlist/admin/entries': path('get', 'admin', 'listWaitlistEntries', {
+      responseSchema: ref('WaitlistEntryPage'),
+    }),
+  }),
   components: {
+    securitySchemes: {
+      bearerAuth: {
+        type: 'http',
+        scheme: 'bearer',
+        bearerFormat: 'JWT',
+      },
+    },
     schemas: {
-      Ok: { type: 'object', additionalProperties: true },
+      ActionAccepted: objectSchema({
+        success: { type: 'boolean' },
+        message: { type: 'string' },
+      }),
+      AdminDashboard: objectSchema({
+        generatedAt: { type: 'string', format: 'date-time' },
+      }),
+      AdminListResponse: arraySchema({
+        type: 'object',
+        additionalProperties: true,
+      }),
+      AgentCheckpoint: objectSchema({
+        id: { oneOf: [{ type: 'string' }, { type: 'number' }] },
+        taskId: { oneOf: [{ type: 'string' }, { type: 'number' }] },
+        status: { type: 'string' },
+      }),
+      AuthCredentialsRequest: objectSchema(
+        {
+          email: { type: 'string', format: 'email' },
+          password: { type: 'string' },
+        },
+        ['email', 'password'],
+      ),
+      AuthProfile: objectSchema({
+        id: { type: 'number' },
+        email: { type: 'string' },
+        name: { type: 'string' },
+        avatar: { type: ['string', 'null'] },
+        city: { type: ['string', 'null'] },
+      }),
+      AuthTokenResponse: objectSchema({
+        access_token: { type: 'string' },
+        refresh_token: { type: 'string' },
+        user: ref('AuthProfile'),
+      }),
+      CandidateActionResponse: objectSchema({
+        success: { type: 'boolean' },
+        candidateId: { oneOf: [{ type: 'number' }, { type: 'string' }] },
+        status: { type: 'string' },
+      }),
+      CandidateMessageRequest: objectSchema({
+        candidateId: { oneOf: [{ type: 'number' }, { type: 'string' }] },
+        message: { type: 'string' },
+      }),
+      AcceptPublicIntentApplicationResponse: objectSchema({
+        applicationId: { type: 'number' },
+        status: { type: 'string', enum: ['accepted'] },
+        meetId: { type: ['number', 'null'] },
+        conversation: objectSchema({
+          status: { type: 'string', enum: ['provisioning', 'ready'] },
+          conversationId: { type: ['string', 'null'] },
+        }),
+      }),
+      ConnectionRequest: objectSchema({
+        id: { type: 'number' },
+        requesterId: { type: 'number' },
+        targetUserId: { type: 'number' },
+        status: {
+          type: 'string',
+          enum: ['pending', 'accepted', 'rejected', 'cancelled'],
+        },
+        message: { type: 'string' },
+        resolvedAt: { type: ['string', 'null'], format: 'date-time' },
+        createdAt: { type: 'string', format: 'date-time' },
+        updatedAt: { type: 'string', format: 'date-time' },
+      }),
+      ConnectionRequestList: arraySchema(ref('ConnectionRequest')),
+      Conversation: objectSchema({
+        id: { oneOf: [{ type: 'number' }, { type: 'string' }] },
+        participants: arraySchema(ref('PublicUserProfile')),
+        updatedAt: { type: 'string', format: 'date-time' },
+      }),
+      ConversationPage: pageSchema(ref('Conversation')),
+      CreateConnectionRequest: objectSchema(
+        {
+          targetUserId: { type: 'number' },
+          message: { type: 'string' },
+        },
+        ['targetUserId'],
+      ),
+      CreatePublicIntentApplicationRequest: objectSchema({
+        message: { type: 'string' },
+      }),
+      CreateMeetRequest: objectSchema({
+        title: { type: 'string' },
+        activityType: { type: 'string' },
+        scheduledAt: { type: 'string' },
+      }),
+      CreateReportRequest: objectSchema(
+        {
+          targetType: { type: 'string' },
+          targetId: { oneOf: [{ type: 'string' }, { type: 'number' }] },
+          reason: { type: 'string' },
+          description: { type: 'string' },
+        },
+        ['targetType', 'targetId', 'reason'],
+      ),
+      ErrorEnvelope: objectSchema(
+        {
+          statusCode: { type: 'number' },
+          timestamp: { type: 'string', format: 'date-time' },
+          path: { type: 'string' },
+          code: { type: 'string' },
+          message: { type: 'string' },
+          details: { type: 'object', additionalProperties: true },
+          error: objectSchema({
+            code: { type: 'string' },
+            message: { type: 'string' },
+            retryable: { type: 'boolean' },
+          }),
+        },
+        ['statusCode', 'code', 'message'],
+      ),
+      FollowState: objectSchema({
+        userId: { type: 'number' },
+        targetUserId: { type: 'number' },
+        following: { type: 'boolean' },
+      }),
+      FollowingState: objectSchema({
+        targetUserId: { type: 'number' },
+        following: { type: 'boolean' },
+      }),
+      FriendPage: pageSchema(ref('PublicUserProfile')),
+      FriendDeleteResponse: objectSchema({
+        removed: { type: 'boolean' },
+        friendship: { type: 'string', enum: ['none', 'removed'] },
+      }),
+      IdListResponse: objectSchema({ ids: arraySchema({ type: 'number' }) }),
+      Meet: objectSchema({
+        id: { oneOf: [{ type: 'number' }, { type: 'string' }] },
+        title: { type: 'string' },
+        status: { type: 'string' },
+      }),
+      MeetJoinResponse: objectSchema({
+        meetId: { oneOf: [{ type: 'number' }, { type: 'string' }] },
+        status: { type: 'string' },
+      }),
+      MeetPage: pageSchema(ref('Meet')),
+      MeetRecordPage: pageSchema(ref('Meet')),
+      CompleteOnboardingRequest: objectSchema(
+        {
+          expectedProfileVersion: { type: 'number' },
+          nickname: { type: 'string' },
+          dateOfBirth: { type: 'string', format: 'date' },
+          city: { type: 'string' },
+          primaryPurpose: { type: 'string' },
+          purposes: arraySchema({ type: 'string' }),
+          interestTags: arraySchema({ type: 'string' }),
+          distanceKm: { type: 'number' },
+          photoIds: arraySchema({ type: 'number' }),
+          coverPhotoId: { type: 'number' },
+          consents: ref('OnboardingConsentsRequest'),
+        },
+        [
+          'nickname',
+          'dateOfBirth',
+          'city',
+          'primaryPurpose',
+          'purposes',
+          'interestTags',
+          'distanceKm',
+          'photoIds',
+          'coverPhotoId',
+          'consents',
+        ],
+      ),
+      CompleteOnboardingResponse: objectSchema({
+        version: { type: 'number' },
+        status: {
+          type: 'string',
+          enum: ['incomplete', 'pending_review', 'ready', 'restricted'],
+        },
+        canUseSocialActions: { type: 'boolean' },
+        requirements: ref('OnboardingRequirements'),
+        completion: ref('OnboardingCompletion'),
+        completedAt: { type: ['string', 'null'], format: 'date-time' },
+        idempotencyKey: { type: 'string' },
+      }),
+      Message: objectSchema({
+        id: { oneOf: [{ type: 'number' }, { type: 'string' }] },
+        text: { type: 'string' },
+        senderId: { type: 'number' },
+        createdAt: { type: 'string', format: 'date-time' },
+      }),
+      MessagePage: pageSchema(ref('Message')),
+      PaginationMeta: objectSchema(
+        {
+          total: { type: 'number' },
+          page: { type: 'number' },
+          lastPage: { type: 'number' },
+        },
+        ['total', 'page', 'lastPage'],
+      ),
+      OnboardingCompletion: objectSchema({
+        missing: arraySchema(ref('OnboardingMissingReason')),
+        approvedPhotoCount: { type: 'number' },
+        pendingPhotoCount: { type: 'number' },
+        rejectedPhotoCount: { type: 'number' },
+        hasCoverPhoto: { type: 'boolean' },
+        profileVersion: { type: 'number' },
+      }),
+      OnboardingConsentsRequest: objectSchema(
+        {
+          termsVersion: { type: 'string' },
+          privacyVersion: { type: 'string' },
+          adultAttestation: { type: 'boolean' },
+        },
+        ['termsVersion', 'privacyVersion', 'adultAttestation'],
+      ),
+      OnboardingMissingReason: {
+        type: 'string',
+        enum: [
+          'TERMS_REQUIRED',
+          'PRIVACY_REQUIRED',
+          'ADULT_ATTESTATION_REQUIRED',
+          'BIRTH_DATE_REQUIRED',
+          'NICKNAME_REQUIRED',
+          'CITY_REQUIRED',
+          'PRIMARY_PURPOSE_REQUIRED',
+          'INTERESTS_REQUIRED',
+          'PROFILE_PHOTOS_REQUIRED',
+          'PHOTO_REVIEW_PENDING',
+          'COVER_PHOTO_REQUIRED',
+          'ACCOUNT_RESTRICTED',
+        ],
+      },
+      OnboardingRequirements: objectSchema({
+        minimumAge: { type: 'number' },
+        minimumApprovedPhotos: { type: 'number' },
+        minimumInterests: { type: 'number' },
+        termsVersion: { type: 'string' },
+        privacyVersion: { type: 'string' },
+      }),
+      OnboardingStatusResponse: objectSchema({
+        version: { type: 'number' },
+        status: {
+          type: 'string',
+          enum: ['incomplete', 'pending_review', 'ready', 'restricted'],
+        },
+        canUseSocialActions: { type: 'boolean' },
+        requirements: ref('OnboardingRequirements'),
+        completion: ref('OnboardingCompletion'),
+        completedAt: { type: ['string', 'null'], format: 'date-time' },
+      }),
+      PublicSocialIntent: objectSchema({
+        id: { oneOf: [{ type: 'number' }, { type: 'string' }] },
+        title: { type: 'string' },
+        type: { type: 'string' },
+        status: { type: 'string' },
+        capacityMin: { type: 'number' },
+        capacityMax: { type: 'number' },
+        acceptedCount: { type: 'number' },
+        applicationPolicy: { type: 'string' },
+        linkedMeetId: { type: ['number', 'null'] },
+        closesAt: { type: ['string', 'null'], format: 'date-time' },
+      }),
+      PublicIntentApplication: objectSchema({
+        id: { type: 'number' },
+        publicIntentId: { type: 'string' },
+        ownerUserId: { type: 'number' },
+        applicantUserId: { type: 'number' },
+        status: {
+          type: 'string',
+          enum: ['pending', 'accepted', 'rejected', 'cancelled'],
+        },
+        message: { type: 'string' },
+        meetId: { type: ['number', 'null'] },
+        resolvedAt: { type: ['string', 'null'], format: 'date-time' },
+        createdAt: { type: 'string', format: 'date-time' },
+        updatedAt: { type: 'string', format: 'date-time' },
+      }),
+      PublicIntentApplicationList: arraySchema(ref('PublicIntentApplication')),
+      PublicSocialIntentMatchList: objectSchema({
+        data: arraySchema({ type: 'object', additionalProperties: true }),
+      }),
+      PublicSocialIntentPage: pageSchema(ref('PublicSocialIntent')),
+      PublicUserProfile: objectSchema({
+        id: { type: 'number' },
+        name: { type: 'string' },
+        avatar: { type: ['string', 'null'] },
+        city: { type: ['string', 'null'] },
+      }),
+      ProfilePhoto: objectSchema({
+        id: { type: 'number' },
+        assetId: { type: 'number' },
+        url: { type: 'string' },
+        sortOrder: { type: 'number' },
+        isCover: { type: 'boolean' },
+        status: {
+          type: 'string',
+          enum: ['pending', 'approved', 'rejected', 'deleted'],
+        },
+        moderationStatus: {
+          type: 'string',
+          enum: ['pending', 'approved', 'rejected', 'unknown'],
+        },
+        width: { type: 'number' },
+        height: { type: 'number' },
+      }),
+      ProfilePhotoDeleteResponse: objectSchema({
+        id: { type: 'number' },
+        status: { type: 'string', enum: ['deleted'] },
+      }),
+      ProfilePhotoInput: objectSchema(
+        {
+          assetId: { type: 'number' },
+          sortOrder: { type: 'number' },
+          isCover: { type: 'boolean' },
+        },
+        ['assetId'],
+      ),
+      ProfilePhotoList: arraySchema(ref('ProfilePhoto')),
+      RefreshTokenRequest: objectSchema({ refresh_token: { type: 'string' } }, [
+        'refresh_token',
+      ]),
+      RelationshipState: objectSchema({
+        userId: { type: 'number' },
+        following: { type: 'boolean' },
+        friendship: { type: 'string', enum: ['none', 'active'] },
+        connectionRequest: {
+          type: 'string',
+          enum: ['none', 'pending_incoming', 'pending_outgoing', 'accepted'],
+        },
+        messagePermission: {
+          type: 'string',
+          enum: [
+            'none',
+            'opener_available',
+            'awaiting_reply',
+            'open',
+            'closed',
+          ],
+        },
+        conversationId: { type: ['string', 'null'] },
+        blocked: { type: 'boolean' },
+      }),
+      ReminderPage: pageSchema({ type: 'object', additionalProperties: true }),
+      ReminderPreferences: objectSchema({
+        enabled: { type: 'boolean' },
+      }),
+      ResolveConnectionRequest: objectSchema({
+        reason: { type: 'string' },
+      }),
+      ResolvePublicIntentApplicationRequest: objectSchema({
+        reason: { type: 'string' },
+      }),
+      SafetyBlockActionResponse: objectSchema({
+        targetUserId: { type: 'number' },
+        blocked: { type: 'boolean' },
+      }),
+      SafetyReport: objectSchema({
+        id: { oneOf: [{ type: 'number' }, { type: 'string' }] },
+        status: { type: 'string' },
+      }),
+      SendMessageRequest: objectSchema({ text: { type: 'string' } }, ['text']),
+      SensitiveTagActionRequest: objectSchema({ tag: { type: 'string' } }, [
+        'tag',
+      ]),
+      SensitiveTagList: objectSchema({ tags: arraySchema({ type: 'string' }) }),
+      SmsSendRequest: objectSchema({ phone: { type: 'string' } }, ['phone']),
+      SmsVerifyRequest: objectSchema(
+        { phone: { type: 'string' }, code: { type: 'string' } },
+        ['phone', 'code'],
+      ),
+      SocialAgentAsyncRunResponse: objectSchema({
+        taskId: { oneOf: [{ type: 'number' }, { type: 'string' }] },
+        runId: { type: 'string' },
+        status: { type: 'string' },
+      }),
+      SocialAgentEventPage: pageSchema({
+        type: 'object',
+        additionalProperties: true,
+      }),
+      SocialAgentMessageRequest: objectSchema({ message: { type: 'string' } }, [
+        'message',
+      ]),
+      SocialAgentRunRequest: objectSchema({ message: { type: 'string' } }, [
+        'message',
+      ]),
+      SocialAgentRunResponse: objectSchema({
+        taskId: { oneOf: [{ type: 'number' }, { type: 'string' }] },
+        assistantMessage: { type: 'string' },
+        status: { type: 'string' },
+      }),
+      SocialAgentSession: objectSchema({
+        taskId: {
+          oneOf: [{ type: 'number' }, { type: 'string' }, { type: 'null' }],
+        },
+        messages: arraySchema({ type: 'object', additionalProperties: true }),
+      }),
+      SocialAgentTask: objectSchema({
+        id: { oneOf: [{ type: 'number' }, { type: 'string' }] },
+        status: { type: 'string' },
+      }),
+      SocialAgentTimeline: objectSchema({
+        items: arraySchema({ type: 'object', additionalProperties: true }),
+      }),
+      SocialProfile: objectSchema({
+        userId: { type: 'number' },
+        profileVersion: { type: 'number' },
+        purpose: { type: ['string', 'null'] },
+        primaryPurpose: { type: 'string' },
+        defaultMatchRadiusKm: { type: 'number' },
+        interests: arraySchema({ type: 'string' }),
+        updatedAt: { type: ['string', 'null'], format: 'date-time' },
+      }),
+      SocialProfileAiDraftRequest: objectSchema({
+        rawText: { type: 'string' },
+        answers: arraySchema({ type: 'object', additionalProperties: true }),
+      }),
+      SocialProfileAiDraftResponse: objectSchema({
+        proposalId: { oneOf: [{ type: 'number' }, { type: 'string' }] },
+        profile: ref('SocialProfile'),
+      }),
+      SocialProfileAiSaveRequest: objectSchema({
+        proposalId: { oneOf: [{ type: 'number' }, { type: 'string' }] },
+        profile: { type: 'object', additionalProperties: true },
+        expectedProfileVersion: { type: 'number' },
+      }),
+      SocialProfileAnswerRequest: objectSchema(
+        { key: { type: 'string' }, answer: { type: 'string' } },
+        ['key', 'answer'],
+      ),
+      SocialProfileCompletion: objectSchema({
+        completed: { type: 'boolean' },
+        missing: arraySchema({ type: 'string' }),
+        profileVersion: { type: 'number' },
+      }),
+      SocialProfilePrivacy: objectSchema({
+        profileVisibility: { type: 'string' },
+        matchingEnabled: { type: 'boolean' },
+      }),
+      SocialProfileQuestionList: objectSchema({
+        questions: arraySchema({ type: 'object', additionalProperties: true }),
+      }),
+      StartConversationRequest: objectSchema(
+        {
+          targetUserId: { type: 'number' },
+          contextType: {
+            type: 'string',
+            enum: [
+              'agent_candidate',
+              'connection_request',
+              'public_intent_application',
+              'friendship',
+              'meet',
+            ],
+          },
+          contextId: { type: 'string' },
+          initialMessage: { type: 'string' },
+        },
+        ['targetUserId', 'contextType', 'contextId'],
+      ),
+      StreamResponse: objectSchema({
+        stream: { type: 'string' },
+      }),
+      SystemHealth: objectSchema({
+        status: { type: 'string' },
+      }),
+      UpdateLocationRequest: objectSchema(
+        {
+          lat: { type: 'number' },
+          lng: { type: 'number' },
+          acceptNearbyMatch: { type: 'boolean' },
+        },
+        ['lat', 'lng'],
+      ),
+      UpdateProfileRequest: objectSchema({
+        name: { type: 'string' },
+        avatar: { type: 'string' },
+        city: { type: 'string' },
+      }),
+      UpdateProfilePhotosRequest: objectSchema(
+        {
+          photos: arraySchema(ref('ProfilePhotoInput')),
+        },
+        ['photos'],
+      ),
+      UpdateSocialProfilePrivacyRequest: objectSchema({
+        profileVisibility: { type: 'string' },
+        matchingEnabled: { type: 'boolean' },
+      }),
+      UpdateSocialProfileRequest: objectSchema({
+        purpose: { type: 'string' },
+        interests: arraySchema({ type: 'string' }),
+        profileVersion: { type: 'number' },
+      }),
+      UploadImageRequest: objectSchema({
+        file: { type: 'string', format: 'binary' },
+      }),
+      UploadImageResponse: objectSchema({
+        url: { type: 'string' },
+        assetId: { oneOf: [{ type: 'number' }, { type: 'null' }] },
+        width: { type: ['number', 'null'] },
+        height: { type: ['number', 'null'] },
+        moderationStatus: {
+          type: 'string',
+          enum: ['pending', 'approved', 'rejected', 'unknown'],
+        },
+      }),
+      UploadVideoRequest: objectSchema({
+        file: { type: 'string', format: 'binary' },
+      }),
+      UploadVideoResponse: objectSchema({
+        url: { type: 'string' },
+      }),
+      UnreadCountResponse: objectSchema({ count: { type: 'number' } }),
+      WaitlistEntry: objectSchema({
+        id: { oneOf: [{ type: 'number' }, { type: 'string' }] },
+        email: { type: 'string' },
+      }),
+      WaitlistEntryPage: pageSchema(ref('WaitlistEntry')),
+      WaitlistRequest: objectSchema(
+        { email: { type: 'string', format: 'email' } },
+        ['email'],
+      ),
+      WechatLoginRequest: objectSchema({ code: { type: 'string' } }, ['code']),
+      WechatLoginUrlResponse: objectSchema({ url: { type: 'string' } }, [
+        'url',
+      ]),
     },
     responses: {
-      Ok: {
-        description: 'Successful response',
-        content: {
-          'application/json': {
-            schema: { $ref: '#/components/schemas/Ok' },
-          },
-        },
+      ErrorResponse: {
+        description: 'Structured API error',
+        content: jsonContent(ref('ErrorEnvelope')),
       },
     },
   },
 } as const;
 
 function path(
+  method: HttpMethod,
   tag: string,
   operationId: string,
-  method: 'get' | 'post' | 'put' | 'patch' = 'get',
+  options: OperationOptions = {},
 ) {
-  return {
-    [method]: {
-      tags: [tag],
-      operationId,
-      responses: {
-        '200': { $ref: '#/components/responses/Ok' },
-        '201': { $ref: '#/components/responses/Ok' },
+  return operation(method, tag, operationId, options);
+}
+
+function operations(...items: OperationPathItem[]): OperationPathItem {
+  const result: OperationPathItem = {};
+  for (const item of items) {
+    for (const method of httpMethods) {
+      const op = item[method];
+      if (op) result[method] = op;
+    }
+  }
+  return result;
+}
+
+function operation(
+  method: HttpMethod,
+  tag: string,
+  operationId: string,
+  options: OperationOptions = {},
+) {
+  const status =
+    options.status ??
+    (method === 'post' ? '201' : method === 'delete' ? '200' : '200');
+  const schema = options.responseSchema ?? ref('ActionAccepted');
+  const contentType = options.requestContentType ?? 'application/json';
+  const operationObject: OpenApiOperation = {
+    tags: [tag],
+    operationId,
+    ...(options.summary ? { summary: options.summary } : {}),
+    ...(options.auth === false
+      ? { security: [] }
+      : { security: bearerSecurity }),
+    ...(options.parameters ? { parameters: options.parameters } : {}),
+    ...(options.requestSchema
+      ? {
+          requestBody: {
+            required: true,
+            content: typedContent(contentType, options.requestSchema),
+          },
+        }
+      : {}),
+    responses: {
+      [status]: {
+        description: status === '204' ? 'No content' : 'Successful response',
+        ...(status === '204' ? {} : { content: jsonContent(schema) }),
       },
+      '403': { $ref: '#/components/responses/ErrorResponse' },
+      '409': { $ref: '#/components/responses/ErrorResponse' },
+      default: { $ref: '#/components/responses/ErrorResponse' },
     },
   };
+
+  return {
+    [method]: operationObject,
+  };
+}
+
+function ref(name: string) {
+  return { $ref: `#/components/schemas/${name}` };
+}
+
+function jsonContent(schema: JsonSchema) {
+  return typedContent('application/json', schema);
+}
+
+function typedContent(contentType: RequestContentType, schema: JsonSchema) {
+  return {
+    [contentType]: {
+      schema,
+    },
+  };
+}
+
+function idempotencyHeader(): OpenApiParameter {
+  return {
+    name: 'Idempotency-Key',
+    in: 'header',
+    required: true,
+    schema: { type: 'string' },
+  };
+}
+
+function withPathParameters<T extends Record<string, OperationPathItem>>(
+  paths: T,
+): T {
+  for (const route of Object.keys(paths) as Array<keyof T & string>) {
+    const params = pathParameters(route);
+    if (params.length === 0) continue;
+
+    const pathItem = paths[route];
+    for (const method of httpMethods) {
+      const op = pathItem[method];
+      if (!op) continue;
+      const existing = op.parameters ?? [];
+      const existingNames = new Set(existing.map((param) => param.name));
+      op.parameters = [
+        ...params.filter((param) => !existingNames.has(param.name)),
+        ...existing,
+      ];
+    }
+  }
+  return paths;
+}
+
+function pathParameters(route: string): OpenApiParameter[] {
+  return Array.from(route.matchAll(/\{([^/}]+)\}/g), (match) => ({
+    name: match[1],
+    in: 'path' as const,
+    required: true,
+    schema: { type: 'string' },
+  }));
+}
+
+function objectSchema(
+  properties: Record<string, JsonSchema>,
+  required: string[] = [],
+  additionalProperties = false,
+) {
+  return {
+    type: 'object',
+    properties,
+    ...(required.length > 0 ? { required } : {}),
+    additionalProperties,
+  };
+}
+
+function arraySchema(items: JsonSchema) {
+  return {
+    type: 'array',
+    items,
+  };
+}
+
+function pageSchema(item: JsonSchema) {
+  return objectSchema(
+    {
+      data: arraySchema(item),
+      metadata: ref('PaginationMeta'),
+    },
+    ['data', 'metadata'],
+  );
 }

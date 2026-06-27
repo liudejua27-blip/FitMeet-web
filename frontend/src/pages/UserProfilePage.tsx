@@ -1,9 +1,10 @@
-﻿import { useCallback, useEffect, useState } from 'react';
+﻿import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { useAuthStore, useSocialStore } from '../stores';
+import { useAuthStore, useSocialContactStore, useSocialStore } from '../stores';
 import * as dataService from '../services/dataService';
 import { socialAgentApi } from '../api/socialAgentApi';
 import type { Meet, UserProfile } from '../types';
+import type { ConnectionRequest, RelationshipState } from '../types/socialContact';
 
 interface ProfileView {
   id: number;
@@ -42,11 +43,23 @@ export const UserProfilePage = () => {
   const navigate = useNavigate();
   const userId = Number.parseInt(id || '0', 10);
   const { isFollowing, toggleFollow } = useSocialStore();
-  const { isLoggedIn } = useAuthStore();
+  const { isLoggedIn, openLogin, user: currentUser } = useAuthStore();
+  const {
+    connectionRequestsById,
+    createConnectionRequest,
+    acceptConnectionRequest,
+    loadConnectionRequests,
+    loadFriends,
+    loadRelationship,
+    relationshipsByUserId,
+    startContextualConversation,
+  } = useSocialContactStore();
   const [user, setUser] = useState<ProfileView | null>(null);
   const [meets, setMeets] = useState<Meet[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [relationshipBusy, setRelationshipBusy] = useState(false);
+  const [relationshipError, setRelationshipError] = useState('');
 
   const loadProfile = useCallback(async () => {
     if (!Number.isFinite(userId) || userId <= 0) {
@@ -76,6 +89,22 @@ export const UserProfilePage = () => {
   useEffect(() => {
     void loadProfile();
   }, [loadProfile]);
+
+  useEffect(() => {
+    if (!isLoggedIn || !Number.isFinite(userId) || userId <= 0) return;
+    void Promise.allSettled([
+      loadRelationship(userId),
+      loadConnectionRequests({ box: 'inbox', status: 'pending' }),
+      loadConnectionRequests({ box: 'outbox', status: 'pending' }),
+      loadFriends(),
+    ]);
+  }, [
+    isLoggedIn,
+    loadConnectionRequests,
+    loadFriends,
+    loadRelationship,
+    userId,
+  ]);
 
   useEffect(() => {
     if (!isLoggedIn || !user?.id) return;
@@ -110,6 +139,93 @@ export const UserProfilePage = () => {
     return () => window.clearTimeout(timer);
   }, [isLoggedIn, user?.city, user?.id]);
 
+  const following = isFollowing(userId);
+  const relationship = relationshipsByUserId[userId] ?? null;
+  const pendingIncomingRequest = useMemo(
+    () =>
+      findPendingConnectionRequest({
+        requests: Object.values(connectionRequestsById),
+        otherUserId: userId,
+        currentUserId: currentUser?.id,
+        direction: 'incoming',
+      }),
+    [connectionRequestsById, currentUser?.id, userId],
+  );
+  const relationshipButton = relationshipButtonState(relationship, isLoggedIn);
+
+  const handleRelationshipAction = async () => {
+    if (!isLoggedIn) {
+      openLogin();
+      return;
+    }
+    if (!user) return;
+
+    setRelationshipBusy(true);
+    setRelationshipError('');
+    try {
+      if (relationship?.blocked || relationship?.messagePermission === 'closed') return;
+
+      if (relationship?.messagePermission === 'open') {
+        if (relationship.conversationId) {
+          navigate(`/messages?conversationId=${encodeURIComponent(relationship.conversationId)}`);
+          return;
+        }
+        const started = await startContextualConversation({
+          targetUserId: user.id,
+          contextType: relationship.friendship === 'active' ? 'friendship' : 'meet',
+          contextId: String(user.id),
+        });
+        const conversationId =
+          started.conversationId || (typeof started.id === 'string' ? started.id : '');
+        if (conversationId) {
+          navigate(`/messages?conversationId=${encodeURIComponent(conversationId)}`);
+          return;
+        }
+        setRelationshipError('会话正在建立中，请稍后刷新。');
+        return;
+      }
+
+      if (relationship?.messagePermission === 'opener_available') {
+        setRelationshipError('请从 Agent 推荐卡片发起招呼，当前资料页缺少有效推荐上下文。');
+        return;
+      }
+      if (relationship?.messagePermission === 'awaiting_reply') return;
+
+      if (relationship?.connectionRequest === 'pending_incoming') {
+        if (!pendingIncomingRequest) {
+          await loadConnectionRequests({ box: 'inbox', status: 'pending' });
+          setRelationshipError('已刷新申请列表，请再试一次。');
+          return;
+        }
+        await acceptConnectionRequest(pendingIncomingRequest.id);
+        await loadRelationship(user.id);
+        return;
+      }
+
+      if (
+        relationship?.connectionRequest === 'pending_outgoing' ||
+        relationship?.friendship === 'active'
+      ) {
+        await loadRelationship(user.id);
+        return;
+      }
+
+      await createConnectionRequest({
+        targetUserId: user.id,
+        message: `想和 ${user.name} 建立联系`,
+        sourceType: 'public_profile',
+        sourceId: String(user.id),
+      });
+      await loadRelationship(user.id);
+    } catch (actionError) {
+      setRelationshipError(
+        actionError instanceof Error ? actionError.message : '操作失败，请稍后重试',
+      );
+    } finally {
+      setRelationshipBusy(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="flex min-h-screen items-center justify-center text-sm text-textMuted">
@@ -138,8 +254,6 @@ export const UserProfilePage = () => {
       </div>
     );
   }
-
-  const following = isFollowing(userId);
 
   return (
     <div className="min-h-screen bg-base pb-20 text-cream">
@@ -200,12 +314,22 @@ export const UserProfilePage = () => {
                 {following ? '✓ 已关注' : '+ 关注'}
               </button>
               <button
-                className="cursor-pointer rounded-lg border border-border bg-surface px-6 py-2 text-sm font-semibold text-white transition hover:border-borderStrong"
-                onClick={() => navigate('/messages')}
+                className={`cursor-pointer rounded-lg border px-6 py-2 text-sm font-semibold transition ${
+                  relationshipButton.disabled || relationshipBusy
+                    ? 'border-border bg-surfaceMuted text-textSofter'
+                    : 'border-border bg-surface text-white hover:border-borderStrong'
+                }`}
+                disabled={relationshipButton.disabled || relationshipBusy}
+                onClick={() => {
+                  void handleRelationshipAction();
+                }}
               >
-                💬 私信
+                {relationshipBusy ? '处理中...' : relationshipButton.label}
               </button>
             </div>
+            {relationshipError && (
+              <div className="mt-2 text-xs text-red-300">{relationshipError}</div>
+            )}
           </div>
         </div>
 
@@ -246,3 +370,61 @@ export const UserProfilePage = () => {
     </div>
   );
 };
+
+function relationshipButtonState(
+  relationship: RelationshipState | null,
+  isLoggedIn: boolean,
+): { label: string; disabled: boolean } {
+  if (!isLoggedIn) return { label: '登录后互动', disabled: false };
+  if (!relationship) return { label: '加载关系中', disabled: true };
+  if (relationship.blocked || relationship.messagePermission === 'closed') {
+    return { label: '已拉黑', disabled: true };
+  }
+  if (relationship.messagePermission === 'open') {
+    return { label: '💬 发消息', disabled: false };
+  }
+  if (relationship.messagePermission === 'opener_available') {
+    return { label: '发招呼', disabled: false };
+  }
+  if (relationship.messagePermission === 'awaiting_reply') {
+    return { label: '等待回复', disabled: true };
+  }
+  if (relationship.connectionRequest === 'pending_incoming') {
+    return { label: '接受申请', disabled: false };
+  }
+  if (relationship.connectionRequest === 'pending_outgoing') {
+    return { label: '已发送', disabled: true };
+  }
+  if (relationship.friendship === 'active') {
+    return { label: '已是好友', disabled: false };
+  }
+  return { label: '加好友', disabled: false };
+}
+
+function findPendingConnectionRequest({
+  requests,
+  otherUserId,
+  currentUserId,
+  direction,
+}: {
+  requests: ConnectionRequest[];
+  otherUserId: number;
+  currentUserId?: number;
+  direction: 'incoming' | 'outgoing';
+}): ConnectionRequest | null {
+  return (
+    requests.find((request) => {
+      if (request.status !== 'pending') return false;
+      if (direction === 'incoming') {
+        return (
+          request.requesterId === otherUserId &&
+          (!currentUserId || request.targetUserId === currentUserId)
+        );
+      }
+      return (
+        request.targetUserId === otherUserId &&
+        (!currentUserId || request.requesterId === currentUserId)
+      );
+    }) ?? null
+  );
+}

@@ -5,12 +5,14 @@ import {
   UploadedFile,
   BadRequestException,
   UseGuards,
+  Request,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { UploadsService } from './uploads.service';
 import { diskStorage } from 'multer';
 import { extname } from 'path';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
+import type { AuthenticatedRequest } from '../common/types/authenticated-request';
 import { ensureUploadBaseDir, ensureUploadTempDir } from './upload-paths';
 
 @Controller('uploads')
@@ -40,9 +42,12 @@ export class UploadsController {
       limits: { fileSize: 10 * 1024 * 1024 }, // 10MB limit
     }),
   )
-  async uploadImage(@UploadedFile() file: Express.Multer.File) {
+  async uploadImage(
+    @UploadedFile() file: Express.Multer.File,
+    @Request() req: AuthenticatedRequest,
+  ) {
     if (!file) throw new BadRequestException('No file uploaded');
-    const result = await this.uploadsService.saveImage(file);
+    const result = await this.uploadsService.saveImage(file, req.user.id);
     return result;
   }
 

@@ -4,8 +4,8 @@ import {
   Post,
   Param,
   Body,
+  Headers,
   UseGuards,
-  Request,
 } from '@nestjs/common';
 import { MessagesService } from './messages.service';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
@@ -39,9 +39,21 @@ export class MessagesController {
   @Post('start')
   startConversation(
     @CurrentUser() user: User,
-    @Body('otherUserId') otherUserId: number,
+    @Body()
+    body: {
+      targetUserId?: number;
+      otherUserId?: number;
+      contextType?: string;
+      contextId?: string;
+      initialMessage?: string;
+    },
+    @Headers('idempotency-key') idempotencyKey?: string,
   ) {
-    return this.messagesService.startConversation(user.id, otherUserId);
+    return this.messagesService.startConversationWithPolicy(
+      user.id,
+      body,
+      idempotencyKey,
+    );
   }
 
   @Post('public-intents/:id/start')

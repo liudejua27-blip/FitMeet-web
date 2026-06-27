@@ -438,8 +438,10 @@ describe('SocialProfileService', () => {
       wantToMeet: ['runner'],
       preferredTraits: ['punctual'],
       avoidTraits: ['pushy'],
+      primaryPurpose: 'workout partner',
       relationshipGoals: ['workout partner'],
       availableTimes: ['evening'],
+      defaultMatchRadiusKm: 5,
       socialPreference: '',
       rejectRules: 'no private places',
       privacyBoundary: 'no phone or WeChat before trust',
@@ -458,7 +460,7 @@ describe('SocialProfileService', () => {
       weekendAvailability: '',
       createdAt: new Date(),
       updatedAt: new Date(),
-    } as UserSocialProfile);
+    } as unknown as UserSocialProfile);
 
     const completion = await service.getCompletion(1);
 
@@ -510,7 +512,7 @@ describe('SocialProfileService', () => {
       weekendAvailability: '',
       createdAt: new Date(),
       updatedAt: new Date(),
-    } as UserSocialProfile);
+    } as unknown as UserSocialProfile);
 
     const completion = await service.getCompletion(1);
 

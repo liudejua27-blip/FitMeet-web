@@ -63,6 +63,55 @@ describe('UploadsService', () => {
     expect(fs.existsSync(tempFile)).toBe(false);
   });
 
+  it('stores uploaded profile images as pending moderation by default', async () => {
+    const tempFile = writeTempImageUpload('pending-image.png');
+    const { service } = makeServiceWithDeps({
+      NODE_ENV: 'development',
+      BASE_URL: 'https://dev.fitmeet.test',
+    });
+
+    const result = await service.saveImage(fileFor(tempFile, 'image/png'), 7);
+    uploadedFiles.push(uploadedPathFromUrl(result.url));
+
+    expect(result.moderationStatus).toBe('pending');
+    expect(result.assetId).toBe(1);
+    expect(fs.existsSync(tempFile)).toBe(false);
+  });
+
+  it('allows mock-approved image moderation only outside production', async () => {
+    const tempFile = writeTempImageUpload('mock-approved.png');
+    const { service } = makeServiceWithDeps({
+      NODE_ENV: 'development',
+      BASE_URL: 'https://dev.fitmeet.test',
+      MEDIA_MODERATION_MODE: 'mock-approved',
+    });
+
+    const result = await service.saveImage(fileFor(tempFile, 'image/png'), 7);
+    uploadedFiles.push(uploadedPathFromUrl(result.url));
+
+    expect(result.moderationStatus).toBe('approved');
+  });
+
+  it('keeps production S3 image uploads pending when no real moderation is configured', async () => {
+    const tempFile = writeTempImageUpload('production-pending.png');
+    const { service } = makeServiceWithDeps({
+      NODE_ENV: 'production',
+      S3_PUBLIC_BASE_URL: 'https://media.socialworld.world/uploads/',
+    });
+    const send = jest.fn().mockResolvedValue({});
+    Object.assign(service as unknown as Record<string, unknown>, {
+      storageProvider: 's3',
+      bucketName: 'fitmeet-test',
+      s3Client: { send },
+    });
+
+    const result = await service.saveImage(fileFor(tempFile, 'image/png'), 7);
+
+    expect(result.moderationStatus).toBe('pending');
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(fs.existsSync(tempFile)).toBe(false);
+  });
+
   it('removes the temporary file when Aliyun OSS file upload fails', async () => {
     const tempFile = writeTempUpload('aliyun-failure.mp4');
     const service = makeService({ NODE_ENV: 'production' });
@@ -110,6 +159,10 @@ describe('UploadsService', () => {
 });
 
 function makeService(env: Record<string, string>) {
+  return makeServiceWithDeps(env).service;
+}
+
+function makeServiceWithDeps(env: Record<string, string>) {
   const configService = {
     get: jest.fn((key: string) => env[key]),
   };
@@ -118,8 +171,17 @@ function makeService(env: Record<string, string>) {
     checkImage: jest.fn(),
     checkOssImage: jest.fn(),
   };
+  const mediaRepo = {
+    create: jest.fn((value) => value),
+    save: jest.fn((value) => ({ id: 1, ...value })),
+  };
 
-  return new UploadsService(configService as never, moderationService as never);
+  const service = new UploadsService(
+    configService as never,
+    moderationService as never,
+    mediaRepo as never,
+  );
+  return { service, configService, moderationService, mediaRepo };
 }
 
 function writeTempUpload(fileName: string) {
@@ -128,6 +190,27 @@ function writeTempUpload(fileName: string) {
   const tempFile = path.join(tempDir, fileName);
   fs.writeFileSync(tempFile, 'fitmeet-upload-test');
   return tempFile;
+}
+
+function writeTempImageUpload(fileName: string) {
+  const tempDir = path.join('public/uploads/temp');
+  fs.mkdirSync(tempDir, { recursive: true });
+  const tempFile = path.join(tempDir, fileName);
+  fs.writeFileSync(
+    tempFile,
+    Buffer.from(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=',
+      'base64',
+    ),
+  );
+  return tempFile;
+}
+
+function uploadedPathFromUrl(url: string) {
+  return path.join(
+    'public/uploads',
+    decodeURIComponent(url.split('/uploads/')[1] ?? ''),
+  );
 }
 
 function fileFor(

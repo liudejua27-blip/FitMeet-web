@@ -67,6 +67,7 @@ describe('SafetyService Agent recommendation exclusions', () => {
       repo() as never,
       repo() as never,
       { get: jest.fn() } as unknown as ConfigService,
+      { closeForBlock: jest.fn() } as never,
     );
 
     const excluded = await service.getAgentRecommendationExcludedUserIds(1);

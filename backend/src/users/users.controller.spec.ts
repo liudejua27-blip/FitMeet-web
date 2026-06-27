@@ -2,6 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { UsersController } from './users.controller';
 import { UsersService } from './users.service';
 import { SocialProfileService } from './social-profile.service';
+import { OnboardingService } from './onboarding.service';
 
 const mockUsersService = {
   findById: jest.fn(),
@@ -17,6 +18,7 @@ describe('UsersController', () => {
       providers: [
         { provide: UsersService, useValue: mockUsersService },
         { provide: SocialProfileService, useValue: {} },
+        { provide: OnboardingService, useValue: {} },
       ],
     }).compile();
 

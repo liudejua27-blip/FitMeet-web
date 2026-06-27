@@ -8,10 +8,12 @@ import { SafetyController } from './safety.controller';
 import { SafetyService } from './safety.service';
 import { UserBlock } from './user-block.entity';
 import { VerificationRequest } from './verification-request.entity';
+import { SocialLoopModule } from '../social-loop/social-loop.module';
 
 @Module({
   imports: [
     ConfigModule,
+    SocialLoopModule,
     TypeOrmModule.forFeature([
       SafetyReport,
       UserBlock,
