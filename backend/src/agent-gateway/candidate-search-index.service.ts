@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
 
+import { normalizeTimeGeoContext } from '../common/time-geo.util';
 import { UserSocialProfile } from '../users/user-social-profile.entity';
 import {
   CandidateSearchIndex,
@@ -15,6 +16,7 @@ import { isSocialAgentActivePublicIntent } from './social-agent-candidate-pool-e
 export type CandidateSearchIndexQuery = {
   ownerUserId?: number | null;
   city?: string | null;
+  countryCode?: string | null;
   activityTypes?: string[];
   interestTags?: string[];
   timeBuckets?: string[];
@@ -141,6 +143,13 @@ export class CandidateSearchIndexService {
       profile.profileDiscoverable === true ||
       profile.agentCanRecommendMe === true;
 
+    const timeGeo = normalizeTimeGeoContext({
+      locale: profile.locale,
+      countryCode: profile.countryCode,
+      timeZone: profile.timeZone,
+      utcOffsetMinutes: profile.utcOffsetMinutes,
+      geoHash: profile.geoHash,
+    });
     const projection = await this.saveProjection({
       sourceType: CandidateSearchIndexSourceType.Profile,
       sourceId: String(profile.userId),
@@ -158,6 +167,11 @@ export class CandidateSearchIndexService {
         : CandidateSearchIndexStatus.Paused,
       displayName: firstNonEmpty(profile.nickname, profile.primaryPurpose),
       city: cleanText(profile.city),
+      locale: timeGeo.locale,
+      countryCode: timeGeo.countryCode,
+      timeZone: timeGeo.timeZone,
+      utcOffsetMinutes: timeGeo.utcOffsetMinutes,
+      geoHash: timeGeo.geoHash,
       areaText: cleanText(profile.nearbyArea),
       lat: null,
       lng: null,
@@ -211,6 +225,15 @@ export class CandidateSearchIndexService {
       return null;
     }
 
+    const timeGeo = normalizeTimeGeoContext({
+      locale: intent.locale,
+      countryCode: intent.countryCode,
+      timeZone: intent.timeZone,
+      utcOffsetMinutes: intent.utcOffsetMinutes,
+      geoHash: intent.geoHash,
+      lat: intent.lat,
+      lng: intent.lng,
+    });
     return this.saveProjection({
       sourceType: CandidateSearchIndexSourceType.PublicIntent,
       sourceId: intent.id,
@@ -225,6 +248,11 @@ export class CandidateSearchIndexService {
       status: CandidateSearchIndexStatus.Active,
       displayName: cleanText(intent.title),
       city: cleanText(intent.city),
+      locale: timeGeo.locale,
+      countryCode: timeGeo.countryCode,
+      timeZone: timeGeo.timeZone,
+      utcOffsetMinutes: timeGeo.utcOffsetMinutes,
+      geoHash: timeGeo.geoHash,
       areaText: firstNonEmpty(intent.loc, intent.locationPreference),
       lat: intent.lat,
       lng: intent.lng,
@@ -325,6 +353,10 @@ export class CandidateSearchIndexService {
       .andWhere('candidate.sourceType IN (:...sourceTypes)', { sourceTypes });
 
     const city = cleanText(query.city);
+    const countryCode = cleanText(query.countryCode).toUpperCase();
+    if (countryCode) {
+      qb.andWhere('candidate.countryCode = :countryCode', { countryCode });
+    }
     if (city) qb.andWhere('candidate.city = :city', { city });
     if (query.ownerUserId)
       qb.andWhere('(candidate.userId IS NULL OR candidate.userId <> :owner)', {

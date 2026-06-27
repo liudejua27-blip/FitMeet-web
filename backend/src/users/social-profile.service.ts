@@ -12,6 +12,7 @@ import {
   AiProfileMatchSignals,
 } from '../ai/ai.service';
 import { AiDelegateProfile } from '../ai-match/ai-delegate-profile.entity';
+import { normalizeTimeGeoContext } from '../common/time-geo.util';
 import { User } from './user.entity';
 import { UserSocialProfile } from './user-social-profile.entity';
 import { ProfileUpdateProposal } from './profile-update-proposal.entity';
@@ -648,6 +649,11 @@ export class SocialProfileService {
       gender: '',
       ageRange: '',
       city: '',
+      locale: 'zh-CN',
+      countryCode: 'CN',
+      timeZone: 'Asia/Shanghai',
+      utcOffsetMinutes: 480,
+      geoHash: '',
       nickname: '',
       primaryPurpose: '',
       defaultMatchRadiusKm: 20,
@@ -690,6 +696,26 @@ export class SocialProfileService {
     if (dto.gender !== undefined) out.gender = dto.gender.trim();
     if (dto.ageRange !== undefined) out.ageRange = dto.ageRange.trim();
     if (dto.city !== undefined) out.city = dto.city.trim();
+    if (
+      dto.locale !== undefined ||
+      dto.countryCode !== undefined ||
+      dto.timeZone !== undefined ||
+      dto.utcOffsetMinutes !== undefined ||
+      dto.geoHash !== undefined
+    ) {
+      const timeGeo = normalizeTimeGeoContext({
+        locale: dto.locale,
+        countryCode: dto.countryCode,
+        timeZone: dto.timeZone,
+        utcOffsetMinutes: dto.utcOffsetMinutes,
+        geoHash: dto.geoHash,
+      });
+      out.locale = timeGeo.locale;
+      out.countryCode = timeGeo.countryCode;
+      out.timeZone = timeGeo.timeZone;
+      out.utcOffsetMinutes = timeGeo.utcOffsetMinutes;
+      out.geoHash = timeGeo.geoHash;
+    }
     if (dto.nickname !== undefined) out.nickname = dto.nickname.trim();
     if (dto.nearbyArea !== undefined) out.nearbyArea = dto.nearbyArea.trim();
     if (dto.fitnessGoals !== undefined)

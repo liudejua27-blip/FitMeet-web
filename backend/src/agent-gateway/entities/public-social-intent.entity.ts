@@ -45,6 +45,21 @@ export class PublicSocialIntent {
   @Column({ default: '' })
   city: string;
 
+  @Column({ type: 'varchar', length: 20, default: 'zh-CN' })
+  locale: string;
+
+  @Column({ type: 'varchar', length: 8, default: 'CN' })
+  countryCode: string;
+
+  @Column({ type: 'varchar', length: 80, default: 'Asia/Shanghai' })
+  timeZone: string;
+
+  @Column({ type: 'int', default: 480 })
+  utcOffsetMinutes: number;
+
+  @Column({ type: 'varchar', length: 16, default: '' })
+  geoHash: string;
+
   @Column({ default: '' })
   loc: string;
 

@@ -91,6 +91,7 @@ import { RedisService } from '../redis/redis.service';
 import { AgentSocialRequestAdapter } from '../social-requests/agent-social-request.adapter';
 import { UserSocialRequest } from '../social-requests/social-request.entity';
 import { sanitizeCity } from '../common/city.util';
+import { normalizeTimeGeoContext } from '../common/time-geo.util';
 import {
   buildPublicIntentMatchSignal,
   buildPublicIntentMatchSignalFromRequest,
@@ -820,6 +821,10 @@ export class AgentGatewayService {
       sanitizedDto,
       candidates,
     );
+    const timeGeo = normalizeTimeGeoContext({
+      lat: sanitizedDto.lat,
+      lng: sanitizedDto.lng,
+    });
     const intent = await this.publicIntentRepo.save(
       this.publicIntentRepo.create({
         id: `public_${crypto.randomUUID()}`,
@@ -833,6 +838,11 @@ export class AgentGatewayService {
         description: sanitizedDto.description.trim(),
         interestTags: sanitizedDto.interests ?? [],
         city: sanitizedDto.city || '',
+        locale: timeGeo.locale,
+        countryCode: timeGeo.countryCode,
+        timeZone: timeGeo.timeZone,
+        utcOffsetMinutes: timeGeo.utcOffsetMinutes,
+        geoHash: timeGeo.geoHash,
         loc: sanitizedDto.loc?.trim() || '',
         lat: sanitizedDto.lat ?? null,
         lng: sanitizedDto.lng ?? null,

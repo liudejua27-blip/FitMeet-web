@@ -37,6 +37,7 @@ import {
 } from '../agent-gateway/entities/agent-action-log.entity';
 import { extractKnownCity, sanitizeCity } from '../common/city.util';
 import { cleanDisplayText } from '../common/display-text.util';
+import { normalizeTimeGeoContext } from '../common/time-geo.util';
 
 /**
  * Activity types considered "offline / in-person" — for these we always
@@ -761,6 +762,15 @@ export class SocialRequestsService {
       ? this.toPublicStatus(request.status)
       : PublicSocialIntentStatus.Inactive;
     const intent = existing ?? this.publicIntentRepo.create({ id });
+    const timeGeo = normalizeTimeGeoContext({
+      locale: request.locale,
+      countryCode: request.countryCode,
+      timeZone: request.timeZone,
+      utcOffsetMinutes: request.utcOffsetMinutes,
+      geoHash: request.geoHash,
+      lat: request.lat,
+      lng: request.lng,
+    });
 
     Object.assign(intent, {
       userId: request.userId,
@@ -776,6 +786,11 @@ export class SocialRequestsService {
       description: request.description,
       interestTags: request.interestTags ?? [],
       city: sanitizeCity(request.city),
+      locale: timeGeo.locale,
+      countryCode: timeGeo.countryCode,
+      timeZone: timeGeo.timeZone,
+      utcOffsetMinutes: timeGeo.utcOffsetMinutes,
+      geoHash: timeGeo.geoHash,
       loc:
         (metadata.locationPreference as string | undefined) ??
         (metadata.nearbyArea as string | undefined) ??

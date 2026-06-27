@@ -36,6 +36,29 @@ export class UpdateSocialProfileDto {
   @IsOptional()
   @IsString()
   @MaxLength(20)
+  locale?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(8)
+  countryCode?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(80)
+  timeZone?: string;
+
+  @IsOptional()
+  utcOffsetMinutes?: number;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(16)
+  geoHash?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(20)
   zodiac?: string;
 
   @IsOptional()
