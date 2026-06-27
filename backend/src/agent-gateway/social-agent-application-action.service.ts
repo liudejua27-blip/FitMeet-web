@@ -9,6 +9,7 @@ import type {
 } from './fitmeet-alpha-agent.types';
 import type { SocialAgentCardActionBody } from './social-agent-action.types';
 import type { SocialAgentIntentRouteResult } from './social-agent-chat.types';
+import { SocialSideEffectService } from './social-side-effect.service';
 
 type PresentedApplication = {
   id: number;
@@ -38,6 +39,7 @@ export class SocialAgentApplicationActionService {
   constructor(
     private readonly applications: PublicIntentApplicationsService,
     private readonly contactPolicy: ContactPolicyService,
+    private readonly sideEffects: SocialSideEffectService,
     @Optional()
     private readonly outboxWorker?: DomainOutboxWorkerService,
   ) {}
@@ -268,6 +270,38 @@ export class SocialAgentApplicationActionService {
       input.ownerUserId,
       input.applicationId,
     );
+    const { result } = await this.sideEffects.runOnce<
+      SocialAgentIntentRouteResult & Record<string, unknown>
+    >({
+      actorUserId: input.ownerUserId,
+      taskId: input.taskId,
+      effectType: 'public_intent_application.accept',
+      idempotencyKey: input.idempotencyKey,
+      resourceType: 'public_intent_application',
+      resourceId: input.applicationId,
+      payload: {
+        applicationId: input.applicationId,
+        reason: input.reason ?? null,
+      },
+      metadata: {
+        publicIntentId: application.publicIntentId,
+        applicantUserId: application.applicantUserId,
+      },
+      execute: () => this.acceptApplicationOnce(input, application),
+    });
+    return result;
+  }
+
+  private async acceptApplicationOnce(
+    input: {
+      ownerUserId: number;
+      taskId: number;
+      applicationId: number;
+      idempotencyKey: string;
+      reason?: string | null;
+    },
+    application: PresentedApplication,
+  ): Promise<SocialAgentIntentRouteResult & Record<string, unknown>> {
     const result = await this.applications.acceptApplication(
       input.ownerUserId,
       input.applicationId,
@@ -310,7 +344,7 @@ export class SocialAgentApplicationActionService {
         messagesHref,
         requiredConfirmation: false,
       },
-    });
+    }) as SocialAgentIntentRouteResult & Record<string, unknown>;
   }
 
   private async rejectApplication(input: {
@@ -320,6 +354,39 @@ export class SocialAgentApplicationActionService {
     idempotencyKey: string;
     reason?: string | null;
   }): Promise<SocialAgentIntentRouteResult> {
+    const application = await this.findOwnerApplication(
+      input.ownerUserId,
+      input.applicationId,
+    );
+    const { result } = await this.sideEffects.runOnce<
+      SocialAgentIntentRouteResult & Record<string, unknown>
+    >({
+      actorUserId: input.ownerUserId,
+      taskId: input.taskId,
+      effectType: 'public_intent_application.reject',
+      idempotencyKey: input.idempotencyKey,
+      resourceType: 'public_intent_application',
+      resourceId: input.applicationId,
+      payload: {
+        applicationId: input.applicationId,
+        reason: input.reason ?? null,
+      },
+      metadata: {
+        publicIntentId: application.publicIntentId,
+        applicantUserId: application.applicantUserId,
+      },
+      execute: () => this.rejectApplicationOnce(input),
+    });
+    return result;
+  }
+
+  private async rejectApplicationOnce(input: {
+    ownerUserId: number;
+    taskId: number;
+    applicationId: number;
+    idempotencyKey: string;
+    reason?: string | null;
+  }): Promise<SocialAgentIntentRouteResult & Record<string, unknown>> {
     const result = await this.applications.rejectApplication(
       input.ownerUserId,
       input.applicationId,
@@ -342,7 +409,7 @@ export class SocialAgentApplicationActionService {
         messagesHref: null,
         requiredConfirmation: false,
       },
-    });
+    }) as SocialAgentIntentRouteResult & Record<string, unknown>;
   }
 
   private async findOwnerApplication(
