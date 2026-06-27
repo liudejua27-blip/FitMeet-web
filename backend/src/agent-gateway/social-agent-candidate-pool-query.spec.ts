@@ -3,6 +3,7 @@ import { AgentTask } from './entities/agent-task.entity';
 import {
   buildCandidatePoolResolvedQuery,
   normalizeCandidatePoolArray,
+  uniqueCandidatePoolNumbers,
   uniqueCandidatePoolStrings,
 } from './social-agent-candidate-pool-query';
 
@@ -43,6 +44,8 @@ describe('buildCandidatePoolResolvedQuery', () => {
       socialRequestId: 301,
       rawText: '青岛周末上午跑步搭子',
       acceptsStrangers: null,
+      candidateUserIds: [],
+      publicIntentIds: [],
     });
   });
 
@@ -71,6 +74,8 @@ describe('buildCandidatePoolResolvedQuery', () => {
       socialRequestId: 302,
       rawText: '上海周末咖啡摄影局',
       acceptsStrangers: null,
+      candidateUserIds: [],
+      publicIntentIds: [],
     });
     expect(query.interestTags).toEqual(
       expect.arrayContaining(['咖啡', '摄影', '拍照']),
@@ -520,5 +525,21 @@ describe('buildCandidatePoolResolvedQuery', () => {
     expect(
       uniqueCandidatePoolStrings([' Qingdao ', 'qingdao', '', '青岛']),
     ).toEqual(['Qingdao', '青岛']);
+    expect(uniqueCandidatePoolNumbers([1, '2', 2, 0, 'bad'])).toEqual([1, 2]);
+  });
+
+  it('carries candidate search index filters into the resolved query', () => {
+    const query = buildCandidatePoolResolvedQuery({
+      query: {
+        ownerUserId: 1,
+        rawText: '青岛今晚散步',
+        candidateUserIds: [2, 2, '3' as never],
+        publicIntentIds: ['public_1', 'public_1', 'public_2'],
+      },
+      socialRequestId: null,
+    });
+
+    expect(query.candidateUserIds).toEqual([2, 3]);
+    expect(query.publicIntentIds).toEqual(['public_1', 'public_2']);
   });
 });

@@ -514,6 +514,9 @@ export class SocialAgentCandidatePoolService {
         input.filtered.blocked += 1;
         continue;
       }
+      if (!this.allowsCandidateUser(input.query, user.id)) {
+        continue;
+      }
       if (input.query.acceptsStrangers === false) {
         input.filtered.boundaryMismatch += 1;
         continue;
@@ -570,6 +573,12 @@ export class SocialAgentCandidatePoolService {
         input.filtered.blocked += 1;
         continue;
       }
+      if (
+        !this.allowsCandidateUser(input.query, ownerUserId) ||
+        !this.allowsPublicIntent(input.query, intent.id)
+      ) {
+        continue;
+      }
       if (input.query.acceptsStrangers === false) {
         input.filtered.boundaryMismatch += 1;
         continue;
@@ -610,6 +619,9 @@ export class SocialAgentCandidatePoolService {
       }
       if (input.blockedIds.has(request.userId)) {
         input.filtered.blocked += 1;
+        continue;
+      }
+      if (!this.allowsCandidateUser(input.query, request.userId)) {
         continue;
       }
       if (input.query.acceptsStrangers === false) {
@@ -743,6 +755,26 @@ export class SocialAgentCandidatePoolService {
     return (
       hasSocialAgentRecommendationBoundary(profile, delegate) ||
       hasSocialAgentSafetyExclusionBoundary(profile, delegate)
+    );
+  }
+
+  private allowsCandidateUser(
+    query: CandidatePoolResolvedQuery,
+    userId: number,
+  ): boolean {
+    return (
+      query.candidateUserIds.length === 0 ||
+      query.candidateUserIds.includes(userId)
+    );
+  }
+
+  private allowsPublicIntent(
+    query: CandidatePoolResolvedQuery,
+    publicIntentId: string,
+  ): boolean {
+    return (
+      query.publicIntentIds.length === 0 ||
+      query.publicIntentIds.includes(publicIntentId)
     );
   }
 

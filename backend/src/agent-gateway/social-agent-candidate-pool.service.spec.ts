@@ -298,6 +298,59 @@ describe('SocialAgentCandidatePoolService', () => {
     ).toBeGreaterThan(0);
   });
 
+  it('uses candidate search index filters to narrow profile and public-intent recall', async () => {
+    const { service } = makeService({
+      users: [realUser(1), realUser(2), realUser(3)],
+      profiles: [
+        profile(2, {
+          nickname: '索引外候选',
+          interestTags: ['散步'],
+          profileDiscoverable: true,
+          agentCanRecommendMe: true,
+        }),
+        profile(3, {
+          nickname: '索引命中候选',
+          interestTags: ['散步'],
+          profileDiscoverable: true,
+          agentCanRecommendMe: true,
+        }),
+      ],
+      publicIntents: [
+        publicIntent('intent_2', 2, {
+          title: '索引外公开约练',
+          requestType: '散步',
+          interestTags: ['散步'],
+        }),
+        publicIntent('intent_3', 3, {
+          title: '索引命中公开约练',
+          requestType: '散步',
+          interestTags: ['散步'],
+        }),
+      ],
+    });
+
+    const result = await service.searchSocial({
+      ownerUserId: 1,
+      city: '青岛',
+      interestTags: ['散步'],
+      rawText: '今晚找散步搭子',
+      candidateUserIds: [3],
+      publicIntentIds: ['intent_3'],
+    });
+
+    expect(
+      result.candidates.map((candidate) => candidate.candidateUserId),
+    ).not.toContain(2);
+    expect(
+      result.candidates.map((candidate) => candidate.publicIntentId),
+    ).not.toContain('intent_2');
+    expect(
+      result.candidates.map((candidate) => candidate.candidateUserId),
+    ).toContain(3);
+    expect(result.query.candidateUserIds).toEqual([3]);
+    expect(result.query.publicIntentIds).toEqual(['intent_3']);
+  });
+
   it('uses candidate preference text to rank consented profile candidates', async () => {
     const { service } = makeService({
       users: [realUser(1), realUser(2), realUser(3)],

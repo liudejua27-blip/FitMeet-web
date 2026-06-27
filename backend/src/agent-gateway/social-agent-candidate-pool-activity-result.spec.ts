@@ -18,6 +18,8 @@ const query: CandidatePoolResolvedQuery = {
   rawText: '周末找人喝咖啡拍照',
   socialRequestId: 50,
   acceptsStrangers: null,
+  candidateUserIds: [],
+  publicIntentIds: [],
 };
 
 const explanation = {

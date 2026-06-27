@@ -25,6 +25,8 @@ export type CandidatePoolQuery = {
   locationPreference?: string | null;
   rawText?: string | null;
   acceptsStrangers?: boolean | null;
+  candidateUserIds?: number[] | null;
+  publicIntentIds?: string[] | null;
   limit?: number | null;
   persistCandidates?: boolean;
 };
@@ -41,6 +43,8 @@ export type CandidatePoolResolvedQuery = {
   socialRequestId: number | null;
   rawText: string;
   acceptsStrangers: boolean | null;
+  candidateUserIds: number[];
+  publicIntentIds: string[];
 };
 
 export function buildCandidatePoolResolvedQuery(input: {
@@ -128,6 +132,8 @@ export function buildCandidatePoolResolvedQuery(input: {
     socialRequestId: input.socialRequestId,
     rawText,
     acceptsStrangers,
+    candidateUserIds: uniqueCandidatePoolNumbers(query.candidateUserIds),
+    publicIntentIds: uniqueCandidatePoolStrings(query.publicIntentIds ?? []),
   };
 }
 
@@ -228,6 +234,21 @@ export function uniqueCandidatePoolStrings(values: unknown[]): string[] {
     if (seen.has(key)) continue;
     seen.add(key);
     out.push(text);
+  }
+  return out;
+}
+
+export function uniqueCandidatePoolNumbers(values: unknown): number[] {
+  if (!Array.isArray(values)) return [];
+  const out: number[] = [];
+  const seen = new Set<number>();
+  for (const value of values) {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed) || parsed <= 0) continue;
+    const id = Math.floor(parsed);
+    if (seen.has(id)) continue;
+    seen.add(id);
+    out.push(id);
   }
   return out;
 }

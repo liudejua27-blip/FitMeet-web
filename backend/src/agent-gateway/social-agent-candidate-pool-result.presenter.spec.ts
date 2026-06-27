@@ -17,6 +17,8 @@ const query = {
   rawText: '',
   socialRequestId: null,
   acceptsStrangers: null,
+  candidateUserIds: [],
+  publicIntentIds: [],
 } satisfies CandidatePoolResolvedQuery;
 
 const debug = {
