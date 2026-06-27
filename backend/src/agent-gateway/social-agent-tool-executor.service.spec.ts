@@ -34,6 +34,7 @@ type MockRepository<T extends object = Record<string, unknown>> = {
   findOne: jest.Mock<Promise<T | null>, [unknown?]>;
   save: jest.Mock<Promise<T>, [T]>;
   create: jest.Mock<T, [Partial<T>]>;
+  createQueryBuilder?: jest.Mock<unknown, [string?]>;
 };
 
 type AgentActionAuditInput = {
