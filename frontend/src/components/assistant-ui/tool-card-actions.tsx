@@ -991,7 +991,12 @@ function visibleActionGroupKey(
   schemaType: SchemaDrivenAssistantCard['schemaType'],
   action: VisibleCardAction,
 ) {
-  if (schemaType === 'social_match.empty') {
+  if (
+    schemaType === 'social_match.empty' ||
+    schemaType === 'social_match.no_candidates' ||
+    schemaType === 'social_match.privacy_guard' ||
+    schemaType === 'social_match.rate_limited'
+  ) {
     const recoveryMode = publicString(action.payload?.recoveryMode);
     if (recoveryMode) return `empty.recovery:${recoveryMode}`;
     if (action.schemaAction === 'candidate.more_like_this') {
@@ -1074,7 +1079,13 @@ function canonicalVisibleActionKey(
       return 'candidate.skip';
     }
   }
-  if (schemaType === 'social_match.activity' || schemaType === 'social_match.empty') {
+  if (
+    schemaType === 'social_match.activity' ||
+    schemaType === 'social_match.empty' ||
+    schemaType === 'social_match.no_candidates' ||
+    schemaType === 'social_match.privacy_guard' ||
+    schemaType === 'social_match.rate_limited'
+  ) {
     if (/^(publish_social_request|publish_to_discover)$/.test(rawAction)) {
       return 'publish_to_discover';
     }
@@ -1253,9 +1264,14 @@ function sortVisibleCardActions(
             'activity.check_in',
             'activity.complete',
           ]
-        : schemaType === 'social_match.empty'
+        : schemaType === 'social_match.empty' ||
+            schemaType === 'social_match.no_candidates' ||
+            schemaType === 'social_match.privacy_guard' ||
+            schemaType === 'social_match.rate_limited'
           ? [
-              'publish_to_discover',
+              'matching.relax_distance',
+              'matching.relax_time',
+              'matching.relax_tags',
               'candidate.more_like_this',
               'activity.modify_time',
               'social_intent.decline_publish',
@@ -2105,7 +2121,60 @@ function defaultCardActions(card: SchemaDrivenAssistantCard): VisibleCardAction[
       },
     ];
   }
-  if (card.schemaType === 'social_match.empty') {
+  if (card.schemaType === 'social_match.no_candidates') {
+    return [
+      {
+        id: `${card.id}:relax-distance`,
+        label: '扩大距离',
+        requiresConfirmation: false,
+        schemaAction: 'matching.relax_distance',
+        action: 'matching.relax_distance',
+        payload: { ...basePayload, strategyId: 'expand_distance' },
+        source: 'default' as const,
+      },
+      {
+        id: `${card.id}:relax-time`,
+        label: '放宽时间',
+        requiresConfirmation: false,
+        schemaAction: 'matching.relax_time',
+        action: 'matching.relax_time',
+        payload: { ...basePayload, strategyId: 'expand_time' },
+        source: 'default' as const,
+      },
+      {
+        id: `${card.id}:relax-tags`,
+        label: '减少偏好限制',
+        requiresConfirmation: false,
+        schemaAction: 'matching.relax_tags',
+        action: 'matching.relax_tags',
+        payload: { ...basePayload, strategyId: 'relax_tags' },
+        source: 'default' as const,
+      },
+      {
+        id: `${card.id}:edit`,
+        label: '修改卡片',
+        requiresConfirmation: false,
+        schemaAction: 'activity.modify_time',
+        action: 'activity.modify_time',
+        payload: basePayload,
+        source: 'default' as const,
+      },
+      {
+        id: `${card.id}:skip-publish`,
+        label: '暂不发布',
+        requiresConfirmation: false,
+        schemaAction: 'social_intent.decline_publish',
+        action: 'social_intent.decline_publish',
+        payload: basePayload,
+        source: 'default' as const,
+      },
+    ];
+  }
+  if (
+    card.schemaType === 'social_match.empty' ||
+    card.schemaType === 'social_match.privacy_guard' ||
+    card.schemaType === 'social_match.rate_limited'
+  ) {
     return [
       {
         id: `${card.id}:publish`,

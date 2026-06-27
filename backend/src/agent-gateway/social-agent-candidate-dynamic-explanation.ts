@@ -3,6 +3,7 @@ import {
   LifeGraphPreferenceHistoryItemDto,
   LifeGraphUnifiedMatchSignalsDto,
 } from '../life-graph/dto/life-graph.dto';
+import { buildExplanationTemplate } from './social-agent-explanation-template.engine';
 
 export type SocialMatchDynamicExplanation = {
   whyYouMayLike: string;
@@ -11,6 +12,7 @@ export type SocialMatchDynamicExplanation = {
   boundaryNotes: string[];
   openerStrategy: string;
   dynamicSignalReasons: string[];
+  explanationSteps: string[];
   preferenceHistoryReasons: string[];
   continuousFilterHints: string[];
 };
@@ -92,6 +94,11 @@ export function buildSocialMatchDynamicExplanation(
     behavior?.pressurePreference === 'low'
       ? '开场先轻一点，先确认时间和强度，不要一上来就给对方压力。'
       : '开场可以直接但克制：说明共同兴趣、可选时间和公共地点，让对方有选择空间。';
+  const explanationSteps = buildExplanationTemplate({
+    scoreBreakdown: input.scoreBreakdown,
+    city: input.city,
+    commonTags,
+  }).explanationSteps;
 
   return {
     whyYouMayLike,
@@ -103,6 +110,7 @@ export function buildSocialMatchDynamicExplanation(
         : ['第一次建议先站内沟通，选择公共场所，不共享精确位置。'],
     openerStrategy,
     dynamicSignalReasons,
+    explanationSteps,
     preferenceHistoryReasons,
     continuousFilterHints: uniqueStrings([
       ...(guidance?.suggestedFilters ?? []),

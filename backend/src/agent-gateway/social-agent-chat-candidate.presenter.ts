@@ -173,6 +173,7 @@ export function toSocialAgentChatCandidate(
     candidateExplanation: candidateExplanationFromRecord(
       record.candidateExplanation,
     ),
+    explanationSteps: stringList(record.explanationSteps),
     emotionalInsight: emotionalInsightFromRecord(record.emotionalInsight),
     status: candidate.status ? String(candidate.status) : undefined,
   };

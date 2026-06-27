@@ -239,6 +239,7 @@ function buildCandidatePoolCandidateCard(input: {
     boundaryNotes: d.boundaryNotes,
     openerStrategy: d.openerStrategy,
     dynamicSignalReasons: d.dynamicSignalReasons,
+    explanationSteps: d.explanationSteps,
     recentPublicActivity: i.recentPublicActivity ?? [],
     preferenceHistorySignals: d.preferenceHistoryReasons,
     continuousFilterHints: d.continuousFilterHints,

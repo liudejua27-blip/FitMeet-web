@@ -197,6 +197,11 @@ import { SocialAgentMatchingJobProcessorService } from './social-agent-matching-
 import { SocialAgentMatchingJobWorkerCronService } from './social-agent-matching-job-worker-cron.service';
 import { SocialAgentPublishReconcilerService } from './social-agent-publish-reconciler.service';
 import { SocialAgentPublishReconcilerCronService } from './social-agent-publish-reconciler-cron.service';
+import { SocialAgentMatchRelaxationService } from './social-agent-match-relaxation.service';
+import { SocialAgentMatchRelaxationActionService } from './social-agent-match-relaxation-action.service';
+import { PublicIntentPrivacyGuardService } from './public-intent-privacy-guard.service';
+import { SocialIntentRateLimitService } from './social-intent-rate-limit.service';
+import { SocialAgentDomainClassifierService } from './social-agent-domain-classifier.service';
 import { AgentSettingsService } from './agent-settings.service';
 import { AgentControlController } from './agent-control.controller';
 import { SafetyEvent } from './entities/safety-event.entity';
@@ -305,6 +310,11 @@ import { AdminRbacModule } from '../admin-rbac/admin-rbac.module';
     SocialAgentMatchingJobWorkerCronService,
     SocialAgentPublishReconcilerService,
     SocialAgentPublishReconcilerCronService,
+    SocialAgentMatchRelaxationService,
+    SocialAgentMatchRelaxationActionService,
+    PublicIntentPrivacyGuardService,
+    SocialIntentRateLimitService,
+    SocialAgentDomainClassifierService,
     AgentApprovalDispatcherService,
     AgentSettingsService,
     AgentActionLogService,
@@ -459,6 +469,11 @@ import { AdminRbacModule } from '../admin-rbac/admin-rbac.module';
     AgentSideEffectLedgerService,
     MatchingJobService,
     SocialAgentMatchingJobProcessorService,
+    SocialAgentMatchRelaxationService,
+    SocialAgentMatchRelaxationActionService,
+    PublicIntentPrivacyGuardService,
+    SocialIntentRateLimitService,
+    SocialAgentDomainClassifierService,
     AgentApprovalDispatcherService,
     AgentSettingsService,
     AgentActionLogService,

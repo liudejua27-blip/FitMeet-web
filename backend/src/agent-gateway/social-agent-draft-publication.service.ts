@@ -45,6 +45,8 @@ import { AgentSideEffectLedgerService } from './agent-side-effect-ledger.service
 import { assertSocialAgentOpportunityPublishable } from './social-agent-opportunity-production-guard';
 import { MatchingJobService } from './matching-job.service';
 import { MatchingJob, MatchingJobStatus } from './entities/matching-job.entity';
+import { PublicIntentPrivacyGuardService } from './public-intent-privacy-guard.service';
+import { SocialIntentRateLimitService } from './social-intent-rate-limit.service';
 
 type DismissDraftContext = {
   action: string;
@@ -95,6 +97,10 @@ export class SocialAgentDraftPublicationService {
     @Optional()
     @InjectRepository(MatchingJob)
     private readonly matchingJobRepo?: Repository<MatchingJob>,
+    @Optional()
+    private readonly privacyGuard?: PublicIntentPrivacyGuardService,
+    @Optional()
+    private readonly rateLimit?: SocialIntentRateLimitService,
   ) {}
 
   async publishDraft(
@@ -103,6 +109,14 @@ export class SocialAgentDraftPublicationService {
     draft: CreateSocialRequestDto & { socialRequestId?: number | null },
   ): Promise<Record<string, unknown>> {
     this.assertRequiredPersistenceDependencies();
+    const privacy = this.privacyGuard?.inspect(draft);
+    if (privacy?.blocked) {
+      throw new BadRequestException('public_intent_privacy_guard_blocked');
+    }
+    const rateLimit = await this.rateLimit?.check(ownerUserId);
+    if (rateLimit && !rateLimit.allowed) {
+      throw new BadRequestException('public_intent_rate_limited');
+    }
     const socialRequestId = await this.resolvePublishSocialRequestId(
       ownerUserId,
       taskId,

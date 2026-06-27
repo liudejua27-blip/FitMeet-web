@@ -36,6 +36,15 @@ describe('tool-ui-schema', () => {
     expect(productComponentForSchemaType('social_match.candidate')).toBe('CandidateCards');
     expect(productComponentForSchemaType('social_match.activity')).toBe('OpportunityCard');
     expect(productComponentForSchemaType('social_match.empty')).toBe('CandidateEmptyStateCard');
+    expect(productComponentForSchemaType('social_match.no_candidates')).toBe(
+      'CandidateEmptyStateCard',
+    );
+    expect(productComponentForSchemaType('social_match.privacy_guard')).toBe(
+      'CandidateEmptyStateCard',
+    );
+    expect(productComponentForSchemaType('social_match.rate_limited')).toBe(
+      'CandidateEmptyStateCard',
+    );
     expect(productComponentForSchemaType('social_match.slot_completion')).toBe('GenericCard');
     expect(productComponentForSchemaType('life_graph.diff')).toBe('LifeGraphDiffCard');
     expect(productComponentForSchemaType('meet_loop.timeline')).toBe('MeetLoopTimeline');
@@ -70,6 +79,16 @@ describe('tool-ui-schema', () => {
           schemaName: 'CandidateEmptyStateCard',
           schemaVersion: FITMEET_TOOL_UI_SCHEMA_VERSION,
           schemaType: 'social_match.empty',
+        },
+      }),
+      normalizeAssistantCard({
+        schemaVersion: FITMEET_TOOL_UI_SCHEMA_VERSION,
+        schemaType: 'social_match.no_candidates',
+        title: '暂时没有找到合适候选',
+        data: {
+          schemaName: 'NoCandidatesRecoveryCard',
+          schemaVersion: FITMEET_TOOL_UI_SCHEMA_VERSION,
+          schemaType: 'social_match.no_candidates',
         },
       }),
       normalizeAssistantCard({
@@ -112,9 +131,9 @@ describe('tool-ui-schema', () => {
     ];
 
     expect(summarizeToolUICardCollection(cards)).toMatchObject({
-      title: '2 个候选 · 1 个下一步建议 · 1 张约练卡 · 1 张补充卡 · 1 个待确认动作',
+      title: '2 个候选 · 2 个下一步建议 · 1 张约练卡 · 1 张补充卡 · 1 个待确认动作',
       candidateCount: 2,
-      emptyCount: 1,
+      emptyCount: 2,
       opportunityCount: 4,
       approvalCount: 1,
       components: [

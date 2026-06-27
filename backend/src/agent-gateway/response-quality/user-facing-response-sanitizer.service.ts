@@ -314,6 +314,20 @@ export class UserFacingResponseSanitizerService {
       };
     }
 
+    const hasNoCandidatesCard = cards.some(
+      (card) => card.schemaType === 'social_match.no_candidates',
+    );
+    if (publicIntentId && hasNoCandidatesCard) {
+      return {
+        stage: 'no_candidates',
+        publicIntentId,
+        discoverHref,
+        publicIntentHref,
+        messagesHref: null,
+        requiredConfirmation: false,
+      };
+    }
+
     const hasCandidateCard = cards.some(
       (card) => card.type === 'candidate_card',
     );
@@ -409,6 +423,13 @@ export class UserFacingResponseSanitizerService {
           return 'PUBLISH_CONFIRMATION_REQUIRED';
         case 'discover_visible':
           return 'DISCOVER_VISIBLE';
+        case 'matching_queued':
+        case 'exploring_index':
+        case 'ranking_candidates':
+        case 'safety_checking':
+          return 'MATCHING_QUEUED';
+        case 'no_candidates':
+          return 'NO_CANDIDATES';
         case 'candidates_recommended':
           return 'CANDIDATES_READY';
         case 'contact_confirmation_required':
@@ -458,6 +479,11 @@ export class UserFacingResponseSanitizerService {
       stage !== 'opportunity_card_generated' &&
       stage !== 'publish_confirmation_required' &&
       stage !== 'discover_visible' &&
+      stage !== 'matching_queued' &&
+      stage !== 'exploring_index' &&
+      stage !== 'ranking_candidates' &&
+      stage !== 'safety_checking' &&
+      stage !== 'no_candidates' &&
       stage !== 'candidates_recommended' &&
       stage !== 'contact_confirmation_required' &&
       stage !== 'messages_handoff' &&
