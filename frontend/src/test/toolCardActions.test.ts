@@ -118,6 +118,68 @@ describe('tool-card-actions runtime identity', () => {
     });
   });
 
+  it('shows owner-side public intent application actions and local navigation', () => {
+    const card: SchemaDrivenAssistantCard = {
+      id: 'application-42',
+      type: 'public_intent_application_card',
+      schemaVersion: FITMEET_TOOL_UI_SCHEMA_VERSION,
+      schemaType: 'public_intent.application',
+      title: '有人申请加入你的约练',
+      body: '我也想参加这次散步。',
+      data: {
+        schemaName: 'PublicIntentApplicationCard',
+        applicationId: 42,
+        publicIntentId: 'intent_abc',
+        applicantUserId: 11,
+        profileHref: '/user/11',
+        messagesHref: '/messages?conversationId=conv_123',
+      },
+      actions: [],
+    };
+
+    const actions = visibleCardActions(card, []);
+
+    expect(actions.map((action) => action.schemaAction)).toEqual([
+      'public_intent_application.accept',
+      'public_intent_application.reject',
+      'public_intent_application.view_profile',
+      'public_intent_application.open_conversation',
+    ]);
+    expect(
+      actions.find((action) => action.schemaAction === 'public_intent_application.accept'),
+    ).toMatchObject({
+      label: '接受并开聊',
+      requiresConfirmation: true,
+      payload: expect.objectContaining({
+        applicationId: 42,
+        applicantUserId: 11,
+        publicIntentId: 'intent_abc',
+      }),
+    });
+    expect(
+      actions.find((action) => action.schemaAction === 'public_intent_application.reject'),
+    ).toMatchObject({
+      label: '暂不接受',
+      requiresConfirmation: false,
+    });
+    expect(
+      cardActionNavigationHrefForTests(
+        card,
+        actions.find(
+          (action) => action.schemaAction === 'public_intent_application.view_profile',
+        )!,
+      ),
+    ).toBe('/user/11');
+    expect(
+      cardActionNavigationHrefForTests(
+        card,
+        actions.find(
+          (action) => action.schemaAction === 'public_intent_application.open_conversation',
+        )!,
+      ),
+    ).toBe('/messages?conversationId=conv_123');
+  });
+
   it('keeps opener generation copy in draft mode instead of approval mode', () => {
     expect(TOOL_UI_CARD_ACTION_COPY['candidate.generate_opener'].result).toBe(
       '开场白草稿已准备好，不会自动发送给对方。',

@@ -42,7 +42,7 @@ function makeRoute(
   };
 }
 
-function makeHarness() {
+function makeHarness(overrides: { applicationActions?: unknown } = {}) {
   const chatLlm = {
     generateConversationalAnswerWithSource: jest
       .fn()
@@ -85,11 +85,69 @@ function makeHarness() {
     profileEnrichment as never,
     routeContext as never,
     metrics as never,
+    overrides.applicationActions as never,
   );
   return { chatLlm, profileEnrichment, routeContext, metrics, service };
 }
 
 describe('SocialAgentRouteConversationTurnService', () => {
+  it('returns owner public-intent application cards through a deterministic query', async () => {
+    const applicationCard = {
+      id: 'public_intent_application:31:pending',
+      type: 'public_intent_application_card',
+      schemaType: 'public_intent.application',
+      title: '有人申请加入你的约练',
+      body: '想一起散步',
+      status: 'waiting_confirmation',
+      data: { applicationId: 31 },
+      actions: [],
+    };
+    const applicationActions = {
+      buildPendingApplicationCards: jest
+        .fn()
+        .mockResolvedValue([applicationCard]),
+    };
+    const { chatLlm, profileEnrichment, service } = makeHarness({
+      applicationActions,
+    });
+    const task = makeTask({ goal: '查看报名' });
+
+    const result = await service.handle({
+      ownerUserId: 7,
+      task,
+      message: '有人报名我的约练卡吗？',
+      route: makeRoute({
+        intent: 'casual_chat',
+        shouldUpdateProfile: false,
+        replyStrategy: 'conversational_answer',
+      }),
+      profile: null,
+      longTermSnapshot: null,
+      brainToolResults: [],
+    });
+
+    expect(result).toMatchObject({
+      handled: true,
+      task,
+      assistantMessageSource: 'deterministic_route',
+      savedContext: false,
+      profileUpdated: false,
+      cards: [applicationCard],
+    });
+    expect(result.assistantMessage).toContain('1 条待处理的约练报名');
+    expect(
+      applicationActions.buildPendingApplicationCards,
+    ).toHaveBeenCalledWith({
+      ownerUserId: 7,
+      taskId: 101,
+      limit: 5,
+    });
+    expect(
+      chatLlm.generateConversationalAnswerWithSource,
+    ).not.toHaveBeenCalled();
+    expect(profileEnrichment.handleTurn).not.toHaveBeenCalled();
+  });
+
   it('delegates profile enrichment intents to the profile enrichment service', async () => {
     const { chatLlm, profileEnrichment, routeContext, service } = makeHarness();
     const task = makeTask();

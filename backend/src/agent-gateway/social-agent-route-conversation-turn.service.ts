@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Optional } from '@nestjs/common';
 
 import { AgentTask } from './entities/agent-task.entity';
 import { LifeGraphProposalDto } from '../life-graph/dto/life-graph.dto';
@@ -18,6 +18,7 @@ import { SocialAgentChatLlmService } from './social-agent-chat-llm.service';
 import { SocialAgentMetricsService } from './social-agent-metrics.service';
 import { SocialAgentProfileEnrichmentService } from './social-agent-profile-enrichment.service';
 import { SocialAgentRouteContextService } from './social-agent-route-context.service';
+import { SocialAgentApplicationActionService } from './social-agent-application-action.service';
 import { buildRunScopedAssistantMessageId } from './social-agent-stream-message-id.util';
 
 type HandleRouteConversationTurnInput = {
@@ -53,6 +54,8 @@ export class SocialAgentRouteConversationTurnService {
     private readonly profileEnrichment: SocialAgentProfileEnrichmentService,
     private readonly routeContext: SocialAgentRouteContextService,
     private readonly metrics?: SocialAgentMetricsService,
+    @Optional()
+    private readonly applicationActions?: SocialAgentApplicationActionService,
   ) {}
 
   async handle(
@@ -62,6 +65,10 @@ export class SocialAgentRouteConversationTurnService {
       taskId: input.task.id,
       traceId: input.traceId,
     });
+    const applicationCards =
+      await this.handlePublicIntentApplicationsQuery(input);
+    if (applicationCards) return applicationCards;
+
     const forceProfileMissingFieldsReply =
       !this.isProfileEnrichmentIntent(input.route) &&
       input.brainToolResults.length === 0 &&
@@ -231,6 +238,40 @@ export class SocialAgentRouteConversationTurnService {
       });
     }
     return null;
+  }
+
+  private async handlePublicIntentApplicationsQuery(
+    input: HandleRouteConversationTurnInput,
+  ): Promise<HandleRouteConversationTurnResult | null> {
+    if (!this.isPublicIntentApplicationsQuestion(input.message)) return null;
+    if (!this.applicationActions) return null;
+    const cards = await this.applicationActions.buildPendingApplicationCards({
+      ownerUserId: input.ownerUserId,
+      taskId: input.task.id,
+      limit: 5,
+    });
+    return {
+      handled: true,
+      task: input.task,
+      assistantMessage:
+        cards.length > 0
+          ? `你有 ${cards.length} 条待处理的约练报名。接受后才会创建站内会话和约练参与关系。`
+          : '暂时没有待处理的约练报名申请。',
+      assistantMessageSource: 'deterministic_route',
+      assistantStreamed: false,
+      savedContext: false,
+      profileUpdated: false,
+      profileUpdateProposal: null,
+      cards,
+    };
+  }
+
+  private isPublicIntentApplicationsQuestion(message: string): boolean {
+    const normalized = message.trim();
+    if (!normalized) return false;
+    return /(报名|申请|加入).{0,16}(约练|卡片|发布|发现|公开|我的|待处理|处理|有人|谁|列表)|(约练|卡片|发布|发现|公开|我的).{0,16}(报名|申请|加入|待处理)/i.test(
+      normalized,
+    );
   }
 
   private isLowCostCasualMessage(message: string): boolean {

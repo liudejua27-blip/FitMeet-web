@@ -11,6 +11,7 @@ export type ToolUISchemaType =
   | 'profile.completion'
   | 'life_graph.diff'
   | 'meet_loop.timeline'
+  | 'public_intent.application'
   | 'safety.approval'
   | 'generic.card';
 
@@ -22,6 +23,7 @@ export type ToolUIProductComponent =
   | 'ProfileCompletionCard'
   | 'LifeGraphDiffCard'
   | 'MeetLoopTimeline'
+  | 'PublicIntentApplicationCard'
   | 'ApprovalPanel'
   | 'GenericCard';
 
@@ -64,7 +66,11 @@ export type ToolUISchemaAction =
   | 'safety.reject'
   | 'slot_completion.use_default_safety'
   | 'slot_completion.custom_safety'
-  | 'slot_completion.cancel';
+  | 'slot_completion.cancel'
+  | 'public_intent_application.accept'
+  | 'public_intent_application.reject'
+  | 'public_intent_application.view_profile'
+  | 'public_intent_application.open_conversation';
 
 export type AssistantCardAction = {
   id?: string;
@@ -97,6 +103,7 @@ export type ToolUICardCollectionSummary = {
   lifeGraphDiffCount: number;
   profileCompletionCount: number;
   meetLoopCount: number;
+  applicationCount: number;
   genericCount: number;
   components: ToolUIProductComponent[];
 };
@@ -285,6 +292,22 @@ export type GenericCardView = {
   body: string | null;
   statusLabel: string | null;
   details: string[];
+};
+
+export type PublicIntentApplicationView = {
+  applicationId: number | string | null;
+  publicIntentId: string | null;
+  applicantUserId: number | string | null;
+  applicantName: string;
+  publicIntentTitle: string;
+  message: string;
+  status: string;
+  statusLabel: string;
+  meetId: number | string | null;
+  profileHref: string | null;
+  messagesHref: string | null;
+  conversationId: string | null;
+  safetyBoundary: string;
 };
 
 export const FITMEET_TOOL_UI_SCHEMA_VERSION = 'fitmeet.tool-ui.v1';
@@ -843,6 +866,7 @@ export function productComponentForSchemaType(
   if (schemaType === 'profile.completion') return 'ProfileCompletionCard';
   if (schemaType === 'life_graph.diff') return 'LifeGraphDiffCard';
   if (schemaType === 'meet_loop.timeline') return 'MeetLoopTimeline';
+  if (schemaType === 'public_intent.application') return 'PublicIntentApplicationCard';
   if (schemaType === 'safety.approval') return 'ApprovalPanel';
   return 'GenericCard';
 }
@@ -870,8 +894,11 @@ export function summarizeToolUICardCollection(
     (card) => card.schemaType === 'profile.completion',
   ).length;
   const meetLoopCount = cards.filter((card) => card.schemaType === 'meet_loop.timeline').length;
+  const applicationCount = cards.filter(
+    (card) => card.schemaType === 'public_intent.application',
+  ).length;
   const genericCount = cards.filter((card) => card.schemaType === 'generic.card').length;
-  const opportunityCount = candidateCount + activityCount + slotCompletionCount;
+  const opportunityCount = candidateCount + activityCount + slotCompletionCount + applicationCount;
   const components = Array.from(
     new Set(cards.map((card) => productComponentForSchemaType(card.schemaType))),
   );
@@ -881,6 +908,7 @@ export function summarizeToolUICardCollection(
     activityCount > 0 ? `${activityCount} 张约练卡` : null,
     slotCompletionCount > 0 ? `${slotCompletionCount} 张补充卡` : null,
     meetLoopCount > 0 ? `${meetLoopCount} 个约练进展` : null,
+    applicationCount > 0 ? `${applicationCount} 条报名申请` : null,
     lifeGraphDiffCount > 0 ? `${lifeGraphDiffCount} 条画像建议` : null,
     profileCompletionCount > 0 ? `${profileCompletionCount} 张资料补全卡` : null,
     approvalCount > 0 ? `${approvalCount} 个待确认动作` : null,
@@ -899,6 +927,8 @@ export function summarizeToolUICardCollection(
     detail = '先补齐当前匹配最需要的信息，生成预览并确认后才保存。';
   } else if (meetLoopCount > 0) {
     detail = '约练进展按发起、等待、改期、确认、评价和画像回写展示。';
+  } else if (applicationCount > 0) {
+    detail = '报名申请按结构化卡片展示；接受后才会创建会话和参与关系。';
   }
 
   return {
@@ -911,6 +941,7 @@ export function summarizeToolUICardCollection(
     lifeGraphDiffCount,
     profileCompletionCount,
     meetLoopCount,
+    applicationCount,
     genericCount,
     components,
   };
@@ -950,6 +981,7 @@ export function schemaDefaultTitle(schemaType: ToolUISchemaType) {
   if (schemaType === 'profile.completion') return '个人信息补全';
   if (schemaType === 'life_graph.diff') return '资料更新建议';
   if (schemaType === 'meet_loop.timeline') return '约练进展';
+  if (schemaType === 'public_intent.application') return '约练报名申请';
   if (schemaType === 'safety.approval') return '安全确认';
   return '整理结果';
 }
@@ -967,6 +999,7 @@ export function toolUISchemaTypeFromUnknown(value: unknown): ToolUISchemaType | 
     text === 'profile.completion' ||
     text === 'life_graph.diff' ||
     text === 'meet_loop.timeline' ||
+    text === 'public_intent.application' ||
     text === 'safety.approval' ||
     text === 'generic.card'
   ) {
@@ -1016,7 +1049,11 @@ export function toolUISchemaActionFromUnknown(value: unknown): ToolUISchemaActio
     text === 'safety.reject' ||
     text === 'slot_completion.use_default_safety' ||
     text === 'slot_completion.custom_safety' ||
-    text === 'slot_completion.cancel'
+    text === 'slot_completion.cancel' ||
+    text === 'public_intent_application.accept' ||
+    text === 'public_intent_application.reject' ||
+    text === 'public_intent_application.view_profile' ||
+    text === 'public_intent_application.open_conversation'
   ) {
     return text;
   }
@@ -1055,6 +1092,18 @@ function toolUISchemaActionFromLegacyAction(value: string | null): ToolUISchemaA
   if (value === 'submit_review') return 'review.submit';
   if (value === 'upload_proof') return 'activity.upload_proof';
   if (value === 'confirm_profile_update') return 'life_graph.accept_update';
+  if (value === 'accept_public_intent_application' || value === 'application.accept') {
+    return 'public_intent_application.accept';
+  }
+  if (value === 'reject_public_intent_application' || value === 'application.reject') {
+    return 'public_intent_application.reject';
+  }
+  if (value === 'view_application_profile' || value === 'application.view_profile') {
+    return 'public_intent_application.view_profile';
+  }
+  if (value === 'open_application_conversation' || value === 'application.open_conversation') {
+    return 'public_intent_application.open_conversation';
+  }
   return undefined;
 }
 
@@ -1073,7 +1122,8 @@ function legacyActionRequiresConfirmation(
     schemaAction === 'opener.confirm_send' ||
     schemaAction === 'publish_to_discover' ||
     schemaAction === 'activity.confirm_create' ||
-    schemaAction === 'life_graph.accept_update'
+    schemaAction === 'life_graph.accept_update' ||
+    schemaAction === 'public_intent_application.accept'
   );
 }
 
@@ -1085,6 +1135,7 @@ export function schemaTypeFromLegacyCardType(type: string): ToolUISchemaType {
   if (type === 'checkin_card' || type === 'meet_loop_timeline' || type === 'review_card') {
     return 'meet_loop.timeline';
   }
+  if (type === 'public_intent_application_card') return 'public_intent.application';
   if (type === 'opener_approval' || type === 'safety_boundary') return 'safety.approval';
   return 'generic.card';
 }
@@ -1137,6 +1188,30 @@ export function defaultOpportunityActionsForSchema(
       },
     ];
   }
+  if (schemaType === 'public_intent.application') {
+    return [
+      {
+        schemaAction: 'public_intent_application.accept',
+        requiresConfirmation: true,
+        source: 'default',
+      },
+      {
+        schemaAction: 'public_intent_application.reject',
+        requiresConfirmation: false,
+        source: 'default',
+      },
+      {
+        schemaAction: 'public_intent_application.view_profile',
+        requiresConfirmation: false,
+        source: 'default',
+      },
+      {
+        schemaAction: 'public_intent_application.open_conversation',
+        requiresConfirmation: false,
+        source: 'default',
+      },
+    ];
+  }
   if (schemaType === 'social_match.empty') {
     return [
       { schemaAction: 'publish_to_discover', requiresConfirmation: true, source: 'default' },
@@ -1177,6 +1252,68 @@ export function normalizeCandidateEmptyStateView(
       '不会编造候选；发送邀请、公开位置或交换联系方式前必须确认。',
     nextBestStep:
       publicDetail(card.data.nextBestStep) ?? '建议先发布到发现，或放宽范围后重新搜索。',
+  };
+}
+
+export function normalizePublicIntentApplicationView(
+  card: SchemaDrivenAssistantCard,
+): PublicIntentApplicationView {
+  const application = isRecord(card.data.application) ? card.data.application : {};
+  const applicant = isRecord(card.data.applicant) ? card.data.applicant : {};
+  const publicIntent = isRecord(card.data.publicIntent) ? card.data.publicIntent : {};
+  const status =
+    publicString(card.data.status) ?? publicString(application.status) ?? 'pending';
+  const applicantUserId = firstPublicPrimitive(
+    card.data.applicantUserId,
+    application.applicantUserId,
+    applicant.userId,
+    applicant.id,
+  );
+  const applicantName =
+    publicDetail(card.data.applicantName) ??
+    publicDetail(application.applicantName) ??
+    publicDetail(applicant.displayName) ??
+    publicDetail(applicant.name) ??
+    (applicantUserId !== null ? `用户 ${String(applicantUserId)}` : '申请人');
+  const publicIntentId =
+    publicString(card.data.publicIntentId) ?? publicString(application.publicIntentId);
+  const conversationId =
+    publicString(card.data.conversationId) ?? publicString(application.conversationId);
+  const messagesHref =
+    firstSafePublicApplicationHref(card.data.messagesHref, application.messagesHref) ??
+    (conversationId ? `/messages?conversationId=${encodeURIComponent(conversationId)}` : null);
+  const profileHref =
+    firstSafePublicApplicationHref(
+      card.data.profileHref,
+      card.data.userHref,
+      application.profileHref,
+      applicant.profileHref,
+    ) ?? (applicantUserId !== null ? `/user/${encodeURIComponent(String(applicantUserId))}` : null);
+
+  return {
+    applicationId: firstPublicPrimitive(card.data.applicationId, application.id),
+    publicIntentId,
+    applicantUserId,
+    applicantName,
+    publicIntentTitle:
+      publicDetail(card.data.publicIntentTitle) ??
+      publicDetail(publicIntent.title) ??
+      publicDetail(application.publicIntentTitle) ??
+      card.title,
+    message:
+      publicDetail(card.data.message) ??
+      publicDetail(application.message) ??
+      card.body ??
+      '对方想加入你发布的约练卡。',
+    status,
+    statusLabel: publicIntentApplicationStatusLabel(status),
+    meetId: firstPublicPrimitive(card.data.meetId, application.meetId),
+    profileHref,
+    messagesHref,
+    conversationId,
+    safetyBoundary:
+      publicDetail(card.data.safetyBoundary) ??
+      '接受后才会创建站内会话；不会公开手机号、微信或精确位置。',
   };
 }
 
@@ -1491,6 +1628,29 @@ function defaultCandidateEmptyRecoveryOptions(): CandidateEmptyStateRecoveryOpti
       requiresConfirmation: false,
     },
   ];
+}
+
+function publicIntentApplicationStatusLabel(status: string) {
+  if (status === 'accepted') return '已接受';
+  if (status === 'rejected') return '已拒绝';
+  if (status === 'cancelled') return '已取消';
+  return '待处理';
+}
+
+function firstSafePublicApplicationHref(...values: unknown[]): string | null {
+  for (const value of values) {
+    const href = publicString(value);
+    if (!href) continue;
+    if (
+      href.startsWith('/user/') ||
+      href.startsWith('/messages?') ||
+      href === '/messages' ||
+      href.startsWith('/public-intent/')
+    ) {
+      return href;
+    }
+  }
+  return null;
 }
 
 function candidateRecommendationProtocol(
@@ -2092,6 +2252,14 @@ function publicString(value: unknown) {
 function primitiveIdentityString(value: unknown) {
   if (typeof value === 'string' && value.trim()) return value.trim();
   if (typeof value === 'number' && Number.isFinite(value)) return String(value);
+  return null;
+}
+
+function firstPublicPrimitive(...values: unknown[]): string | number | null {
+  for (const value of values) {
+    if (typeof value === 'string' && value.trim()) return value.trim();
+    if (typeof value === 'number' && Number.isFinite(value)) return value;
+  }
   return null;
 }
 
