@@ -281,7 +281,7 @@ describe('SocialAgentPlannerService', () => {
     expect(events.save).not.toHaveBeenCalled();
   });
 
-  it('does not let stale low context window config shorten DeepSeek planner memory', async () => {
+  it('uses the compact answer context window for DeepSeek planner memory', async () => {
     global.fetch = jest.fn().mockResolvedValue({
       ok: true,
       json: jest.fn().mockResolvedValue({
@@ -350,23 +350,23 @@ describe('SocialAgentPlannerService', () => {
     >;
     const brainMemory = userPayload.brainMemory as Record<string, unknown>;
 
-    expect(userPayload.priorPlan).toHaveLength(80);
+    expect(userPayload.priorPlan).toHaveLength(8);
     expect(userPayload.priorPlan).toEqual(
-      expect.arrayContaining([expect.objectContaining({ id: 'plan-16' })]),
+      expect.arrayContaining([expect.objectContaining({ id: 'plan-88' })]),
     );
-    expect(userPayload.recentToolCalls).toHaveLength(80);
+    expect(userPayload.recentToolCalls).toHaveLength(8);
     expect(userPayload.recentToolCalls).toEqual(
-      expect.arrayContaining([expect.objectContaining({ id: 'tool-16' })]),
+      expect.arrayContaining([expect.objectContaining({ id: 'tool-88' })]),
     );
-    expect(brainMemory.turns).toHaveLength(80);
+    expect(brainMemory.turns).toHaveLength(8);
     expect(brainMemory.turns).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ text: 'brain-17' }),
+        expect.objectContaining({ text: 'brain-89' }),
         expect.objectContaining({ text: '继续刚才的约练任务' }),
       ]),
     );
-    expect(brainMemory.previousPlanSummary).toHaveLength(80);
-    expect(brainMemory.previousToolSummary).toHaveLength(80);
+    expect(brainMemory.previousPlanSummary).toHaveLength(8);
+    expect(brainMemory.previousToolSummary).toHaveLength(8);
   });
 
   it('hydrates the legacy planner path with the same Social Codex context contract before calling DeepSeek', async () => {
@@ -507,6 +507,7 @@ describe('SocialAgentPlannerService', () => {
       userId: 1,
       taskId: 10,
       threadId: 'agent-task:10',
+      mode: 'answer',
     });
     expect(global.fetch).not.toHaveBeenCalled();
     expect(result.source).toBe('workflow');

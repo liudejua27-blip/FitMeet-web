@@ -770,7 +770,7 @@ describe('SocialAgentIntentRouterService', () => {
         string,
         unknown
       >;
-      expect(userPayload.conversationHistory).toHaveLength(80);
+      expect(userPayload.conversationHistory).toHaveLength(4);
     } finally {
       global.fetch = originalFetch;
     }
@@ -904,7 +904,7 @@ describe('SocialAgentIntentRouterService', () => {
       const userPayload = JSON.parse(
         String(payload.messages[1].content),
       ) as Record<string, unknown>;
-      expect(userPayload.conversationHistory).toHaveLength(80);
+      expect(userPayload.conversationHistory).toHaveLength(4);
       expect(userPayload.knownTaskSlots).toMatchObject({
         activity: '散步',
         time_window: '今天晚上',
@@ -1142,7 +1142,7 @@ describe('SocialAgentIntentRouterService', () => {
     const userPayload = JSON.parse(
       String(retryPayload.messages[1].content),
     ) as Record<string, unknown>;
-    expect(userPayload.conversationHistory).toHaveLength(80);
+    expect(userPayload.conversationHistory).toHaveLength(4);
   });
 
   it('normalizes injected DeepSeek timeout messages before falling back to rules', async () => {
@@ -1429,7 +1429,7 @@ describe('SocialAgentIntentRouterService', () => {
     ).toBe(25000);
   });
 
-  it('does not let stale tiny context env weaken DeepSeek intent routing payloads', async () => {
+  it('uses the compact router context window while ignoring stale stored-context env', async () => {
     const router = new SocialAgentIntentRouterService({
       get: jest.fn((key: string) => {
         if (key === 'DEEPSEEK_API_KEY') return 'test-key';
@@ -1481,10 +1481,10 @@ describe('SocialAgentIntentRouterService', () => {
         string,
         unknown
       >;
-      expect(userPayload.conversationHistory).toHaveLength(80);
+      expect(userPayload.conversationHistory).toHaveLength(4);
       expect(userPayload.conversationHistory).toEqual(
         expect.arrayContaining([
-          expect.objectContaining({ text: 'history-16' }),
+          expect.objectContaining({ text: 'history-92' }),
           expect.objectContaining({ text: 'history-95' }),
         ]),
       );
@@ -1644,7 +1644,7 @@ describe('SocialAgentIntentRouterService', () => {
     }
   });
 
-  it('keeps short follow-up turns on DeepSeek with hydrated task memory and full context', async () => {
+  it('keeps short follow-up turns on DeepSeek with hydrated task memory and compact router context', async () => {
     const router = new SocialAgentIntentRouterService({
       get: jest.fn((key: string) => {
         if (key === 'DEEPSEEK_API_KEY') return 'test-key';
@@ -1725,13 +1725,11 @@ describe('SocialAgentIntentRouterService', () => {
         unknown
       >;
       expect(userPayload.message).toBe('可以');
-      expect(userPayload.conversationHistory).toHaveLength(80);
+      expect(userPayload.conversationHistory).toHaveLength(4);
       expect(userPayload.conversationHistory).toEqual(
         expect.arrayContaining([
-          expect.objectContaining({ text: 'history-16' }),
-          expect.objectContaining({
-            text: '我想在青岛大学，今天晚上，找个女舞蹈生散步。',
-          }),
+          expect.objectContaining({ text: 'history-92' }),
+          expect.objectContaining({ text: 'history-95' }),
         ]),
       );
       expect(userPayload.knownTaskSlots).toMatchObject({

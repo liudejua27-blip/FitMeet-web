@@ -70,6 +70,40 @@ describe('FitMeetAlphaAgentSdkService', () => {
     );
   });
 
+  it('keeps clear social search requests on the local deterministic path even when SDK is enabled', async () => {
+    const service = new FitMeetAlphaAgentSdkService({
+      get: jest.fn((key: string) => {
+        if (key === 'OPENAI_AGENTS_SDK_ENABLED') return 'true';
+        if (key === 'OPENAI_API_KEY') return 'test-openai-key';
+        return undefined;
+      }),
+    } as unknown as ConfigService);
+
+    const decision = await service.prepareTurn({
+      ownerUserId: 1,
+      taskId: 105,
+      message: '今晚想找青岛大学附近跑步搭子',
+      permissionMode: 'limited_auto',
+      context: {
+        recentMessages: Array.from({ length: 40 }, (_, index) => ({
+          role: index % 2 === 0 ? 'user' : 'assistant',
+          text: `历史消息 ${index + 1}`,
+        })),
+      },
+    });
+
+    expect(decision.safety.blocked).toBe(false);
+    expect(decision.agentTrace.sdkEnabled).toBe(true);
+    expect(decision.structuredIntent).toMatchObject({
+      intent: 'find_nearby_partner',
+      nextAgent: 'match_agent',
+      activityType: '跑步',
+      locationText: '青岛大学',
+      timePreference: '今晚',
+      requiresSearch: true,
+    });
+  });
+
   it('uses hydrated task slots when local intent fallback handles a short follow-up', async () => {
     const service = new FitMeetAlphaAgentSdkService(config);
 

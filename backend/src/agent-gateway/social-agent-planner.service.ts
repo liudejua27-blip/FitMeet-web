@@ -26,7 +26,7 @@ import {
   selectSocialAgentConfiguredModel,
   SocialAgentModelRouterService,
 } from './social-agent-model-router.service';
-import { socialAgentContextTurnLimit } from './social-agent-context-window';
+import { socialAgentLlmContextTurnLimit } from './social-agent-context-window';
 import {
   readSocialAgentConversationHistory,
   summarizeSocialAgentTaskMemoryForLlm,
@@ -956,6 +956,7 @@ export class SocialAgentPlannerService {
         userId: task.ownerUserId,
         taskId: task.id,
         threadId: `agent-task:${task.id}`,
+        mode: 'answer',
       })
       .catch((error) => {
         this.logger.warn(
@@ -971,7 +972,7 @@ export class SocialAgentPlannerService {
   }
 
   private plannerContextLimit(): number {
-    return socialAgentContextTurnLimit(this.config);
+    return socialAgentLlmContextTurnLimit(this.config, 'answer');
   }
 
   private failureFromTaskState(

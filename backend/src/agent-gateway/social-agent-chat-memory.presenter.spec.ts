@@ -80,7 +80,7 @@ describe('social-agent-chat-memory.presenter', () => {
     ]);
   });
 
-  it('keeps the default LLM history window at 20 conversation rounds (40 messages)', () => {
+  it('keeps the default stored history window for restore and audit callers', () => {
     const agentTask = task({
       memory: {
         socialAgentConversation: {
@@ -99,7 +99,7 @@ describe('social-agent-chat-memory.presenter', () => {
     expect(history.at(-1)).toEqual({ role: 'user', text: '第 85 条' });
   });
 
-  it('does not let stale tiny limits shrink the DeepSeek context below production default', () => {
+  it('allows explicit compact LLM history limits for prompt callers', () => {
     const agentTask = task({
       memory: {
         socialAgentConversation: {
@@ -113,8 +113,8 @@ describe('social-agent-chat-memory.presenter', () => {
 
     const history = buildSocialAgentLlmConversationHistory(agentTask, 8);
 
-    expect(history).toHaveLength(80);
-    expect(history[0]).toEqual({ role: 'assistant', text: '第 6 条' });
+    expect(history).toHaveLength(8);
+    expect(history[0]).toEqual({ role: 'assistant', text: '第 78 条' });
     expect(history.at(-1)).toEqual({ role: 'user', text: '第 85 条' });
   });
 

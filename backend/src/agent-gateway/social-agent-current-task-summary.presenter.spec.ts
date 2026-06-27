@@ -73,11 +73,11 @@ describe('social agent current task summary presenter', () => {
         typeof value === 'object' && value !== null && !Array.isArray(value),
     });
 
-    expect(summary.plan).toHaveLength(80);
-    expect(summary.recentToolCalls).toHaveLength(80);
-    expect((summary.plan as Array<{ id: string }>)[0]?.id).toBe('step_9');
+    expect(summary.plan).toHaveLength(40);
+    expect(summary.recentToolCalls).toHaveLength(40);
+    expect((summary.plan as Array<{ id: string }>)[0]?.id).toBe('step_49');
     expect((summary.recentToolCalls as Array<{ id: string }>)[0]?.id).toBe(
-      'call_9',
+      'call_49',
     );
   });
 

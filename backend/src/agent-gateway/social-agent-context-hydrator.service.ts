@@ -21,7 +21,10 @@ import {
 } from './social-agent-task-slot-constraints.presenter';
 import { parseSocialAgentThreadTaskId } from './social-agent-thread-id.util';
 import { SocialCodexLifeGraphGovernanceService } from './social-codex-life-graph-governance.service';
-import { socialAgentContextTurnLimit } from './social-agent-context-window';
+import {
+  type SocialAgentContextMode,
+  socialAgentLlmContextTurnLimit,
+} from './social-agent-context-window';
 
 export type SocialAgentHydratedContext = {
   userId: number;
@@ -63,7 +66,9 @@ export class SocialAgentContextHydratorService {
     userId: number;
     threadId?: string | number | null;
     taskId?: number | null;
+    mode?: SocialAgentContextMode;
   }): Promise<SocialAgentHydratedContext> {
+    const mode = input.mode ?? 'router';
     const task = await this.resolveTask(input);
     const longTerm = await this.longTerm
       ?.readSnapshot(input.userId)
@@ -94,6 +99,24 @@ export class SocialAgentContextHydratorService {
       this.lifeGraphGovernance?.toUserVisibleFactSummaries(
         lifeGraphFactProposals,
       ) ?? [];
+    const fullTaskMemory = taskMemory
+      ? this.sanitizeTaskMemory(taskMemory, {
+          taskSlots,
+          taskSlotSummary,
+          knownTaskSlotConstraints,
+          candidateActions,
+          pendingApprovals,
+        })
+      : null;
+    const lifeGraphSummary = longTerm
+      ? (this.sanitizeContextValue({
+          profileFacts: longTerm.profileFacts,
+          preferences: longTerm.preferences,
+          boundaries: longTerm.boundaries,
+          availability: longTerm.availability,
+          activityPreferences: longTerm.activityPreferences,
+        }) as Record<string, unknown>)
+      : null;
     return {
       userId: input.userId,
       threadId: this.canonicalThreadId(input.threadId, task?.id ?? null),
@@ -102,19 +125,11 @@ export class SocialAgentContextHydratorService {
         ? this.sanitizeRecentMessages(
             readSocialAgentConversationHistory(
               task,
-              socialAgentContextTurnLimit(this.config),
+              socialAgentLlmContextTurnLimit(this.config, mode),
             ),
           )
         : [],
-      taskMemory: taskMemory
-        ? this.sanitizeTaskMemory(taskMemory, {
-            taskSlots,
-            taskSlotSummary,
-            knownTaskSlotConstraints,
-            candidateActions,
-            pendingApprovals,
-          })
-        : null,
+      taskMemory: this.contextTaskMemoryForMode(fullTaskMemory, mode),
       taskSlots: this.sanitizeContextValue(taskSlots) as typeof taskSlots,
       taskSlotSummary: this.sanitizeContextValue(taskSlotSummary) as Record<
         string,
@@ -123,30 +138,168 @@ export class SocialAgentContextHydratorService {
       knownTaskSlotConstraints: this.sanitizeContextValue(
         knownTaskSlotConstraints,
       ) as SocialAgentKnownTaskSlotConstraints | null,
-      lifeGraphFactProposals: this.sanitizeContextValue(
-        lifeGraphFactProposals,
-      ) as typeof lifeGraphFactProposals,
-      lifeGraphFactDisplaySummaries: this.sanitizeContextValue(
-        lifeGraphFactDisplaySummaries,
-      ) as typeof lifeGraphFactDisplaySummaries,
-      lifeGraphGovernanceSummary,
-      lifeGraphSummary: longTerm
-        ? (this.sanitizeContextValue({
-            profileFacts: longTerm.profileFacts,
-            preferences: longTerm.preferences,
-            boundaries: longTerm.boundaries,
-            availability: longTerm.availability,
-            activityPreferences: longTerm.activityPreferences,
-          }) as Record<string, unknown>)
-        : null,
+      lifeGraphFactProposals: this.contextLifeGraphFactProposalsForMode(
+        this.sanitizeContextValue(
+          lifeGraphFactProposals,
+        ) as typeof lifeGraphFactProposals,
+        mode,
+      ),
+      lifeGraphFactDisplaySummaries:
+        this.contextLifeGraphFactDisplaySummariesForMode(
+          this.sanitizeContextValue(
+            lifeGraphFactDisplaySummaries,
+          ) as typeof lifeGraphFactDisplaySummaries,
+          mode,
+        ),
+      lifeGraphGovernanceSummary: this.contextLifeGraphGovernanceSummaryForMode(
+        lifeGraphGovernanceSummary,
+        mode,
+      ),
+      lifeGraphSummary: this.contextLifeGraphSummaryForMode(
+        lifeGraphSummary,
+        mode,
+      ),
       pendingApprovals: this.sanitizeContextValue(
         pendingApprovals,
       ) as SocialAgentTaskMemory['pendingActions'],
-      candidateActions: this.sanitizeContextValue(candidateActions) as Record<
-        string,
-        unknown
-      > | null,
+      candidateActions: this.contextCandidateActionsForMode(
+        this.sanitizeContextValue(candidateActions) as Record<
+          string,
+          unknown
+        > | null,
+        mode,
+      ),
     };
+  }
+
+  private contextTaskMemoryForMode(
+    memory: SocialAgentTaskMemory | null,
+    mode: SocialAgentContextMode,
+  ): SocialAgentTaskMemory | null {
+    if (!memory) return null;
+    if (mode === 'deep_recovery') return memory;
+    const memoryRecord = memory as unknown as Record<string, unknown>;
+    const compact = {
+      currentGoal: memory.currentGoal,
+      activeEntities: memory.activeEntities,
+      preferences: memory.preferences,
+      boundaries: memory.boundaries,
+      activityState: memory.activityState,
+      currentTask: memory.currentTask,
+      taskSlots: memory.taskSlots,
+      taskSlotSummary: memory.taskSlotSummary,
+      knownTaskSlotConstraints: memory.knownTaskSlotConstraints,
+      pendingApprovals: memoryRecord.pendingApprovals,
+      updatedAt: memory.updatedAt,
+    };
+    if (mode === 'router') {
+      return this.sanitizeContextValue({
+        currentGoal: compact.currentGoal,
+        activityState: compact.activityState,
+        currentTask: compact.currentTask,
+        taskSlots: compact.taskSlots,
+        taskSlotSummary: compact.taskSlotSummary,
+        knownTaskSlotConstraints: compact.knownTaskSlotConstraints,
+        pendingApprovalCount: Array.isArray(compact.pendingApprovals)
+          ? compact.pendingApprovals.length
+          : 0,
+        updatedAt: compact.updatedAt,
+      }) as SocialAgentTaskMemory;
+    }
+    if (mode === 'match' || mode === 'answer') {
+      return this.sanitizeContextValue({
+        ...compact,
+        candidateState: memory.candidateState,
+        candidateActions: memoryRecord.candidateActions,
+      }) as SocialAgentTaskMemory;
+    }
+    if (mode === 'life_graph') {
+      return this.sanitizeContextValue({
+        ...compact,
+        stableProfileFacts: memory.stableProfileFacts,
+        lastUserMessages: Array.isArray(memory.lastUserMessages)
+          ? memory.lastUserMessages.slice(-4)
+          : memory.lastUserMessages,
+      }) as SocialAgentTaskMemory;
+    }
+    return this.sanitizeContextValue(compact) as SocialAgentTaskMemory;
+  }
+
+  private contextLifeGraphFactProposalsForMode(
+    proposals: ReturnType<
+      SocialCodexLifeGraphGovernanceService['proposeStableFactsFromSlots']
+    >,
+    mode: SocialAgentContextMode,
+  ): ReturnType<
+    SocialCodexLifeGraphGovernanceService['proposeStableFactsFromSlots']
+  > {
+    if (mode === 'life_graph' || mode === 'deep_recovery') return proposals;
+    if (mode === 'match') return proposals.slice(0, 4);
+    return [];
+  }
+
+  private contextLifeGraphFactDisplaySummariesForMode(
+    summaries: ReturnType<
+      SocialCodexLifeGraphGovernanceService['toUserVisibleFactSummaries']
+    >,
+    mode: SocialAgentContextMode,
+  ): ReturnType<
+    SocialCodexLifeGraphGovernanceService['toUserVisibleFactSummaries']
+  > {
+    if (mode === 'life_graph' || mode === 'deep_recovery') return summaries;
+    if (mode === 'match') return summaries.slice(0, 4);
+    return [];
+  }
+
+  private contextLifeGraphGovernanceSummaryForMode(
+    summary: ReturnType<
+      SocialCodexLifeGraphGovernanceService['summarizeFactProposals']
+    >,
+    mode: SocialAgentContextMode,
+  ): ReturnType<
+    SocialCodexLifeGraphGovernanceService['summarizeFactProposals']
+  > {
+    if (mode !== 'router') return summary;
+    return {
+      total: summary.total,
+      autoSaveCount: 0,
+      confirmationRequiredCount: summary.confirmationRequiredCount,
+      blockedCount: summary.blockedCount,
+      sensitiveCount: summary.sensitiveCount,
+      expiringFactKeys: [],
+    };
+  }
+
+  private contextLifeGraphSummaryForMode(
+    summary: Record<string, unknown> | null,
+    mode: SocialAgentContextMode,
+  ): Record<string, unknown> | null {
+    if (!summary) return null;
+    if (mode === 'router' || mode === 'ordinary_chat') return null;
+    if (mode === 'life_graph' || mode === 'deep_recovery') return summary;
+    return this.sanitizeContextValue({
+      preferences: summary.preferences,
+      boundaries: summary.boundaries,
+      availability: summary.availability,
+      activityPreferences: summary.activityPreferences,
+    }) as Record<string, unknown>;
+  }
+
+  private contextCandidateActionsForMode(
+    candidateActions: Record<string, unknown> | null,
+    mode: SocialAgentContextMode,
+  ): Record<string, unknown> | null {
+    if (!candidateActions) return null;
+    if (
+      mode === 'router' ||
+      mode === 'ordinary_chat' ||
+      mode === 'life_graph'
+    ) {
+      return this.sanitizeContextValue({
+        actionCount: Object.keys(candidateActions).length,
+      }) as Record<string, unknown>;
+    }
+    return candidateActions;
   }
 
   private async resolveTask(input: {

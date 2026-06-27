@@ -561,7 +561,7 @@ describe('SocialAgentRouteContextService', () => {
     );
   });
 
-  it('passes the configured context window into layered memory construction', () => {
+  it('passes the compact ordinary-chat context window into layered memory construction', () => {
     const { memoryContext, service } = makeHarness({ contextLimit: '80' });
     const task = makeTask({
       memory: {
@@ -579,7 +579,7 @@ describe('SocialAgentRouteContextService', () => {
     expect(memoryContext.build).toHaveBeenCalledWith(
       expect.objectContaining({
         conversationHistory: expect.arrayContaining([
-          expect.objectContaining({ text: '第 9 条上下文' }),
+          expect.objectContaining({ text: '第 81 条上下文' }),
           expect.objectContaining({ text: '第 88 条上下文' }),
         ]),
       }),
@@ -587,7 +587,7 @@ describe('SocialAgentRouteContextService', () => {
     const call = memoryContext.build.mock.calls.at(-1)?.[0] as {
       conversationHistory: unknown[];
     };
-    expect(call.conversationHistory).toHaveLength(80);
+    expect(call.conversationHistory).toHaveLength(8);
   });
 
   it('uses hydrated recent messages for layered memory when server restore has newer context', () => {

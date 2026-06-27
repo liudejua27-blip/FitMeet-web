@@ -598,6 +598,7 @@ export class SocialAgentRunRecommendationService {
         userId: input.ownerUserId,
         taskId: input.task.id,
         threadId: `agent-task:${input.task.id}`,
+        mode: 'match',
       })
       .catch((error) => {
         this.logger.warn(

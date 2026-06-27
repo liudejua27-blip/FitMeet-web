@@ -427,6 +427,7 @@ describe('SocialAgentRunRecommendationService', () => {
       userId: 7,
       taskId: 101,
       threadId: 'agent-task:101',
+      mode: 'match',
     });
     expect(task.memory).toMatchObject({
       taskSlots: {

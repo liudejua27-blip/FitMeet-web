@@ -3,7 +3,7 @@ import { ConfigService } from '@nestjs/config';
 
 import { cleanDisplayText } from '../common/display-text.util';
 import { AgentTask } from './entities/agent-task.entity';
-import { socialAgentContextTurnLimit } from './social-agent-context-window';
+import { socialAgentLlmContextTurnLimit } from './social-agent-context-window';
 import { hasSocialAgentSearchContext } from './social-agent-candidate-context.presenter';
 import { readSocialAgentStoredCandidateSummaries } from './social-agent-chat-session.presenter';
 import type { SocialAgentRouteMessageBody } from './social-agent-chat.types';
@@ -66,7 +66,7 @@ export class SocialAgentRouteContextService {
       this.nonEmptyRecordArray(hydrated?.recentMessages) ??
       readSocialAgentConversationHistory(
         input.task,
-        socialAgentContextTurnLimit(this.config),
+        socialAgentLlmContextTurnLimit(this.config, 'router'),
       );
     const taskSlotSummary =
       this.nonEmptyRecord(hydrated?.taskSlotSummary) ??
@@ -157,7 +157,7 @@ export class SocialAgentRouteContextService {
       this.nonEmptyRecordArray(hydratedContext?.recentMessages) ??
       readSocialAgentConversationHistory(
         task,
-        socialAgentContextTurnLimit(this.config),
+        socialAgentLlmContextTurnLimit(this.config, 'ordinary_chat'),
       );
     return (
       this.memoryContext?.build({

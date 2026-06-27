@@ -211,6 +211,7 @@ export class SocialAgentMainAgentTurnService {
         userId: input.ownerUserId,
         taskId: input.task.id,
         threadId: `agent-task:${input.task.id}`,
+        mode: 'answer',
       })
       .catch(() => null);
     if (!hydrated) return input.base;

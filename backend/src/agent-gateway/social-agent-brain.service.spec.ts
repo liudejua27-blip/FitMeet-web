@@ -251,9 +251,9 @@ describe('SocialAgentBrainService', () => {
         string,
         unknown
       >;
-      expect(userPayload.conversationHistory).toHaveLength(80);
+      expect(userPayload.conversationHistory).toHaveLength(8);
       expect(userPayload.conversationHistory).toEqual(
-        expect.arrayContaining([expect.objectContaining({ text: 'turn-6' })]),
+        expect.arrayContaining([expect.objectContaining({ text: 'turn-78' })]),
       );
       expect(userPayload.availableTools).toEqual(
         expect.arrayContaining([
@@ -535,7 +535,7 @@ describe('SocialAgentBrainService', () => {
       const userPayload = JSON.parse(
         String(payload.messages[1].content),
       ) as Record<string, unknown>;
-      expect(userPayload.conversationHistory).toHaveLength(80);
+      expect(userPayload.conversationHistory).toHaveLength(8);
       expect(userPayload.knownTaskSlots).toMatchObject({
         activity: '散步',
         time_window: '今天晚上',
@@ -1249,7 +1249,7 @@ describe('SocialAgentBrainService', () => {
         string,
         unknown
       >;
-      expect(userPayload.conversationHistory).toHaveLength(80);
+      expect(userPayload.conversationHistory).toHaveLength(8);
       expect(
         (
           plannedService as unknown as {

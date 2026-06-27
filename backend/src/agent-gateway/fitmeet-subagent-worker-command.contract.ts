@@ -5,7 +5,10 @@ import {
 } from './social-codex-runtime-model';
 import type { SocialAgentIntentRouterResult } from './social-agent-intent-router.service';
 import type { LongTermMemorySnapshot } from './social-agent-long-term-memory.service';
-import { selectSocialAgentContextWindow } from './social-agent-context-window';
+import {
+  selectSocialAgentContextWindow,
+  socialAgentContextTurnLimit,
+} from './social-agent-context-window';
 import { buildSocialAgentKnownTaskSlotConstraints } from './social-agent-task-slot-constraints.presenter';
 
 export const FITMEET_SUBAGENT_WORKER_COMMAND_CONTRACT =
@@ -602,7 +605,7 @@ function normalizeContextSnapshot(input: {
       readRecordArray(taskContext, 'recentMessages'),
       readRecordArray(taskContext, 'conversationHistory'),
     ),
-    input.contextTurnLimit ?? undefined,
+    protectedSubagentContextTurnLimit(input.contextTurnLimit),
   );
   const sourcePendingActions = isRecord(source)
     ? (source as Record<string, unknown>).pendingActions
@@ -670,6 +673,18 @@ function normalizeContextSnapshot(input: {
     },
     'contextSnapshot',
   ) as FitMeetSubagentWorkerContextSnapshot;
+}
+
+function protectedSubagentContextTurnLimit(value?: number | null): number {
+  if (!Number.isFinite(value ?? NaN) || Number(value) <= 0) {
+    return socialAgentContextTurnLimit();
+  }
+  return socialAgentContextTurnLimit({
+    get: (key: string) =>
+      key === 'SOCIAL_AGENT_CONTEXT_TURN_LIMIT'
+        ? String(Math.floor(Number(value)))
+        : undefined,
+  });
 }
 
 function mergeRecentMessageSources(

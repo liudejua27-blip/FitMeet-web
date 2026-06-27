@@ -58,7 +58,10 @@ function findHardcodedTinyLlmContextSlices(file: string, source: string) {
     for (const match of source.matchAll(pattern)) {
       const raw = match[0];
       if (raw.includes('contextLimit') || raw.includes('limit')) {
-        if (!source.includes('socialAgentContextTurnLimit')) {
+        if (
+          !source.includes('socialAgentContextTurnLimit') &&
+          !source.includes('socialAgentLlmContextTurnLimit')
+        ) {
           matches.push(raw);
         }
         continue;

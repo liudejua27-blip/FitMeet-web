@@ -14,7 +14,7 @@ import {
 } from './social-agent-model-router.service';
 import {
   selectSocialAgentContextWindow,
-  socialAgentContextTurnLimit,
+  socialAgentLlmContextTurnLimit,
 } from './social-agent-context-window';
 import {
   enforceSocialIntentGate,
@@ -1069,7 +1069,7 @@ export class SocialAgentIntentRouterService {
           profile: input.profile ?? {},
           conversationHistory: selectSocialAgentContextWindow(
             input.conversationHistory,
-            socialAgentContextTurnLimit(this.config),
+            socialAgentLlmContextTurnLimit(this.config, 'router'),
           ),
           fallback,
         }),

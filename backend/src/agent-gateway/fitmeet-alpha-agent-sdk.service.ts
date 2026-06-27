@@ -92,10 +92,11 @@ export class FitMeetAlphaAgentSdkService {
       };
     }
 
-    if (!sdkEnabled) {
-      const localIntent = enforceFitMeetAlphaStructuredIntentHandoff(
-        this.ruleStructuredIntent(message, turnContext),
-      );
+    const localIntent = enforceFitMeetAlphaStructuredIntentHandoff(
+      this.ruleStructuredIntent(message, turnContext),
+    );
+
+    if (!sdkEnabled || this.canUseLocalIntentOnly(localIntent, message)) {
       return {
         traceId,
         safety,
@@ -158,15 +159,52 @@ export class FitMeetAlphaAgentSdkService {
             ...agentTrace.guardrails,
             { name: 'openai-agents-sdk-run', status: 'skipped' },
           ],
-          ...this.traceSubagents(
-            this.ruleStructuredIntent(message, turnContext),
-            message,
-          ),
+          ...this.traceSubagents(localIntent, message),
         },
         cards: [],
-        structuredIntent: this.ruleStructuredIntent(message, turnContext),
+        structuredIntent: localIntent,
       };
     }
+  }
+
+  private canUseLocalIntentOnly(
+    intent: Record<string, unknown>,
+    message: string,
+  ): boolean {
+    const intentName = this.text(intent.intent);
+    const needState = this.text(intent.needState);
+    const readiness = this.text(intent.readiness);
+    const activityType = this.text(intent.activityType);
+    const timePreference = this.text(intent.timePreference);
+    const locationText = this.text(intent.locationText);
+    if (
+      [
+        'fitness_math',
+        'complete_life_graph',
+        'view_profile_changes',
+        'analyze_life_rhythm',
+      ].includes(intentName)
+    ) {
+      return true;
+    }
+    if (intentName === 'general_social_need' && readiness === 'clarify') {
+      return true;
+    }
+    if (
+      intentName === 'recommend_weekly_activity' &&
+      needState === 'activity_recommendation'
+    ) {
+      return true;
+    }
+    if (intentName !== 'find_nearby_partner') return false;
+    const explicitSocialText =
+      /(找|认识|推荐|匹配|约|发布|约练|搭子|同伴|朋友|候选|散步|跑步|健身|羽毛球|五四广场|青岛大学)/.test(
+        message,
+      );
+    const hasConcreteSlots = Boolean(
+      activityType || timePreference || locationText,
+    );
+    return explicitSocialText && hasConcreteSlots;
   }
 
   buildResultCards(input: {

@@ -141,6 +141,7 @@ describe('SocialAgentContextHydratorService', () => {
       userId: 7,
       taskId: 44,
       threadId: 44,
+      mode: 'life_graph',
     });
 
     expect(context.taskSlots.activity?.value).toBe('散步');
@@ -267,7 +268,7 @@ describe('SocialAgentContextHydratorService', () => {
 
     expect(findActiveConversationTask).toHaveBeenCalledWith(7);
     expect(assertTaskOwner).not.toHaveBeenCalled();
-    expect(context.recentMessages).toHaveLength(80);
+    expect(context.recentMessages).toHaveLength(4);
     expect(context.taskSlots.activity?.value).toBe('散步');
     expect(context.knownTaskSlotConstraints).toEqual(
       expect.objectContaining({
@@ -282,8 +283,7 @@ describe('SocialAgentContextHydratorService', () => {
       context.knownTaskSlotConstraints,
     );
     expect(context.candidateActions).toMatchObject({
-      recommendedIds: [1, 2, 3],
-      savedIds: [2],
+      actionCount: 4,
     });
   });
 
@@ -335,6 +335,7 @@ describe('SocialAgentContextHydratorService', () => {
       userId: 7,
       taskId: 44,
       threadId: 'agent-task:44',
+      mode: 'match',
     });
 
     expect(context.candidateActions).toMatchObject({
@@ -399,6 +400,7 @@ describe('SocialAgentContextHydratorService', () => {
       userId: 7,
       taskId: 44,
       threadId: 'agent-task:44',
+      mode: 'match',
     });
 
     expect(context.candidateActions).toMatchObject({
@@ -427,7 +429,7 @@ describe('SocialAgentContextHydratorService', () => {
     });
   });
 
-  it('hydrates 20 rounds of context while redacting contact and precise location data', async () => {
+  it('hydrates compact router context while redacting contact and precise location data', async () => {
     const task = makeRichMemoryTask();
     const service = new SocialAgentContextHydratorService(
       {
@@ -480,9 +482,9 @@ describe('SocialAgentContextHydratorService', () => {
       threadId: 'agent-task:44',
     });
 
-    expect(context.recentMessages).toHaveLength(80);
+    expect(context.recentMessages).toHaveLength(4);
     expect(context.recentMessages[0]).toMatchObject({
-      text: '第 9 条上下文',
+      text: '第 85 条上下文',
     });
 
     const serialized = JSON.stringify(context);
@@ -490,11 +492,12 @@ describe('SocialAgentContextHydratorService', () => {
     expect(serialized).not.toContain('wxid_secret');
     expect(serialized).not.toContain('36.123456');
     expect(serialized).not.toContain('青岛大学宿舍3号楼');
-    expect(serialized).toContain('青岛大学附近');
+    expect(serialized).not.toContain('青岛大学附近');
     expect(serialized).toContain('[REDACTED');
+    expect(context.lifeGraphSummary).toBeNull();
   });
 
-  it('uses the same configured context window as the router and brain', async () => {
+  it('uses mode-specific context windows for matching and configured LLM overrides', async () => {
     const task = makeRichMemoryTask();
     const service = new SocialAgentContextHydratorService(
       {
@@ -505,7 +508,7 @@ describe('SocialAgentContextHydratorService', () => {
       new SocialCodexLifeGraphGovernanceService(),
       {
         get: jest.fn((key: string) =>
-          key === 'SOCIAL_AGENT_CONTEXT_TURN_LIMIT' ? '40' : undefined,
+          key === 'SOCIAL_AGENT_LLM_CONTEXT_TURN_LIMIT' ? '16' : undefined,
         ),
       } as never,
     );
@@ -514,11 +517,16 @@ describe('SocialAgentContextHydratorService', () => {
       userId: 7,
       taskId: 44,
       threadId: 'agent-task:44',
+      mode: 'match',
     });
 
-    expect(context.recentMessages).toHaveLength(80);
+    expect(context.recentMessages).toHaveLength(16);
     expect(context.recentMessages[0]).toMatchObject({
-      text: '第 9 条上下文',
+      text: '第 73 条上下文',
+    });
+    expect(context.lifeGraphSummary).toBeNull();
+    expect(context.candidateActions).toMatchObject({
+      recommendedIds: [1, 2, 3],
     });
   });
 });
