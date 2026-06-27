@@ -156,6 +156,7 @@ import { SocialAgentUserInterestEvent } from './entities/social-agent-user-inter
 import { SocialAgentUserInterestEventService } from './social-agent-user-interest-event.service';
 import { SocialAgentPreferenceGeneralizationService } from './social-agent-preference-generalization.service';
 import { SocialCandidateAuditService } from './social-candidate-audit.service';
+import { SocialAgentMatchHistoryService } from './social-agent-match-history.service';
 import { SocialAgentRagService } from './social-agent-rag.service';
 import { SocialAgentRouteContextService } from './social-agent-route-context.service';
 import { SocialAgentRouteCandidateConfirmationService } from './social-agent-route-candidate-confirmation.service';
@@ -427,6 +428,7 @@ import { AdminRbacModule } from '../admin-rbac/admin-rbac.module';
     SocialAgentUserInterestEventService,
     SocialAgentPreferenceGeneralizationService,
     SocialCandidateAuditService,
+    SocialAgentMatchHistoryService,
     SocialAgentRagService,
     SocialAgentRouteContextService,
     SocialAgentRouteCandidateConfirmationService,
@@ -563,6 +565,7 @@ import { AdminRbacModule } from '../admin-rbac/admin-rbac.module';
     SocialAgentUserInterestEventService,
     SocialAgentPreferenceGeneralizationService,
     SocialCandidateAuditService,
+    SocialAgentMatchHistoryService,
     SocialAgentRagService,
     SocialAgentRouteContextService,
     SocialAgentToolExecutorService,
