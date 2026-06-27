@@ -451,6 +451,148 @@ describe('SocialAgentCandidatePoolService', () => {
     ).toBeGreaterThan(0);
   });
 
+  it('applies generalized preference matrix to rank relaxed styles over competitive ones', async () => {
+    const interestEvents = {
+      summarizeForUser: jest.fn().mockResolvedValue({
+        ownerUserId: 1,
+        eventCount: 4,
+        positiveTargetUserIds: [],
+        negativeTargetUserIds: [],
+        highAffinityTargetUserIds: [],
+        rejectedTargetUserIds: [],
+        overExposedTargetUserIds: [],
+        activityTagWeights: [],
+        candidatePreferenceWeights: [],
+        cityWeights: [],
+        locationWeights: [],
+        timeWindowWeights: [],
+        preferenceGeneralization: {
+          version: 'fitmeet.preference_generalization.v1',
+          updatedAt: '2026-06-27T08:00:00.000Z',
+          preferredRadiusKm: null,
+          targetUserWeights: [],
+          activityTagWeights: [],
+          styleWeights: [
+            { tag: '竞技', weight: -8, reasons: ['风格不合'] },
+            { tag: '低压力', weight: 6, reasons: ['风格不合'] },
+          ],
+          timeBucketWeights: [],
+          cityWeights: [],
+          areaWeights: [],
+          recentReasons: ['风格不合'],
+        },
+      }),
+    };
+    const { service } = makeService({
+      users: [realUser(1), realUser(2), realUser(3)],
+      profiles: [
+        profile(2, {
+          nickname: '轻松散步候选',
+          interestTags: ['散步', '低压力'],
+          socialStyle: '轻松低压力',
+          updatedAt: new Date('2026-01-01T00:00:00.000Z'),
+        }),
+        profile(3, {
+          nickname: '竞技跑步候选',
+          interestTags: ['散步', '竞技'],
+          socialStyle: '竞技高强度',
+          updatedAt: new Date('2026-06-01T00:00:00.000Z'),
+        }),
+      ],
+      interestEvents,
+    });
+
+    const result = await service.searchSocial({
+      ownerUserId: 1,
+      city: '青岛',
+      interestTags: ['散步'],
+      rawText: '找一个散步搭子',
+    });
+
+    expect(result.candidates[0]).toMatchObject({
+      candidateUserId: 2,
+      displayName: '轻松散步候选',
+      scoreBreakdown: expect.objectContaining({
+        generalizedPreferenceFit: expect.any(Number),
+        styleAffinity: expect.any(Number),
+      }),
+      preferenceHistorySignals: expect.arrayContaining([
+        expect.stringContaining('互动风格更符合'),
+      ]),
+    });
+    expect(result.candidates[0].scoreBreakdown.styleAffinity).toBeGreaterThan(
+      0,
+    );
+  });
+
+  it('uses generalized target and time feedback to downrank repeated bad fits', async () => {
+    const interestEvents = {
+      summarizeForUser: jest.fn().mockResolvedValue({
+        ownerUserId: 1,
+        eventCount: 3,
+        positiveTargetUserIds: [],
+        negativeTargetUserIds: [],
+        highAffinityTargetUserIds: [],
+        rejectedTargetUserIds: [],
+        overExposedTargetUserIds: [],
+        activityTagWeights: [],
+        candidatePreferenceWeights: [],
+        cityWeights: [],
+        locationWeights: [],
+        timeWindowWeights: [],
+        preferenceGeneralization: {
+          version: 'fitmeet.preference_generalization.v1',
+          updatedAt: '2026-06-27T08:00:00.000Z',
+          preferredRadiusKm: null,
+          targetUserWeights: [{ userId: 2, weight: -30, reasons: ['不合适'] }],
+          activityTagWeights: [],
+          styleWeights: [],
+          timeBucketWeights: [
+            { tag: '工作日晚上', weight: -6, reasons: ['时间不合'] },
+          ],
+          cityWeights: [],
+          areaWeights: [],
+          recentReasons: ['不合适', '时间不合'],
+        },
+      }),
+    };
+    const { service } = makeService({
+      users: [realUser(1), realUser(2), realUser(3)],
+      profiles: [
+        profile(2, {
+          nickname: '旧坏反馈候选',
+          interestTags: ['咖啡'],
+          availableTimes: ['工作日晚上'],
+        }),
+        profile(3, {
+          nickname: '新候选',
+          interestTags: ['咖啡'],
+          availableTimes: ['周末下午'],
+        }),
+      ],
+      interestEvents,
+    });
+
+    const result = await service.searchSocial({
+      ownerUserId: 1,
+      city: '青岛',
+      interestTags: ['咖啡'],
+      rawText: '找咖啡聊天搭子',
+    });
+
+    expect(result.candidates[0]).toMatchObject({
+      candidateUserId: 3,
+      displayName: '新候选',
+    });
+    expect(
+      result.candidates.find((candidate) => candidate.candidateUserId === 2)
+        ?.scoreBreakdown,
+    ).toMatchObject({
+      generalizedPreferenceFit: expect.any(Number),
+      timeBucketPenalty: expect.any(Number),
+    });
+  });
+
   it('persists FitMeet match v1 score metadata and feedback adjustments', async () => {
     const interestEvents = {
       summarizeForUser: jest.fn().mockResolvedValue({

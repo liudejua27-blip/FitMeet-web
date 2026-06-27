@@ -58,6 +58,8 @@ export function candidateProfileTags(
     ...normalizeArray(profile?.wantToMeet),
     ...normalizeArray(profile?.relationshipGoals),
     ...normalizeArray(profile?.traits),
+    profile?.socialStyle,
+    profile?.socialPreference,
     ...normalizeArray(delegate?.favoriteSports),
     ...extractKnownTags(delegate?.interests ?? ''),
     ...extractKnownTags(delegate?.trainingGoals ?? ''),

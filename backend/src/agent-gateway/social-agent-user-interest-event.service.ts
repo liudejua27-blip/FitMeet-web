@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 
@@ -7,6 +7,10 @@ import {
   SocialAgentUserInterestEvent,
   SocialAgentUserInterestEventType,
 } from './entities/social-agent-user-interest-event.entity';
+import {
+  SocialAgentPreferenceGeneralizationService,
+  type SocialAgentPreferenceGeneralizationSummary,
+} from './social-agent-preference-generalization.service';
 
 export type SocialAgentUserInterestEventInput = {
   ownerUserId: number;
@@ -40,6 +44,7 @@ export type SocialAgentUserInterestSummary = {
   cityWeights: Array<{ tag: string; weight: number }>;
   locationWeights: Array<{ tag: string; weight: number }>;
   timeWindowWeights: Array<{ tag: string; weight: number }>;
+  preferenceGeneralization: SocialAgentPreferenceGeneralizationSummary | null;
 };
 
 @Injectable()
@@ -51,6 +56,8 @@ export class SocialAgentUserInterestEventService {
   constructor(
     @InjectRepository(SocialAgentUserInterestEvent)
     private readonly repo: Repository<SocialAgentUserInterestEvent>,
+    @Optional()
+    private readonly preferenceGeneralization?: SocialAgentPreferenceGeneralizationService,
   ) {}
 
   async recordEvent(
@@ -116,6 +123,8 @@ export class SocialAgentUserInterestEventService {
       cityWeights: [],
       locationWeights: [],
       timeWindowWeights: [],
+      preferenceGeneralization:
+        (await this.loadPreferenceGeneralization(input.ownerUserId)) ?? null,
     };
     const positiveTargetIds = new Map<number, number>();
     const negativeTargetIds = new Map<number, number>();
@@ -168,6 +177,19 @@ export class SocialAgentUserInterestEventService {
     summary.locationWeights = this.sortedWeights(locationWeights);
     summary.timeWindowWeights = this.sortedWeights(timeWeights);
     return summary;
+  }
+
+  private async loadPreferenceGeneralization(
+    ownerUserId: number,
+  ): Promise<SocialAgentPreferenceGeneralizationSummary | null> {
+    try {
+      return (
+        (await this.preferenceGeneralization?.summarizeForUser(ownerUserId)) ??
+        null
+      );
+    } catch {
+      return null;
+    }
   }
 
   eventFromCandidateAction(input: {
