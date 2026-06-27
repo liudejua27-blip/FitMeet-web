@@ -4,6 +4,7 @@ import { CoreBaseline1780000000000 } from '../database/migrations/1780000000000-
 import { AgentPublicLoopP0DatabaseStabilization1781000000000 } from '../database/migrations/1781000000000-AgentPublicLoopP0DatabaseStabilization';
 import { MatchingJobs1781400000000 } from '../database/migrations/1781400000000-MatchingJobs';
 import { AgentDismissPersistenceStabilization1781600000000 } from '../database/migrations/1781600000000-AgentDismissPersistenceStabilization';
+import { SocialContactLoopV11781700000000 } from '../database/migrations/1781700000000-SocialContactLoopV1';
 import { MatchingWorkerReconcilerStabilization1781800000000 } from '../database/migrations/1781800000000-MatchingWorkerReconcilerStabilization';
 import {
   AgentTask,
@@ -516,6 +517,7 @@ async function serviceWithFreshDatabase(
       AgentPublicLoopP0DatabaseStabilization1781000000000,
       MatchingJobs1781400000000,
       AgentDismissPersistenceStabilization1781600000000,
+      SocialContactLoopV11781700000000,
       MatchingWorkerReconcilerStabilization1781800000000,
     ],
     migrationsTableName: `migrations_${schema}`,
