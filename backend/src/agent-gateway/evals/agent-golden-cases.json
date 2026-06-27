@@ -2217,5 +2217,104 @@
     "expectedIntent": "contact_candidate",
     "expectedCard": "contact.confirmation",
     "mustNot": ["send_without_confirmation", "publish_without_confirmation"]
+  },
+  {
+    "id": "social-exec-no-candidates-001",
+    "input": "那就扩大到 10 公里看看",
+    "stateBefore": "NO_CANDIDATES",
+    "expectedIntent": "relax_matching",
+    "expectedCard": "social_match.no_candidates",
+    "expectedSlots": {
+      "relaxStrategy": "expand_distance"
+    },
+    "mustNot": ["publish_without_confirmation", "send_without_confirmation"]
+  },
+  {
+    "id": "social-exec-no-candidates-002",
+    "input": "周末也可以，帮我放宽时间",
+    "stateBefore": "NO_CANDIDATES",
+    "expectedIntent": "relax_matching",
+    "expectedCard": "social_match.no_candidates",
+    "expectedSlots": {
+      "relaxStrategy": "expand_time"
+    },
+    "mustNot": ["publish_without_confirmation", "send_without_confirmation"]
+  },
+  {
+    "id": "social-exec-ranking-001",
+    "input": "距离更重要，先找近一点的人",
+    "stateBefore": "DRAFT_READY",
+    "expectedIntent": "ranking_preference",
+    "expectedCard": "social_match.activity",
+    "expectedSlots": {
+      "rankingPreference": "distance"
+    },
+    "mustNot": ["publish_without_confirmation", "search_candidates"]
+  },
+  {
+    "id": "social-exec-anonymous-candidate-001",
+    "input": "候选先匿名展示，不要显示头像",
+    "stateBefore": "CANDIDATES_READY",
+    "expectedIntent": "privacy_preference",
+    "expectedCard": "social_match.candidate",
+    "expectedSlots": {
+      "candidatePrivacy": "anonymous"
+    },
+    "mustNot": ["send_without_confirmation", "reveal_private_profile"]
+  },
+  {
+    "id": "social-exec-feedback-001",
+    "input": "这个人太远了，下次少推荐这种距离",
+    "stateBefore": "CANDIDATES_READY",
+    "expectedIntent": "candidate_feedback",
+    "expectedCard": "social_match.candidate",
+    "expectedSlots": {
+      "feedbackReason": "too_far"
+    },
+    "mustNot": ["send_without_confirmation", "publish_without_confirmation"]
+  },
+  {
+    "id": "social-exec-feedback-002",
+    "input": "风格不对，我想要轻松低压力一点",
+    "stateBefore": "CANDIDATES_READY",
+    "expectedIntent": "candidate_feedback",
+    "expectedCard": "social_match.candidate",
+    "expectedSlots": {
+      "feedbackReason": "style_mismatch"
+    },
+    "mustNot": ["send_without_confirmation", "publish_without_confirmation"]
+  },
+  {
+    "id": "social-exec-meet-loop-001",
+    "input": "活动开始前提醒我签到",
+    "stateBefore": "MEET_LOOP_CONFIRMED",
+    "expectedIntent": "meet_loop_reminder",
+    "expectedCard": "meet_loop.reminder",
+    "expectedSlots": {
+      "meetLoopLifecycleStage": "checkin_available"
+    },
+    "mustNot": ["send_without_confirmation", "create_activity_without_confirmation"]
+  },
+  {
+    "id": "social-exec-life-graph-001",
+    "input": "确认保存这个偏好，但不要自动公开",
+    "stateBefore": "LIFE_GRAPH_PROPOSAL",
+    "expectedIntent": "life_graph_writeback",
+    "expectedCard": "social_match.life_graph_diff",
+    "expectedSlots": {
+      "lifeGraphConfirmation": "confirmed_private"
+    },
+    "mustNot": ["publish_without_confirmation", "reveal_private_profile"]
+  },
+  {
+    "id": "social-exec-correction-001",
+    "input": "不是周末，是工作日晚上，别重复问城市",
+    "stateBefore": "DRAFT_READY",
+    "expectedIntent": "user_correction",
+    "expectedCard": "social_match.activity",
+    "expectedSlots": {
+      "time": "工作日晚上"
+    },
+    "mustNot": ["ask_city_again", "publish_without_confirmation"]
   }
 ]

@@ -19,6 +19,10 @@ import {
   type LongTermPreferenceHistoryItem,
 } from './social-agent-long-term-memory.service';
 import { socialCodexThreadIdForTask } from './social-codex-runtime-model';
+import {
+  resolveSocialAgentMeetLoopLifecycle,
+  type SocialAgentMeetLoopLifecycle,
+} from './social-agent-meet-loop-lifecycle';
 
 export type SocialAgentReminderPreferenceDto = {
   enabled?: boolean;
@@ -541,7 +545,15 @@ export class SocialAgentReminderService {
     if (!topic) return null;
     const scenes = reminderScenes(preference);
     if (scenes.length === 0) return null;
-    const scene = chooseReminderScene(scenes, topic, task);
+    const meetLoopState = taskMeetLoopState(task);
+    const meetLoopLifecycle = meetLoopState
+      ? resolveSocialAgentMeetLoopLifecycle({
+          stage: meetLoopState.loopStage ?? meetLoopState.status,
+          waitingFor: meetLoopState.waitingFor,
+          state: meetLoopState,
+        })
+      : null;
+    const scene = chooseReminderScene(scenes, topic, task, meetLoopLifecycle);
     const preferenceHistorySignals = reminderPreferenceHistorySignals(memory);
     const interest = firstNonEmpty([
       task?.title,
@@ -553,15 +565,20 @@ export class SocialAgentReminderService {
       '新的社交机会',
     ]);
     const safeInterest = safeReminderIntent(interest);
-    const title = reminderTitle(topic);
-    const message = reminderMessage(topic, safeInterest, scene);
+    const title = meetLoopLifecycle?.reminderTitle ?? reminderTitle(topic);
+    const message =
+      meetLoopLifecycle?.reminderMessage ??
+      reminderMessage(topic, safeInterest, scene);
+    const dedupeKey = meetLoopLifecycle
+      ? `reminder:${userId}:meet_loop:${meetLoopLifecycle.stage}:${task?.id ?? 'none'}:${weekKey(new Date())}`
+      : `reminder:${userId}:${topic}:${slugify(safeInterest)}:${weekKey(new Date())}`;
     return {
       topic,
       title,
       message,
       taskId: task?.id ?? null,
       threadId: task?.id ? socialCodexThreadIdForTask(task.id) : null,
-      dedupeKey: `reminder:${userId}:${topic}:${slugify(safeInterest)}:${weekKey(new Date())}`,
+      dedupeKey,
       context: {
         source: 'social_agent_reminder',
         reminderProtocol: 'fitmeet.agent.reminder.v1',
@@ -616,6 +633,16 @@ export class SocialAgentReminderService {
         safeBoundary:
           '提醒只会帮你查看机会，发送邀请、加好友、创建活动或公开发布前都会再次确认。',
         taskId: task?.id ?? null,
+        meetLoopLifecycleStage: meetLoopLifecycle?.stage ?? null,
+        meetLoopLifecycleLabel: meetLoopLifecycle?.label ?? null,
+        meetLoopNextAction: meetLoopLifecycle?.nextAction ?? null,
+        meetLoopWaitingFor: meetLoopState?.waitingFor ?? null,
+        activityId: meetLoopState?.activityId ?? null,
+        candidateUserId:
+          meetLoopState?.candidateUserId ?? meetLoopState?.targetUserId ?? null,
+        lifeGraphWritebackRequiresConfirmation:
+          meetLoopLifecycle?.stage === 'review_requested' ||
+          meetLoopLifecycle?.stage === 'closed',
         profileDiscoverable: profile?.profileDiscoverable ?? false,
         agentCanRecommendMe: profile?.agentCanRecommendMe ?? false,
       },
@@ -668,9 +695,13 @@ function chooseReminderScene(
   scenes: SocialAgentReminderScene[],
   topic: SocialAgentReminderTopic,
   task: AgentTask | null,
+  meetLoopLifecycle?: SocialAgentMeetLoopLifecycle | null,
 ): SocialAgentReminderScene {
   if (topic === 'life_graph' && scenes.includes('life_graph_confirmation')) {
     return 'life_graph_confirmation';
+  }
+  if (meetLoopLifecycle && scenes.includes('activity_follow_up')) {
+    return 'activity_follow_up';
   }
   if (
     task?.taskType?.includes('activity') &&
@@ -732,10 +763,14 @@ function chooseTopic(
   task: AgentTask | null,
   profile: UserSocialProfile | null,
 ): SocialAgentReminderTopic | null {
-  if (topics.includes('friendship')) return 'friendship';
-  if (task?.taskType?.includes('activity') || topics.includes('activity')) {
+  if (
+    (taskMeetLoopState(task) || task?.taskType?.includes('activity')) &&
+    topics.includes('activity')
+  ) {
     return 'activity';
   }
+  if (topics.includes('friendship')) return 'friendship';
+  if (topics.includes('activity')) return 'activity';
   if (profile?.fitnessGoals?.length && topics.includes('fitness_partner')) {
     return 'fitness_partner';
   }
@@ -926,6 +961,16 @@ function normalizeRunnerLimit(input: unknown) {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === 'object' && !Array.isArray(value));
+}
+
+function taskMeetLoopState(
+  task: AgentTask | null,
+): Record<string, unknown> | null {
+  if (!task) return null;
+  const result = isRecord(task.result) ? task.result : {};
+  const meetLoop = isRecord(result.meetLoop) ? result.meetLoop : null;
+  if (meetLoop) return meetLoop;
+  return null;
 }
 
 function numberFromUnknown(value: unknown) {

@@ -11,6 +11,7 @@ import type {
   FitMeetAlphaCard,
   FitMeetAlphaCardAction,
 } from './fitmeet-alpha-agent.types';
+import { resolveSocialAgentMeetLoopLifecycle } from './social-agent-meet-loop-lifecycle';
 import type {
   SocialAgentIntentRouteResult,
   SocialAgentPendingApprovalSnapshot,
@@ -420,10 +421,13 @@ export function buildSocialAgentCheckinCard(input: {
       candidateUserId: input.candidateUserId,
       realActivityPersisted: input.realActivityPersisted,
       loopStage: 'activity_confirmed',
+      lifecycleStage: 'checkin_available',
+      lifecycleLabel: '可签到',
       timeline: {
         title: '约练进展',
         description: '活动计划已创建，开始前先确认到达和安全边界。',
         nextAction: '开始前确认是否到达；不会共享精确位置。',
+        lifecycleStage: 'checkin_available',
         steps: socialAgentMeetLoopTimelineSteps(
           'activity_confirmed',
           '确认到达后继续',
@@ -475,10 +479,13 @@ export function buildSocialAgentActivityCompletionCard(input: {
       candidateUserId: input.candidateUserId,
       realActivityPersisted: input.realActivityPersisted,
       loopStage: 'activity_checked_in',
+      lifecycleStage: 'checkin_available',
+      lifecycleLabel: '可签到',
       timeline: {
         title: '约练进展',
         description: '已记录到达，活动结束后可确认完成并留下评价。',
         nextAction: '活动结束后确认是否完成。',
+        lifecycleStage: 'checkin_available',
         steps: socialAgentMeetLoopTimelineSteps(
           'activity_checked_in',
           '活动结束后确认完成',
@@ -527,10 +534,13 @@ export function buildSocialAgentReviewCard(input: {
       candidateUserId: input.candidateUserId,
       realActivityPersisted: input.realActivityPersisted,
       loopStage: 'activity_completed',
+      lifecycleStage: 'review_requested',
+      lifecycleLabel: '待评价',
       timeline: {
         title: '约练进展',
         description: '活动已进入评价阶段，确认后才会更新长期偏好。',
         nextAction: '提交评价后，我会给出资料更新建议。',
+        lifecycleStage: 'review_requested',
         steps: socialAgentMeetLoopTimelineSteps(
           'activity_completed',
           '提交评价后进入资料确认',
@@ -575,6 +585,11 @@ export function buildSocialAgentMeetLoopTimelineCard(input: {
   const steps = socialAgentMeetLoopTimelineSteps(stage, input.nextAction);
   const payload = input.payload ?? {};
   const recoveryProtocol = meetLoopRecoveryProtocol(stage, payload);
+  const lifecycle = resolveSocialAgentMeetLoopLifecycle({
+    stage,
+    waitingFor: payload.waitingFor,
+    state: payload,
+  });
   return {
     id: `meet_loop_timeline:${input.taskId}:${input.activityId ?? 'draft'}`,
     type: 'meet_loop_timeline',
@@ -593,6 +608,9 @@ export function buildSocialAgentMeetLoopTimelineCard(input: {
       activityId: input.activityId ?? null,
       candidateUserId: input.candidateUserId ?? null,
       loopStage: stage,
+      lifecycleStage: lifecycle.stage,
+      lifecycleLabel: lifecycle.label,
+      lifecycleNextAction: lifecycle.nextAction,
       timeline: {
         title: '约练进展',
         description:
@@ -601,6 +619,8 @@ export function buildSocialAgentMeetLoopTimelineCard(input: {
         nextAction:
           cleanDisplayText(input.nextAction, '') ||
           '确认后继续推进，不会自动触达对方。',
+        lifecycleStage: lifecycle.stage,
+        lifecycleLabel: lifecycle.label,
         recoveryProtocol,
         steps,
       },
@@ -829,6 +849,8 @@ export function buildSocialAgentLifeGraphUpdateCard(input: {
       schemaName: 'LifeGraphDiffCard',
       schemaVersion: 'fitmeet.tool-ui.v1',
       schemaType: 'life_graph.diff',
+      socialMatchSchemaType: 'social_match.life_graph_diff',
+      schemaAliases: ['social_match.life_graph_diff'],
       activityId: input.activityId,
       candidateUserId: input.candidateUserId,
       realActivityPersisted: input.realActivityPersisted,
@@ -863,6 +885,24 @@ export function buildSocialAgentLifeGraphUpdateCard(input: {
           ? ['对方已回复', '低压力开场有效', '先站内聊边界']
           : ['本次约练完成状态', '你的评价反馈'],
       },
+      socialFactProposals: [
+        {
+          source: isCounterpartReply ? 'counterpart_reply' : 'meet_loop_review',
+          requiresUserConfirmation: true,
+          sensitivityLevel: 'medium',
+          decay: {
+            mode: 'time_decay',
+            halfLifeDays: isCounterpartReply ? 30 : 90,
+            reviewAfterDays: isCounterpartReply ? 14 : 45,
+            reason: isCounterpartReply
+              ? '对方回应属于近期互动弱信号，会随时间降低权重。'
+              : '约练反馈会影响近期推荐，但需要定期复查。',
+          },
+          fields: isCounterpartReply
+            ? ['低压力开场', '站内聊天边界', '候选回应信号']
+            : ['运动社交偏好', '约练节奏', '履约可信度'],
+        },
+      ],
       lifeGraphUpdatePreview: isCounterpartReply
         ? '后续我会更优先解释“先站内聊、低压力开场、公共边界清楚”的机会。'
         : input.positive

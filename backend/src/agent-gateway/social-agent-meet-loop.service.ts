@@ -73,6 +73,7 @@ import {
   type SocialAgentUserInterestEventInput,
 } from './social-agent-user-interest-event.service';
 import type { SocialAgentUserInterestEventType } from './entities/social-agent-user-interest-event.entity';
+import { socialAgentMeetLoopLifecyclePatch } from './social-agent-meet-loop-lifecycle';
 
 @Injectable()
 export class SocialAgentMeetLoopService {
@@ -1412,6 +1413,21 @@ export class SocialAgentMeetLoopService {
     },
   ): Promise<void> {
     const payload = this.isRecord(input.payload) ? input.payload : {};
+    const lifecyclePatch = socialAgentMeetLoopLifecyclePatch({
+      stage,
+      waitingFor: input.waitingFor,
+      state: payload,
+    });
+    const state = {
+      ...payload,
+      ...lifecyclePatch,
+      status:
+        cleanDisplayText(payload.status, '') ||
+        cleanDisplayText(payload.loopStage, '') ||
+        stage,
+      loopStage: cleanDisplayText(payload.loopStage, '') || stage,
+      waitingFor: input.waitingFor,
+    };
     await this.l5Runtime?.transitionMeetLoop({
       ownerUserId: task.ownerUserId,
       agentTaskId: task.id,
@@ -1421,9 +1437,21 @@ export class SocialAgentMeetLoopService {
       ),
       stage,
       waitingFor: input.waitingFor,
-      state: payload,
+      state,
       review: input.review ?? null,
     });
+    const result = this.isRecord(task.result) ? task.result : {};
+    const currentMeetLoop = this.isRecord(result.meetLoop)
+      ? result.meetLoop
+      : {};
+    task.result = {
+      ...result,
+      meetLoop: {
+        ...currentMeetLoop,
+        ...state,
+      },
+    };
+    await this.taskRepo.save(task);
   }
 
   private meetLoopPayload(

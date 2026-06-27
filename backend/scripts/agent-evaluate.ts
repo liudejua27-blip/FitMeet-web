@@ -133,6 +133,63 @@ function predict(input: string, stateBefore: string): Prediction {
   const emitted: string[] = [];
   const slots = extractSlots(text);
 
+  if (isRelaxMatching(text, stateBefore)) {
+    return {
+      intent: 'relax_matching',
+      card: 'social_match.no_candidates',
+      slots,
+      emitted,
+      fallbackUsed: false,
+    };
+  }
+  if (isMeetLoopReminder(text, stateBefore)) {
+    return {
+      intent: 'meet_loop_reminder',
+      card: 'meet_loop.reminder',
+      slots,
+      emitted,
+      fallbackUsed: false,
+    };
+  }
+  if (isLifeGraphWriteback(text, stateBefore)) {
+    return {
+      intent: 'life_graph_writeback',
+      card: 'social_match.life_graph_diff',
+      slots,
+      emitted,
+      fallbackUsed: false,
+    };
+  }
+  if (isCandidateFeedback(text, stateBefore)) {
+    return {
+      intent: 'candidate_feedback',
+      card: 'social_match.candidate',
+      slots,
+      emitted,
+      fallbackUsed: false,
+    };
+  }
+  if (isPrivacyPreference(text, stateBefore)) {
+    return {
+      intent: 'privacy_preference',
+      card: 'social_match.candidate',
+      slots,
+      emitted,
+      fallbackUsed: false,
+    };
+  }
+  if (isRankingPreference(text, stateBefore)) {
+    return {
+      intent: 'ranking_preference',
+      card:
+        stateBefore === 'COLLECTING_SLOTS'
+          ? 'social_match.slot_completion'
+          : 'social_match.activity',
+      slots,
+      emitted,
+      fallbackUsed: false,
+    };
+  }
   if (isCorrection(text, stateBefore)) {
     return {
       intent: 'user_correction',
@@ -255,6 +312,58 @@ function isContactCandidate(text: string, stateBefore: string): boolean {
   );
 }
 
+function isRelaxMatching(text: string, stateBefore: string): boolean {
+  return (
+    stateBefore === 'NO_CANDIDATES' &&
+    /(扩大|放宽|10\s*公里|更远|周末也可以|减少偏好|少一点限制|不限兴趣)/.test(
+      text,
+    )
+  );
+}
+
+function isRankingPreference(text: string, stateBefore: string): boolean {
+  return (
+    (stateBefore === 'DRAFT_READY' || stateBefore === 'COLLECTING_SLOTS') &&
+    /(距离更重要|近一点|时间更重要|同频优先|能聊得来优先|兴趣优先|风格优先)/.test(
+      text,
+    )
+  );
+}
+
+function isPrivacyPreference(text: string, stateBefore: string): boolean {
+  return (
+    stateBefore === 'CANDIDATES_READY' &&
+    /(匿名|不要显示头像|隐藏头像|先别展示真实资料|粗略区域)/.test(text)
+  );
+}
+
+function isCandidateFeedback(text: string, stateBefore: string): boolean {
+  return (
+    stateBefore === 'CANDIDATES_READY' &&
+    /(太远|时间不合|风格不对|不合适|bad fit|不想见这种|低压力一点|轻松一点)/i.test(
+      text,
+    )
+  );
+}
+
+function isMeetLoopReminder(text: string, stateBefore: string): boolean {
+  return (
+    stateBefore.startsWith('MEET_LOOP') &&
+    /(提醒|签到|活动开始|评价|收到回复|等待回复|Life Graph|长期偏好)/i.test(
+      text,
+    )
+  );
+}
+
+function isLifeGraphWriteback(text: string, stateBefore: string): boolean {
+  return (
+    stateBefore === 'LIFE_GRAPH_PROPOSAL' &&
+    /(确认保存|保留|不要自动公开|写入|用于推荐|不要用于推荐|拒绝)/.test(
+      text,
+    )
+  );
+}
+
 function isCorrection(text: string, stateBefore: string): boolean {
   return (
     stateBefore === 'DRAFT_READY' &&
@@ -282,6 +391,8 @@ function extractSlots(text: string): Record<string, string> {
     slots.time = '周末下午';
   } else if (/明天下午/.test(text)) {
     slots.time = '明天下午';
+  } else if (/工作日晚上/.test(text)) {
+    slots.time = '工作日晚上';
   } else if (/周日/.test(text)) {
     slots.time = '周日';
   }
@@ -303,6 +414,42 @@ function extractSlots(text: string): Record<string, string> {
 
   if (isMatchingAuthorization(text)) slots.matchingConsent = 'true';
   if (isCancel(text, 'DRAFT_READY')) slots.dismissed = 'true';
+  if (/扩大|10\s*公里|更远/.test(text)) {
+    slots.relaxStrategy = 'expand_distance';
+  } else if (/放宽时间|周末也可以|最近\s*7\s*天/.test(text)) {
+    slots.relaxStrategy = 'expand_time';
+  } else if (/减少偏好|少一点限制|不限兴趣/.test(text)) {
+    slots.relaxStrategy = 'relax_tags';
+  }
+  if (/距离更重要|近一点/.test(text)) {
+    slots.rankingPreference = 'distance';
+  } else if (/时间更重要/.test(text)) {
+    slots.rankingPreference = 'time';
+  } else if (/同频|能聊得来|兴趣优先|风格优先/.test(text)) {
+    slots.rankingPreference = 'social_fit';
+  }
+  if (/匿名|不要显示头像|隐藏头像|先别展示真实资料/.test(text)) {
+    slots.candidatePrivacy = 'anonymous';
+  }
+  if (/太远/.test(text)) {
+    slots.feedbackReason = 'too_far';
+  } else if (/时间不合/.test(text)) {
+    slots.feedbackReason = 'time_mismatch';
+  } else if (/风格不对|低压力一点|轻松一点/.test(text)) {
+    slots.feedbackReason = 'style_mismatch';
+  }
+  if (/签到|活动开始/.test(text)) {
+    slots.meetLoopLifecycleStage = 'checkin_available';
+  } else if (/评价/.test(text)) {
+    slots.meetLoopLifecycleStage = 'review_requested';
+  }
+  if (/确认保存.*不要自动公开|不要自动公开.*确认保存/.test(text)) {
+    slots.lifeGraphConfirmation = 'confirmed_private';
+  } else if (/确认保存|保留|写入/.test(text)) {
+    slots.lifeGraphConfirmation = 'confirmed';
+  } else if (/拒绝|不要用于推荐/.test(text)) {
+    slots.lifeGraphConfirmation = 'rejected';
+  }
   return slots;
 }
 
