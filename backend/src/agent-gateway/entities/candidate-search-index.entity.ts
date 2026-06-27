@@ -23,6 +23,8 @@ export enum CandidateSearchIndexStatus {
 @Entity('candidate_search_index')
 @Index(['sourceType', 'sourceId'], { unique: true })
 @Index(['status', 'city'])
+@Index(['status', 'countryCode', 'city'])
+@Index(['geoHash', 'status'])
 @Index(['userId', 'status'])
 @Index(['profileDiscoverable', 'agentCanRecommendMe', 'status'])
 @Index(['sourceUpdatedAt', 'updatedAt'])
@@ -72,6 +74,21 @@ export class CandidateSearchIndex {
 
   @Column({ default: '' })
   city: string;
+
+  @Column({ type: 'varchar', length: 20, default: 'zh-CN' })
+  locale: string;
+
+  @Column({ type: 'varchar', length: 8, default: 'CN' })
+  countryCode: string;
+
+  @Column({ type: 'varchar', length: 80, default: 'Asia/Shanghai' })
+  timeZone: string;
+
+  @Column({ type: 'int', default: 480 })
+  utcOffsetMinutes: number;
+
+  @Column({ type: 'varchar', length: 16, default: '' })
+  geoHash: string;
 
   @Column({ type: 'text', default: '' })
   areaText: string;

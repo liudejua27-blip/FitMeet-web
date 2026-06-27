@@ -6,6 +6,8 @@ import { MatchingJobs1781400000000 } from '../database/migrations/1781400000000-
 import { AgentDismissPersistenceStabilization1781600000000 } from '../database/migrations/1781600000000-AgentDismissPersistenceStabilization';
 import { SocialContactLoopV11781700000000 } from '../database/migrations/1781700000000-SocialContactLoopV1';
 import { MatchingWorkerReconcilerStabilization1781800000000 } from '../database/migrations/1781800000000-MatchingWorkerReconcilerStabilization';
+import { CandidateSearchIndex1782200000000 } from '../database/migrations/1782200000000-CandidateSearchIndex';
+import { AgentGlobalTimeGeoFoundation1782400000000 } from '../database/migrations/1782400000000-AgentGlobalTimeGeoFoundation';
 import {
   AgentTask,
   AgentTaskEvent,
@@ -519,6 +521,8 @@ async function serviceWithFreshDatabase(
       AgentDismissPersistenceStabilization1781600000000,
       SocialContactLoopV11781700000000,
       MatchingWorkerReconcilerStabilization1781800000000,
+      CandidateSearchIndex1782200000000,
+      AgentGlobalTimeGeoFoundation1782400000000,
     ],
     migrationsTableName: `migrations_${schema}`,
     migrationsTransactionMode: 'each',
