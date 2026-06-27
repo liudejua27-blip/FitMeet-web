@@ -33,6 +33,9 @@ function makeService() {
   const confirmationPolicy = {
     canRunAsConfirmedUserAction: jest.fn(() => false),
   };
+  const contactPolicy = {
+    reserveOpener: jest.fn().mockResolvedValue({ status: 'opener_available' }),
+  };
   const toolInput = new SocialAgentToolInputParserService();
   const service = new SocialAgentMessageToolService(
     messages as never,
@@ -40,14 +43,16 @@ function makeService() {
     confirmationPolicy as never,
     toolInput,
     new SocialAgentTaskMemoryService(toolInput),
+    contactPolicy as never,
   );
 
-  return { service, messages, matchService, confirmationPolicy };
+  return { service, messages, matchService, confirmationPolicy, contactPolicy };
 }
 
 describe('SocialAgentMessageToolService', () => {
   it('sends user-confirmed candidate messages as the user when no agent is bound', async () => {
-    const { service, messages, confirmationPolicy } = makeService();
+    const { service, messages, confirmationPolicy, contactPolicy } =
+      makeService();
     confirmationPolicy.canRunAsConfirmedUserAction.mockReturnValue(true);
     messages.startConversation.mockResolvedValue({ conversationId: 'conv_1' });
     messages.sendMessage.mockResolvedValue({
@@ -72,6 +77,11 @@ describe('SocialAgentMessageToolService', () => {
       1,
       2,
       expect.objectContaining({ agentConnectionId: null, ownerUserId: 1 }),
+    );
+    expect(contactPolicy.reserveOpener).toHaveBeenCalledWith(
+      1,
+      2,
+      expect.objectContaining({ contextType: 'agent_candidate' }),
     );
     expect(messages.sendMessage).toHaveBeenCalledWith(
       'conv_1',
@@ -137,7 +147,7 @@ describe('SocialAgentMessageToolService', () => {
   });
 
   it('marks matched candidates as messaged when IDs are present', async () => {
-    const { service, messages, matchService } = makeService();
+    const { service, messages, matchService, contactPolicy } = makeService();
     messages.startConversation.mockResolvedValue({ conversationId: 'conv_1' });
     messages.sendMessage.mockResolvedValue({ id: 'msg_1' });
     matchService.markCandidateMessaged.mockResolvedValue({
@@ -157,6 +167,14 @@ describe('SocialAgentMessageToolService', () => {
     );
 
     expect(matchService.markCandidateMessaged).toHaveBeenCalledWith(10, 33, 1);
+    expect(contactPolicy.reserveOpener).toHaveBeenCalledWith(
+      1,
+      2,
+      expect.objectContaining({
+        contextType: 'agent_candidate',
+        contextId: '33',
+      }),
+    );
     expect(result.output).toMatchObject({
       id: 'msg_1',
       candidate: { id: 33, status: 'messaged' },

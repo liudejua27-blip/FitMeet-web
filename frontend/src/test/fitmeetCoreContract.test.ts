@@ -1,11 +1,28 @@
 import { describe, expect, it } from 'vitest';
 
-import { fitMeetCoreEndpoints, fitMeetCoreEndpointTemplates } from '../api/fitmeetCoreContract';
+import { fitMeetCoreOpenApi } from '../../../backend/src/openapi/fitmeet-core.openapi';
+import {
+  fitMeetCoreEndpointMethods,
+  fitMeetCoreEndpoints,
+  fitMeetCoreEndpointTemplates,
+} from '../api/fitmeetCoreContract';
 
 describe('fitMeetCoreEndpoints', () => {
   it('keeps the App core smoke read-back endpoints in the typed registry', () => {
     expect(fitMeetCoreEndpoints.auth.getProfile).toBe('/auth/profile');
+    expect(fitMeetCoreEndpoints.system.health).toBe('/health');
+    expect(fitMeetCoreEndpoints.system.readiness).toBe('/ready');
+    expect(fitMeetCoreEndpoints.users.getPublicUser('user:42')).toBe('/users/user%3A42');
     expect(fitMeetCoreEndpoints.users.updateProfile).toBe('/users/profile');
+    expect(fitMeetCoreEndpoints.users.updateLocation).toBe('/users/me/location');
+    expect(fitMeetCoreEndpoints.onboarding.status).toBe('/users/me/onboarding-status');
+    expect(fitMeetCoreEndpoints.onboarding.complete).toBe('/users/me/onboarding/complete');
+    expect(fitMeetCoreEndpoints.onboarding.profilePhotos).toBe('/users/me/profile-photos');
+    expect(fitMeetCoreEndpoints.onboarding.deleteProfilePhoto('photo:42')).toBe(
+      '/users/me/profile-photos/photo%3A42',
+    );
+    expect(fitMeetCoreEndpoints.socialProfile.current).toBe('/users/me/social-profile');
+    expect(fitMeetCoreEndpoints.socialProfile.privacy).toBe('/users/me/social-profile/privacy');
     expect(fitMeetCoreEndpoints.uploads.image).toBe('/uploads/image');
     expect(fitMeetCoreEndpoints.discover.publicSocialIntents).toBe('/public/social-intents');
     expect(fitMeetCoreEndpoints.discover.publicSocialIntent('intent:city run')).toBe(
@@ -13,6 +30,21 @@ describe('fitMeetCoreEndpoints', () => {
     );
     expect(fitMeetCoreEndpoints.discover.publicSocialIntentMatches('intent:city run')).toBe(
       '/public/social-intents/intent%3Acity%20run/matches',
+    );
+    expect(fitMeetCoreEndpoints.discover.publicSocialIntentApplications('intent:city run')).toBe(
+      '/public/social-intents/intent%3Acity%20run/applications',
+    );
+    expect(fitMeetCoreEndpoints.discover.myPublicIntentApplications).toBe(
+      '/users/me/public-intent-applications',
+    );
+    expect(fitMeetCoreEndpoints.discover.acceptPublicIntentApplication(42)).toBe(
+      '/public-intent-applications/42/accept',
+    );
+    expect(fitMeetCoreEndpoints.discover.rejectPublicIntentApplication('app:42')).toBe(
+      '/public-intent-applications/app%3A42/reject',
+    );
+    expect(fitMeetCoreEndpoints.discover.cancelPublicIntentApplication('app:42')).toBe(
+      '/public-intent-applications/app%3A42/cancel',
     );
     expect(fitMeetCoreEndpoints.messages.startConversation).toBe('/messages/start');
     expect(fitMeetCoreEndpoints.messages.getConversations).toBe('/messages/conversations');
@@ -32,6 +64,27 @@ describe('fitMeetCoreEndpoints', () => {
       '/messages/public-intents/intent%3Acity%20run/start',
     );
     expect(fitMeetCoreEndpoints.messages.getUnreadCount).toBe('/messages/unread');
+    expect(fitMeetCoreEndpoints.friends.deleteFriend('user:42')).toBe('/friends/user%3A42');
+    expect(fitMeetCoreEndpoints.friends.createConnectionRequest).toBe('/connections/requests');
+    expect(fitMeetCoreEndpoints.friends.listConnectionRequests).toBe('/connections/requests');
+    expect(fitMeetCoreEndpoints.friends.acceptConnectionRequest(42)).toBe(
+      '/connections/requests/42/accept',
+    );
+    expect(fitMeetCoreEndpoints.friends.rejectConnectionRequest('req:42')).toBe(
+      '/connections/requests/req%3A42/reject',
+    );
+    expect(fitMeetCoreEndpoints.friends.cancelConnectionRequest('req:42')).toBe(
+      '/connections/requests/req%3A42/cancel',
+    );
+    expect(fitMeetCoreEndpoints.friends.relationshipState('user:42')).toBe(
+      '/relationships/users/user%3A42',
+    );
+    expect(fitMeetCoreEndpoints.friends.followUser('user:42')).toBe('/users/user%3A42/follow');
+    expect(fitMeetCoreEndpoints.friends.isFollowing('user:42')).toBe('/users/user%3A42/following');
+    expect(fitMeetCoreEndpoints.friends.followingIds).toBe('/following/ids');
+    expect(fitMeetCoreEndpoints.safety.blockUser('user:42')).toBe('/safety/blocks/user%3A42');
+    expect(fitMeetCoreEndpoints.safety.unblockUser('user:42')).toBe('/safety/blocks/user%3A42');
+    expect(fitMeetCoreEndpoints.safety.blockedIds).toBe('/safety/blocks/ids');
     expect(fitMeetCoreEndpoints.socialAgentChat.session).toBe('/social-agent/chat/session');
     expect(fitMeetCoreEndpoints.socialAgentChat.run).toBe('/social-agent/chat/run');
     expect(fitMeetCoreEndpoints.socialAgentChat.runAsync).toBe('/social-agent/chat/run-async');
@@ -180,97 +233,75 @@ describe('fitMeetCoreEndpoints', () => {
   });
 
   it('keeps the frontend endpoint templates aligned with the shared OpenAPI path set', () => {
-    expect(new Set(flattenEndpointTemplates())).toEqual(
-      new Set([
-        '/auth/register',
-        '/auth/login',
-        '/auth/sms/send',
-        '/auth/sms/verify',
-        '/auth/wechat/url',
-        '/auth/wechat/login',
-        '/auth/refresh',
-        '/auth/profile',
-        '/users/profile',
-        '/public/social-intents',
-        '/public/social-intents/{id}',
-        '/public/social-intents/{id}/matches',
-        '/messages/start',
-        '/messages/conversations',
-        '/messages/conversations/{conversationId}',
-        '/messages/conversations/{conversationId}/send',
-        '/messages/public-intents/{id}/start',
-        '/messages/unread',
-        '/social-agent/chat/run',
-        '/social-agent/chat/run-async',
-        '/social-agent/chat/messages',
-        '/social-agent/chat/messages/stream',
-        '/social-agent/chat/route-message',
-        '/social-agent/chat/route-message/stream',
-        '/social-agent/chat/stream',
-        '/social-agent/chat/stream-user',
-        '/social-agent/chat/session',
-        '/social-agent/chat/feedback-events',
-        '/social-agent/chat/tasks/{taskId}/session',
-        '/social-agent/chat/tasks/{taskId}/runs/{runId}',
-        '/social-agent/chat/tasks/{taskId}/messages',
-        '/social-agent/chat/tasks/{taskId}/messages/stream',
-        '/social-agent/chat/tasks/{taskId}/publish-social-request',
-        '/social-agent/chat/tasks/{taskId}/replan-run',
-        '/social-agent/chat/tasks/{taskId}/append-context',
-        '/social-agent/chat/tasks/{taskId}/actions',
-        '/social-agent/chat/tasks/{taskId}/actions/stream',
-        '/social-agent/chat/tasks/{taskId}/save-candidate',
-        '/social-agent/chat/tasks/{taskId}/send-message',
-        '/social-agent/chat/tasks/{taskId}/connect-candidate',
-        '/social-agent/chat/checkpoints/{checkpointId}/resume/stream',
-        '/social-agent/chat/checkpoints/{checkpointId}/replay/stream',
-        '/social-agent/chat/checkpoints/{checkpointId}/retry/stream',
-        '/social-agent/chat/checkpoints/{checkpointId}/steps/{stepId}/retry/stream',
-        '/social-agent/chat/checkpoints/{checkpointId}/steps/{stepId}/replay/stream',
-        '/social-agent/chat/checkpoints/{checkpointId}/steps/{stepId}/fork/stream',
-        '/social-agent/chat/checkpoints/{checkpointId}/fork/stream',
-        '/agent/checkpoints/tasks/{taskId}/latest',
-        '/agent/checkpoints/{checkpointId}/retry',
-        '/agent/checkpoints/{checkpointId}/replay',
-        '/agent/checkpoints/{checkpointId}/fork',
-        '/agent/checkpoints/{checkpointId}/steps/{stepId}/retry',
-        '/agent/checkpoints/{checkpointId}/steps/{stepId}/replay',
-        '/agent/checkpoints/{checkpointId}/steps/{stepId}/fork',
-        '/social-agent/tasks/current',
-        '/social-agent/tasks/{taskId}/timeline',
-        '/social-agent/tasks/{taskId}/events',
-        '/social-agent/tasks/{taskId}/events/eval',
-        '/social-agent/tasks/{taskId}/events/replay',
-        '/social-agent/tasks/{taskId}/replan',
-        '/social-agent/tasks/{taskId}/run-next',
-        '/social-agent/reminders',
-        '/social-agent/reminders/preferences',
-        '/social-agent/reminders/run-once',
-        '/social-agent/reminders/disable',
-        '/social-agent/reminders/{id}/open',
-        '/social-agent/reminders/{id}/dismiss',
-        '/social-agent/l5/dashboard',
-        '/social-agent/l5/replay-samples',
-        '/social-agent/l5/subagent-memory',
-        '/social-agent/l5/meet-loop-states',
-        '/social-agent/l5/patch-effects',
-        '/social-agent/l5/auto-runs',
-        '/social-agent/l5/observability',
-        '/social-agent/l5/observability/satisfaction',
-        '/social-agent/l5/feedback-events',
-        '/social-agent/l5/feedback-failure-corpus',
-        '/social-agent/l5/feedback-golden-candidates',
-        '/social-agent/l5/subagent-worker-jobs',
-        '/social-agent/l5/subagent-worker-jobs/{id}/requeue',
-        '/social-agent/l5/subagent-worker-jobs/{id}/cancel',
-        '/social-agent/self-improve/runner/run-once',
-        '/admin/rbac/roles',
-        '/admin/rbac/users/{userId}/roles',
-        '/admin/rbac/audit-logs',
-        '/uploads/image',
-        '/uploads/video',
+    const templates = new Set(flattenEndpointTemplates());
+    for (const path of Object.keys(fitMeetCoreEndpointMethods)) {
+      expect(templates).toContain(path);
+    }
+    expect(templates).not.toContain('/friends/users/{id}/follow');
+    expect(templates).not.toContain('/friends/following-ids');
+    expect(templates).not.toContain('/safety/blocks');
+  });
+
+  it('keeps OpenAPI paths and methods aligned with the frontend method registry', () => {
+    const openApiMethods = Object.fromEntries(
+      Object.entries(fitMeetCoreOpenApi.paths).map(([path, item]) => [
+        path,
+        Object.keys(item).sort(),
       ]),
     );
+    const registryMethods = Object.fromEntries(
+      Object.entries(fitMeetCoreEndpointMethods).map(([path, methods]) => [
+        path,
+        [...methods].sort(),
+      ]),
+    );
+
+    expect(openApiMethods).toEqual(registryMethods);
+    expect(openApiMethods['/users/me/social-profile']).toEqual(['get', 'put']);
+    expect(openApiMethods['/users/me/onboarding-status']).toEqual(['get']);
+    expect(openApiMethods['/users/me/onboarding/complete']).toEqual(['post']);
+    expect(openApiMethods['/users/me/profile-photos']).toEqual(['get', 'put']);
+    expect(openApiMethods['/users/me/profile-photos/{photoId}']).toEqual(['delete']);
+    expect(openApiMethods['/users/me/social-profile/privacy']).toEqual(['get', 'patch']);
+    expect(openApiMethods['/public/social-intents/{id}/applications']).toEqual(['get', 'post']);
+    expect(openApiMethods['/public-intent-applications/{id}/accept']).toEqual(['post']);
+    expect(openApiMethods['/connections/requests']).toEqual(['get', 'post']);
+    expect(openApiMethods['/connections/requests/{id}/accept']).toEqual(['post']);
+    expect(openApiMethods['/relationships/users/{userId}']).toEqual(['get']);
+    expect(openApiMethods['/friends/{userId}']).toEqual(['delete']);
+    expect(openApiMethods['/users/{id}/follow']).toEqual(['post']);
+    expect(openApiMethods['/safety/blocks/{id}']).toEqual(['delete', 'post']);
+  });
+
+  it('keeps OpenAPI request bodies and path parameters structurally valid', () => {
+    expect(requestContentTypes('/uploads/image', 'post')).toContain('multipart/form-data');
+    expect(requestContentTypes('/uploads/video', 'post')).toContain('multipart/form-data');
+    expect(requestContentTypes('/auth/login', 'post')).toContain('application/json');
+    expect(responseSchemaRef('/users/me/onboarding/complete', 'post', '201')).toBe(
+      '#/components/schemas/CompleteOnboardingResponse',
+    );
+
+    for (const [path, item] of Object.entries(fitMeetCoreOpenApi.paths)) {
+      const requiredPathParams = Array.from(path.matchAll(/\{([^/}]+)\}/g), (match) => match[1]);
+      if (requiredPathParams.length === 0) continue;
+
+      for (const method of Object.keys(item)) {
+        const operation = item[method as keyof typeof item] as {
+          parameters?: Array<{ name?: string; in?: string; required?: boolean }>;
+        };
+        for (const paramName of requiredPathParams) {
+          expect(operation.parameters).toEqual(
+            expect.arrayContaining([
+              expect.objectContaining({
+                name: paramName,
+                in: 'path',
+                required: true,
+              }),
+            ]),
+          );
+        }
+      }
+    }
   });
 
   it('normalizes dynamic endpoint builders back to their OpenAPI templates', () => {
@@ -294,6 +325,26 @@ describe('fitMeetCoreEndpoints', () => {
       {
         built: fitMeetCoreEndpoints.messages.startPublicIntentConversation('intent:city run'),
         template: fitMeetCoreEndpointTemplates.messages.startPublicIntentConversation,
+      },
+      {
+        built: fitMeetCoreEndpoints.users.getPublicUser('user:42'),
+        template: fitMeetCoreEndpointTemplates.users.getPublicUser,
+      },
+      {
+        built: fitMeetCoreEndpoints.onboarding.deleteProfilePhoto('photo:42'),
+        template: fitMeetCoreEndpointTemplates.onboarding.deleteProfilePhoto,
+      },
+      {
+        built: fitMeetCoreEndpoints.friends.followUser('user:42'),
+        template: fitMeetCoreEndpointTemplates.friends.followUser,
+      },
+      {
+        built: fitMeetCoreEndpoints.friends.isFollowing('user:42'),
+        template: fitMeetCoreEndpointTemplates.friends.isFollowing,
+      },
+      {
+        built: fitMeetCoreEndpoints.safety.blockUser('user:42'),
+        template: fitMeetCoreEndpointTemplates.safety.blockUser,
       },
       {
         built: fitMeetCoreEndpoints.socialAgentChat.taskSession(101),
@@ -382,6 +433,31 @@ function flattenEndpointTemplates(): string[] {
   return Object.values(fitMeetCoreEndpointTemplates).flatMap((group) => Object.values(group));
 }
 
+function requestContentTypes(path: string, method: string): string[] {
+  const paths = fitMeetCoreOpenApi.paths as Record<
+    string,
+    Record<string, { requestBody?: { content?: Record<string, unknown> } }>
+  >;
+  const operation = paths[path]?.[method];
+  return Object.keys(operation?.requestBody?.content ?? {});
+}
+
+function responseSchemaRef(path: string, method: string, status: string): string | undefined {
+  const paths = fitMeetCoreOpenApi.paths as Record<
+    string,
+    Record<
+      string,
+      {
+        responses?: Record<
+          string,
+          { content?: { 'application/json'?: { schema?: { $ref?: string } } } }
+        >;
+      }
+    >
+  >;
+  return paths[path]?.[method]?.responses?.[status]?.content?.['application/json']?.schema?.$ref;
+}
+
 function normalizeTemplatePath(path: string): string {
   return path.replace(/\{[^/}]+\}/g, ':param');
 }
@@ -393,5 +469,7 @@ function normalizeBuiltPath(path: string): string {
     .replace(/\/conversation%3Acity%20run(?=\/|$)/g, '/:param')
     .replace(/\/sar%3Acity%20run(?=\/|$)/g, '/:param')
     .replace(/\/intent%3Acity%20run(?=\/|$)/g, '/:param')
-    .replace(/\/rem%3A101(?=\/|$)/g, '/:param');
+    .replace(/\/rem%3A101(?=\/|$)/g, '/:param')
+    .replace(/\/photo%3A42(?=\/|$)/g, '/:param')
+    .replace(/\/user%3A42(?=\/|$)/g, '/:param');
 }

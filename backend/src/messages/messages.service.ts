@@ -45,6 +45,14 @@ import {
 import { redactSensitiveText } from '../common/privacy-redaction.util';
 import { RealtimeEventService } from '../realtime/realtime-event.service';
 import { AgentSideEffectLedgerService } from '../agent-gateway/agent-side-effect-ledger.service';
+import {
+  ContactContextType,
+  ContactPolicyService,
+} from '../social-loop/contact-policy.service';
+import {
+  SocialLoopErrorCode,
+  socialForbidden,
+} from '../social-loop/social-loop.errors';
 
 type SendMessageOptions = {
   source?: MessageSource;
@@ -59,6 +67,10 @@ type SendMessageOptions = {
   actorUserId?: number | null;
   agentTaskId?: number | null;
   idempotencyKey?: string | null;
+  contactContext?: {
+    contextType: ContactContextType;
+    contextId: string;
+  } | null;
 };
 
 type AgentMessageEventOptions = {
@@ -81,6 +93,18 @@ type StartConversationOptions = {
   metadata?: Record<string, unknown>;
   agentTaskId?: number | null;
   idempotencyKey?: string | null;
+  contactContext?: {
+    contextType: ContactContextType;
+    contextId: string;
+  } | null;
+};
+
+type StartConversationRequest = {
+  targetUserId?: number;
+  otherUserId?: number;
+  contextType?: string;
+  contextId?: string;
+  initialMessage?: string;
 };
 
 type AgentMessageEventInput = {
@@ -145,6 +169,8 @@ export class MessagesService {
     private readonly realtime?: RealtimeEventService,
     @Optional()
     private readonly sideEffectLedger?: AgentSideEffectLedgerService,
+    @Optional()
+    private readonly contactPolicy?: ContactPolicyService,
   ) {}
 
   async getConversations(userId: number) {
@@ -292,6 +318,32 @@ export class MessagesService {
 
     const otherId = conv.participantIds.find((id) => id !== Number(senderId));
     const senderType = options.senderType ?? 'user';
+    let markOpenerContext: {
+      contextType: ContactContextType;
+      contextId: string;
+    } | null = null;
+    let shouldOpenAfterReply = false;
+    if (otherId && senderType === 'user' && this.contactPolicy) {
+      const decision = await this.contactPolicy.assertCanSendMessage(
+        Number(senderId),
+        Number(otherId),
+        options.contactContext ?? undefined,
+      );
+      if (decision.shouldOpenAfterReply) {
+        shouldOpenAfterReply = true;
+      }
+      if (
+        decision.permission.status === 'opener_available' &&
+        options.contactContext
+      ) {
+        await this.contactPolicy.markOpenerSent(
+          Number(senderId),
+          Number(otherId),
+          options.contactContext,
+        );
+        markOpenerContext = options.contactContext;
+      }
+    }
     let agentConnectionId =
       options.agentConnectionId ?? conv.agentConnectionId ?? null;
     let ownerUserId =
@@ -367,7 +419,20 @@ export class MessagesService {
         ownerUserId,
         source: options.source ?? 'user',
       });
+      if (markOpenerContext && otherId && this.contactPolicy) {
+        await this.contactPolicy.restoreOpenerAvailableAfterSendFailure(
+          Number(senderId),
+          Number(otherId),
+          markOpenerContext,
+        );
+      }
       throw error;
+    }
+    if (shouldOpenAfterReply && otherId && this.contactPolicy) {
+      await this.contactPolicy.openAfterReply(
+        Number(senderId),
+        Number(otherId),
+      );
     }
 
     const safeText = this.messageTextForDisplay(content);
@@ -542,6 +607,47 @@ export class MessagesService {
     return this.startConversationOnce(userId, otherUserId, options);
   }
 
+  async startConversationWithPolicy(
+    userId: number,
+    body: StartConversationRequest,
+    idempotencyKey?: string,
+  ) {
+    const targetUserId = Number(body.targetUserId ?? body.otherUserId);
+    const context = this.normalizeContactContext(body);
+    if (!this.contactPolicy) {
+      throw socialForbidden(SocialLoopErrorCode.ContactNotAllowed);
+    }
+    await this.contactPolicy.assertCanStartConversation(
+      userId,
+      targetUserId,
+      context,
+    );
+    const result = await this.startConversation(userId, targetUserId, {
+      idempotencyKey,
+      contactContext: context,
+      metadata: {
+        source: context.contextType,
+        contactContextType: context.contextType,
+        contactContextId: context.contextId,
+      },
+    });
+    const initialMessage = body.initialMessage?.trim();
+    const message = initialMessage
+      ? await this.sendMessage(result.conversationId, userId, initialMessage, {
+          contactContext: context,
+          metadata: {
+            source: context.contextType,
+            contactContextType: context.contextType,
+            contactContextId: context.contextId,
+          },
+        })
+      : null;
+    return {
+      ...result,
+      message,
+    };
+  }
+
   private async startConversationOnce(
     userId: number,
     otherUserId: number,
@@ -638,6 +744,15 @@ export class MessagesService {
     }
     if (intent.userId === userId) {
       throw new BadRequestException('不能给自己发布的内容发消息');
+    }
+    if (this.contactPolicy) {
+      const relationship = await this.contactPolicy.getRelationshipState(
+        userId,
+        intent.userId,
+      );
+      if (relationship.messagePermission !== 'open') {
+        throw socialForbidden(SocialLoopErrorCode.ContactNotAllowed);
+      }
     }
 
     const request = intent.linkedSocialRequestId
@@ -1111,6 +1226,30 @@ export class MessagesService {
   private directConversationKey(userA: number, userB: number): string {
     const [minUserId, maxUserId] = this.directParticipantIds(userA, userB);
     return `direct:${minUserId}:${maxUserId}`;
+  }
+
+  private normalizeContactContext(body: StartConversationRequest): {
+    contextType: ContactContextType;
+    contextId: string;
+  } {
+    const contextType = cleanDisplayText(body.contextType, '');
+    const contextId = cleanDisplayText(body.contextId, '');
+    if (
+      ![
+        'agent_candidate',
+        'connection_request',
+        'public_intent_application',
+        'friendship',
+        'meet',
+      ].includes(contextType) ||
+      !contextId
+    ) {
+      throw socialForbidden(SocialLoopErrorCode.ContactNotAllowed);
+    }
+    return {
+      contextType: contextType as ContactContextType,
+      contextId,
+    };
   }
 
   async getRecentAgentConversationSignals(options: {

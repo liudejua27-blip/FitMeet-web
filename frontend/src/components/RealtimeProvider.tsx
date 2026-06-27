@@ -1,7 +1,8 @@
-import { useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import { io, type Socket } from 'socket.io-client';
 import { API_BASE_URL, getToken } from '../api/client';
-import { useAuthStore, useMessageStore } from '../stores';
+import { useAuthStore, useMessageStore, useSocialContactStore } from '../stores';
+import type { RealtimeEnvelope } from '../types/socialContact';
 
 /**
  * App-level realtime bridge.
@@ -20,8 +21,28 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
   const connectSocket = useMessageStore((s) => s.connectSocket);
   const disconnectSocket = useMessageStore((s) => s.disconnectSocket);
   const loadConversations = useMessageStore((s) => s.loadConversations);
+  const handleSocialContactRealtimeEvent = useSocialContactStore((s) => s.handleRealtimeEvent);
+  const loadOwnerApplications = useSocialContactStore((s) => s.loadOwnerApplications);
+  const loadApplicantApplications = useSocialContactStore((s) => s.loadApplicantApplications);
+  const recoverProvisioningApplications = useSocialContactStore((s) => s.recoverProvisioningApplications);
+  const resetSocialContactForLogout = useSocialContactStore((s) => s.resetForLogout);
   const wasLoggedIn = useRef(false);
   const realtimeSocket = useRef<Socket | null>(null);
+
+  const recoverSocialContact = useCallback(() => {
+    void Promise.allSettled([
+      loadOwnerApplications(),
+      loadApplicantApplications(),
+      loadConversations(),
+    ]).then(() => {
+      recoverProvisioningApplications();
+    });
+  }, [
+    loadApplicantApplications,
+    loadConversations,
+    loadOwnerApplications,
+    recoverProvisioningApplications,
+  ]);
 
   useEffect(() => {
     if (isLoggedIn) {
@@ -29,42 +50,68 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
       realtimeSocket.current = connectRealtimeSocket(realtimeSocket.current, {
         onEvent(event) {
           window.dispatchEvent(new CustomEvent('fitmeet:realtime', { detail: event }));
+          if (event.eventType === 'conversation.ready') {
+            handleSocialContactRealtimeEvent(event);
+          }
           if (
             event.eventType === 'message:new' ||
             event.eventType === 'conversation:created' ||
-            event.eventType === 'conversation:updated'
+            event.eventType === 'conversation:updated' ||
+            event.eventType === 'conversation.ready'
           ) {
             loadConversations();
           }
+        },
+        onReconnect() {
+          recoverSocialContact();
         },
       });
       // Prime the conversation list so the bell badge / Messages page have data
       // even before the first newMessage arrives.
       loadConversations();
+      recoverSocialContact();
       wasLoggedIn.current = true;
     } else if (wasLoggedIn.current) {
       // Transition logged-in -> logged-out: drop the socket.
       disconnectSocket();
       realtimeSocket.current?.disconnect();
       realtimeSocket.current = null;
+      resetSocialContactForLogout();
       wasLoggedIn.current = false;
     }
-  }, [isLoggedIn, connectSocket, disconnectSocket, loadConversations]);
+  }, [
+    isLoggedIn,
+    connectSocket,
+    disconnectSocket,
+    handleSocialContactRealtimeEvent,
+    loadConversations,
+    recoverSocialContact,
+    resetSocialContactForLogout,
+  ]);
+
+  useEffect(() => {
+    if (!isLoggedIn) return undefined;
+    const recover = () => recoverSocialContact();
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'visible') recover();
+    };
+    window.addEventListener('focus', recover);
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    return () => {
+      window.removeEventListener('focus', recover);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+    };
+  }, [isLoggedIn, recoverSocialContact]);
 
   return <>{children}</>;
 }
 
-type RealtimeEnvelope = {
-  eventId: string;
-  eventType: string;
-  userId: number;
-  payload: Record<string, unknown>;
-  createdAt: string;
-};
-
 function connectRealtimeSocket(
   current: Socket | null,
-  options: { onEvent: (event: RealtimeEnvelope) => void },
+  options: {
+    onEvent: (event: RealtimeEnvelope) => void;
+    onReconnect: () => void;
+  },
 ) {
   const token = getToken();
   if (!token) return null;
@@ -97,6 +144,7 @@ function connectRealtimeSocket(
         detail: { connected: true },
       }),
     );
+    options.onReconnect();
   });
   socket.on('disconnect', () => {
     window.dispatchEvent(
@@ -115,6 +163,7 @@ function connectRealtimeSocket(
   socket.on('realtime:event', (event: RealtimeEnvelope) => {
     if (event && typeof event.eventType === 'string') options.onEvent(event);
   });
+  socket.on('conversation.ready', (event: RealtimeEnvelope) => options.onEvent(event));
   socket.on('message:new', (event: RealtimeEnvelope) => options.onEvent(event));
   socket.on('life_graph:updated', (event: RealtimeEnvelope) => options.onEvent(event));
   socket.on('agent:thinking', (event: RealtimeEnvelope) => options.onEvent(event));

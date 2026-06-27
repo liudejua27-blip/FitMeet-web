@@ -649,6 +649,8 @@ export class SocialProfileService {
       ageRange: '',
       city: '',
       nickname: '',
+      primaryPurpose: '',
+      defaultMatchRadiusKm: 20,
       nearbyArea: '',
       fitnessGoals: [],
       zodiac: '',

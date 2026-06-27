@@ -799,6 +799,12 @@ export class SocialRequestsService {
         personalityPreference:
           (metadata.personalityPreference as string[] | undefined) ?? [],
       },
+      capacityMin: intent.capacityMin ?? 1,
+      capacityMax: intent.capacityMax ?? 1,
+      acceptedCount: intent.acceptedCount ?? 0,
+      applicationPolicy: intent.applicationPolicy ?? 'approval_required',
+      linkedMeetId: intent.linkedMeetId ?? null,
+      closesAt: request.expiresAt,
       status,
       metadata: {
         ...metadata,

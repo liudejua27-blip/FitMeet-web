@@ -18,6 +18,7 @@ import { ModerationModule } from './moderation/moderation.module';
 import { RedisModule } from './redis/redis.module';
 import { SafetyModule } from './safety/safety.module';
 import { SocialRequestsModule } from './social-requests/social-requests.module';
+import { SocialLoopModule } from './social-loop/social-loop.module';
 import { MatchModule } from './match/match.module';
 import { ActivitiesModule } from './activities/activities.module';
 import { UploadsModule } from './uploads/uploads.module';
@@ -141,6 +142,7 @@ import { AdminRbacModule } from './admin-rbac/admin-rbac.module';
     AIModule,
     AgentGatewayModule,
     SocialRequestsModule,
+    SocialLoopModule,
     MatchModule,
     ActivitiesModule,
   ],

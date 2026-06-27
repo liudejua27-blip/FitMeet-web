@@ -13,6 +13,8 @@ export interface ChatMessage {
   text: string;
   time: string;
   isMine: boolean;
+  deliveryStatus?: 'pending' | 'sent' | 'failed';
+  errorText?: string;
   source?: 'user' | 'ai_delegate';
   card?: {
     type: 'fitmeet_contact_card';
@@ -42,6 +44,7 @@ interface MessageState {
   activeConvId: string | null;
   messages: Record<string, ChatMessage[]>;
   totalUnread: number;
+  disabledConversationReasons: Record<string, string>;
 
   connectSocket: () => void;
   disconnectSocket: () => void;
@@ -49,7 +52,7 @@ interface MessageState {
   selectConv: (id: string) => void;
   closeConv: () => void;
   sendMessage: (convId: string, text: string) => Promise<void>;
-  startChat: (userId: number, username: string, avatar: string, color: string) => void;
+  startChat: (input: { conversationId?: string; userId?: number }) => void;
   loadConversations: () => Promise<void>;
   loadMessages: (convId: string) => Promise<void>;
 }
@@ -62,6 +65,7 @@ export const useMessageStore = create<MessageState>()(
       activeConvId: null,
       messages: {},
       totalUnread: 0,
+      disabledConversationReasons: {},
 
       connectSocket: () => {
         const token = api.getToken();
@@ -274,12 +278,13 @@ export const useMessageStore = create<MessageState>()(
       closeConv: () => set({ activeConvId: null }),
 
       sendMessage: async (convId, text) => {
-        // Optimistic update
+        const tempId = `pending-${Date.now()}`;
         const newMsg: ChatMessage = {
-          id: Date.now(),
+          id: tempId,
           text,
           time: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }),
           isMine: true,
+          deliveryStatus: 'pending',
           source: 'user',
           card: null,
         };
@@ -295,34 +300,68 @@ export const useMessageStore = create<MessageState>()(
         }));
 
         try {
-          await dataService.sendMessage(convId, text);
+          const saved = await dataService.sendMessage(convId, text);
+          const savedMessage: ChatMessage = {
+            id: messageIdValue(saved.id),
+            text: cleanDisplayText(saved.text, text),
+            time:
+              cleanDisplayText(saved.time) ||
+              new Date().toLocaleTimeString('zh-CN', {
+                hour: '2-digit',
+                minute: '2-digit',
+              }),
+            isMine: true,
+            deliveryStatus: 'sent',
+            source: messageSourceValue(saved.source),
+            card: cardValue(saved.card),
+          };
+          set((state) => ({
+            messages: {
+              ...state.messages,
+              [convId]: (state.messages[convId] || []).map((message) =>
+                message.id === tempId ? savedMessage : message,
+              ),
+            },
+            disabledConversationReasons: {
+              ...state.disabledConversationReasons,
+              [convId]: '',
+            },
+          }));
         } catch (e) {
           console.error('Send failed', e);
+          const reason = permissionFailureMessage(e);
+          set((state) => ({
+            messages: {
+              ...state.messages,
+              [convId]: (state.messages[convId] || []).map((message) =>
+                message.id === tempId
+                  ? {
+                      ...message,
+                      deliveryStatus: 'failed',
+                      errorText: reason || '发送失败，请稍后重试',
+                    }
+                  : message,
+              ),
+            },
+            disabledConversationReasons: reason
+              ? { ...state.disabledConversationReasons, [convId]: reason }
+              : state.disabledConversationReasons,
+          }));
         }
       },
 
-      startChat: (userId) => {
-        const existing = get().conversations.find((c) => c.userId === userId);
+      startChat: ({ conversationId, userId }) => {
+        const existing = conversationId
+          ? get().conversations.find((c) => c.id === conversationId)
+          : get().conversations.find((c) => c.userId === userId);
         if (existing) {
           set({ activeConvId: existing.id });
           get().loadMessages(existing.id);
-        } else {
-          dataService
-            .startConversation(userId)
-            .then((res) => {
-              get()
-                .loadConversations()
-                .then(() => {
-                  const refreshed = get().conversations.find((c) => c.userId === userId);
-                  if (refreshed) {
-                    set({ activeConvId: refreshed.id });
-                  } else if (res?.conversationId) {
-                    // Fallback using returned ID directly
-                    set({ activeConvId: res.conversationId });
-                  }
-                });
-            })
-            .catch((e) => console.error(e));
+          return;
+        }
+        if (conversationId) {
+          set({ activeConvId: conversationId });
+          get().loadMessages(conversationId);
         }
       },
     }),
@@ -332,6 +371,7 @@ export const useMessageStore = create<MessageState>()(
         conversations: state.conversations,
         messages: state.messages,
         totalUnread: state.totalUnread,
+        disabledConversationReasons: state.disabledConversationReasons,
       }),
     },
   ),
@@ -392,4 +432,22 @@ function cardValue(value: unknown): ChatMessage['card'] {
   return isRecord(value) && value.type === 'fitmeet_contact_card'
     ? (value as ChatMessage['card'])
     : null;
+}
+
+function permissionFailureMessage(error: unknown): string {
+  if (!(error instanceof api.ApiError)) return '';
+  switch (error.code) {
+    case 'CONTACT_NOT_ALLOWED':
+      return '尚未获得联系权限';
+    case 'OPENER_ALREADY_SENT':
+      return '已发送招呼，等待对方回复';
+    case 'USER_BLOCKED':
+      return '已拉黑或被拉黑，无法继续发送';
+    case 'CONVERSATION_PROVISIONING':
+      return '会话正在建立中';
+    case 'SOCIAL_PROFILE_NOT_READY':
+      return '请先完善资料后再发送';
+    default:
+      return '';
+  }
 }

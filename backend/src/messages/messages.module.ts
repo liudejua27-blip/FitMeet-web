@@ -4,6 +4,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { MessagesController } from './messages.controller';
 import { MessagesService } from './messages.service';
 import { MessagesGateway } from './messages.gateway';
+import { DomainOutboxWorkerService } from './domain-outbox-worker.service';
 import { Conversation, ConversationSchema } from './conversation.schema';
 import { Message, MessageSchema } from './message.schema';
 import {
@@ -20,6 +21,9 @@ import { UserSocialRequest } from '../social-requests/social-request.entity';
 import { RealtimeModule } from '../realtime/realtime.module';
 import { AgentSideEffectLedger } from '../agent-gateway/entities/agent-side-effect-ledger.entity';
 import { AgentSideEffectLedgerService } from '../agent-gateway/agent-side-effect-ledger.service';
+import { SocialLoopModule } from '../social-loop/social-loop.module';
+import { ContactPermission } from '../social-loop/contact-permission.entity';
+import { DomainOutboxEvent } from '../social-loop/domain-outbox-event.entity';
 
 @Module({
   imports: [
@@ -36,12 +40,20 @@ import { AgentSideEffectLedgerService } from '../agent-gateway/agent-side-effect
       PublicSocialIntent,
       UserSocialRequest,
       AgentSideEffectLedger,
+      ContactPermission,
+      DomainOutboxEvent,
     ]),
     AuthModule,
     RealtimeModule,
+    SocialLoopModule,
   ],
   controllers: [MessagesController],
-  providers: [MessagesService, MessagesGateway, AgentSideEffectLedgerService],
+  providers: [
+    MessagesService,
+    MessagesGateway,
+    DomainOutboxWorkerService,
+    AgentSideEffectLedgerService,
+  ],
   exports: [MessagesService, MessagesGateway],
 })
 export class MessagesModule {}

@@ -1,6 +1,8 @@
 import {
   Controller,
+  Delete,
   Get,
+  Headers,
   Patch,
   Post,
   Put,
@@ -12,8 +14,11 @@ import {
 } from '@nestjs/common';
 import { UsersService } from './users.service';
 import { SocialProfileService } from './social-profile.service';
+import { OnboardingService } from './onboarding.service';
+import { CompleteOnboardingDto } from './dto/complete-onboarding.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 import { UpdateLocationDto } from './dto/update-location.dto';
+import { UpdateProfilePhotosDto } from './dto/update-profile-photos.dto';
 import { UpdateSocialProfileDto } from './dto/update-social-profile.dto';
 import { UpdateProfilePrivacyDto } from './dto/update-ai-profile-privacy.dto';
 import { SensitiveTagActionDto } from './dto/sensitive-tag-action.dto';
@@ -27,6 +32,7 @@ export class UsersController {
   constructor(
     private readonly usersService: UsersService,
     private readonly socialProfileService: SocialProfileService,
+    private readonly onboardingService: OnboardingService,
   ) {}
 
   @Public()
@@ -61,6 +67,46 @@ export class UsersController {
       data.lng,
       data.acceptNearbyMatch,
     );
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Get('me/onboarding-status')
+  getOnboardingStatus(@Request() req: AuthenticatedRequest) {
+    return this.onboardingService.getStatus(req.user.id);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Post('me/onboarding/complete')
+  completeOnboarding(
+    @Request() req: AuthenticatedRequest,
+    @Body() data: CompleteOnboardingDto,
+    @Headers('idempotency-key') idempotencyKey?: string,
+  ) {
+    return this.onboardingService.complete(req.user.id, data, idempotencyKey);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Get('me/profile-photos')
+  getProfilePhotos(@Request() req: AuthenticatedRequest) {
+    return this.onboardingService.listProfilePhotos(req.user.id);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Put('me/profile-photos')
+  updateProfilePhotos(
+    @Request() req: AuthenticatedRequest,
+    @Body() data: UpdateProfilePhotosDto,
+  ) {
+    return this.onboardingService.replaceProfilePhotos(req.user.id, data);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Delete('me/profile-photos/:photoId')
+  deleteProfilePhoto(
+    @Request() req: AuthenticatedRequest,
+    @Param('photoId', ParseIntPipe) photoId: number,
+  ) {
+    return this.onboardingService.deleteProfilePhoto(req.user.id, photoId);
   }
 
   /**

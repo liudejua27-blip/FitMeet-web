@@ -15,6 +15,22 @@ const socialAgentApiMock = vi.hoisted(() => ({
   recordInterestEvent: vi.fn(),
 }));
 
+const socialContactStoreMock = vi.hoisted(() => {
+  const state = {
+    applicationsById: {},
+    applicationByPublicIntentId: {},
+    conversationsByApplicationId: {},
+    loadApplicantApplications: vi.fn(() => Promise.resolve()),
+    createApplication: vi.fn(() => Promise.resolve(null)),
+    cancelApplication: vi.fn(() => Promise.resolve()),
+    recoverProvisioningApplications: vi.fn(() => Promise.resolve()),
+  };
+
+  return vi.fn((selector?: (state: Record<string, unknown>) => unknown) =>
+    typeof selector === 'function' ? selector(state) : state,
+  );
+});
+
 vi.mock('../services/dataService', () => dataServiceMock);
 
 vi.mock('../api/socialAgentApi', () => ({
@@ -29,6 +45,7 @@ vi.mock('../stores', () => ({
   useNotificationStore: () => ({
     addNotification: vi.fn(),
   }),
+  useSocialContactStore: socialContactStoreMock,
 }));
 
 describe('DiscoverPage public intent readback', () => {

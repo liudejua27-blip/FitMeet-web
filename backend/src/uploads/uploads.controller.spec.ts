@@ -11,9 +11,11 @@ describe('UploadsController', () => {
   function makeController() {
     const uploadsService = {
       saveImage: jest.fn().mockResolvedValue({
+        assetId: 42,
         url: 'https://cdn.fitmeet.test/avatar.webp',
         width: 640,
         height: 640,
+        moderationStatus: 'approved',
       }),
       saveFile: jest.fn().mockResolvedValue('https://cdn.fitmeet.test/v.mp4'),
     };
@@ -49,13 +51,16 @@ describe('UploadsController', () => {
   it('delegates image uploads to UploadsService and preserves dimensions', async () => {
     const { controller, uploadsService } = makeController();
     const file = { originalname: 'avatar.jpg' } as Express.Multer.File;
+    const req = { user: { id: 7 } };
 
-    await expect(controller.uploadImage(file)).resolves.toEqual({
+    await expect(controller.uploadImage(file, req as never)).resolves.toEqual({
+      assetId: 42,
       url: 'https://cdn.fitmeet.test/avatar.webp',
       width: 640,
       height: 640,
+      moderationStatus: 'approved',
     });
-    expect(uploadsService.saveImage).toHaveBeenCalledWith(file);
+    expect(uploadsService.saveImage).toHaveBeenCalledWith(file, 7);
   });
 
   it('delegates video uploads to UploadsService and wraps the URL response', async () => {
@@ -70,9 +75,10 @@ describe('UploadsController', () => {
 
   it('rejects missing upload files before hitting storage', async () => {
     const { controller, uploadsService } = makeController();
+    const req = { user: { id: 7 } };
 
     await expect(
-      controller.uploadImage(undefined as never),
+      controller.uploadImage(undefined as never, req as never),
     ).rejects.toBeInstanceOf(BadRequestException);
     await expect(
       controller.uploadVideo(undefined as never),

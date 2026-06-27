@@ -5,13 +5,17 @@ import {
   OnModuleInit,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { InjectRepository } from '@nestjs/typeorm';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as sharp from 'sharp';
 import OSS from 'ali-oss';
 import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
+import { createHash } from 'crypto';
+import { Repository } from 'typeorm';
 import { ModerationService } from '../moderation/moderation.service';
 import { ensureUploadBaseDir, ensureUploadTempDir } from './upload-paths';
+import { MediaAsset, MediaModerationStatus } from '../users/media-asset.entity';
 
 const PLACEHOLDER_PATTERN =
   /^(|change_me.*|your-.*|replace-.*|.*_here|secret_key|password)$/i;
@@ -30,6 +34,8 @@ export class UploadsService implements OnModuleInit {
   constructor(
     private readonly configService: ConfigService,
     private readonly moderationService: ModerationService,
+    @InjectRepository(MediaAsset)
+    private readonly mediaRepo: Repository<MediaAsset>,
   ) {
     this.ensureUploadDir();
     ensureUploadTempDir();
@@ -127,7 +133,14 @@ export class UploadsService implements OnModuleInit {
    */
   async saveImage(
     file: Express.Multer.File,
-  ): Promise<{ url: string; width: number; height: number }> {
+    ownerUserId?: number,
+  ): Promise<{
+    assetId: number | null;
+    url: string;
+    width: number;
+    height: number;
+    moderationStatus: string;
+  }> {
     if (this.isProduction && this.storageProvider === 'local') {
       this.safeUnlink(file.path);
       throw new BadRequestException(
@@ -155,10 +168,13 @@ export class UploadsService implements OnModuleInit {
       const shouldModerateOssObject =
         this.storageProvider === 'aliyun-oss' &&
         this.moderationService.isAliyunImageModerationEnabled();
+      let moderationStatus: MediaModerationStatus =
+        this.defaultImageModerationStatus();
 
       if (!shouldModerateOssObject) {
         // Check the exact image bytes that will be stored.
         this.moderationService.checkImage(processedBuffer, file.originalname);
+        moderationStatus = this.mockApprovedImageModerationStatus();
       }
 
       // 3. Upload to configured object storage
@@ -173,6 +189,7 @@ export class UploadsService implements OnModuleInit {
               bucketName: this.bucketName,
               regionId: this.configService.get<string>('ALIYUN_OSS_REGION'),
             });
+            moderationStatus = 'approved';
           }
         } catch (error) {
           if (uploaded) {
@@ -183,11 +200,14 @@ export class UploadsService implements OnModuleInit {
           this.safeUnlink(file.path);
         }
 
-        return {
+        return this.persistImageAsset(ownerUserId, {
           url: this.getAliyunOssUrl(filename),
           width: metadata.width || 0,
           height: metadata.height || 0,
-        };
+          storageKey: filename,
+          sha256: this.hash(processedBuffer),
+          moderationStatus,
+        });
       } else if (this.s3Client) {
         await this.uploadToS3(filename, processedBuffer, 'image/webp');
 
@@ -195,11 +215,14 @@ export class UploadsService implements OnModuleInit {
         this.safeUnlink(file.path);
 
         const s3Url = this.getS3Url(filename);
-        return {
+        return this.persistImageAsset(ownerUserId, {
           url: s3Url,
           width: metadata.width || 0,
           height: metadata.height || 0,
-        };
+          storageKey: filename,
+          sha256: this.hash(processedBuffer),
+          moderationStatus,
+        });
       } else {
         // Fallback to local storage logic (or keep it as legacy)
         const filepath = path.join(this.uploadDir, filename);
@@ -208,11 +231,14 @@ export class UploadsService implements OnModuleInit {
 
         const baseUrl =
           this.configService.get<string>('BASE_URL') || 'http://localhost:3000';
-        return {
+        return this.persistImageAsset(ownerUserId, {
           url: `${baseUrl}/uploads/${filename}`,
           width: metadata.width || 0,
           height: metadata.height || 0,
-        };
+          storageKey: filename,
+          sha256: this.hash(processedBuffer),
+          moderationStatus,
+        });
       }
     } catch (error) {
       if (error instanceof Error) {
@@ -223,6 +249,69 @@ export class UploadsService implements OnModuleInit {
       }
       throw error;
     }
+  }
+
+  private async persistImageAsset(
+    ownerUserId: number | undefined,
+    result: {
+      url: string;
+      width: number;
+      height: number;
+      storageKey: string;
+      sha256: string;
+      moderationStatus: MediaModerationStatus;
+    },
+  ) {
+    if (!ownerUserId) {
+      return {
+        assetId: null,
+        url: result.url,
+        width: result.width,
+        height: result.height,
+        moderationStatus: result.moderationStatus,
+      };
+    }
+
+    const asset = await this.mediaRepo.save(
+      this.mediaRepo.create({
+        ownerUserId,
+        purpose: 'profile_photo',
+        storageKey: result.storageKey,
+        url: result.url,
+        mimeType: 'image/webp',
+        width: result.width,
+        height: result.height,
+        sha256: result.sha256,
+        moderationStatus: result.moderationStatus,
+        moderationReason: '',
+      }),
+    );
+    return {
+      assetId: asset.id,
+      url: result.url,
+      width: result.width,
+      height: result.height,
+      moderationStatus: asset.moderationStatus,
+    };
+  }
+
+  private hash(buffer: Buffer) {
+    return createHash('sha256').update(buffer).digest('hex');
+  }
+
+  private defaultImageModerationStatus(): MediaModerationStatus {
+    return 'pending';
+  }
+
+  private mockApprovedImageModerationStatus(): MediaModerationStatus {
+    if (
+      this.configService.get<string>('MEDIA_MODERATION_MODE') ===
+        'mock-approved' &&
+      !this.isProduction
+    ) {
+      return 'approved';
+    }
+    return 'pending';
   }
 
   /*

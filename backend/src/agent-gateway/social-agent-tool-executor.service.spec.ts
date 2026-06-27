@@ -179,6 +179,9 @@ function makeService(options: { agentLoop?: unknown } = {}) {
     getConversations: jest.fn(),
     sendAgentReply: jest.fn(),
   };
+  const contactPolicy = {
+    reserveOpener: jest.fn().mockResolvedValue({ status: 'opener_available' }),
+  };
   const friends = { ensureFollowing: jest.fn() };
   const activities = { create: jest.fn(), join: jest.fn() };
   const safety = {
@@ -272,6 +275,7 @@ function makeService(options: { agentLoop?: unknown } = {}) {
     confirmationPolicy,
     toolInput,
     taskMemory,
+    contactPolicy as never,
   );
   const activityTools = new SocialAgentActivityToolService(
     activities as never,

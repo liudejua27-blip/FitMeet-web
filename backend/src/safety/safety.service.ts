@@ -17,6 +17,7 @@ import { EmergencyContact } from './emergency-contact.entity';
 import { SafetyReport } from './report.entity';
 import { UserBlock } from './user-block.entity';
 import { VerificationRequest } from './verification-request.entity';
+import { ContactPolicyService } from '../social-loop/contact-policy.service';
 
 @Injectable()
 export class SafetyService {
@@ -32,6 +33,7 @@ export class SafetyService {
     @InjectRepository(User)
     private readonly userRepo: Repository<User>,
     private readonly configService: ConfigService,
+    private readonly contactPolicy: ContactPolicyService,
   ) {}
 
   async createReport(reporterId: number, dto: CreateReportDto) {
@@ -60,9 +62,13 @@ export class SafetyService {
     const existing = await this.blockRepo.findOne({
       where: { blockerId, blockedId },
     });
-    if (existing) return { blocked: true };
+    if (existing) {
+      await this.contactPolicy.closeForBlock(blockerId, blockedId);
+      return { blocked: true };
+    }
 
     await this.blockRepo.save({ blockerId, blockedId });
+    await this.contactPolicy.closeForBlock(blockerId, blockedId);
     return { blocked: true };
   }
 
