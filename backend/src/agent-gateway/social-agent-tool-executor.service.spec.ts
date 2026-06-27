@@ -561,11 +561,20 @@ describe('SocialAgentToolExecutorService', () => {
     expect(l5Runtime.transitionMeetLoop).not.toHaveBeenCalled();
   });
 
-  it('updates social profile from extracted agent context', async () => {
+  it('creates a confirmable profile proposal from extracted agent context without writing profile directly', async () => {
     const { service, taskRepo, socialProfiles } = makeService();
     const task = makeTask({ permissionMode: AgentTaskPermissionMode.Assist });
     taskRepo.findOne.mockResolvedValue(task);
-    socialProfiles.upsert.mockResolvedValue({ userId: 1, city: 'Qingdao' });
+    socialProfiles.generateAiDraft.mockResolvedValue({
+      mode: 'fallback',
+      draft: { basic: { city: 'Qingdao' } },
+      proposal: {
+        proposalId: 901,
+        baseProfileVersion: 4,
+        status: 'pending',
+      },
+      completion: { completionRate: 60 },
+    });
 
     const call = await service.executeToolAction(
       100,
@@ -591,30 +600,37 @@ describe('SocialAgentToolExecutorService', () => {
     );
 
     expect(call.status).toBe('succeeded');
-    expect(socialProfiles.upsert).toHaveBeenCalledWith(
+    expect(socialProfiles.upsert).not.toHaveBeenCalled();
+    expect(socialProfiles.generateAiDraft).toHaveBeenCalledWith(
       1,
       expect.objectContaining({
-        gender: 'male',
-        ageRange: '18',
-        city: 'Qingdao',
-        nearbyArea: 'Qingdao University',
-        zodiac: 'Aries',
-        mbti: 'INFP',
-        wantToMeet: ['same-school women'],
-        matchSignals: expect.objectContaining({
-          agentProfileMemory: expect.objectContaining({
-            height: '181cm',
-            weight: '70kg',
-            school: 'Qingdao University',
-            targetPreference: 'same-school women',
+        rawText: expect.stringContaining('Qingdao University'),
+        source: 'agent_tool_profile_memory_proposal',
+        answers: expect.arrayContaining([
+          expect.objectContaining({ key: 'gender', answer: 'male' }),
+          expect.objectContaining({ key: 'city', answer: 'Qingdao' }),
+          expect.objectContaining({
+            key: 'matchSignals',
+            answer: expect.stringContaining('height: 181cm'),
           }),
-        }),
+        ]),
       }),
     );
     expect(call.output).toMatchObject({
       success: true,
+      status: 'pending_confirmation',
+      profileUpdated: false,
+      confirmationRequired: true,
+      proposal: expect.objectContaining({ proposalId: 901 }),
       updatedFields: expect.arrayContaining(['gender', 'city', 'matchSignals']),
       memoryFields: expect.arrayContaining(['height', 'weight', 'school']),
+    });
+    expect(task.result).toMatchObject({
+      profileUpdatePreview: expect.objectContaining({
+        status: 'pending_confirmation',
+        confirmationRequired: true,
+        proposal: expect.objectContaining({ proposalId: 901 }),
+      }),
     });
   });
 

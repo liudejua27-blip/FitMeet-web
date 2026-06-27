@@ -286,6 +286,97 @@ describe('SocialAgentProfileEnrichmentService', () => {
     expect(result.assistantMessageSource).toBe('fallback');
   });
 
+  it('returns a confirmable profile preview card instead of treating proposal output as saved', async () => {
+    const { chatLlm, executor, service } = makeHarness();
+    const task = makeTask();
+    const draft = {
+      basic: {
+        nickname: '',
+        city: '青岛',
+        ageRange: '',
+        gender: '',
+        zodiac: '',
+      },
+      personality: { traits: [], socialStyle: '', communicationStyle: '' },
+      interests: { sports: ['跑步'], lifestyle: ['咖啡'], learning: [] },
+      preferences: { wantToMeet: [], preferredTraits: [], avoidTraits: [] },
+      availability: { weekdays: '', weekends: '' },
+      safety: { rejectRules: '', privacyBoundary: '只接受公共场所' },
+      summary: '青岛跑步和咖啡爱好者。',
+    };
+    const proposal = {
+      proposalId: 55,
+      baseProfileVersion: 2,
+      proposedFields: { city: '青岛', interestTags: ['跑步', '咖啡'] },
+      draft,
+      status: 'pending',
+      expiresAt: '2026-06-30T00:00:00.000Z',
+    };
+    executor.executeToolAction.mockResolvedValueOnce({
+      status: 'succeeded',
+      output: {
+        success: true,
+        status: 'pending_confirmation',
+        profileUpdated: false,
+        confirmationRequired: true,
+        updatedFields: ['city', 'interestTags'],
+        memoryFields: [],
+        proposal,
+        profileUpdatePreview: {
+          mode: 'fallback',
+          draft,
+          proposal,
+          completion: { completionRate: 60 },
+        },
+      },
+      error: null,
+    });
+
+    const result = await service.handleTurn({
+      ownerUserId: 7,
+      task,
+      message: '可以保存，我在青岛，喜欢跑步和咖啡',
+      intent: 'profile_enrichment',
+      buildMemoryContext: () => ({ summary: 'memory' }) as never,
+    });
+
+    expect(chatLlm.generateAgentBrainReplyWithSource).toHaveBeenCalledWith(
+      expect.objectContaining({
+        mode: 'profile_extraction',
+        toolOutput: expect.objectContaining({
+          status: 'pending_confirmation',
+          profileUpdated: false,
+        }),
+      }),
+    );
+    expect(result.profileUpdated).toBe(false);
+    expect(result.cards).toEqual([
+      expect.objectContaining({
+        schemaType: 'profile.completion',
+        data: expect.objectContaining({
+          pendingProposal: expect.objectContaining({
+            proposalId: 55,
+            draft: expect.objectContaining({
+              basic: expect.objectContaining({ city: '青岛' }),
+            }),
+          }),
+          questions: [],
+          savePolicy: 'preview_before_write',
+        }),
+      }),
+    ]);
+    expect(task.memory).toMatchObject({
+      taskMemory: {
+        currentTask: {
+          profileSaved: false,
+          waitingFor: 'profile_update_preview_confirmation',
+          lastCompletedStep: 'profile_update_preview_created',
+        },
+      },
+    });
+    expect(result.assistantMessage).toContain('确认前不会写入个人信息');
+  });
+
   it('passes hydrated recent turns into Agent Brain replies', async () => {
     const { chatLlm, service } = makeHarness();
     const task = makeTask();

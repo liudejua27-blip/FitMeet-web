@@ -100,11 +100,11 @@ export function requiresMandatorySocialAgentApproval(
       mode === 'recommendable'
     );
   }
-  if (
-    toolName === SocialAgentToolName.UpdateAiProfileFromAnswers ||
-    toolName === SocialAgentToolName.UpdateProfileFromAgentContext
-  ) {
+  if (toolName === SocialAgentToolName.UpdateAiProfileFromAnswers) {
     return containsPrivacySensitiveProfileField(input);
+  }
+  if (toolName === SocialAgentToolName.UpdateProfileFromAgentContext) {
+    return false;
   }
   return false;
 }

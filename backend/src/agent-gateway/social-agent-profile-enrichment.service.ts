@@ -242,17 +242,34 @@ export class SocialAgentProfileEnrichmentService {
         error: call.error ?? null,
       });
       mergeSocialAgentStableProfileFacts(task, mergedProfile);
-      transitionSocialAgentState(task, 'profile_saved', {
-        objective: 'profile_enrichment',
-        nextStep: '询问可约时间、边界要求，或等待用户确认开始搜索',
-        shouldSearchNow: false,
-        profileSaved: call.status === 'succeeded',
-        awaitingSearchConfirmation: true,
-        waitingFor: 'availability_boundaries_or_search_confirmation',
-        lastCompletedStep: 'profile_saved',
-      });
+      const pendingProfileProposal =
+        this.isPendingProfileUpdateProposalOutput(output);
+      transitionSocialAgentState(
+        task,
+        pendingProfileProposal ? 'profile_detected' : 'profile_saved',
+        {
+          objective: 'profile_enrichment',
+          nextStep: pendingProfileProposal
+            ? '等待用户确认是否保存资料更新预览'
+            : '询问可约时间、边界要求，或等待用户确认开始搜索',
+          shouldSearchNow: false,
+          profileSaved: call.status === 'succeeded' && !pendingProfileProposal,
+          awaitingSearchConfirmation: !pendingProfileProposal,
+          waitingFor: pendingProfileProposal
+            ? 'profile_update_preview_confirmation'
+            : 'availability_boundaries_or_search_confirmation',
+          lastCompletedStep: pendingProfileProposal
+            ? 'profile_update_preview_created'
+            : 'profile_saved',
+        },
+      );
       await this.taskRepo.save(task);
-      const fallbackReply = this.profileUpdatedReply(mergedProfile, output);
+      const fallbackReply = pendingProfileProposal
+        ? this.profileUpdatePreviewReply(mergedProfile, output)
+        : this.profileUpdatedReply(mergedProfile, output);
+      const profileUpdatePreviewCard = pendingProfileProposal
+        ? this.profileUpdatePreviewCard(task, output)
+        : null;
       const memoryContext = buildMemoryContext(task);
       const taskContext = input.buildTaskContext?.(task, memoryContext) ?? null;
       let assistantStreamed = false;
@@ -260,7 +277,7 @@ export class SocialAgentProfileEnrichmentService {
         message,
         task,
         intent,
-        mode: 'profile_updated',
+        mode: pendingProfileProposal ? 'profile_extraction' : 'profile_updated',
         extractedProfile: mergedProfile,
         sourceMessage,
         toolOutput: output,
@@ -286,8 +303,11 @@ export class SocialAgentProfileEnrichmentService {
         assistantMessage: answer.text,
         assistantMessageSource: assistantStreamed ? 'llm' : answer.source,
         savedContext: true,
-        profileUpdated: call.status === 'succeeded',
+        profileUpdated: call.status === 'succeeded' && !pendingProfileProposal,
         profileUpdateProposal: null,
+        cards: profileUpdatePreviewCard
+          ? [profileUpdatePreviewCard]
+          : undefined,
         task,
         assistantStreamed,
       };
@@ -929,8 +949,24 @@ export class SocialAgentProfileEnrichmentService {
     ].join('\n');
   }
 
-  private profileCompletionCard(task: AgentTask): FitMeetAlphaCard {
-    const missingFields = this.profileCompletionMissingFields(task);
+  private profileCompletionCard(
+    task: AgentTask,
+    options: {
+      pendingProposal?: Record<string, unknown> | null;
+      questions?: Array<{
+        key: string;
+        label: string;
+        question: string;
+        placeholder: string;
+        options: string[];
+      }>;
+      title?: string;
+      body?: string;
+      missingFields?: string[];
+    } = {},
+  ): FitMeetAlphaCard {
+    const missingFields =
+      options.missingFields ?? this.profileCompletionMissingFields(task);
     const questions = [
       {
         key: 'currentGoal',
@@ -979,23 +1015,27 @@ export class SocialAgentProfileEnrichmentService {
         ],
       },
     ];
+    const visibleQuestions = options.questions ?? questions;
 
     return {
       id: `profile_completion:${task.id}`,
       type: 'profile_completion',
       schemaVersion: 'fitmeet.tool-ui.v1',
       schemaType: 'profile.completion',
-      title: '让 Agent 帮你补充个人信息',
-      body: '回答 3-5 个问题后，我会先生成更新预览；确认后才保存到个人信息。',
+      title: options.title ?? '让 Agent 帮你补充个人信息',
+      body:
+        options.body ??
+        '回答 3-5 个问题后，我会先生成更新预览；确认后才保存到个人信息。',
       status: 'waiting_confirmation',
       data: {
         taskId: task.id,
         schemaName: 'ProfileCompletionCard',
         schemaVersion: 'fitmeet.tool-ui.v1',
         schemaType: 'profile.completion',
-        questionCount: questions.length,
+        questionCount: visibleQuestions.length,
         missingFields,
-        questions,
+        questions: visibleQuestions,
+        pendingProposal: options.pendingProposal ?? null,
         savePolicy: 'preview_before_write',
         boundaries: [
           '不会推荐具体人物',
@@ -1006,6 +1046,42 @@ export class SocialAgentProfileEnrichmentService {
       },
       actions: [],
     };
+  }
+
+  private profileUpdatePreviewCard(
+    task: AgentTask,
+    output: Record<string, unknown>,
+  ): FitMeetAlphaCard | null {
+    const taskResult = this.isRecord(task.result) ? task.result : {};
+    const preview = this.isRecord(output.profileUpdatePreview)
+      ? output.profileUpdatePreview
+      : this.isRecord(taskResult.profileUpdatePreview)
+        ? taskResult.profileUpdatePreview
+        : {};
+    const proposal = this.isRecord(preview.proposal)
+      ? preview.proposal
+      : this.isRecord(output.proposal)
+        ? output.proposal
+        : null;
+    if (!proposal) return null;
+    const draft = this.isRecord(proposal.draft)
+      ? proposal.draft
+      : this.isRecord(preview.draft)
+        ? preview.draft
+        : null;
+    const pendingProposal = draft ? { ...proposal, draft } : proposal;
+    return this.profileCompletionCard(task, {
+      pendingProposal,
+      questions: [],
+      missingFields: Array.isArray(output.updatedFields)
+        ? output.updatedFields
+            .map((item) => cleanDisplayText(item, ''))
+            .filter(Boolean)
+            .map((item) => this.profileFieldLabel(item))
+        : [],
+      title: '确认是否保存个人信息更新',
+      body: '我已根据刚才的对话生成更新预览；确认保存前不会写入个人信息，也不会自动开启匹配。',
+    });
   }
 
   private profileExtractionReply(
@@ -1057,6 +1133,48 @@ export class SocialAgentProfileEnrichmentService {
     ]
       .filter(Boolean)
       .join('\n');
+  }
+
+  private profileUpdatePreviewReply(
+    extractedProfile: ExtractedProfileFields,
+    output: Record<string, unknown>,
+  ): string {
+    const updatedFields = Array.isArray(output.updatedFields)
+      ? output.updatedFields
+          .map((item) => cleanDisplayText(item, ''))
+          .filter(Boolean)
+          .map((item) => this.profileFieldLabel(item))
+      : [];
+    const memoryFields = Array.isArray(output.memoryFields)
+      ? output.memoryFields
+          .map((item) => cleanDisplayText(item, ''))
+          .filter(Boolean)
+          .map((item) => this.profileFieldLabel(item))
+      : [];
+    const lines = this.profileFieldLines(extractedProfile);
+    return [
+      '我先生成了个人信息更新预览，确认前不会写入个人信息，也不会自动开启匹配。',
+      updatedFields.length > 0
+        ? `建议保存字段：${updatedFields.join('、')}`
+        : '',
+      memoryFields.length > 0
+        ? `建议作为补充偏好记录：${memoryFields.join('、')}`
+        : '',
+      lines.length > 0 ? `本次识别：${lines.join('；')}` : '',
+      '你确认保存后，我再写入个人信息；是否开始匹配会作为单独确认，不会和保存资料混在一起。',
+    ]
+      .filter(Boolean)
+      .join('\n');
+  }
+
+  private isPendingProfileUpdateProposalOutput(
+    output: Record<string, unknown>,
+  ): boolean {
+    return (
+      output.status === 'pending_confirmation' ||
+      output.confirmationRequired === true ||
+      this.isRecord(output.proposal)
+    );
   }
 
   private profileUsedWithoutSavingReply(

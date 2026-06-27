@@ -21,6 +21,7 @@ export type FitMeetAgentToolRuntimeStatus = 'implemented' | 'planned';
 export type FitMeetAgentToolPermission =
   | 'read_only'
   | 'profile_write'
+  | 'profile_write_proposal'
   | 'memory_write'
   | 'search'
   | 'draft_or_create'
@@ -264,12 +265,12 @@ const TOOL_DEFINITIONS: FitMeetAgentToolDefinition[] = [
   {
     name: 'update_profile_from_agent_context',
     description:
-      'Update the current user AI social profile from explicitly provided conversation facts.',
+      'Create a confirmable profile/memory update proposal from explicitly provided conversation facts. Never writes profile or memory directly.',
     category: FitMeetAgentToolCategory.Profile,
-    permission: 'profile_write',
+    permission: 'profile_write_proposal',
     riskLevel: AgentActionRiskLevel.Medium,
     requiresApproval: false,
-    requiresConfirmation: false,
+    requiresConfirmation: true,
     inputSchema: objectSchema(
       {
         extractedProfile: objectSchema(
@@ -301,9 +302,13 @@ const TOOL_DEFINITIONS: FitMeetAgentToolDefinition[] = [
     outputSchema: objectSchema(
       {
         success: { type: 'boolean' },
+        status: { type: 'string' },
+        profileUpdated: { type: 'boolean' },
+        confirmationRequired: { type: 'boolean' },
         updatedFields: stringArraySchema,
         memoryFields: stringArraySchema,
         missingFields: stringArraySchema,
+        proposal: objectSchema({}, [], true),
       },
       ['success'],
       true,
@@ -314,9 +319,9 @@ const TOOL_DEFINITIONS: FitMeetAgentToolDefinition[] = [
     runtimeStatus: 'implemented',
     plannerEnabled: true,
     dataScope: 'owner_profile_only',
-    sideEffects: ['profile_update', 'task_memory_update'],
+    sideEffects: ['profile_update_proposal', 'task_memory_update'],
     failureFallback:
-      'Store the extracted facts in task memory, tell the user the profile write failed, and ask whether to retry.',
+      'Keep the extracted facts in task memory, tell the user the profile proposal failed, and ask whether to retry.',
     aliases: ['update_ai_profile', 'save_profile_memory'],
   },
   {
@@ -327,7 +332,7 @@ const TOOL_DEFINITIONS: FitMeetAgentToolDefinition[] = [
     permission: 'memory_write',
     riskLevel: AgentActionRiskLevel.Medium,
     requiresApproval: false,
-    requiresConfirmation: false,
+    requiresConfirmation: true,
     inputSchema: objectSchema(
       {
         memoryType: {
@@ -350,6 +355,9 @@ const TOOL_DEFINITIONS: FitMeetAgentToolDefinition[] = [
     outputSchema: objectSchema(
       {
         success: { type: 'boolean' },
+        status: { type: 'string' },
+        confirmationRequired: { type: 'boolean' },
+        proposal: objectSchema({}, [], true),
         memoryFields: stringArraySchema,
         storedIn: { type: 'string' },
       },
@@ -362,9 +370,9 @@ const TOOL_DEFINITIONS: FitMeetAgentToolDefinition[] = [
     runtimeStatus: 'implemented',
     plannerEnabled: true,
     dataScope: 'owner_agent_memory_only',
-    sideEffects: ['task_memory_update'],
+    sideEffects: ['profile_update_proposal', 'task_memory_update'],
     failureFallback:
-      'Keep the note in the current assistant reply and ask the user to restate it later if persistence matters.',
+      'Keep the note in the current assistant reply and ask the user whether to create the proposal again later.',
     aliases: ['remember_profile_note', 'append_social_agent_memory'],
   },
   {
