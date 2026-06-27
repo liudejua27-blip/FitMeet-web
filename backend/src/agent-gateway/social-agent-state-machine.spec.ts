@@ -34,6 +34,7 @@ describe('Social Agent state machine', () => {
     });
     let memory = readSocialAgentTaskMemory(task);
     expect(memory.currentTask.state).toBe('profile_building');
+    expect(memory.currentTask.loopState).toBe('PROFILE_REQUIRED');
     expect(memory.currentTask.previousState).toBe('casual_chatting');
 
     transitionSocialAgentState(task, 'profile_saved', {
@@ -45,16 +46,16 @@ describe('Social Agent state machine', () => {
     expect(memory.currentTask.profileSaved).toBe(true);
 
     transitionSocialAgentState(task, 'search_started');
-    expect(readSocialAgentTaskMemory(task).currentTask.state).toBe(
-      'searching_candidates',
-    );
+    memory = readSocialAgentTaskMemory(task);
+    expect(memory.currentTask.state).toBe('searching_candidates');
+    expect(memory.currentTask.loopState).toBe('MATCHING_QUEUED');
 
     transitionSocialAgentState(task, 'candidates_returned', {
       waitingFor: 'candidate_selection',
     });
-    expect(readSocialAgentTaskMemory(task).currentTask.state).toBe(
-      'showing_candidates',
-    );
+    memory = readSocialAgentTaskMemory(task);
+    expect(memory.currentTask.state).toBe('showing_candidates');
+    expect(memory.currentTask.loopState).toBe('CANDIDATES_READY');
 
     transitionSocialAgentState(task, 'confirmation_required', {
       waitingFor: 'action_confirmation',
@@ -77,11 +78,28 @@ describe('Social Agent state machine', () => {
     transitionSocialAgentState(task, 'candidates_returned', {
       waitingFor: 'search_refinement',
     });
-    expect(readSocialAgentTaskMemory(task).currentTask.state).toBe(
-      'showing_candidates',
+    const memory = readSocialAgentTaskMemory(task);
+    expect(memory.currentTask.state).toBe('showing_candidates');
+    expect(memory.currentTask.loopState).toBe('NO_CANDIDATES');
+    expect(memory.currentTask.waitingFor).toBe('search_refinement');
+  });
+
+  it('rejects illegal public-loop jumps while keeping legacy state logic intact', () => {
+    const task = makeTask();
+
+    transitionSocialAgentState(task, 'activity_planning', {
+      waitingFor: 'opportunity_slot_completion',
+      lastCompletedStep: 'activity_slots_partial',
+    });
+    expect(readSocialAgentTaskMemory(task).currentTask.loopState).toBe(
+      'INTENT_DRAFT',
     );
-    expect(readSocialAgentTaskMemory(task).currentTask.waitingFor).toBe(
-      'search_refinement',
-    );
+
+    expect(() =>
+      transitionSocialAgentState(task, 'message_action', {
+        waitingFor: 'candidate_reply',
+        lastCompletedStep: 'message_sent',
+      }),
+    ).toThrow(/illegal_social_agent_loop_transition/);
   });
 });
