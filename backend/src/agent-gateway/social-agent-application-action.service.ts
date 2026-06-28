@@ -59,6 +59,11 @@ export class SocialAgentApplicationActionService {
     }
 
     if (input.action === 'public_intent_application.accept') {
+      if (!this.isConfirmedAccept(payload)) {
+        throw new BadRequestException(
+          'public_intent_application_accept_confirmation_required',
+        );
+      }
       return this.acceptApplication({
         ownerUserId: input.ownerUserId,
         taskId: input.taskId,
@@ -531,6 +536,14 @@ export class SocialAgentApplicationActionService {
       String(process.env.FITMEET_AGENT_INLINE_OUTBOX_PROVISIONING ?? '')
         .trim()
         .toLowerCase(),
+    );
+  }
+
+  private isConfirmedAccept(payload: Record<string, unknown>) {
+    return (
+      payload.confirmedAccept === true ||
+      payload.approved === true ||
+      payload.confirmed === true
     );
   }
 

@@ -47,6 +47,26 @@ const BLOCKED_ACTIONS = new Set([
   'offline_meeting',
 ]);
 
+function isPublishLikeSocialRequestAction(
+  action: string,
+  payload: Record<string, unknown>,
+) {
+  if (action === 'publish_social_request') return true;
+  if (action !== 'create_social_request') return false;
+  const rawMode = payload.mode ?? payload.intent ?? payload.visibility;
+  const mode = typeof rawMode === 'string' ? rawMode.trim().toLowerCase() : '';
+  return (
+    payload.publish === true ||
+    payload.syncPublicIntent === true ||
+    payload.public === true ||
+    payload.isPublic === true ||
+    payload.discoverable === true ||
+    mode === 'publish' ||
+    mode === 'public' ||
+    mode === 'discoverable'
+  );
+}
+
 @Injectable()
 export class SocialAgentSafetyToolService {
   constructor(
@@ -89,8 +109,11 @@ export class SocialAgentSafetyToolService {
       );
     }
 
+    const actionBlocksSensitiveText =
+      BLOCKED_ACTIONS.has(input.action) ||
+      isPublishLikeSocialRequestAction(input.action, payload);
     const shouldBlock =
-      BLOCKED_ACTIONS.has(input.action) &&
+      actionBlocksSensitiveText &&
       (hasContact ||
         hasPreciseLocation ||
         hasHighRiskContent ||

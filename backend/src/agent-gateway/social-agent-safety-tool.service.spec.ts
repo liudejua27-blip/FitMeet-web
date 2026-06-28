@@ -105,6 +105,75 @@ describe('SocialAgentSafetyToolService', () => {
     });
   });
 
+  it('blocks publish-like create_social_request payloads that include contact info', async () => {
+    const { service } = makeService();
+
+    const result = await service.checkSafetyPolicy({
+      ownerUserId: 1,
+      taskId: 100,
+      action: 'create_social_request',
+      text: '今晚散步，电话 13800001111',
+      payload: {
+        title: '今晚散步',
+        publish: true,
+        description: '电话 13800001111',
+      },
+    });
+
+    expect(result).toMatchObject({
+      allowed: false,
+      level: 'blocked',
+      reasons: expect.arrayContaining([
+        expect.stringContaining('直接联系方式'),
+      ]),
+    });
+    expect(JSON.stringify(result.redactedPayload)).toContain(
+      '[REDACTED_PHONE]',
+    );
+  });
+
+  it('blocks syncPublicIntent create_social_request payloads that include precise addresses', async () => {
+    const { service } = makeService();
+
+    const result = await service.checkSafetyPolicy({
+      ownerUserId: 1,
+      taskId: 100,
+      action: 'create_social_request',
+      text: '在中山路18号楼见',
+      payload: {
+        syncPublicIntent: true,
+        locationText: '中山路18号楼',
+      },
+    });
+
+    expect(result).toMatchObject({
+      allowed: false,
+      level: 'blocked',
+      reasons: expect.arrayContaining([expect.stringContaining('精确地址')]),
+    });
+  });
+
+  it('does not block draft create_social_request payloads but still redacts sensitive fields', async () => {
+    const { service } = makeService();
+
+    const result = await service.checkSafetyPolicy({
+      ownerUserId: 1,
+      taskId: 100,
+      action: 'create_social_request',
+      text: '先做草稿，微信 fitmeet_test',
+      payload: {
+        mode: 'draft',
+        description: '微信 fitmeet_test',
+      },
+    });
+
+    expect(result.allowed).toBe(true);
+    expect(result.level).toBe('medium');
+    expect(JSON.stringify(result.redactedPayload)).toContain(
+      '[REDACTED_CONTACT]',
+    );
+  });
+
   it('creates safety reports through SafetyService', async () => {
     const { safety, service } = makeService();
 

@@ -48,6 +48,7 @@ import { User } from '../users/user.entity';
 import { Follow } from '../friends/follow.entity';
 import { AgentL5RuntimeService } from './agent-l5-runtime.service';
 import { AgentSideEffectLedgerService } from './agent-side-effect-ledger.service';
+import { SocialAgentLongTermMemoryService } from './social-agent-long-term-memory.service';
 
 /**
  * Replays the underlying real action of an approved AgentApprovalRequest.
@@ -123,6 +124,8 @@ export class AgentApprovalDispatcherService {
     private readonly taskRepo?: Repository<AgentTask>,
     @Optional()
     private readonly sideEffectLedger?: AgentSideEffectLedgerService,
+    @Optional()
+    private readonly longTermMemory?: SocialAgentLongTermMemoryService,
   ) {}
 
   /**
@@ -501,6 +504,16 @@ export class AgentApprovalDispatcherService {
         }
 
         default: {
+          if (
+            approval.actionType === 'update_long_term_memory' ||
+            approval.actionType === 'memory_write'
+          ) {
+            const result = await this.dispatchLongTermMemoryApproval(
+              approval,
+              conn,
+            );
+            return { ok: true, result };
+          }
           if (approval.actionType === 'mark_candidate_messaged') {
             await this.advanceSocialRequestAfterMessage(approval);
             await this.writeLog(
@@ -639,6 +652,55 @@ export class AgentApprovalDispatcherService {
     };
     task.memory = memory;
     await this.taskRepo.save(task);
+  }
+
+  private async dispatchLongTermMemoryApproval(
+    approval: AgentApprovalRequest,
+    conn: AgentConnection | null,
+  ): Promise<unknown> {
+    if (!this.longTermMemory) {
+      throw new Error(
+        'LongTermMemoryService unavailable for memory approval dispatch',
+      );
+    }
+    const payload = this.record(approval.payload);
+    const result = await this.longTermMemory.updateConfirmedMemory({
+      userId: approval.userId,
+      taskId: approval.agentTaskId,
+      memoryKey: this.text(payload.memoryKey) ?? '',
+      value: this.memoryValue(payload.value),
+      reason: this.text(payload.reason) ?? undefined,
+      proposalId:
+        this.text(payload.proposalId) ??
+        this.number(payload.proposalId) ??
+        approval.id,
+      confirmed: true,
+      source: 'approval_dispatcher',
+      tags: this.stringList(payload.tags),
+    });
+    await this.writeLog(
+      approval,
+      conn,
+      LoggedAction.AgentEvent,
+      {
+        approvalId: approval.id,
+        agentTaskId: approval.agentTaskId,
+        actionType: approval.actionType,
+        memoryKey: this.text(payload.memoryKey),
+        proposalId: this.text(payload.proposalId) ?? approval.id,
+      },
+      ActionResult.Success,
+    );
+    await this.writeActionLog(approval, conn, AgentActionStatus.Executed, {
+      outputSummary: 'long_term_memory_dispatched',
+      payload: {
+        actionType: approval.actionType,
+        memoryKey: this.text(payload.memoryKey),
+        proposalId: this.text(payload.proposalId) ?? approval.id,
+        result,
+      },
+    });
+    return result;
   }
 
   private async sendOwnerMessageDirectly(
@@ -886,6 +948,19 @@ export class AgentApprovalDispatcherService {
       return String(value);
     }
     return null;
+  }
+
+  private memoryValue(value: unknown): string | string[] | boolean {
+    if (typeof value === 'boolean') return value;
+    if (Array.isArray(value)) return this.stringList(value);
+    return this.text(value) ?? '';
+  }
+
+  private stringList(value: unknown): string[] {
+    const raw = Array.isArray(value) ? value : value == null ? [] : [value];
+    return raw
+      .map((item) => this.text(item))
+      .filter((item): item is string => Boolean(item));
   }
 
   private number(value: unknown): number | null {

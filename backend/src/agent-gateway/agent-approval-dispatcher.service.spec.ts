@@ -15,6 +15,7 @@ describe('AgentApprovalDispatcherService', () => {
       approvalRepo?: Record<string, jest.Mock>;
       actionLogs?: Record<string, jest.Mock>;
       l5Runtime?: Record<string, jest.Mock>;
+      longTermMemory?: Record<string, jest.Mock>;
       socialRequests?: Record<string, jest.Mock>;
       taskRepo?: Record<string, jest.Mock>;
     } = {},
@@ -41,6 +42,15 @@ describe('AgentApprovalDispatcherService', () => {
         syncPublicIntentById: jest.fn().mockResolvedValue({
           id: 'public_301',
           status: 'active',
+        }),
+      } as Record<string, jest.Mock>);
+    const longTermMemory =
+      options.longTermMemory ??
+      ({
+        updateConfirmedMemory: jest.fn().mockResolvedValue({
+          success: true,
+          status: 'updated',
+          memoryKey: 'availableTimes',
         }),
       } as Record<string, jest.Mock>);
     const logRepo = {
@@ -70,6 +80,8 @@ describe('AgentApprovalDispatcherService', () => {
       socialRequests as never,
       l5Runtime as never,
       taskRepo as never,
+      undefined,
+      longTermMemory as never,
     );
     return {
       actionLogs,
@@ -77,6 +89,7 @@ describe('AgentApprovalDispatcherService', () => {
       l5Runtime,
       logRepo,
       service,
+      longTermMemory,
       socialRequests,
       taskRepo,
     };
@@ -310,6 +323,89 @@ describe('AgentApprovalDispatcherService', () => {
         candidateRecordId: 501,
         status: SocialRequestCandidateStatus.Messaged,
       },
+    });
+  });
+
+  it('dispatches approved long-term memory approvals into confirmed memory writes', async () => {
+    const longTermMemory = {
+      updateConfirmedMemory: jest.fn().mockResolvedValue({
+        success: true,
+        status: 'updated',
+        memoryKey: 'availableTimes',
+      }),
+    };
+    const { actionLogs, logRepo, service } = makeService({ longTermMemory });
+
+    const result = await service.dispatch({
+      id: 9920,
+      userId: 7,
+      agentConnectionId: null,
+      agentTaskId: 101,
+      type: ApprovalType.Custom,
+      actionType: 'update_long_term_memory',
+      skillName: 'agent.memory.update',
+      status: ApprovalStatus.Approved,
+      riskLevel: ApprovalRiskLevel.Medium,
+      summary: '写入长期记忆：可约时间',
+      reason: '',
+      createdBy: 'agent',
+      payload: {
+        memoryKey: 'availableTimes',
+        value: ['周末下午', '工作日晚上'],
+        reason: '用户确认保存',
+        proposalId: 'proposal_9920',
+        tags: ['availability', 'confirmed'],
+      },
+      relatedSocialRequestId: null,
+      relatedCandidateId: null,
+      relatedActivityId: null,
+      agentRationale: '',
+      expiresAt: new Date('2026-06-07T00:00:00.000Z'),
+      respondedAt: new Date('2026-06-06T00:00:00.000Z'),
+    } as unknown as AgentApprovalRequest);
+
+    expect(longTermMemory.updateConfirmedMemory).toHaveBeenCalledWith({
+      userId: 7,
+      taskId: 101,
+      memoryKey: 'availableTimes',
+      value: ['周末下午', '工作日晚上'],
+      reason: '用户确认保存',
+      proposalId: 'proposal_9920',
+      confirmed: true,
+      source: 'approval_dispatcher',
+      tags: ['availability', 'confirmed'],
+    });
+    expect(logRepo.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: 'agent_event',
+        result: 'success',
+        payload: expect.objectContaining({
+          approvalId: 9920,
+          actionType: 'update_long_term_memory',
+          memoryKey: 'availableTimes',
+        }),
+      }),
+    );
+    expect(actionLogs.logAgentAction).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ownerUserId: 7,
+        agentTaskId: 101,
+        actionStatus: 'executed',
+        outputSummary: 'long_term_memory_dispatched',
+        payload: expect.objectContaining({
+          approvalId: 9920,
+          actionType: 'update_long_term_memory',
+          memoryKey: 'availableTimes',
+        }),
+      }),
+    );
+    expect(result).toEqual({
+      ok: true,
+      result: expect.objectContaining({
+        success: true,
+        status: 'updated',
+        memoryKey: 'availableTimes',
+      }),
     });
   });
 
