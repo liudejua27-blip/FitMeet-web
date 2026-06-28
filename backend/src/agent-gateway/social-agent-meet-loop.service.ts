@@ -74,6 +74,7 @@ import {
 } from './social-agent-user-interest-event.service';
 import type { SocialAgentUserInterestEventType } from './entities/social-agent-user-interest-event.entity';
 import { socialAgentMeetLoopLifecyclePatch } from './social-agent-meet-loop-lifecycle';
+import { SocialAgentLoopStateTransitionEventService } from './social-agent-loop-state-transition-event.service';
 
 @Injectable()
 export class SocialAgentMeetLoopService {
@@ -98,6 +99,8 @@ export class SocialAgentMeetLoopService {
     @Optional() private readonly l5Runtime?: AgentL5RuntimeService,
     @Optional()
     private readonly interestEvents?: SocialAgentUserInterestEventService,
+    @Optional()
+    private readonly loopStateEvents?: SocialAgentLoopStateTransitionEventService,
   ) {}
 
   async performActivityAction(
@@ -173,6 +176,7 @@ export class SocialAgentMeetLoopService {
       payload,
     });
     transitionSocialAgentState(task, 'confirmation_required', {
+      loopState: 'ACTIVITY_CONFIRMATION_REQUIRED',
       objective: 'meet_loop',
       nextStep: '等待你确认是否继续推进邀约',
       shouldSearchNow: false,
@@ -187,6 +191,17 @@ export class SocialAgentMeetLoopService {
     await this.persistMeetLoopState(task, 'activity_draft_created', {
       waitingFor: 'meet_loop_resume_confirmation',
       payload,
+    });
+    await this.writeCurrentLoopTransition(task, {
+      publicLoopStage: 'meet_loop_resume_confirmation',
+      workflowState: 'ACTIVITY_CONFIRMATION_REQUIRED',
+      payload: {
+        action: body.action,
+        activityId: this.number(payload.activityId),
+        candidateUserId: this.number(
+          payload.candidateUserId ?? payload.targetUserId,
+        ),
+      },
     });
     const assistantMessage =
       '我已恢复到上次保存的邀约进度。下一步仍需要你确认，确认前不会发送消息、连接候选人或创建活动。';
@@ -267,6 +282,16 @@ export class SocialAgentMeetLoopService {
       waitingFor: 'continue_conversation',
       state: nextPayload,
       review: null,
+    });
+    await this.writeCurrentLoopTransition(task, {
+      publicLoopStage: 'counterpart_replied',
+      workflowState: 'COUNTERPART_REPLIED',
+      payload: {
+        action: body.action,
+        activityId,
+        candidateUserId,
+        counterpartIntent,
+      },
     });
     if (counterpartIntent === 'accepted') {
       await this.recordMeetLoopInterestEvent(task.ownerUserId, task, {
@@ -454,6 +479,7 @@ export class SocialAgentMeetLoopService {
       payload,
     });
     transitionSocialAgentState(task, 'confirmation_required', {
+      loopState: 'ACTIVITY_CONFIRMATION_REQUIRED',
       objective: 'meet_loop',
       nextStep: '等待你补充新的时间范围',
       shouldSearchNow: false,
@@ -474,6 +500,17 @@ export class SocialAgentMeetLoopService {
     await this.persistMeetLoopState(task, 'activity_draft_created', {
       waitingFor: 'reschedule_time_window',
       payload,
+    });
+    await this.writeCurrentLoopTransition(task, {
+      publicLoopStage: 'reschedule_requested',
+      workflowState: 'ACTIVITY_CONFIRMATION_REQUIRED',
+      payload: {
+        action: body.action,
+        activityId: this.number(payload.activityId),
+        candidateUserId: this.number(
+          payload.candidateUserId ?? payload.targetUserId,
+        ),
+      },
     });
     const assistantMessage =
       '可以改期。我会先等你给出新的时间范围，再生成改期草稿；不会自动通知对方。';
@@ -664,6 +701,7 @@ export class SocialAgentMeetLoopService {
       },
     };
     transitionSocialAgentState(task, 'confirmation_required', {
+      loopState: 'ACTIVITY_CONFIRMATION_REQUIRED',
       objective: 'activity_creation',
       nextStep: '等待你确认是否创建约练计划',
       shouldSearchNow: false,
@@ -675,6 +713,16 @@ export class SocialAgentMeetLoopService {
     await this.persistMeetLoopState(task, 'activity_draft_created', {
       waitingFor: 'activity_confirmation',
       payload,
+    });
+    await this.writeCurrentLoopTransition(task, {
+      publicLoopStage: 'activity_confirmation_required',
+      workflowState: 'ACTIVITY_CONFIRMATION_REQUIRED',
+      payload: {
+        action: body.action,
+        approvalId: approval.id,
+        socialRequestId,
+        candidateUserId,
+      },
     });
 
     const card = buildSocialAgentActivityPlanCard({
@@ -827,6 +875,16 @@ export class SocialAgentMeetLoopService {
       waitingFor: 'activity_check_in',
       payload: this.meetLoopPayload(task),
     });
+    await this.writeCurrentLoopTransition(task, {
+      publicLoopStage: 'activity_confirmed',
+      workflowState: 'ACTIVITY_CONFIRMED',
+      payload: {
+        action: body.action,
+        activityId: resolvedActivityId,
+        candidateUserId: resolvedCandidateUserId,
+        realActivityPersisted: Boolean(realActivity),
+      },
+    });
 
     const timelineCard = buildSocialAgentMeetLoopTimelineCard({
       taskId: task.id,
@@ -920,6 +978,16 @@ export class SocialAgentMeetLoopService {
     await this.persistMeetLoopState(task, 'activity_checked_in', {
       waitingFor: 'activity_completion',
       payload: this.meetLoopPayload(task),
+    });
+    await this.writeCurrentLoopTransition(task, {
+      publicLoopStage: 'activity_checked_in',
+      workflowState: 'ACTIVITY_CHECKED_IN',
+      payload: {
+        action: body.action,
+        activityId: resolvedActivityId,
+        candidateUserId,
+        realActivityPersisted: Boolean(checkinResult),
+      },
     });
 
     const card = buildSocialAgentActivityCompletionCard({
@@ -1019,6 +1087,16 @@ export class SocialAgentMeetLoopService {
       waitingFor: 'review',
       payload: this.meetLoopPayload(task),
     });
+    await this.writeCurrentLoopTransition(task, {
+      publicLoopStage: 'activity_completed',
+      workflowState: 'ACTIVITY_COMPLETED',
+      payload: {
+        action: body.action,
+        activityId: resolvedActivityId,
+        candidateUserId,
+        realActivityPersisted: Boolean(completedActivity),
+      },
+    });
 
     const card = buildSocialAgentReviewCard({
       taskId: task.id,
@@ -1117,13 +1195,14 @@ export class SocialAgentMeetLoopService {
         trustScoreDelta,
       },
     };
-    transitionSocialAgentState(task, 'life_graph_updated', {
+    transitionSocialAgentState(task, 'activity_completed', {
+      loopState: 'REVIEW_SUBMITTED',
       objective: 'meet_loop',
       nextStep: '本次约练闭环已完成',
       shouldSearchNow: false,
       awaitingSearchConfirmation: false,
       waitingFor: '',
-      lastCompletedStep: 'trust_score_updated',
+      lastCompletedStep: 'review_submitted',
     });
     await this.taskRepo.save(task);
     await this.persistMeetLoopState(task, 'review_submitted', {
@@ -1135,6 +1214,19 @@ export class SocialAgentMeetLoopService {
       waitingFor: '',
       payload: this.meetLoopPayload(task),
       review: { rating, comment, submittedAt: now },
+    });
+    await this.writeCurrentLoopTransition(task, {
+      publicLoopStage: 'review_submitted',
+      workflowState: 'REVIEW_SUBMITTED',
+      payload: {
+        action: body.action,
+        activityId,
+        candidateUserId,
+        rating,
+        positive,
+        trustScoreDelta,
+        realActivityPersisted: Boolean(reviewResult),
+      },
     });
 
     const card = buildSocialAgentLifeGraphUpdateCard({
@@ -1452,6 +1544,35 @@ export class SocialAgentMeetLoopService {
       },
     };
     await this.taskRepo.save(task);
+  }
+
+  private async writeCurrentLoopTransition(
+    task: AgentTask,
+    input: {
+      publicLoopStage: string;
+      workflowState: string;
+      payload?: Record<string, unknown>;
+    },
+  ): Promise<void> {
+    if (!this.loopStateEvents) return;
+    try {
+      await this.loopStateEvents.writeCurrentTaskTransition({
+        task,
+        publicLoopStage: input.publicLoopStage,
+        workflowState: input.workflowState,
+        payload: input.payload,
+      });
+    } catch (error) {
+      this.logger.warn(
+        JSON.stringify({
+          event: 'social_agent.meet_loop.transition_event_write_failed',
+          taskId: task.id,
+          publicLoopStage: input.publicLoopStage,
+          workflowState: input.workflowState,
+          message: error instanceof Error ? error.message : String(error),
+        }),
+      );
+    }
   }
 
   private meetLoopPayload(

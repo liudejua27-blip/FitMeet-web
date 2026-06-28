@@ -63,6 +63,9 @@ function makeHarness(options: { activities?: unknown } = {}) {
   const l5Runtime = {
     transitionMeetLoop: jest.fn().mockResolvedValue(undefined),
   };
+  const loopStateEvents = {
+    writeCurrentTaskTransition: jest.fn().mockResolvedValue(undefined),
+  };
   const service = new SocialAgentMeetLoopService(
     taskRepo as never,
     eventRepo as never,
@@ -73,6 +76,7 @@ function makeHarness(options: { activities?: unknown } = {}) {
     options.activities as never,
     l5Runtime as never,
     interestEvents as never,
+    loopStateEvents as never,
   );
   return {
     approvals,
@@ -80,6 +84,7 @@ function makeHarness(options: { activities?: unknown } = {}) {
     lifeGraph,
     interestEvents,
     l5Runtime,
+    loopStateEvents,
     metrics,
     savedEvents,
     service,
@@ -136,6 +141,20 @@ describe('SocialAgentMeetLoopService', () => {
           socialRequestId: 301,
           activityType: 'running',
           locationName: '青岛大学附近公共场所',
+        }),
+      }),
+    );
+    expect(
+      harness.loopStateEvents.writeCurrentTaskTransition,
+    ).toHaveBeenCalledWith(
+      expect.objectContaining({
+        task: harness.task,
+        publicLoopStage: 'activity_confirmation_required',
+        workflowState: 'ACTIVITY_CONFIRMATION_REQUIRED',
+        payload: expect.objectContaining({
+          approvalId: 9001,
+          socialRequestId: 301,
+          candidateUserId: 22,
         }),
       }),
     );
@@ -222,6 +241,18 @@ describe('SocialAgentMeetLoopService', () => {
         }),
       }),
     );
+    expect(
+      harness.loopStateEvents.writeCurrentTaskTransition,
+    ).toHaveBeenCalledWith(
+      expect.objectContaining({
+        task: harness.task,
+        publicLoopStage: 'activity_confirmed',
+        workflowState: 'ACTIVITY_CONFIRMED',
+        payload: expect.objectContaining({
+          candidateUserId: 22,
+        }),
+      }),
+    );
 
     const checkedIn = await harness.service.performActivityAction(7, 101, {
       action: 'activity.check_in',
@@ -244,6 +275,18 @@ describe('SocialAgentMeetLoopService', () => {
         }),
       }),
     );
+    expect(
+      harness.loopStateEvents.writeCurrentTaskTransition,
+    ).toHaveBeenCalledWith(
+      expect.objectContaining({
+        task: harness.task,
+        publicLoopStage: 'activity_checked_in',
+        workflowState: 'ACTIVITY_CHECKED_IN',
+        payload: expect.objectContaining({
+          candidateUserId: 22,
+        }),
+      }),
+    );
 
     const completed = await harness.service.performActivityAction(7, 101, {
       action: 'activity.complete',
@@ -263,6 +306,18 @@ describe('SocialAgentMeetLoopService', () => {
         state: expect.objectContaining({
           status: 'activity_completed',
           loopStage: 'activity_completed',
+        }),
+      }),
+    );
+    expect(
+      harness.loopStateEvents.writeCurrentTaskTransition,
+    ).toHaveBeenCalledWith(
+      expect.objectContaining({
+        task: harness.task,
+        publicLoopStage: 'activity_completed',
+        workflowState: 'ACTIVITY_COMPLETED',
+        payload: expect.objectContaining({
+          candidateUserId: 22,
         }),
       }),
     );
@@ -332,6 +387,20 @@ describe('SocialAgentMeetLoopService', () => {
         }),
         review: expect.objectContaining({
           rating: 5,
+        }),
+      }),
+    );
+    expect(
+      harness.loopStateEvents.writeCurrentTaskTransition,
+    ).toHaveBeenCalledWith(
+      expect.objectContaining({
+        task: harness.task,
+        publicLoopStage: 'review_submitted',
+        workflowState: 'REVIEW_SUBMITTED',
+        payload: expect.objectContaining({
+          candidateUserId: 22,
+          rating: 5,
+          trustScoreDelta: 2,
         }),
       }),
     );
@@ -702,6 +771,20 @@ describe('SocialAgentMeetLoopService', () => {
         }),
       },
     });
+    expect(
+      harness.loopStateEvents.writeCurrentTaskTransition,
+    ).toHaveBeenCalledWith(
+      expect.objectContaining({
+        task: harness.task,
+        publicLoopStage: 'meet_loop_resume_confirmation',
+        workflowState: 'ACTIVITY_CONFIRMATION_REQUIRED',
+        payload: expect.objectContaining({
+          action: 'meet_loop.resume',
+          activityId: 700,
+          candidateUserId: 22,
+        }),
+      }),
+    );
   });
 
   it('resumes counterpart replies into continue-chat state without side effects or direct Life Graph writes', async () => {
@@ -799,6 +882,21 @@ describe('SocialAgentMeetLoopService', () => {
         }),
       }),
     );
+    expect(
+      harness.loopStateEvents.writeCurrentTaskTransition,
+    ).toHaveBeenCalledWith(
+      expect.objectContaining({
+        task: harness.task,
+        publicLoopStage: 'counterpart_replied',
+        workflowState: 'COUNTERPART_REPLIED',
+        payload: expect.objectContaining({
+          action: 'meet_loop.resume',
+          activityId: 700,
+          candidateUserId: 22,
+          counterpartIntent: 'accepted',
+        }),
+      }),
+    );
     expect(harness.interestEvents.recordEvent).toHaveBeenCalledWith(
       expect.objectContaining({
         ownerUserId: 7,
@@ -881,6 +979,20 @@ describe('SocialAgentMeetLoopService', () => {
           }),
         },
       });
+      expect(
+        harness.loopStateEvents.writeCurrentTaskTransition,
+      ).toHaveBeenCalledWith(
+        expect.objectContaining({
+          task: harness.task,
+          publicLoopStage: 'reschedule_requested',
+          workflowState: 'ACTIVITY_CONFIRMATION_REQUIRED',
+          payload: expect.objectContaining({
+            action,
+            activityId: 700,
+            candidateUserId: 22,
+          }),
+        }),
+      );
     },
   );
 
