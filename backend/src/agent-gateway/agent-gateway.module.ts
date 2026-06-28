@@ -135,6 +135,8 @@ import { AgentRunCheckpointService } from './agent-run-checkpoint.service';
 import { FitMeetAgentRuntimeService } from './fitmeet-agent-runtime.service';
 import { SocialAgentCandidatePoolService } from './social-agent-candidate-pool.service';
 import { CandidateSearchIndexService } from './candidate-search-index.service';
+import { CandidateFeatureService } from './candidate-feature.service';
+import { CandidateRecallIndexService } from './candidate-recall-index.service';
 import { SocialAgentLlmOutputCacheService } from './social-agent-llm-output-cache.service';
 import { SocialAgentSemanticResponseCacheService } from './social-agent-semantic-response-cache.service';
 import { SocialAgentToolResultCacheService } from './social-agent-tool-result-cache.service';
@@ -424,6 +426,8 @@ import { AdminRbacModule } from '../admin-rbac/admin-rbac.module';
     SocialAgentTokenBudgetContextPackerService,
     SocialAgentCandidatePoolService,
     CandidateSearchIndexService,
+    CandidateFeatureService,
+    CandidateRecallIndexService,
     SocialAgentMetricsService,
     SocialAgentLongTermMemoryService,
     SocialAgentUserInterestEventService,
@@ -563,6 +567,8 @@ import { AdminRbacModule } from '../admin-rbac/admin-rbac.module';
     SocialAgentTokenBudgetContextPackerService,
     SocialAgentCandidatePoolService,
     CandidateSearchIndexService,
+    CandidateFeatureService,
+    CandidateRecallIndexService,
     SocialAgentLongTermMemoryService,
     SocialAgentUserInterestEventService,
     SocialAgentPreferenceGeneralizationService,

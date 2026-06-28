@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException, Optional } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { EntityManager, ObjectLiteral, Repository } from 'typeorm';
+import { EntityManager, In, ObjectLiteral, Repository } from 'typeorm';
 
 import { SocialActivity } from '../activities/entities/activity.entity';
 import { AiDelegateProfile } from '../ai-match/ai-delegate-profile.entity';
@@ -107,6 +107,7 @@ import type {
   SocialAgentPreferenceWeight,
 } from './social-agent-preference-generalization.service';
 import { SocialCandidateAuditService } from './social-candidate-audit.service';
+import { CandidateRecallIndexService } from './candidate-recall-index.service';
 import {
   normalizeSocialAgentRankingPreference,
   rankingPreferenceIsDefault,
@@ -283,15 +284,19 @@ export class SocialAgentCandidatePoolService {
     private readonly interestEvents?: SocialAgentUserInterestEventService,
     @Optional()
     private readonly candidateAudit?: SocialCandidateAuditService,
+    @Optional()
+    private readonly candidateRecallIndex?: CandidateRecallIndexService,
   ) {}
 
   async searchSocial(
     input: CandidatePoolQuery,
   ): Promise<CandidatePoolSearchResult> {
-    const query = await this.resolveQuery({
+    let query = await this.resolveQuery({
       ...input,
       intent: 'social_search',
     });
+    const recall = await this.applyRecallIndex(query, input);
+    query = recall.query;
     const [
       counts,
       users,
@@ -304,25 +309,11 @@ export class SocialAgentCandidatePoolService {
       userInterestSummary,
     ] = await Promise.all([
       this.loadCounts(),
-      this.cachedFind('users:updated_desc', this.userRepo, {
-        order: { updatedAt: 'DESC' },
-      }),
-      this.cachedFind('profiles:updated_desc', this.profileRepo, {
-        order: { updatedAt: 'DESC' },
-      }),
-      this.cachedFind('ai_delegates:updated_desc', this.aiDelegateRepo, {
-        order: { updatedAt: 'DESC' },
-      }),
-      this.cachedFind('public_intents:updated_desc', this.publicIntentRepo, {
-        order: { updatedAt: 'DESC' },
-      }),
-      this.cachedFind(
-        'legacy_social_requests:updated_desc',
-        this.legacySocialRequestRepo,
-        {
-          order: { updatedAt: 'DESC' },
-        },
-      ),
+      this.loadUsersForQuery(query),
+      this.loadProfilesForQuery(query),
+      this.loadDelegatesForQuery(query),
+      this.loadPublicIntentsForQuery(query, recall.used),
+      this.loadLegacyRequestsForQuery(query, recall.used),
       this.cachedBlockedIds(input.ownerUserId),
       this.cachedLifeGraphSignals(input.ownerUserId),
       this.loadUserInterestSummary(input.ownerUserId),
@@ -553,6 +544,108 @@ export class SocialAgentCandidatePoolService {
       request,
       task,
     });
+  }
+
+  private async applyRecallIndex(
+    query: CandidatePoolResolvedQuery,
+    input: CandidatePoolQuery,
+  ): Promise<{ query: CandidatePoolResolvedQuery; used: boolean }> {
+    if (!this.candidateRecallIndex) return { query, used: false };
+    const recall = await this.candidateRecallIndex.recallForCandidatePool(
+      query,
+      {
+        ownerUserId: input.ownerUserId,
+        limit: input.limit,
+      },
+    );
+    const hasUsableRecall =
+      recall.candidateUserIds.length > 0 || recall.publicIntentIds.length > 0;
+    if (!recall.used || !hasUsableRecall) return { query, used: false };
+    return {
+      used: true,
+      query: {
+        ...query,
+        candidateUserIds: recall.candidateUserIds,
+        publicIntentIds: recall.publicIntentIds,
+      },
+    };
+  }
+
+  private async loadUsersForQuery(
+    query: CandidatePoolResolvedQuery,
+  ): Promise<User[]> {
+    if (query.candidateUserIds.length > 0) {
+      return this.safeFind(this.userRepo, {
+        where: { id: In(query.candidateUserIds) },
+      });
+    }
+    return this.cachedFind('users:updated_desc', this.userRepo, {
+      order: { updatedAt: 'DESC' },
+    });
+  }
+
+  private async loadProfilesForQuery(
+    query: CandidatePoolResolvedQuery,
+  ): Promise<UserSocialProfile[]> {
+    if (query.candidateUserIds.length > 0) {
+      return this.safeFind(this.profileRepo, {
+        where: { userId: In(query.candidateUserIds) },
+      });
+    }
+    return this.cachedFind('profiles:updated_desc', this.profileRepo, {
+      order: { updatedAt: 'DESC' },
+    });
+  }
+
+  private async loadDelegatesForQuery(
+    query: CandidatePoolResolvedQuery,
+  ): Promise<AiDelegateProfile[]> {
+    if (query.candidateUserIds.length > 0) {
+      return this.safeFind(this.aiDelegateRepo, {
+        where: { userId: In(query.candidateUserIds) },
+      });
+    }
+    return this.cachedFind('ai_delegates:updated_desc', this.aiDelegateRepo, {
+      order: { updatedAt: 'DESC' },
+    });
+  }
+
+  private async loadPublicIntentsForQuery(
+    query: CandidatePoolResolvedQuery,
+    recallUsed: boolean,
+  ): Promise<PublicSocialIntent[]> {
+    if (query.publicIntentIds.length > 0) {
+      return this.safeFind(this.publicIntentRepo, {
+        where: { id: In(query.publicIntentIds) },
+      });
+    }
+    if (recallUsed) return [];
+    return this.cachedFind(
+      'public_intents:updated_desc',
+      this.publicIntentRepo,
+      {
+        order: { updatedAt: 'DESC' },
+      },
+    );
+  }
+
+  private async loadLegacyRequestsForQuery(
+    query: CandidatePoolResolvedQuery,
+    recallUsed: boolean,
+  ): Promise<SocialRequest[]> {
+    if (query.candidateUserIds.length > 0) {
+      return this.safeFind(this.legacySocialRequestRepo, {
+        where: { userId: In(query.candidateUserIds) },
+      });
+    }
+    if (recallUsed) return [];
+    return this.cachedFind(
+      'legacy_social_requests:updated_desc',
+      this.legacySocialRequestRepo,
+      {
+        order: { updatedAt: 'DESC' },
+      },
+    );
   }
 
   private buildProfileCandidates(input: {

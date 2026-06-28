@@ -177,6 +177,9 @@ function makeService(
     interestEvents?: {
       summarizeForUser: jest.Mock;
     };
+    candidateRecallIndex?: {
+      recallForCandidatePool: jest.Mock;
+    };
   } = {},
 ) {
   const users = repo(options.users ?? [realUser(1), realUser(2)]);
@@ -217,6 +220,8 @@ function makeService(
     options.toolResultCache,
     options.metrics as never,
     options.interestEvents as never,
+    undefined,
+    options.candidateRecallIndex as never,
   );
   return {
     service,
@@ -357,6 +362,83 @@ describe('SocialAgentCandidatePoolService', () => {
     ).toContain(3);
     expect(result.query.candidateUserIds).toEqual([3]);
     expect(result.query.publicIntentIds).toEqual(['intent_3']);
+  });
+
+  it('uses recall index hits before loading social-search candidate sources', async () => {
+    const candidateRecallIndex = {
+      recallForCandidatePool: jest.fn(async () => ({
+        used: true,
+        source: 'candidate_search_index',
+        rowCount: 2,
+        candidateUserIds: [3],
+        publicIntentIds: ['intent_3'],
+        rows: [],
+        features: {
+          rowCount: 2,
+          profileRows: 1,
+          publicIntentRows: 1,
+          cities: ['青岛'],
+          activityTypes: ['散步'],
+          interestTags: ['散步'],
+        },
+      })),
+    };
+    const { service, repos } = makeService({
+      users: [realUser(1), realUser(2), realUser(3)],
+      profiles: [
+        profile(2, {
+          nickname: '召回外候选',
+          interestTags: ['散步'],
+          profileDiscoverable: true,
+          agentCanRecommendMe: true,
+        }),
+        profile(3, {
+          nickname: '召回命中候选',
+          interestTags: ['散步'],
+          profileDiscoverable: true,
+          agentCanRecommendMe: true,
+        }),
+      ],
+      publicIntents: [
+        publicIntent('intent_2', 2, {
+          title: '召回外公开约练',
+          requestType: '散步',
+          interestTags: ['散步'],
+        }),
+        publicIntent('intent_3', 3, {
+          title: '召回命中公开约练',
+          requestType: '散步',
+          interestTags: ['散步'],
+        }),
+      ],
+      candidateRecallIndex,
+    });
+
+    const result = await service.searchSocial({
+      ownerUserId: 1,
+      city: '青岛',
+      interestTags: ['散步'],
+      rawText: '今晚找散步搭子',
+    });
+
+    expect(candidateRecallIndex.recallForCandidatePool).toHaveBeenCalledWith(
+      expect.objectContaining({
+        city: '青岛',
+        interestTags: expect.arrayContaining(['散步']),
+      }),
+      { ownerUserId: 1, limit: undefined },
+    );
+    expect(repos.users.find).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: expect.any(Object) } }),
+    );
+    expect(repos.publicIntents.find).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: expect.any(Object) } }),
+    );
+    expect(result.query.candidateUserIds).toEqual([3]);
+    expect(result.query.publicIntentIds).toEqual(['intent_3']);
+    expect(
+      result.candidates.map((candidate) => candidate.candidateUserId),
+    ).not.toContain(2);
   });
 
   it('uses candidate preference text to rank consented profile candidates', async () => {
