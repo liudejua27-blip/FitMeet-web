@@ -2,6 +2,7 @@ import { MigrationInterface, QueryRunner } from 'typeorm';
 
 export class AddAgentTaskLoopStateTransitionEvent1783000000000 implements MigrationInterface {
   name = 'AddAgentTaskLoopStateTransitionEvent1783000000000';
+  public readonly transaction = false;
 
   public async up(queryRunner: QueryRunner): Promise<void> {
     await queryRunner.query(`

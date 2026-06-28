@@ -45,6 +45,7 @@ import { buildSocialAgentNoCandidatesCard } from './social-agent-no-candidates-c
 import { SocialAgentMatchRelaxationService } from './social-agent-match-relaxation.service';
 import type { SocialAgentMatchingFallback } from './social-agent-match-relaxation.types';
 import { SocialCandidateAuditService } from './social-candidate-audit.service';
+import { SocialAgentLoopStateTransitionEventService } from './social-agent-loop-state-transition-event.service';
 import {
   transitionSocialAgentState,
   type SocialAgentTaskMemory,
@@ -88,6 +89,17 @@ type FinalizedMatchingJob = {
   matchingFallback: SocialAgentMatchingFallback | null;
   candidateSnapshotId: number | null;
   noCandidatesFinal: boolean;
+  loopTransition: MatchingJobLoopTransition | null;
+};
+
+type MatchingJobLoopTransition = {
+  task: Pick<AgentTask, 'id' | 'ownerUserId'>;
+  fromState: string | null;
+  toState: string;
+  publicLoopStage: string;
+  workflowState: string;
+  reason: string | null;
+  payload: Record<string, unknown>;
 };
 
 class CancelMatchingJobError extends Error {
@@ -131,6 +143,8 @@ export class SocialAgentMatchingJobProcessorService {
     private readonly candidateAudit?: SocialCandidateAuditService,
     @Optional()
     private readonly featureFlags?: FeatureFlagService,
+    @Optional()
+    private readonly loopStateEvents?: SocialAgentLoopStateTransitionEventService,
   ) {}
 
   async processDueJobs(input: {
@@ -217,6 +231,7 @@ export class SocialAgentMatchingJobProcessorService {
         indexHints,
         matchingFallback: matchingFallback ?? null,
       });
+      await this.writeFinalizedLoopTransition(finalized);
       this.emitMatchingResult(finalized);
       return finalized.job.status;
     } catch (error) {
@@ -612,19 +627,19 @@ export class SocialAgentMatchingJobProcessorService {
             })
             .getOne()
         : null;
-      if (task) {
-        await this.writeTaskResultInTransaction(manager, {
-          task,
-          job: completedJob,
-          validation,
-          candidates,
-          searchResult: input.searchResult,
-          indexHints: input.indexHints,
-          matchingFallback: input.matchingFallback,
-          candidateSnapshotId: snapshot?.id ?? null,
-          noCandidateCards,
-        });
-      }
+      const loopTransition = task
+        ? await this.writeTaskResultInTransaction(manager, {
+            task,
+            job: completedJob,
+            validation,
+            candidates,
+            searchResult: input.searchResult,
+            indexHints: input.indexHints,
+            matchingFallback: input.matchingFallback,
+            candidateSnapshotId: snapshot?.id ?? null,
+            noCandidateCards,
+          })
+        : null;
 
       validation.publicIntent.candidateUserIds = candidates
         .map((candidate) => candidate.candidateUserId ?? candidate.userId)
@@ -698,6 +713,7 @@ export class SocialAgentMatchingJobProcessorService {
         matchingFallback: input.matchingFallback,
         candidateSnapshotId: snapshot?.id ?? null,
         noCandidatesFinal,
+        loopTransition,
       };
     });
   }
@@ -715,7 +731,7 @@ export class SocialAgentMatchingJobProcessorService {
       candidateSnapshotId: number | null;
       noCandidateCards: ReturnType<typeof buildSocialAgentNoCandidatesCard>[];
     },
-  ): Promise<void> {
+  ): Promise<MatchingJobLoopTransition | null> {
     const taskId = this.taskIdFromJob(input.job);
     if (!taskId) throw new BadRequestException('matching_job_task_id_missing');
     const task = input.task;
@@ -878,7 +894,7 @@ export class SocialAgentMatchingJobProcessorService {
         }) as Record<string, unknown>,
       }),
     );
-    await this.writeLoopStateTransitionInTransaction(manager, {
+    return this.buildLoopStateTransition({
       task,
       memory: loopMemory,
       publicLoopStage:
@@ -903,40 +919,52 @@ export class SocialAgentMatchingJobProcessorService {
     });
   }
 
-  private async writeLoopStateTransitionInTransaction(
-    manager: EntityManager,
-    input: {
-      task: AgentTask;
-      memory: SocialAgentTaskMemory;
-      publicLoopStage: string;
-      workflowState: string;
-      payload: Record<string, unknown>;
-    },
-  ): Promise<void> {
+  private buildLoopStateTransition(input: {
+    task: AgentTask;
+    memory: SocialAgentTaskMemory;
+    publicLoopStage: string;
+    workflowState: string;
+    payload: Record<string, unknown>;
+  }): MatchingJobLoopTransition | null {
     const transition = input.memory.currentTask.lastLoopStateTransitionEvent;
-    if (!transition) return;
-    await manager.getRepository(AgentTaskEvent).save(
-      manager.getRepository(AgentTaskEvent).create({
-        taskId: input.task.id,
+    if (!transition) return null;
+    return {
+      task: {
+        id: input.task.id,
         ownerUserId: input.task.ownerUserId,
-        actor: AgentTaskEventActor.System,
-        eventType: AgentTaskEventType.LoopStateTransition,
-        summary:
-          `Loop state transition: ${transition.from} -> ${transition.to}`.slice(
-            0,
-            500,
-          ),
-        payload: sanitizeForDisplay({
-          ...transition,
-          fromState: transition.from,
-          toState: transition.to,
-          publicLoopStage: input.publicLoopStage,
-          workflowState: input.workflowState,
-          reason: transition.reason,
-          ...input.payload,
-        }) as Record<string, unknown>,
-      }),
-    );
+      },
+      fromState: transition.from,
+      toState: transition.to,
+      publicLoopStage: input.publicLoopStage,
+      workflowState: input.workflowState,
+      reason: transition.reason,
+      payload: sanitizeForDisplay({
+        ...transition,
+        fromState: transition.from,
+        toState: transition.to,
+        publicLoopStage: input.publicLoopStage,
+        workflowState: input.workflowState,
+        reason: transition.reason,
+        ...input.payload,
+      }) as Record<string, unknown>,
+    };
+  }
+
+  private async writeFinalizedLoopTransition(
+    finalized: FinalizedMatchingJob,
+  ): Promise<void> {
+    if (!finalized.loopTransition || !this.loopStateEvents) return;
+    try {
+      await this.loopStateEvents.writeTransition(finalized.loopTransition);
+    } catch (error) {
+      this.logger.warn({
+        event: 'social_agent.matching_job.loop_transition_write_failed',
+        jobId: finalized.job.id,
+        taskId: finalized.taskId,
+        publicIntentId: finalized.publicIntentId,
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
   }
 
   private buildSocialRequestDraft(input: {

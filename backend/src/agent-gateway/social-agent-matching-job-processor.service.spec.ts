@@ -69,17 +69,15 @@ describe('SocialAgentMatchingJobProcessorService', () => {
         eventType: AgentTaskEventType.SocialAgentCandidatesReturned,
       }),
     );
-    expect(harness.eventRepo.create).toHaveBeenCalledWith(
+    expect(harness.loopStateEvents.writeTransition).toHaveBeenCalledWith(
       expect.objectContaining({
-        actor: AgentTaskEventActor.System,
-        eventType: AgentTaskEventType.LoopStateTransition,
-        summary: 'Loop state transition: IDLE -> CANDIDATES_READY',
+        task: { id: 101, ownerUserId: 7 },
+        fromState: 'IDLE',
+        toState: 'CANDIDATES_READY',
+        workflowState: 'CANDIDATES_READY',
+        publicLoopStage: 'candidates_ready',
+        reason: 'candidates_returned',
         payload: expect.objectContaining({
-          fromState: 'IDLE',
-          toState: 'CANDIDATES_READY',
-          workflowState: 'CANDIDATES_READY',
-          publicLoopStage: 'candidates_ready',
-          reason: 'candidates_returned',
           matchingJobId: 9001,
           publicIntentId: 'social_request_301',
           socialRequestId: 301,
@@ -128,17 +126,15 @@ describe('SocialAgentMatchingJobProcessorService', () => {
         }),
       }),
     );
-    expect(harness.eventRepo.create).toHaveBeenCalledWith(
+    expect(harness.loopStateEvents.writeTransition).toHaveBeenCalledWith(
       expect.objectContaining({
-        actor: AgentTaskEventActor.System,
-        eventType: AgentTaskEventType.LoopStateTransition,
-        summary: 'Loop state transition: IDLE -> NO_CANDIDATES',
+        task: { id: 101, ownerUserId: 7 },
+        fromState: 'IDLE',
+        toState: 'NO_CANDIDATES',
+        workflowState: 'NO_CANDIDATES',
+        publicLoopStage: 'no_candidates',
+        reason: 'candidates_returned',
         payload: expect.objectContaining({
-          fromState: 'IDLE',
-          toState: 'NO_CANDIDATES',
-          workflowState: 'NO_CANDIDATES',
-          publicLoopStage: 'no_candidates',
-          reason: 'candidates_returned',
           matchingJobId: 9001,
           publicIntentId: 'social_request_301',
           socialRequestId: 301,
@@ -205,23 +201,39 @@ describe('SocialAgentMatchingJobProcessorService', () => {
         publicLoopStage: 'no_candidates_final',
       }),
     );
-    expect(harness.eventRepo.create).toHaveBeenCalledWith(
+    expect(harness.loopStateEvents.writeTransition).toHaveBeenCalledWith(
       expect.objectContaining({
-        actor: AgentTaskEventActor.System,
-        eventType: AgentTaskEventType.LoopStateTransition,
-        summary: 'Loop state transition: IDLE -> NO_CANDIDATES_FINAL',
+        task: { id: 101, ownerUserId: 7 },
+        fromState: 'IDLE',
+        toState: 'NO_CANDIDATES_FINAL',
+        workflowState: 'NO_CANDIDATES_FINAL',
+        publicLoopStage: 'no_candidates_final',
+        reason: 'candidates_returned',
         payload: expect.objectContaining({
-          fromState: 'IDLE',
-          toState: 'NO_CANDIDATES_FINAL',
-          workflowState: 'NO_CANDIDATES_FINAL',
-          publicLoopStage: 'no_candidates_final',
-          reason: 'candidates_returned',
           matchingJobId: 9001,
           candidateCount: 0,
           noCandidatesFinal: true,
         }),
       }),
     );
+  });
+
+  it('does not fail a completed matching job when loop transition event write fails', async () => {
+    const harness = makeHarness({
+      candidates: [makeCandidate()],
+      loopTransitionError: new Error('loop_transition_write_failed'),
+    });
+
+    await expect(harness.service.processClaimedJob(makeJob())).resolves.toBe(
+      MatchingJobStatus.CandidatesReady,
+    );
+
+    expect(harness.loopStateEvents.writeTransition).toHaveBeenCalled();
+    expect(harness.manager.query).toHaveBeenCalledWith(
+      expect.stringContaining('UPDATE "matching_jobs"'),
+      expect.arrayContaining([MatchingJobStatus.CandidatesReady, 1]),
+    );
+    expect(harness.matchingJobs.markFailed).not.toHaveBeenCalled();
   });
 
   it('does not mark the job completed when task/event writeback fails', async () => {
@@ -346,6 +358,7 @@ function makeHarness(
     candidates?: unknown[];
     publicIntent?: Record<string, unknown>;
     eventSaveError?: Error;
+    loopTransitionError?: Error;
     indexRows?: Array<{
       userId?: number | null;
       publicIntentId?: string | null;
@@ -436,6 +449,11 @@ function makeHarness(
     }),
   };
   const realtime = { emitAgentEvent: jest.fn() };
+  const loopStateEvents = {
+    writeTransition: jest.fn(async () => {
+      if (options.loopTransitionError) throw options.loopTransitionError;
+    }),
+  };
   const relaxation = {
     buildFallback: jest.fn(async () => ({
       version: 'fitmeet.matching-fallback.v1',
@@ -585,6 +603,8 @@ function makeHarness(
       realtime as never,
       relaxation as never,
       candidateAudit as never,
+      undefined as never,
+      loopStateEvents as never,
     ),
     candidateSearchIndex,
     candidateAudit,
@@ -592,6 +612,7 @@ function makeHarness(
     taskRepo,
     realtime,
     relaxation,
+    loopStateEvents,
   };
 }
 
