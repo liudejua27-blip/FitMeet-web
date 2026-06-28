@@ -705,8 +705,15 @@ const TOOL_DEFINITIONS: FitMeetAgentToolDefinition[] = [
       true,
     ),
     outputSchema: objectSchema(
-      { socialRequestId: { type: 'integer' }, status: { type: 'string' } },
-      ['socialRequestId'],
+      {
+        socialRequestId: { type: 'integer' },
+        status: { type: 'string' },
+        publicIntentId: { type: 'string' },
+        publicIntentStatus: { type: 'string' },
+        synced: { type: 'boolean' },
+        publicIntent: objectSchema({}, [], true),
+      },
+      ['socialRequestId', 'publicIntentId', 'synced'],
       true,
     ),
     permissionMode: [...CONFIRM_AND_AUTO],
@@ -715,7 +722,7 @@ const TOOL_DEFINITIONS: FitMeetAgentToolDefinition[] = [
     runtimeStatus: 'implemented',
     plannerEnabled: true,
     dataScope: 'owner_social_requests_only',
-    sideEffects: ['social_request_create'],
+    sideEffects: ['social_request_create_or_update', 'public_intent_sync'],
   },
   {
     name: 'search_public_intents',

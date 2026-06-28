@@ -1033,6 +1033,9 @@ export class SocialAgentDraftPublicationService {
         },
       },
       ownerUserId,
+      {
+        internalPublishOrchestrator: 'social_agent_draft_publication',
+      },
     );
     if (publishAction.status !== 'succeeded') {
       throw new BadRequestException(
