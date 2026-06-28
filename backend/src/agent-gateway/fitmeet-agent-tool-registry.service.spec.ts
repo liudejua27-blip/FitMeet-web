@@ -198,7 +198,7 @@ describe('FitMeetAgentToolRegistryService', () => {
       requiresConfirmation: true,
       executorToolName: 'report_safety_issue',
       runtimeStatus: 'implemented',
-      plannerEnabled: true,
+      plannerEnabled: false,
       sideEffects: ['safety_report_create'],
     });
     expect(
@@ -231,6 +231,9 @@ describe('FitMeetAgentToolRegistryService', () => {
     );
     expect(plannerTools.map((tool) => tool.name)).not.toContain(
       'get_candidate_pool_debug',
+    );
+    expect(plannerTools.map((tool) => tool.name)).not.toContain(
+      'report_safety_issue',
     );
     expect(
       plannerTools.every(

@@ -136,11 +136,7 @@ export const FITMEET_ALPHA_AGENT_TOOL_OWNERS: Record<
   FitMeetAlphaAgentName,
   string[]
 > = {
-  'FitMeet Main Agent': [
-    'check_safety_policy',
-    'report_safety_issue',
-    'redact_sensitive_output',
-  ],
+  'FitMeet Main Agent': ['check_safety_policy', 'redact_sensitive_output'],
   'Agent Brain': [],
   'Life Graph Agent': [
     'get_user_profile',
