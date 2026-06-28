@@ -1018,16 +1018,18 @@ export class SocialAgentDraftPublicationService {
     const dto = toSocialAgentPublishDto(task.id, draft);
     const publishAction = await this.executor.executeToolAction(
       taskId,
-      SocialAgentToolName.CreateSocialRequest,
+      SocialAgentToolName.PublishSocialRequest,
       {
         ...dto,
         socialRequestId: expectedSocialRequestId,
         mode: 'publish',
         publish: true,
         syncPublicIntent: true,
+        confirmedPublish: true,
         metadata: {
           ...(dto.metadata ?? {}),
           confirmationSource: 'social_agent_chat',
+          publishOrchestrator: 'social_agent_draft_publication',
         },
       },
       ownerUserId,
@@ -1052,7 +1054,7 @@ export class SocialAgentDraftPublicationService {
           status: 'pending_approval',
           approvalId: pendingApproval.id,
           approval: pendingApproval,
-          toolName: SocialAgentToolName.CreateSocialRequest,
+          toolName: SocialAgentToolName.PublishSocialRequest,
           toolCallId: publishAction.id,
         },
       );
@@ -1154,7 +1156,7 @@ export class SocialAgentDraftPublicationService {
         discoverHref,
         publicIntentHref,
         status: 'published',
-        toolName: SocialAgentToolName.CreateSocialRequest,
+        toolName: SocialAgentToolName.PublishSocialRequest,
         toolCallId: publishAction.id,
         matchingJobId: matchingJob.id,
         matchingJobStatus: matchingJob.status,

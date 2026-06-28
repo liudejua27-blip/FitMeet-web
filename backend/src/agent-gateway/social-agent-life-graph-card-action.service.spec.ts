@@ -131,7 +131,7 @@ describe('SocialAgentLifeGraphCardActionService', () => {
     ).toHaveBeenCalledWith({
       task: harness.task,
       publicLoopStage: 'contact_confirmation_required',
-      workflowState: 'PROFILE_SAVED',
+      workflowState: 'LIFE_GRAPH_UPDATED',
     });
     expect(result).toMatchObject({
       action: 'reply',

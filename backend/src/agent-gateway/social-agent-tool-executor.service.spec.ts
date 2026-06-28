@@ -3353,7 +3353,7 @@ describe('SocialAgentToolExecutorService', () => {
     expect(socialRequests.syncPublicIntentById).not.toHaveBeenCalled();
   });
 
-  it('routes legacy publish_social_request through approval before public side effects', async () => {
+  it('allows publish_social_request to sync public intent after confirmation', async () => {
     const { service, taskRepo, connectionRepo, socialRequests, approvals } =
       makeService();
     const task = makeTask({
@@ -3362,6 +3362,14 @@ describe('SocialAgentToolExecutorService', () => {
     });
     taskRepo.findOne.mockResolvedValue(task);
     connectionRepo.findOne.mockResolvedValue({ id: 7, userId: 1 });
+    socialRequests.update.mockResolvedValue({
+      id: 301,
+      status: 'matching',
+    });
+    socialRequests.syncPublicIntentById.mockResolvedValue({
+      id: 'social_request_301',
+      status: 'active',
+    });
 
     const call = await service.executeToolAction(
       100,
@@ -3387,6 +3395,52 @@ describe('SocialAgentToolExecutorService', () => {
 
     expect(call.status).toBe('succeeded');
     expect(call.output).toMatchObject({
+      socialRequestId: 301,
+      publicIntentId: 'social_request_301',
+      synced: true,
+    });
+    expect(approvals.create).not.toHaveBeenCalled();
+    expect(socialRequests.update).toHaveBeenCalledWith(
+      301,
+      1,
+      expect.objectContaining({
+        type: SocialRequestType.RunningPartner,
+        mode: 'publish',
+        syncPublicIntent: true,
+      }),
+      { id: 7, userId: 1 },
+    );
+    expect(socialRequests.syncPublicIntentById).toHaveBeenCalledWith(301, 1);
+  });
+
+  it('routes unconfirmed publish_social_request through approval before public side effects', async () => {
+    const { service, taskRepo, connectionRepo, socialRequests, approvals } =
+      makeService();
+    const task = makeTask({
+      permissionMode: AgentTaskPermissionMode.Confirm,
+      agentConnectionId: 7,
+    });
+    taskRepo.findOne.mockResolvedValue(task);
+    connectionRepo.findOne.mockResolvedValue({ id: 7, userId: 1 });
+
+    const call = await service.executeToolAction(
+      100,
+      SocialAgentToolName.PublishSocialRequest,
+      {
+        mode: 'publish',
+        publish: true,
+        syncPublicIntent: true,
+        socialRequestId: 301,
+        type: SocialRequestType.RunningPartner,
+        title: '今天晚上青岛大学跑步搭子',
+        city: '青岛',
+        activityType: '跑步',
+      },
+      1,
+    );
+
+    expect(call.status).toBe('succeeded');
+    expect(call.output).toMatchObject({
       pendingApproval: true,
       status: 'pending_approval',
     });
@@ -3396,8 +3450,8 @@ describe('SocialAgentToolExecutorService', () => {
         type: 'post_publish',
       }),
     );
-    expect(socialRequests.update).not.toHaveBeenCalled();
     expect(socialRequests.create).not.toHaveBeenCalled();
+    expect(socialRequests.update).not.toHaveBeenCalled();
     expect(socialRequests.syncPublicIntentById).not.toHaveBeenCalled();
   });
 
