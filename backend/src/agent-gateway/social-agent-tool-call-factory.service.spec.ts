@@ -22,6 +22,15 @@ describe('SocialAgentToolCallFactoryService', () => {
     expect(factory.normalizeToolName('send_message')).toBe(
       SocialAgentToolName.SendMessage,
     );
+    expect(factory.normalizeToolName('publish_social_request')).toBe(
+      SocialAgentToolName.PublishSocialRequest,
+    );
+    expect(factory.normalizeToolName('create_social_request')).toBe(
+      SocialAgentToolName.CreateSocialRequest,
+    );
+    expect(factory.normalizeToolName('social_request_draft')).toBe(
+      SocialAgentToolName.CreateSocialRequest,
+    );
     expect(factory.normalizeToolName('unknown_tool')).toBeNull();
   });
 

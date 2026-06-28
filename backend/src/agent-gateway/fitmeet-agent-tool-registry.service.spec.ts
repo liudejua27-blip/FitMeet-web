@@ -299,4 +299,33 @@ describe('FitMeetAgentToolRegistryService', () => {
     );
     expect(service.resolveExecutorToolName('unknown_tool')).toBeNull();
   });
+
+  it('keeps create and publish social request tools unambiguous', () => {
+    expect(service.getToolByExecutorName('publish_social_request')?.name).toBe(
+      'publish_social_request',
+    );
+    expect(service.getToolByExecutorName('create_social_request')?.name).toBe(
+      'create_social_request',
+    );
+
+    expect(service.normalizeToolName('publish_social_request')).toBe(
+      SocialAgentToolName.PublishSocialRequest,
+    );
+    expect(service.normalizeToolName('create_social_request')).toBe(
+      SocialAgentToolName.CreateSocialRequest,
+    );
+    expect(service.normalizeToolName('social_request_draft')).toBe(
+      SocialAgentToolName.CreateSocialRequest,
+    );
+
+    expect(
+      service.getTool('create_social_request')?.aliases ?? [],
+    ).not.toContain('publish_social_request');
+    expect(service.resolveExecutorToolName('publish_social_request')).toBe(
+      'publish_social_request',
+    );
+    expect(service.resolveExecutorToolName('create_social_request')).toBe(
+      'create_social_request',
+    );
+  });
 });

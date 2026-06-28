@@ -684,7 +684,7 @@ const TOOL_DEFINITIONS: FitMeetAgentToolDefinition[] = [
     sideEffects: ['social_request_create_or_draft'],
     failureFallback:
       'Return a text draft to the user and ask them to confirm or edit before retrying creation.',
-    aliases: ['publish_social_request'],
+    aliases: ['social_request_draft', 'create_request_draft'],
   },
   {
     name: 'publish_social_request',
@@ -1412,6 +1412,10 @@ export class FitMeetAgentToolRegistryService {
         (item.aliases ?? []).includes(normalized),
       );
     return tool ? this.cloneTool(tool) : null;
+  }
+
+  normalizeToolName(name: string): string | null {
+    return this.getTool(name)?.name ?? null;
   }
 
   getToolByExecutorName(
