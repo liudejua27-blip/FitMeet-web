@@ -1878,6 +1878,9 @@ describe('SocialAgentChat acceptance flow', () => {
         syncPublicIntent: true,
       }),
       7,
+      expect.objectContaining({
+        internalPublishOrchestrator: 'social_agent_draft_publication',
+      }),
     );
     expect(executor.executeToolAction).not.toHaveBeenCalledWith(
       expect.any(Number),
@@ -2086,6 +2089,9 @@ describe('SocialAgentChat acceptance flow', () => {
         syncPublicIntent: true,
       }),
       7,
+      expect.objectContaining({
+        internalPublishOrchestrator: 'social_agent_draft_publication',
+      }),
     );
   });
 

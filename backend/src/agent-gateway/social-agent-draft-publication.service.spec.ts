@@ -519,6 +519,9 @@ describe('SocialAgentDraftPublicationService', () => {
         }),
       }),
       7,
+      expect.objectContaining({
+        internalPublishOrchestrator: 'social_agent_draft_publication',
+      }),
     );
     expect(result).toMatchObject({
       success: true,
@@ -763,6 +766,9 @@ describe('SocialAgentDraftPublicationService', () => {
         }),
       }),
       7,
+      expect.objectContaining({
+        internalPublishOrchestrator: 'social_agent_draft_publication',
+      }),
     );
     expect(result).toMatchObject({
       success: true,

@@ -328,4 +328,26 @@ describe('FitMeetAgentToolRegistryService', () => {
       'create_social_request',
     );
   });
+
+  it('declares publish_social_request public intent sync outputs and side effects', () => {
+    const tool = service.getTool('publish_social_request');
+
+    expect(tool).toMatchObject({
+      name: 'publish_social_request',
+      outputSchema: expect.objectContaining({
+        required: expect.arrayContaining([
+          'socialRequestId',
+          'publicIntentId',
+          'synced',
+        ]),
+        properties: expect.objectContaining({
+          publicIntentId: { type: 'string' },
+          publicIntentStatus: { type: 'string' },
+          synced: { type: 'boolean' },
+          publicIntent: expect.objectContaining({ type: 'object' }),
+        }),
+      }),
+      sideEffects: ['social_request_create_or_update', 'public_intent_sync'],
+    });
+  });
 });

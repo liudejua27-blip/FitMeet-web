@@ -171,6 +171,7 @@ type ExecuteTaskOptions = {
 };
 
 type ToolExecutionOptions = {
+  internalPublishOrchestrator?: 'social_agent_draft_publication';
   signal?: AbortSignal | null;
 };
 
@@ -788,7 +789,7 @@ export class SocialAgentToolExecutorService {
           normalizedToolName,
           input,
           ownerUserId,
-          { signal },
+          { ...options, signal },
         );
         didRun = true;
         return {
@@ -1429,10 +1430,18 @@ export class SocialAgentToolExecutorService {
         return safetyBlocked;
       }
       this.toolExecutionPolicy.assertHighRiskFrequencyLimit(task, toolName);
+      if (
+        this.isCreateSocialRequestPublicSyncAttempt(toolName, executionInput)
+      ) {
+        throw new BadRequestException(
+          'create_social_request_public_sync_disabled_use_publish_to_discover',
+        );
+      }
       const hasApprovedCredential = await this.hasApprovedToolActionCredential(
         task,
         toolName,
         executionInput,
+        options,
       );
       const gatedOutput = await this.maybeGateActionByRisk(
         task,
@@ -1893,8 +1902,9 @@ export class SocialAgentToolExecutorService {
     task: AgentTask,
     toolName: SocialAgentToolName,
     input: Record<string, unknown>,
+    options: ToolExecutionOptions = {},
   ): Promise<boolean> {
-    if (this.hasInlineConfirmedPublishCredential(toolName, input)) {
+    if (this.hasInlineConfirmedPublishCredential(toolName, input, options)) {
       return true;
     }
 
@@ -1918,6 +1928,7 @@ export class SocialAgentToolExecutorService {
   private hasInlineConfirmedPublishCredential(
     toolName: SocialAgentToolName,
     input: Record<string, unknown>,
+    options: ToolExecutionOptions = {},
   ): boolean {
     if (
       toolName !== SocialAgentToolName.CreateSocialRequest &&
@@ -1935,13 +1946,25 @@ export class SocialAgentToolExecutorService {
     if (!publishesToDiscover) return false;
 
     const metadata = this.toolInput.asRecord(input.metadata);
-    const publishSource = this.toolInput.string(metadata.publishSource);
     const publishOrchestrator = this.toolInput.string(
       metadata.publishOrchestrator,
     );
     return (
-      publishSource === 'agent_card_action' ||
-      publishOrchestrator === 'social_agent_draft_publication'
+      publishOrchestrator === 'social_agent_draft_publication' &&
+      options.internalPublishOrchestrator === 'social_agent_draft_publication'
+    );
+  }
+
+  private isCreateSocialRequestPublicSyncAttempt(
+    toolName: SocialAgentToolName,
+    input: Record<string, unknown>,
+  ): boolean {
+    if (toolName !== SocialAgentToolName.CreateSocialRequest) return false;
+    const mode = this.toolInput.string(input.mode ?? input.intent);
+    return (
+      mode === 'publish' ||
+      this.toolInput.bool(input.publish) === true ||
+      this.toolInput.bool(input.syncPublicIntent) === true
     );
   }
 
