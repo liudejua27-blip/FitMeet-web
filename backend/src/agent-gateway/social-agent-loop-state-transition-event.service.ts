@@ -9,6 +9,7 @@ import {
   AgentTaskEventActor,
   AgentTaskEventType,
 } from './entities/agent-task.entity';
+import { readSocialAgentTaskMemory } from './social-agent-memory.util';
 
 export type SocialAgentLoopStateTransitionInput = {
   task: Pick<AgentTask, 'id' | 'ownerUserId'>;
@@ -17,6 +18,13 @@ export type SocialAgentLoopStateTransitionInput = {
   publicLoopStage?: string | null;
   workflowState?: string | null;
   reason?: string | null;
+  payload?: Record<string, unknown>;
+};
+
+export type SocialAgentCurrentLoopStateTransitionInput = {
+  task: AgentTask;
+  publicLoopStage?: string | null;
+  workflowState?: string | null;
   payload?: Record<string, unknown>;
 };
 
@@ -63,6 +71,26 @@ export class SocialAgentLoopStateTransitionEventService {
         }),
       );
     }
+  }
+
+  async writeCurrentTaskTransition(
+    input: SocialAgentCurrentLoopStateTransitionInput,
+  ): Promise<void> {
+    const transition = readSocialAgentTaskMemory(input.task).currentTask
+      .lastLoopStateTransitionEvent;
+    if (!transition) return;
+    await this.writeTransition({
+      task: input.task,
+      fromState: transition.from,
+      toState: transition.to,
+      publicLoopStage: input.publicLoopStage ?? null,
+      workflowState: input.workflowState ?? null,
+      reason: transition.reason,
+      payload: {
+        ...transition,
+        ...(input.payload ?? {}),
+      },
+    });
   }
 
   private summary(input: SocialAgentLoopStateTransitionInput): string {

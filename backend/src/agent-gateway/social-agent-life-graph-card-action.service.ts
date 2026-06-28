@@ -29,6 +29,7 @@ import {
   recordSocialAgentShortTermAction,
   transitionSocialAgentState,
 } from './social-agent-memory.util';
+import { SocialAgentLoopStateTransitionEventService } from './social-agent-loop-state-transition-event.service';
 
 @Injectable()
 export class SocialAgentLifeGraphCardActionService {
@@ -43,6 +44,8 @@ export class SocialAgentLifeGraphCardActionService {
     private readonly eventRepo: Repository<AgentTaskEvent>,
     @Optional()
     private readonly lifeGraph?: LifeGraphService,
+    @Optional()
+    private readonly loopStateEvents?: SocialAgentLoopStateTransitionEventService,
   ) {}
 
   async performUpdateAction(
@@ -122,6 +125,13 @@ export class SocialAgentLifeGraphCardActionService {
       },
     };
     await this.taskRepo.save(task);
+    await this.loopStateEvents?.writeCurrentTaskTransition({
+      task,
+      publicLoopStage: accepted
+        ? 'contact_confirmation_required'
+        : 'profile_completion',
+      workflowState: accepted ? 'PROFILE_SAVED' : 'PROFILE_COMPLETION',
+    });
 
     const assistantMessage = this.decisionReply(proposal, accepted);
     const result = buildSocialAgentCardActionRouteResult({
@@ -216,6 +226,11 @@ export class SocialAgentLifeGraphCardActionService {
       },
     );
     await this.taskRepo.save(task);
+    await this.loopStateEvents?.writeCurrentTaskTransition({
+      task,
+      publicLoopStage: accepted ? 'messages_handoff' : 'discover_visible',
+      workflowState: accepted ? 'LIFE_GRAPH_UPDATED' : 'REVIEW_REQUESTED',
+    });
 
     const assistantMessage = accepted
       ? this.lifeGraphInfluenceAcceptedReply(payload)

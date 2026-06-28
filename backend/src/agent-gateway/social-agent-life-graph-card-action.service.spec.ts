@@ -89,14 +89,19 @@ function makeHarness() {
       .fn()
       .mockResolvedValue(makeProposal(LifeGraphProposalStatus.Rejected)),
   };
+  const loopStateEvents = {
+    writeCurrentTaskTransition: jest.fn().mockResolvedValue(undefined),
+  };
   const service = new SocialAgentLifeGraphCardActionService(
     taskRepo as never,
     eventRepo as never,
     lifeGraph as never,
+    loopStateEvents as never,
   );
   return {
     eventRepo,
     lifeGraph,
+    loopStateEvents,
     savedEvents,
     service,
     taskRepo,
@@ -120,6 +125,13 @@ describe('SocialAgentLifeGraphCardActionService', () => {
 
     expect(harness.lifeGraph.confirmUpdate).toHaveBeenCalledWith(7, {
       proposalId: 77,
+    });
+    expect(
+      harness.loopStateEvents.writeCurrentTaskTransition,
+    ).toHaveBeenCalledWith({
+      task: harness.task,
+      publicLoopStage: 'contact_confirmation_required',
+      workflowState: 'PROFILE_SAVED',
     });
     expect(result).toMatchObject({
       action: 'reply',

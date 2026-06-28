@@ -409,6 +409,82 @@ describe('AgentApprovalDispatcherService', () => {
     });
   });
 
+  it('rolls back approved long-term memory dispatch when confirmed memory write is not updated', async () => {
+    const longTermMemory = {
+      updateConfirmedMemory: jest.fn().mockResolvedValue({
+        success: false,
+        status: 'confirmation_required',
+        confirmationRequired: true,
+        memoryKey: '',
+      }),
+    };
+    const approvalRepo = {
+      update: jest.fn().mockResolvedValue({ affected: 1 }),
+    };
+    const { actionLogs, logRepo, service } = makeService({
+      approvalRepo,
+      longTermMemory,
+    });
+
+    const result = await service.dispatch({
+      id: 9921,
+      userId: 7,
+      agentConnectionId: null,
+      agentTaskId: 101,
+      type: ApprovalType.Custom,
+      actionType: 'update_long_term_memory',
+      skillName: 'agent.memory.update',
+      status: ApprovalStatus.Approved,
+      riskLevel: ApprovalRiskLevel.Medium,
+      summary: '写入长期记忆',
+      reason: '',
+      createdBy: 'agent',
+      payload: {},
+      relatedSocialRequestId: null,
+      relatedCandidateId: null,
+      relatedActivityId: null,
+      agentRationale: '',
+      expiresAt: new Date('2026-06-07T00:00:00.000Z'),
+      respondedAt: new Date('2026-06-06T00:00:00.000Z'),
+    } as unknown as AgentApprovalRequest);
+
+    expect(longTermMemory.updateConfirmedMemory).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: 7,
+        taskId: 101,
+        memoryKey: '',
+        value: '',
+        confirmed: true,
+        source: 'approval_dispatcher',
+      }),
+    );
+    expect(result.ok).toBe(false);
+    expect(result.errorMessage).toContain(
+      'long_term_memory_dispatch_not_updated:confirmation_required',
+    );
+    expect(approvalRepo.update).toHaveBeenCalledWith(
+      9921,
+      expect.objectContaining({
+        status: ApprovalStatus.Pending,
+        respondedAt: null,
+      }),
+    );
+    expect(logRepo.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: 'intercepted',
+        result: 'error',
+      }),
+    );
+    expect(actionLogs.logAgentAction).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actionStatus: 'failed',
+        outputSummary: expect.stringContaining(
+          'long_term_memory_dispatch_not_updated',
+        ),
+      }),
+    );
+  });
+
   it('dispatches approved activity creation with safety and idempotency context', async () => {
     const activities = {
       create: jest.fn().mockResolvedValue({
