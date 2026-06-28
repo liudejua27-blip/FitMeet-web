@@ -339,11 +339,15 @@ function reminderScenesFromPreference(
 ): SocialAgentReminderScene[] {
   const metadata = isRecord(preference?.metadata) ? preference?.metadata : {};
   const scenes = Array.isArray(metadata.reminderScenes)
-    ? metadata.reminderScenes.filter(isReminderScene)
+      ? metadata.reminderScenes.filter(isReminderScene)
     : [];
   return scenes.length
     ? scenes
     : [
+        'application_inbox',
+        'counterpart_reply',
+        'stalled_match',
+        'activity_review',
         'new_match',
         'weekend_opportunities',
         'past_social_goal',
@@ -354,6 +358,10 @@ function reminderScenesFromPreference(
 
 function isReminderScene(value: unknown): value is SocialAgentReminderScene {
   return (
+    value === 'application_inbox' ||
+    value === 'counterpart_reply' ||
+    value === 'stalled_match' ||
+    value === 'activity_review' ||
     value === 'new_match' ||
     value === 'weekend_opportunities' ||
     value === 'past_social_goal' ||

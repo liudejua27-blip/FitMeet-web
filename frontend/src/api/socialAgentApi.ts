@@ -287,6 +287,10 @@ export interface FitMeetAgentThreadDetail {
 export type SocialAgentReminderTopic = 'friendship' | 'fitness_partner' | 'activity' | 'life_graph';
 
 export type SocialAgentReminderScene =
+  | 'application_inbox'
+  | 'counterpart_reply'
+  | 'stalled_match'
+  | 'activity_review'
   | 'new_match'
   | 'weekend_opportunities'
   | 'past_social_goal'

@@ -5,6 +5,7 @@ import { In, LessThan, Repository } from 'typeorm';
 
 import { shouldRunBackgroundJobs } from '../common/process-role.util';
 import { NotificationsService } from '../notifications/notifications.service';
+import { PublicIntentApplication } from '../social-loop/public-intent-application.entity';
 import { UserSocialProfile } from '../users/user-social-profile.entity';
 import { AgentTask, AgentTaskStatus } from './entities/agent-task.entity';
 import {
@@ -35,6 +36,10 @@ export type SocialAgentReminderPreferenceDto = {
 };
 
 export type SocialAgentReminderScene =
+  | 'application_inbox'
+  | 'counterpart_reply'
+  | 'stalled_match'
+  | 'activity_review'
   | 'new_match'
   | 'weekend_opportunities'
   | 'past_social_goal'
@@ -49,6 +54,7 @@ type ReminderCandidate = {
   context: Record<string, unknown>;
   taskId: number | null;
   threadId: string | null;
+  route?: string;
 };
 
 export type SocialAgentReminderRunnerSummary = {
@@ -108,6 +114,8 @@ export class SocialAgentReminderService {
     private readonly taskRepo: Repository<AgentTask>,
     @InjectRepository(UserSocialProfile)
     private readonly socialProfileRepo: Repository<UserSocialProfile>,
+    @InjectRepository(PublicIntentApplication)
+    private readonly applicationRepo: Repository<PublicIntentApplication>,
     private readonly notifications: NotificationsService,
     private readonly longTermMemory: SocialAgentLongTermMemoryService,
   ) {}
@@ -337,9 +345,9 @@ export class SocialAgentReminderService {
       targetId: reminder.id,
       pushPayload: {
         targetType: 'agent_reminder',
-        route: reminder.taskId
-          ? `/agent/chat/${reminder.taskId}`
-          : '/agent/chat',
+        route:
+          candidate.route ??
+          (reminder.taskId ? `/agent/chat/${reminder.taskId}` : '/agent/chat'),
         reminderId: reminder.id,
         taskId: reminder.taskId,
         threadId: reminder.threadId,
@@ -531,6 +539,15 @@ export class SocialAgentReminderService {
     userId: number,
     preference: SocialAgentReminderPreference,
   ): Promise<ReminderCandidate | null> {
+    const scenes = reminderScenes(preference);
+    if (scenes.length === 0) return null;
+    const applicationCandidate = await this.buildApplicationInboxCandidate(
+      userId,
+      preference,
+      scenes,
+    );
+    if (applicationCandidate) return applicationCandidate;
+
     const task = await this.taskRepo.findOne({
       where: {
         ownerUserId: userId,
@@ -543,8 +560,6 @@ export class SocialAgentReminderService {
     const memory = await this.longTermMemory.readSnapshot(userId);
     const topic = chooseTopic(preference.topics, task, profile);
     if (!topic) return null;
-    const scenes = reminderScenes(preference);
-    if (scenes.length === 0) return null;
     const meetLoopState = taskMeetLoopState(task);
     const meetLoopLifecycle = meetLoopState
       ? resolveSocialAgentMeetLoopLifecycle({
@@ -648,6 +663,64 @@ export class SocialAgentReminderService {
       },
     };
   }
+
+  private async buildApplicationInboxCandidate(
+    userId: number,
+    preference: SocialAgentReminderPreference,
+    scenes: SocialAgentReminderScene[],
+  ): Promise<ReminderCandidate | null> {
+    if (!scenes.includes('application_inbox')) return null;
+    const topic = chooseApplicationTopic(preference.topics);
+    if (!topic) return null;
+    const application = await this.applicationRepo.findOne({
+      where: { ownerUserId: userId, status: 'pending' },
+      order: { createdAt: 'DESC' },
+    });
+    if (!application) return null;
+    const messagePreview = safeReminderIntent(
+      application.message || '有人想加入你的约练',
+    );
+    return {
+      topic,
+      title: '有新的约练报名待确认',
+      message:
+        '有人报名了你的公开约练卡。你可以先查看留言和资料；接受、拒绝、私信或加好友前都会再次确认。',
+      taskId: null,
+      threadId: null,
+      route: '/messages',
+      dedupeKey: `reminder:${userId}:application:${application.id}`,
+      context: {
+        source: 'social_agent_reminder',
+        sourceType: 'public_intent_application',
+        reminderProtocol: 'fitmeet.agent.reminder.v1',
+        topic,
+        scene: 'application_inbox',
+        scenes,
+        applicationId: application.id,
+        publicIntentId: application.publicIntentId,
+        applicantUserId: application.applicantUserId,
+        applicationStatus: application.status,
+        messagePreview,
+        suggestionOnly: true,
+        deliveryChannels: [...REMINDER_DELIVERY_CHANNELS],
+        externalDeliveryDisabled: true,
+        disabledExternalChannels: [...REMINDER_DISABLED_EXTERNAL_CHANNELS],
+        deliveryPolicy: reminderDeliveryPolicy(),
+        settingsRoute: '/agent/chat?settings=reminders',
+        optOutAction: 'social_agent.reminder.disable',
+        dismissAction: 'social_agent.reminder.dismiss',
+        allowedActions: [
+          'open_messages',
+          'view_application',
+          'open_agent_chat',
+        ],
+        prohibitedActions: [...REMINDER_PROHIBITED_ACTIONS],
+        reminderSafetyProtocol: reminderSafetyProtocol(),
+        safeBoundary:
+          '提醒只会帮你查看报名，接受报名、私信、加好友或创建活动前都会再次确认。',
+      },
+    };
+  }
 }
 
 function normalizeScenesForPreferenceUpdate(
@@ -664,6 +737,10 @@ function normalizeScenesForPreferenceUpdate(
 }
 
 const DEFAULT_REMINDER_SCENES: SocialAgentReminderScene[] = [
+  'application_inbox',
+  'counterpart_reply',
+  'stalled_match',
+  'activity_review',
   'new_match',
   'weekend_opportunities',
   'past_social_goal',
@@ -673,6 +750,10 @@ const DEFAULT_REMINDER_SCENES: SocialAgentReminderScene[] = [
 
 function isReminderScene(value: unknown): value is SocialAgentReminderScene {
   return (
+    value === 'application_inbox' ||
+    value === 'counterpart_reply' ||
+    value === 'stalled_match' ||
+    value === 'activity_review' ||
     value === 'new_match' ||
     value === 'weekend_opportunities' ||
     value === 'past_social_goal' ||
@@ -700,8 +781,20 @@ function chooseReminderScene(
   if (topic === 'life_graph' && scenes.includes('life_graph_confirmation')) {
     return 'life_graph_confirmation';
   }
+  if (
+    meetLoopLifecycle?.stage === 'review_requested' &&
+    scenes.includes('activity_review')
+  ) {
+    return 'activity_review';
+  }
   if (meetLoopLifecycle && scenes.includes('activity_follow_up')) {
     return 'activity_follow_up';
+  }
+  if (
+    task?.status === AgentTaskStatus.WaitingReply &&
+    scenes.includes('counterpart_reply')
+  ) {
+    return 'counterpart_reply';
   }
   if (
     task?.taskType?.includes('activity') &&
@@ -709,6 +802,7 @@ function chooseReminderScene(
   ) {
     return 'activity_follow_up';
   }
+  if (task && scenes.includes('stalled_match')) return 'stalled_match';
   if (scenes.includes('new_match')) return 'new_match';
   if (scenes.includes('past_social_goal')) return 'past_social_goal';
   return scenes[0] ?? 'weekend_opportunities';
@@ -730,6 +824,15 @@ function normalizeTopics(
     allowed.has(topic as SocialAgentReminderTopic),
   );
   return topics.length ? topics : DEFAULT_TOPICS;
+}
+
+function chooseApplicationTopic(
+  topics: SocialAgentReminderTopic[],
+): SocialAgentReminderTopic | null {
+  if (topics.includes('activity')) return 'activity';
+  if (topics.includes('friendship')) return 'friendship';
+  if (topics.includes('fitness_partner')) return 'fitness_partner';
+  return topics[0] ?? null;
 }
 
 function normalizeFrequency(
@@ -793,6 +896,18 @@ function reminderMessage(
   if (scene === 'life_graph_confirmation') {
     return '你的社交偏好有几处可以确认，确认后我能更稳地帮你筛选机会。';
   }
+  if (scene === 'application_inbox') {
+    return '有人报名了你的公开约练卡。你可以先查看留言和资料；接受或私信前都会再次确认。';
+  }
+  if (scene === 'counterpart_reply') {
+    return `你之前提到“${cleanIntent}”，对方可能有新回应。要不要回到消息页继续确认下一步？`;
+  }
+  if (scene === 'stalled_match') {
+    return `你之前提到“${cleanIntent}”，这条约练已经停了一会儿。要不要我帮你继续推进，或者先修改条件？`;
+  }
+  if (scene === 'activity_review') {
+    return '这次约练已进入评价阶段。提交反馈后，我会先生成长期偏好更新建议，确认后才写入。';
+  }
   if (scene === 'activity_follow_up') {
     return `你之前提到“${cleanIntent}”，要不要我帮你看看这件事现在有没有新的安全进展？`;
   }
@@ -849,6 +964,36 @@ function reminderDeliveryPolicy() {
     disabledExternalChannels: [...REMINDER_DISABLED_EXTERNAL_CHANNELS],
     prohibitedActions: [...REMINDER_PROHIBITED_ACTIONS],
   };
+}
+
+function reminderSafetyProtocol() {
+  return [
+    {
+      key: 'suggestion_only',
+      label: '只做建议',
+      detail: '提醒只会帮你查看机会，不会自动执行任何社交动作。',
+    },
+    {
+      key: 'delivery',
+      label: '站内提醒',
+      detail: '只通过站内通知和 Agent 会话提示，不使用短信、邮件或外部推送。',
+    },
+    {
+      key: 'approval',
+      label: '执行确认',
+      detail: '发送邀请、加好友、创建活动或公开发布前都会再次确认。',
+    },
+    {
+      key: 'frequency',
+      label: '频率控制',
+      detail: '提醒受静默时间、频率和忽略后的降频保护约束。',
+    },
+    {
+      key: 'opt_out',
+      label: '随时关闭',
+      detail: '你可以在 Agent 会话设置里关闭或调整提醒场景。',
+    },
+  ];
 }
 
 function latestPreferenceValue(
