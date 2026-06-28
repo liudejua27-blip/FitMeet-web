@@ -20,6 +20,8 @@ describe('AddAgentTaskLoopStateTransitionEvent migration', () => {
     const sql = queryRunner.query.mock.calls
       .map(([statement]) => String(statement))
       .join('\n');
+    expect(sql).toContain('FROM pg_type');
+    expect(sql).toContain("typname = 'agent_task_event_type_enum'");
     expect(sql).toContain('ALTER TYPE "agent_task_event_type_enum"');
     expect(sql).toContain(
       "ADD VALUE IF NOT EXISTS 'social_agent.loop_state.transition'",

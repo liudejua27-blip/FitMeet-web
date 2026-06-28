@@ -1437,6 +1437,16 @@ export class SocialAgentToolExecutorService {
           'create_social_request_public_sync_disabled_use_publish_to_discover',
         );
       }
+      if (
+        this.isPublishSocialRequestMissingStagedRequestId(
+          toolName,
+          executionInput,
+        )
+      ) {
+        throw new BadRequestException(
+          'publish_social_request_requires_staged_social_request_id',
+        );
+      }
       const hasApprovedCredential = await this.hasApprovedToolActionCredential(
         task,
         toolName,
@@ -1968,6 +1978,16 @@ export class SocialAgentToolExecutorService {
     );
   }
 
+  private isPublishSocialRequestMissingStagedRequestId(
+    toolName: SocialAgentToolName,
+    input: Record<string, unknown>,
+  ): boolean {
+    return (
+      toolName === SocialAgentToolName.PublishSocialRequest &&
+      !this.toolInput.number(input.socialRequestId)
+    );
+  }
+
   private approvalMatchesTool(
     approval: AgentApprovalRequest,
     toolName: SocialAgentToolName,
@@ -2403,17 +2423,18 @@ export class SocialAgentToolExecutorService {
       },
       this.toolInput,
     );
+    if (!parsed.socialRequestId) {
+      throw new BadRequestException(
+        'publish_social_request_requires_staged_social_request_id',
+      );
+    }
     const agent = await this.loadAgentConnection(task.agentConnectionId);
-    const request = parsed.socialRequestId
-      ? await this.socialRequests.update(
-          parsed.socialRequestId,
-          task.ownerUserId,
-          parsed.dto as UpdateSocialRequestDto,
-          agent,
-        )
-      : await this.socialRequests.create(task.ownerUserId, parsed.dto, {
-          agent,
-        });
+    const request = await this.socialRequests.update(
+      parsed.socialRequestId,
+      task.ownerUserId,
+      parsed.dto as UpdateSocialRequestDto,
+      agent,
+    );
     const requestRecord = this.toolInput.asRecord(request);
     const socialRequestId =
       this.toolInput.number(requestRecord.id) ?? parsed.socialRequestId;

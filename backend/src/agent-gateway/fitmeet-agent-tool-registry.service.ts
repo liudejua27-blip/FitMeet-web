@@ -644,15 +644,18 @@ const TOOL_DEFINITIONS: FitMeetAgentToolDefinition[] = [
   {
     name: 'create_social_request',
     description:
-      'Create a social request draft or publishable request card from the user confirmed goal.',
+      'Create or update a private social request draft. Public publishing must use publish_social_request through the confirmed publish flow.',
     category: FitMeetAgentToolCategory.Request,
     permission: 'draft_or_create',
     riskLevel: AgentActionRiskLevel.Medium,
-    requiresApproval: true,
-    requiresConfirmation: true,
+    requiresApproval: false,
+    requiresConfirmation: false,
     inputSchema: objectSchema(
       {
-        mode: { type: 'string', enum: ['draft', 'publish', 'ai_draft'] },
+        mode: {
+          type: 'string',
+          enum: ['draft', 'ai_draft', 'draft_only', 'private_draft'],
+        },
         title: { type: 'string' },
         description: { type: 'string' },
         requestType: { type: 'string' },
@@ -683,17 +686,19 @@ const TOOL_DEFINITIONS: FitMeetAgentToolDefinition[] = [
     dataScope: 'owner_social_requests_only',
     sideEffects: ['social_request_create_or_draft'],
     failureFallback:
-      'Return a text draft to the user and ask them to confirm or edit before retrying creation.',
+      'Draft creation is allowed; public publishing must use publish_social_request through the confirmed publish flow.',
     aliases: ['social_request_draft', 'create_request_draft'],
   },
   {
     name: 'publish_social_request',
-    description: '根据用户确认后的需求发布约练需求卡片。',
+    description:
+      'Publish an already staged social request after the user confirmed the publish flow.',
     category: FitMeetAgentToolCategory.Request,
     riskLevel: AgentActionRiskLevel.Medium,
     requiresApproval: true,
     inputSchema: objectSchema(
       {
+        socialRequestId: { type: 'integer' },
         title: { type: 'string' },
         description: { type: 'string' },
         requestType: { type: 'string' },
@@ -701,7 +706,7 @@ const TOOL_DEFINITIONS: FitMeetAgentToolDefinition[] = [
         interests: stringArraySchema,
         timePreference: { type: 'string' },
       },
-      ['description'],
+      ['socialRequestId'],
       true,
     ),
     outputSchema: objectSchema(
@@ -720,7 +725,7 @@ const TOOL_DEFINITIONS: FitMeetAgentToolDefinition[] = [
     permissionAction: SocialAgentAction.SendInvite,
     executorToolName: 'publish_social_request',
     runtimeStatus: 'implemented',
-    plannerEnabled: true,
+    plannerEnabled: false,
     dataScope: 'owner_social_requests_only',
     sideEffects: ['social_request_create_or_update', 'public_intent_sync'],
   },

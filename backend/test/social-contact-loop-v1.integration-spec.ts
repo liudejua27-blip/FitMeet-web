@@ -1,5 +1,6 @@
 import { createRequire } from 'module';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
+import { JwtService } from '@nestjs/jwt';
 import { Test, TestingModule } from '@nestjs/testing';
 import { getConnectionToken, getModelToken } from '@nestjs/mongoose';
 import { Connection, Model } from 'mongoose';
@@ -41,14 +42,19 @@ function configureIntegrationEnvironment() {
   process.env.NODE_ENV = 'test';
   process.env.ENABLE_SCHEDULER = 'false';
   process.env.FITMEET_PROCESS_ROLE = 'api';
+  process.env.FITMEET_DISABLE_THROTTLE = 'true';
   process.env.DATABASE_URL =
     process.env.FITMEET_INTEGRATION_DATABASE_URL ??
+    process.env.DATABASE_URL ??
     'postgres://root:password123@localhost:5432/fitness_app';
   process.env.MONGO_URI =
     process.env.FITMEET_INTEGRATION_MONGO_URI ??
+    process.env.MONGO_URI ??
     `mongodb://localhost:27017/fitness_app_${runId.replace(/-/g, '_')}`;
   process.env.REDIS_URL =
-    process.env.FITMEET_INTEGRATION_REDIS_URL ?? 'redis://localhost:6379/15';
+    process.env.FITMEET_INTEGRATION_REDIS_URL ??
+    process.env.REDIS_URL ??
+    'redis://localhost:6379/15';
 }
 
 describe('Social Contact Loop V1 integration', () => {
@@ -65,6 +71,7 @@ describe('Social Contact Loop V1 integration', () => {
   let permissionRepo: Repository<ContactPermission>;
   let outboxRepo: Repository<DomainOutboxEvent>;
   let contactPolicy: ContactPolicyService;
+  let jwtService: JwtService;
   let conversationModel: Model<Conversation>;
   let messageModel: Model<Message>;
 
@@ -117,6 +124,7 @@ describe('Social Contact Loop V1 integration', () => {
     permissionRepo = dataSource.getRepository(ContactPermission);
     outboxRepo = dataSource.getRepository(DomainOutboxEvent);
     contactPolicy = moduleRef.get(ContactPolicyService);
+    jwtService = moduleRef.get(JwtService);
     conversationModel = moduleRef.get<Model<Conversation>>(
       getModelToken(Conversation.name),
     );
@@ -489,15 +497,20 @@ describe('Social Contact Loop V1 integration', () => {
 
   async function registerReadyUser(label: string): Promise<TestUser> {
     const email = `${runId}.${label}@example.test`;
-    const register = await request(app.getHttpServer())
-      .post('/api/auth/register')
-      .send({ email, password, name: `Loop ${label}` })
-      .expect(201);
-    const userId = register.body.user.id as number;
-    await makeOnboardingReady(userId, label);
+    const user = await userRepo.save(
+      userRepo.create({
+        email,
+        password,
+        name: `Loop ${label}`,
+        avatar: 'L',
+        color: '#C8FF00',
+      }),
+    );
+    const userId = user.id;
+    await makeOnboardingReady(user.id, label);
     return {
       id: userId,
-      token: register.body.access_token as string,
+      token: jwtService.sign({ sub: userId, email }),
       email,
     };
   }

@@ -69,6 +69,10 @@ jobs:
       REDIS_HOST: 127.0.0.1
       REDIS_PORT: 6379
       MONGO_URI: mongodb://127.0.0.1:27017/fitmeet_ci
+      FITMEET_INTEGRATION_DATABASE_URL: postgres://fitmeet:fitmeet@127.0.0.1:5432/fitmeet_ci
+      FITMEET_INTEGRATION_MONGO_URI: mongodb://127.0.0.1:27017/fitmeet_ci
+      FITMEET_INTEGRATION_REDIS_URL: redis://127.0.0.1:6379
+      FITMEET_DISABLE_THROTTLE: "true"
       JWT_SECRET: ci_jwt_secret_32_chars_minimum_value
       AGENT_WEBHOOK_SIGNING_SECRET: ci_webhook_secret_32_chars_minimum
     steps:
@@ -101,6 +105,90 @@ jobs:
 
       - name: Backend full Jest with open-handle detection
         run: pnpm exec jest --runInBand --detectOpenHandles
+
+  backend-p1-integration:
+    name: Backend P1 Integration
+    needs: backend-p0
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: backend
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: fitmeet_ci
+          POSTGRES_USER: fitmeet
+          POSTGRES_PASSWORD: fitmeet
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U fitmeet -d fitmeet_ci"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+      mongo:
+        image: mongo:7
+        ports:
+          - 27017:27017
+        options: >-
+          --health-cmd "mongosh --quiet --eval 'db.adminCommand({ ping: 1 }).ok'"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      CI: true
+      NODE_ENV: test
+      DATABASE_URL: postgres://fitmeet:fitmeet@127.0.0.1:5432/fitmeet_ci
+      DB_HOST: 127.0.0.1
+      DB_PORT: 5432
+      DB_USERNAME: fitmeet
+      DB_PASSWORD: fitmeet
+      DB_DATABASE: fitmeet_ci
+      REDIS_URL: redis://127.0.0.1:6379
+      REDIS_HOST: 127.0.0.1
+      REDIS_PORT: 6379
+      MONGO_URI: mongodb://127.0.0.1:27017/fitmeet_ci
+      FITMEET_INTEGRATION_DATABASE_URL: postgres://fitmeet:fitmeet@127.0.0.1:5432/fitmeet_ci
+      FITMEET_INTEGRATION_MONGO_URI: mongodb://127.0.0.1:27017/fitmeet_ci
+      FITMEET_INTEGRATION_REDIS_URL: redis://127.0.0.1:6379
+      FITMEET_DISABLE_THROTTLE: "true"
+      JWT_SECRET: ci_jwt_secret_32_chars_minimum_value
+      AGENT_WEBHOOK_SIGNING_SECRET: ci_webhook_secret_32_chars_minimum
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.23.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: backend/pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Backend migrations
+        run: pnpm run migration:run
+
+      - name: Backend integration e2e
+        run: pnpm run test:e2e:integration
 
   frontend-p0:
     name: Frontend P0
