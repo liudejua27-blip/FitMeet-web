@@ -1744,11 +1744,7 @@ export class SocialAgentToolExecutorService {
       case SocialAgentToolName.GetCurrentTaskMemory:
         return this.taskMemory.currentTaskMemory(task);
       case SocialAgentToolName.PublishSocialRequest:
-        return this.createSocialRequest(task, {
-          ...input,
-          mode: input.mode ?? 'publish',
-          publish: input.publish ?? true,
-        });
+        return this.publishSocialRequest(task, input);
       case SocialAgentToolName.CreateSocialRequest:
         return this.createSocialRequest(task, input);
       case SocialAgentToolName.SearchPublicIntents:
@@ -1923,7 +1919,12 @@ export class SocialAgentToolExecutorService {
     toolName: SocialAgentToolName,
     input: Record<string, unknown>,
   ): boolean {
-    if (toolName !== SocialAgentToolName.CreateSocialRequest) return false;
+    if (
+      toolName !== SocialAgentToolName.CreateSocialRequest &&
+      toolName !== SocialAgentToolName.PublishSocialRequest
+    ) {
+      return false;
+    }
     if (this.toolInput.bool(input.confirmedPublish) !== true) return false;
 
     const mode = this.toolInput.string(input.mode ?? input.intent);
@@ -1935,7 +1936,13 @@ export class SocialAgentToolExecutorService {
 
     const metadata = this.toolInput.asRecord(input.metadata);
     const publishSource = this.toolInput.string(metadata.publishSource);
-    return publishSource === 'agent_card_action';
+    const publishOrchestrator = this.toolInput.string(
+      metadata.publishOrchestrator,
+    );
+    return (
+      publishSource === 'agent_card_action' ||
+      publishOrchestrator === 'social_agent_draft_publication'
+    );
   }
 
   private approvalMatchesTool(
@@ -2355,6 +2362,50 @@ export class SocialAgentToolExecutorService {
 
     return buildSocialAgentSocialRequestResult({
       request: this.toolInput.asRecord(request),
+      asRecord: (value) => this.toolInput.asRecord(value),
+    });
+  }
+
+  private async publishSocialRequest(
+    task: AgentTask,
+    input: Record<string, unknown>,
+  ): Promise<unknown> {
+    const parsed = buildSocialAgentSocialRequestToolInput(
+      task,
+      {
+        ...input,
+        mode: input.mode ?? 'publish',
+        publish: input.publish ?? true,
+        syncPublicIntent: input.syncPublicIntent ?? true,
+      },
+      this.toolInput,
+    );
+    const agent = await this.loadAgentConnection(task.agentConnectionId);
+    const request = parsed.socialRequestId
+      ? await this.socialRequests.update(
+          parsed.socialRequestId,
+          task.ownerUserId,
+          parsed.dto as UpdateSocialRequestDto,
+          agent,
+        )
+      : await this.socialRequests.create(task.ownerUserId, parsed.dto, {
+          agent,
+        });
+    const requestRecord = this.toolInput.asRecord(request);
+    const socialRequestId =
+      this.toolInput.number(requestRecord.id) ?? parsed.socialRequestId;
+    if (!socialRequestId) {
+      throw new BadRequestException(
+        'publish_social_request_missing_request_id',
+      );
+    }
+    const publicIntent = await this.socialRequests.syncPublicIntentById(
+      socialRequestId,
+      task.ownerUserId,
+    );
+    return buildSocialAgentSocialRequestResult({
+      request: requestRecord,
+      publicIntent: this.toolInput.asRecord(publicIntent),
       asRecord: (value) => this.toolInput.asRecord(value),
     });
   }

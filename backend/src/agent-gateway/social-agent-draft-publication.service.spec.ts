@@ -93,8 +93,8 @@ function makeHarness(initialTask = makeTask(), options: HarnessOptions = {}) {
   };
   const executor = {
     executeToolAction: jest.fn().mockResolvedValue({
-      id: 'action_create_social_request_publish_1',
-      toolName: SocialAgentToolName.CreateSocialRequest,
+      id: 'action_publish_social_request_1',
+      toolName: SocialAgentToolName.PublishSocialRequest,
       status: 'succeeded',
       output: {
         id: 301,
@@ -502,7 +502,7 @@ describe('SocialAgentDraftPublicationService', () => {
 
     expect(executor.executeToolAction).toHaveBeenCalledWith(
       101,
-      SocialAgentToolName.CreateSocialRequest,
+      SocialAgentToolName.PublishSocialRequest,
       expect.objectContaining({
         socialRequestId: 301,
         mode: 'publish',
@@ -511,9 +511,11 @@ describe('SocialAgentDraftPublicationService', () => {
         status: UserSocialRequestStatus.Matching,
         requireUserConfirmation: true,
         syncPublicIntent: true,
+        confirmedPublish: true,
         metadata: expect.objectContaining({
           agentTaskId: 101,
           confirmationSource: 'social_agent_chat',
+          publishOrchestrator: 'social_agent_draft_publication',
         }),
       }),
       7,
@@ -536,7 +538,7 @@ describe('SocialAgentDraftPublicationService', () => {
         sourceVersion: 'source-v1',
         candidateCount: 0,
       },
-      toolCallId: 'action_create_social_request_publish_1',
+      toolCallId: 'action_publish_social_request_1',
       socialRequest: { id: 301, status: UserSocialRequestStatus.Matching },
       publicIntent: {
         id: 'social_request_301',
@@ -642,8 +644,8 @@ describe('SocialAgentDraftPublicationService', () => {
   it('surfaces publish tool failures', async () => {
     const { executor, service } = makeHarness();
     executor.executeToolAction.mockResolvedValueOnce({
-      id: 'action_create_social_request_publish_1',
-      toolName: SocialAgentToolName.CreateSocialRequest,
+      id: 'action_publish_social_request_1',
+      toolName: SocialAgentToolName.PublishSocialRequest,
       status: 'failed',
       output: null,
       error: { message: 'public intent sync failed' },
@@ -664,8 +666,8 @@ describe('SocialAgentDraftPublicationService', () => {
   it('keeps publish requests pending when the tool requires approval', async () => {
     const { executor, savedEvents, service, task } = makeHarness();
     executor.executeToolAction.mockResolvedValueOnce({
-      id: 'action_create_social_request_publish_approval',
-      toolName: SocialAgentToolName.CreateSocialRequest,
+      id: 'action_publish_social_request_approval',
+      toolName: SocialAgentToolName.PublishSocialRequest,
       status: 'succeeded',
       output: {
         success: false,
@@ -701,7 +703,7 @@ describe('SocialAgentDraftPublicationService', () => {
       status: 'pending_approval',
       taskStatus: AgentTaskStatus.AwaitingConfirmation,
       synced: false,
-      toolCallId: 'action_create_social_request_publish_approval',
+      toolCallId: 'action_publish_social_request_approval',
     });
     expect(task.status).toBe(AgentTaskStatus.AwaitingConfirmation);
     expect(task.statusReason).toBe('publish_social_request_requires_approval');
@@ -749,11 +751,16 @@ describe('SocialAgentDraftPublicationService', () => {
     );
     expect(executor.executeToolAction).toHaveBeenCalledWith(
       101,
-      SocialAgentToolName.CreateSocialRequest,
+      SocialAgentToolName.PublishSocialRequest,
       expect.objectContaining({
         socialRequestId: 301,
         mode: 'publish',
         publish: true,
+        syncPublicIntent: true,
+        confirmedPublish: true,
+        metadata: expect.objectContaining({
+          publishOrchestrator: 'social_agent_draft_publication',
+        }),
       }),
       7,
     );

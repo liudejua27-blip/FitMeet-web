@@ -299,7 +299,7 @@ describe('Social Agent route branch production boundary', () => {
         'CreateSocialRequest',
         'SearchMatches',
       ],
-      'social-agent-draft-publication.service.ts': ['CreateSocialRequest'],
+      'social-agent-draft-publication.service.ts': ['PublishSocialRequest'],
     };
     const forbiddenHighRiskTools = [
       'SendMessage',

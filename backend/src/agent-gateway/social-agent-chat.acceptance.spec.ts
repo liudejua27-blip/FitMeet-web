@@ -237,7 +237,7 @@ function makeHarness(options: Record<string, unknown> = {}) {
           });
         }
         if (
-          toolName === SocialAgentToolName.CreateSocialRequest &&
+          toolName === SocialAgentToolName.PublishSocialRequest &&
           input.mode === 'publish'
         ) {
           const socialRequestId = Number(input.socialRequestId ?? 301);
@@ -277,7 +277,7 @@ function makeHarness(options: Record<string, unknown> = {}) {
             updatedAt: new Date('2026-01-01T00:00:01.000Z'),
           };
           return {
-            id: 'action_create_social_request_publish_1',
+            id: 'action_publish_social_request_1',
             toolName,
             status: 'succeeded',
             output: {
@@ -1871,7 +1871,7 @@ describe('SocialAgentChat acceptance flow', () => {
     ]);
     expect(executor.executeToolAction).toHaveBeenCalledWith(
       result.taskId,
-      SocialAgentToolName.CreateSocialRequest,
+      SocialAgentToolName.PublishSocialRequest,
       expect.objectContaining({
         mode: 'publish',
         publish: true,
@@ -2078,7 +2078,7 @@ describe('SocialAgentChat acceptance flow', () => {
     ]);
     expect(executor.executeToolAction).toHaveBeenCalledWith(
       second.taskId,
-      SocialAgentToolName.CreateSocialRequest,
+      SocialAgentToolName.PublishSocialRequest,
       expect.objectContaining({
         socialRequestId: 301,
         mode: 'publish',

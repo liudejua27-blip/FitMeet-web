@@ -130,7 +130,7 @@ export class SocialAgentLifeGraphCardActionService {
       publicLoopStage: accepted
         ? 'contact_confirmation_required'
         : 'profile_completion',
-      workflowState: accepted ? 'PROFILE_SAVED' : 'PROFILE_COMPLETION',
+      workflowState: accepted ? 'LIFE_GRAPH_UPDATED' : 'PROFILE_REQUIRED',
     });
 
     const assistantMessage = this.decisionReply(proposal, accepted);
@@ -229,7 +229,7 @@ export class SocialAgentLifeGraphCardActionService {
     await this.loopStateEvents?.writeCurrentTaskTransition({
       task,
       publicLoopStage: accepted ? 'messages_handoff' : 'discover_visible',
-      workflowState: accepted ? 'LIFE_GRAPH_UPDATED' : 'REVIEW_REQUESTED',
+      workflowState: accepted ? 'LIFE_GRAPH_UPDATED' : 'ACTIVITY_COMPLETED',
     });
 
     const assistantMessage = accepted
