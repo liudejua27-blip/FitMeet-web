@@ -5,6 +5,7 @@ import { Follow } from '../friends/follow.entity';
 import { MeetParticipant } from '../meets/meet-participant.entity';
 import { Meet } from '../meets/meet.entity';
 import { UserBlock } from '../safety/user-block.entity';
+import { SocialPolicyModule } from '../social-policy/social-policy.module';
 import { ApiIdempotencyRecord } from '../users/api-idempotency-record.entity';
 import { User } from '../users/user.entity';
 import { UsersModule } from '../users/users.module';
@@ -24,6 +25,7 @@ import { PublicIntentApplication } from './public-intent-application.entity';
 @Module({
   imports: [
     UsersModule,
+    SocialPolicyModule,
     TypeOrmModule.forFeature([
       ApiIdempotencyRecord,
       ConnectionRequest,
