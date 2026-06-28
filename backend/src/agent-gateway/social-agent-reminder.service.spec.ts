@@ -75,6 +75,7 @@ describe('SocialAgentReminderService', () => {
     const reminderRepo = repo<Record<string, unknown>>();
     const taskRepo = repo<Record<string, unknown>>();
     const profileRepo = repo<Record<string, unknown>>();
+    const applicationRepo = repo<Record<string, unknown>>();
     const notifications = { create: jest.fn(() => Promise.resolve({})) };
     const defaultLongTermSnapshot: LongTermMemorySnapshot = {
       userId: 7,
@@ -116,6 +117,7 @@ describe('SocialAgentReminderService', () => {
       reminderRepo as never,
       taskRepo as never,
       profileRepo as never,
+      applicationRepo as never,
       notifications as never,
       longTermMemory as never,
     );
@@ -125,6 +127,7 @@ describe('SocialAgentReminderService', () => {
       reminderRepo,
       taskRepo,
       profileRepo,
+      applicationRepo,
       notifications,
       longTermMemory,
     };
@@ -423,6 +426,133 @@ describe('SocialAgentReminderService', () => {
           reminderContext: expect.objectContaining({
             meetLoopLifecycleStage: 'checkin_available',
             activityId: 91,
+          }),
+        }),
+      }),
+    );
+  });
+
+  it('creates an Agent inbox reminder when someone applies to my public intent', async () => {
+    const { service, applicationRepo, notifications } = build();
+    applicationRepo.rows.push({
+      id: 88,
+      ownerUserId: 7,
+      applicantUserId: 13,
+      publicIntentId: 'pub_walk_1',
+      status: 'pending',
+      message: '我也想一起散步，微信fitmeet123',
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+
+    await service.updatePreference(7, {
+      enabled: true,
+      topics: ['activity'],
+      scenes: ['application_inbox'],
+      quietStart: '00:00',
+      quietEnd: '00:00',
+      frequency: 'realtime',
+    });
+    const result = await service.runOnce(7);
+
+    expect(result.skipped).toBe(false);
+    expect(result.reminder).toMatchObject({
+      topic: 'activity',
+      title: '有新的约练报名待确认',
+      message: expect.stringContaining('有人报名了你的公开约练卡'),
+      taskId: null,
+      threadId: null,
+      dedupeKey: 'reminder:7:application:88',
+      context: expect.objectContaining({
+        sourceType: 'public_intent_application',
+        scene: 'application_inbox',
+        applicationId: 88,
+        publicIntentId: 'pub_walk_1',
+        applicantUserId: 13,
+        applicationStatus: 'pending',
+        messagePreview: expect.stringContaining('联系方式已隐藏'),
+        suggestionOnly: true,
+        allowedActions: [
+          'open_messages',
+          'view_application',
+          'open_agent_chat',
+        ],
+        prohibitedActions: expect.arrayContaining([
+          'send_message',
+          'add_friend',
+          'create_activity',
+          'publish_activity',
+        ]),
+        safeBoundary: expect.stringContaining(
+          '接受报名、私信、加好友或创建活动前都会再次确认',
+        ),
+      }),
+    });
+    expect(JSON.stringify(result.reminder)).not.toContain('fitmeet123');
+    expect(notifications.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'social_agent.reminder',
+        targetId: result.reminder?.id,
+        pushPayload: expect.objectContaining({
+          route: '/messages',
+          reminderContext: expect.objectContaining({
+            sourceType: 'public_intent_application',
+            applicationId: 88,
+            scene: 'application_inbox',
+          }),
+        }),
+      }),
+    );
+  });
+
+  it('nudges stalled match tasks without executing contact actions', async () => {
+    const { service, taskRepo, notifications } = build();
+    taskRepo.rows.push({
+      id: 61,
+      ownerUserId: 7,
+      title: '今晚五四广场散步搭子',
+      goal: '今晚五四广场散步',
+      taskType: 'social_match',
+      status: AgentTaskStatus.WaitingResult,
+      updatedAt: new Date(Date.now() - 2 * 60 * 60 * 1000),
+    });
+    taskRepo.findOne.mockResolvedValueOnce(taskRepo.rows[0]);
+
+    await service.updatePreference(7, {
+      enabled: true,
+      topics: ['activity'],
+      scenes: ['stalled_match'],
+      quietStart: '00:00',
+      quietEnd: '00:00',
+      frequency: 'daily',
+    });
+    const result = await service.runOnce(7);
+
+    expect(result.skipped).toBe(false);
+    expect(result.reminder).toMatchObject({
+      topic: 'activity',
+      taskId: 61,
+      threadId: 'agent-task:61',
+      message: expect.stringContaining('已经停了一会儿'),
+      context: expect.objectContaining({
+        scene: 'stalled_match',
+        taskId: 61,
+        suggestionOnly: true,
+        allowedActions: ['open_agent_chat', 'view_safe_opportunities'],
+        prohibitedActions: expect.arrayContaining([
+          'send_message',
+          'add_friend',
+          'create_activity',
+        ]),
+      }),
+    });
+    expect(notifications.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        pushPayload: expect.objectContaining({
+          route: '/agent/chat/61',
+          reminderContext: expect.objectContaining({
+            scene: 'stalled_match',
+            taskId: 61,
           }),
         }),
       }),

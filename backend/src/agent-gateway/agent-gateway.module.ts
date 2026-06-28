@@ -213,6 +213,7 @@ import { SocialAgentApplicationActionService } from './social-agent-application-
 import { PublicIntentPrivacyGuardService } from './public-intent-privacy-guard.service';
 import { SocialIntentRateLimitService } from './social-intent-rate-limit.service';
 import { SocialAgentDomainClassifierService } from './social-agent-domain-classifier.service';
+import { PublicIntentApplication } from '../social-loop/public-intent-application.entity';
 import { AgentSettingsService } from './agent-settings.service';
 import { AgentControlController } from './agent-control.controller';
 import { SafetyEvent } from './entities/safety-event.entity';
@@ -289,6 +290,7 @@ import { AdminRbacModule } from '../admin-rbac/admin-rbac.module';
       ContactRequest,
       SocialRequest,
       PublicSocialIntent,
+      PublicIntentApplication,
       UserSocialRequest,
       SocialRequestCandidate,
       Follow,

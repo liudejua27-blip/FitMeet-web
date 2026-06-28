@@ -67,6 +67,29 @@ export const MessagesPage = () => {
         .filter((item): item is PublicIntentApplication => Boolean(item)),
     [applicantApplicationIds, applicationsById],
   );
+  const pendingOwnerApplications = useMemo(
+    () => ownerApplications.filter((application) => application.status === 'pending').length,
+    [ownerApplications],
+  );
+  const pendingApplicantApplications = useMemo(
+    () => applicantApplications.filter((application) => application.status === 'pending').length,
+    [applicantApplications],
+  );
+  const provisioningApplications = useMemo(
+    () =>
+      [...ownerApplications, ...applicantApplications].filter((application) => {
+        const conversation = conversationsByApplicationId[application.id];
+        return (
+          application.status === 'accepted' &&
+          (!conversation || conversation.status === 'provisioning' || !conversation.conversationId)
+        );
+      }).length,
+    [applicantApplications, conversationsByApplicationId, ownerApplications],
+  );
+  const unreadConversationCount = useMemo(
+    () => conversations.filter((conversation) => conversation.unread > 0).length,
+    [conversations],
+  );
 
   useEffect(() => {
     void Promise.allSettled([
@@ -201,8 +224,14 @@ export const MessagesPage = () => {
           <div className="sticky top-0 z-10 bg-base/95 backdrop-blur-xl border-b border-border px-5 py-4">
             <h2 className="font-display text-lg font-black text-white">消息</h2>
             <p className="text-xs text-textSofter mt-0.5">
-              {conversations.filter((c) => c.unread > 0).length} 条未读
+              {unreadConversationCount} 条未读
             </p>
+            <AgentInboxSummaryChip
+              pendingApplicantApplications={pendingApplicantApplications}
+              pendingOwnerApplications={pendingOwnerApplications}
+              provisioningApplications={provisioningApplications}
+              unreadConversationCount={unreadConversationCount}
+            />
           </div>
 
           <ApplicationInboxSection
@@ -412,6 +441,44 @@ export const MessagesPage = () => {
     </div>
   );
 };
+
+function AgentInboxSummaryChip({
+  pendingApplicantApplications,
+  pendingOwnerApplications,
+  provisioningApplications,
+  unreadConversationCount,
+}: {
+  pendingApplicantApplications: number;
+  pendingOwnerApplications: number;
+  provisioningApplications: number;
+  unreadConversationCount: number;
+}) {
+  const total =
+    pendingOwnerApplications +
+    pendingApplicantApplications +
+    provisioningApplications +
+    unreadConversationCount;
+  if (total <= 0) return null;
+  const details = [
+    pendingOwnerApplications > 0 ? `${pendingOwnerApplications} 条报名待确认` : null,
+    pendingApplicantApplications > 0 ? `${pendingApplicantApplications} 条报名等待回应` : null,
+    provisioningApplications > 0 ? `${provisioningApplications} 个会话建立中` : null,
+    unreadConversationCount > 0 ? `${unreadConversationCount} 条未读` : null,
+  ].filter(Boolean);
+  return (
+    <div className="mt-3 rounded-xl border border-lime/25 bg-lime/10 px-3 py-2">
+      <div className="flex items-center justify-between gap-3">
+        <span className="text-xs font-black text-lime">Agent 待处理</span>
+        <span className="rounded-full bg-lime/20 px-2 py-0.5 text-[10px] font-black text-lime">
+          {total}
+        </span>
+      </div>
+      <p className="mt-1 text-[11px] leading-4 text-textMuted">
+        {details.join(' · ')}
+      </p>
+    </div>
+  );
+}
 
 function ApplicationInboxSection({
   actionId,

@@ -6701,6 +6701,10 @@ describe('AgentWorkspacePage', () => {
         reminderOptInConfirmedAt: '2026-06-15T01:30:00.000Z',
         reminderPreferenceUpdatedAt: '2026-06-15T01:40:00.000Z',
         reminderScenes: [
+          'application_inbox',
+          'counterpart_reply',
+          'stalled_match',
+          'activity_review',
           'new_match',
           'weekend_opportunities',
           'past_social_goal',
@@ -6755,6 +6759,10 @@ describe('AgentWorkspacePage', () => {
           frequency: 'weekly',
           topics: ['friendship', 'fitness_partner', 'activity'],
           scenes: [
+            'application_inbox',
+            'counterpart_reply',
+            'stalled_match',
+            'activity_review',
             'new_match',
             'weekend_opportunities',
             'past_social_goal',
@@ -6767,7 +6775,7 @@ describe('AgentWorkspacePage', () => {
       ),
     );
     expect(await screen.findByText('约练机会提醒已开启')).toBeInTheDocument();
-    expect(screen.getByText(/每周一次摘要 · 5 个场景 · 09:00-21:00/)).toBeInTheDocument();
+    expect(screen.getByText(/每周一次摘要 · 9 个场景 · 09:00-21:00/)).toBeInTheDocument();
     expect(screen.getByTestId('assistant-ui-reminder-toggle')).toHaveAttribute(
       'data-reminder-state',
       'enabled',
@@ -6797,7 +6805,7 @@ describe('AgentWorkspacePage', () => {
         }),
       ),
     );
-    expect(screen.getByText(/实时提醒 · 5 个场景 · 09:00-21:00/)).toBeInTheDocument();
+    expect(screen.getByText(/实时提醒 · 9 个场景 · 09:00-21:00/)).toBeInTheDocument();
 
     fireEvent.change(screen.getByTestId('assistant-ui-reminder-frequency'), {
       target: { value: 'daily' },
@@ -6832,7 +6840,16 @@ describe('AgentWorkspacePage', () => {
       expect(updateReminderPreferenceSpy).toHaveBeenLastCalledWith(
         expect.objectContaining({
           enabled: true,
-          scenes: ['new_match', 'weekend_opportunities', 'past_social_goal', 'activity_follow_up'],
+          scenes: [
+            'application_inbox',
+            'counterpart_reply',
+            'stalled_match',
+            'activity_review',
+            'new_match',
+            'weekend_opportunities',
+            'past_social_goal',
+            'activity_follow_up',
+          ],
         }),
       ),
     );
@@ -6846,7 +6863,15 @@ describe('AgentWorkspacePage', () => {
       expect(updateReminderPreferenceSpy).toHaveBeenLastCalledWith(
         expect.objectContaining({
           enabled: true,
-          scenes: ['new_match', 'past_social_goal', 'activity_follow_up'],
+          scenes: [
+            'application_inbox',
+            'counterpart_reply',
+            'stalled_match',
+            'activity_review',
+            'new_match',
+            'past_social_goal',
+            'activity_follow_up',
+          ],
         }),
       ),
     );
@@ -6873,7 +6898,14 @@ describe('AgentWorkspacePage', () => {
       expect(updateReminderPreferenceSpy).toHaveBeenLastCalledWith(
         expect.objectContaining({
           enabled: true,
-          scenes: ['new_match', 'activity_follow_up'],
+          scenes: [
+            'application_inbox',
+            'counterpart_reply',
+            'stalled_match',
+            'activity_review',
+            'new_match',
+            'activity_follow_up',
+          ],
         }),
       ),
     );
@@ -6900,7 +6932,13 @@ describe('AgentWorkspacePage', () => {
       expect(updateReminderPreferenceSpy).toHaveBeenLastCalledWith(
         expect.objectContaining({
           enabled: true,
-          scenes: ['new_match'],
+          scenes: [
+            'application_inbox',
+            'counterpart_reply',
+            'stalled_match',
+            'activity_review',
+            'new_match',
+          ],
         }),
       ),
     );
@@ -6914,11 +6952,16 @@ describe('AgentWorkspacePage', () => {
       expect(updateReminderPreferenceSpy).toHaveBeenLastCalledWith(
         expect.objectContaining({
           enabled: true,
-          scenes: [],
+          scenes: [
+            'application_inbox',
+            'counterpart_reply',
+            'stalled_match',
+            'activity_review',
+          ],
         }),
       ),
     );
-    expect(screen.getByText(/每天一次摘要 · 未选择场景 · 10:30-21:00/)).toBeInTheDocument();
+    expect(screen.getByText(/每天一次摘要 · 4 个场景 · 10:30-21:00/)).toBeInTheDocument();
 
     fireEvent.click(screen.getByTestId('assistant-ui-reminder-toggle'));
     await waitFor(() => expect(disableRemindersSpy).toHaveBeenCalledTimes(1));

@@ -630,6 +630,10 @@ const REMINDER_SCENE_OPTIONS: Array<{
   value: SocialAgentReminderScene;
   label: string;
 }> = [
+  { value: 'application_inbox', label: '有人报名我的约练时提醒' },
+  { value: 'counterpart_reply', label: '对方有回应时提醒' },
+  { value: 'stalled_match', label: '约练卡住时提醒我继续' },
+  { value: 'activity_review', label: '活动结束后提醒评价' },
   { value: 'new_match', label: '有新匹配时提醒' },
   { value: 'weekend_opportunities', label: '周末前提醒我看看机会' },
   { value: 'past_social_goal', label: '长期没推进时提醒我继续' },
