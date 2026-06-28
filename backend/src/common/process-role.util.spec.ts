@@ -1,6 +1,7 @@
 import {
   fitMeetProcessRole,
   shouldRunBackgroundJobs,
+  shouldRunWorkerRole,
 } from './process-role.util';
 
 describe('process role', () => {
@@ -23,8 +24,30 @@ describe('process role', () => {
     process.env.ENABLE_SCHEDULER = 'true';
 
     expect(shouldRunBackgroundJobs()).toBe(true);
+    expect(shouldRunWorkerRole('worker-matching')).toBe(true);
 
     process.env.ENABLE_SCHEDULER = 'false';
     expect(shouldRunBackgroundJobs()).toBe(false);
+    expect(shouldRunWorkerRole('worker-matching')).toBe(false);
+  });
+
+  it('supports precise worker roles without enabling legacy broad background jobs', () => {
+    process.env.FITMEET_PROCESS_ROLE = 'worker-matching';
+    process.env.ENABLE_SCHEDULER = 'true';
+
+    expect(fitMeetProcessRole()).toBe('worker-matching');
+    expect(shouldRunBackgroundJobs()).toBe(false);
+    expect(shouldRunWorkerRole('worker-matching')).toBe(true);
+    expect(shouldRunWorkerRole('worker-outbox')).toBe(false);
+  });
+
+  it('keeps all role as a compatibility mode for every worker role', () => {
+    process.env.FITMEET_PROCESS_ROLE = 'all';
+    process.env.ENABLE_SCHEDULER = 'true';
+
+    expect(shouldRunBackgroundJobs()).toBe(true);
+    expect(shouldRunWorkerRole('worker-matching')).toBe(true);
+    expect(shouldRunWorkerRole('worker-outbox')).toBe(true);
+    expect(shouldRunWorkerRole('worker-reminder')).toBe(true);
   });
 });

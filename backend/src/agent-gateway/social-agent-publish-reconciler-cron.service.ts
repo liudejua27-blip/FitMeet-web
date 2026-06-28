@@ -3,6 +3,7 @@ import { Cron } from '@nestjs/schedule';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 
+import { shouldRunWorkerRole } from '../common/process-role.util';
 import { AgentTask, AgentTaskStatus } from './entities/agent-task.entity';
 import { SocialAgentPublishReconcilerService } from './social-agent-publish-reconciler.service';
 
@@ -31,6 +32,7 @@ export class SocialAgentPublishReconcilerCronService {
   @Cron('*/2 * * * *')
   async reconcilePublishedTasksCron(): Promise<void> {
     if (process.env.FITMEET_PUBLISH_RECONCILER_ENABLED === '0') return;
+    if (!shouldRunWorkerRole('worker-matching')) return;
     try {
       const summary = await this.reconcileDuePublishedTasks();
       if (summary.scanned > 0) {
