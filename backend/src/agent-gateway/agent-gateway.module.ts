@@ -143,6 +143,7 @@ import { SocialAgentToolResultCacheService } from './social-agent-tool-result-ca
 import { SocialAgentEmbeddingCacheService } from './social-agent-embedding-cache.service';
 import { SocialAgentTokenBudgetContextPackerService } from './social-agent-token-budget-context-packer.service';
 import { SocialAgentMetricsService } from './social-agent-metrics.service';
+import { SocialAgentLoopObservabilityService } from './social-agent-loop-observability.service';
 import { SocialAgentLongTermMemoryService } from './social-agent-long-term-memory.service';
 import { SocialAgentLongTermMemory } from './entities/social-agent-long-term-memory.entity';
 import { SocialAgentMessageFeedback } from './entities/social-agent-message-feedback.entity';
@@ -214,6 +215,7 @@ import { PublicIntentPrivacyGuardService } from './public-intent-privacy-guard.s
 import { SocialIntentRateLimitService } from './social-intent-rate-limit.service';
 import { SocialAgentDomainClassifierService } from './social-agent-domain-classifier.service';
 import { PublicIntentApplication } from '../social-loop/public-intent-application.entity';
+import { DomainOutboxEvent } from '../social-loop/domain-outbox-event.entity';
 import { AgentSettingsService } from './agent-settings.service';
 import { AgentControlController } from './agent-control.controller';
 import { SafetyEvent } from './entities/safety-event.entity';
@@ -291,6 +293,7 @@ import { AdminRbacModule } from '../admin-rbac/admin-rbac.module';
       SocialRequest,
       PublicSocialIntent,
       PublicIntentApplication,
+      DomainOutboxEvent,
       UserSocialRequest,
       SocialRequestCandidate,
       Follow,
@@ -431,6 +434,7 @@ import { AdminRbacModule } from '../admin-rbac/admin-rbac.module';
     CandidateFeatureService,
     CandidateRecallIndexService,
     SocialAgentMetricsService,
+    SocialAgentLoopObservabilityService,
     SocialAgentLongTermMemoryService,
     SocialAgentUserInterestEventService,
     SocialAgentPreferenceGeneralizationService,
@@ -571,6 +575,7 @@ import { AdminRbacModule } from '../admin-rbac/admin-rbac.module';
     CandidateSearchIndexService,
     CandidateFeatureService,
     CandidateRecallIndexService,
+    SocialAgentLoopObservabilityService,
     SocialAgentLongTermMemoryService,
     SocialAgentUserInterestEventService,
     SocialAgentPreferenceGeneralizationService,

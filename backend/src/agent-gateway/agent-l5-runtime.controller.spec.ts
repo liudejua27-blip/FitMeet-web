@@ -15,6 +15,8 @@ describe('AgentL5RuntimeController', () => {
         subagentWorkerJobs: 0,
         candidateSnapshots: 0,
         candidateEvents: 0,
+        socialLoopTraceLinks: 0,
+        socialLoopMissingCriticalIds: 0,
       }),
       messageFeedback: [],
       candidateSnapshots: [],
@@ -29,6 +31,10 @@ describe('AgentL5RuntimeController', () => {
         }),
         llmOutputCacheSummary: {},
         toolResultCacheSummary: {},
+      }),
+      socialLoopObservability: expect.objectContaining({
+        identifiers: expect.arrayContaining(['taskId', 'matchingJobId']),
+        recentTraceLinks: [],
       }),
     });
   });
@@ -84,6 +90,12 @@ function makeController() {
     {
       listRecentSnapshots: jest.fn().mockResolvedValue([]),
       listRecentEvents: jest.fn().mockResolvedValue([]),
+    } as never,
+    {
+      snapshot: jest.fn().mockResolvedValue({
+        identifiers: ['taskId', 'matchingJobId'],
+        recentTraceLinks: [],
+      }),
     } as never,
   );
 }

@@ -29,6 +29,7 @@ import {
   type AgentSkillPatchEffectDto,
   type AgentSubagentMemoryDto,
   type SocialAgentMessageFeedbackDto,
+  type SocialLoopObservabilityDto,
   type SocialAgentRuntimeMetricsDto,
   type SubagentWorkerJobDto,
 } from '../api/agentL5RuntimeApi';
@@ -363,6 +364,9 @@ export const AgentL5AdminPage = memo(function AgentL5AdminPage() {
                   onRecordSatisfaction={recordSatisfaction}
                   satisfactionBusy={satisfactionBusy}
                   socialAgentMetrics={dashboard?.socialAgentMetrics ?? null}
+                  socialLoopObservability={
+                    dashboard?.socialLoopObservability ?? null
+                  }
                 />
               ) : activeTab === 'workers' ? (
                 <WorkerQueuePanel
@@ -1055,11 +1059,13 @@ function ObservabilityPanel({
   onRecordSatisfaction,
   satisfactionBusy,
   socialAgentMetrics,
+  socialLoopObservability,
 }: {
   observability: AgentObservabilityDto | null;
   onRecordSatisfaction: (score: number) => void;
   satisfactionBusy: boolean;
   socialAgentMetrics: SocialAgentRuntimeMetricsDto | null;
+  socialLoopObservability: SocialLoopObservabilityDto | null;
 }) {
   const counters = observability?.counters ?? {};
   const latency = observability?.latency ?? {};
@@ -1160,6 +1166,42 @@ function ObservabilityPanel({
   const tokenOptimizationItems = tokenOptimizationSummaryItems(
     socialAgentMetrics?.tokenOptimizationSummary,
   );
+  const socialLoopBusinessItems = socialLoopBusinessMetricItems(
+    socialLoopObservability,
+  );
+  const socialLoopCoverageItems = socialLoopCoverageItemsFrom(
+    socialLoopObservability,
+  );
+  const socialLoopTraceRows = (socialLoopObservability?.recentTraceLinks ?? [])
+    .slice(0, 8)
+    .map((link) => [
+      <div key={`loop-task-${link.taskId}`} className="grid gap-1">
+        <span className="font-black text-white">Task {link.taskId}</span>
+        <span className="text-xs font-bold text-[#8f8174]">
+          {link.status} · {formatDate(link.updatedAt)}
+        </span>
+      </div>,
+      compactTraceIds([
+        ['run', link.runId],
+        ['thread', link.threadId],
+      ]),
+      compactTraceIds([
+        ['intent', link.publicIntentId],
+        ['request', link.socialRequestId],
+        ['job', link.matchingJobId],
+      ]),
+      compactTraceIds([
+        ['snapshot', link.candidateSnapshotId],
+        ['candidate', link.candidateRecordId],
+      ]),
+      compactTraceIds([
+        ['application', link.applicationId],
+        ['conversation', link.conversationId],
+        ['activity', link.activityId],
+        ['approval', link.approvalId],
+      ]),
+      link.missing.length ? link.missing.slice(0, 4).join(', ') : 'complete',
+    ]);
 
   return (
     <PanelShell
@@ -1331,6 +1373,34 @@ function ObservabilityPanel({
           emptyText="暂无 embedding 缓存数据"
           items={embeddingCacheItems}
           title="Embedding Cache"
+        />
+      </div>
+
+      <div className="mt-5 grid gap-4 xl:grid-cols-2">
+        <ObservabilityList
+          emptyText="暂无 Social Loop 业务指标"
+          items={socialLoopBusinessItems}
+          title="Social Loop Business"
+        />
+        <ObservabilityList
+          emptyText="暂无闭环 ID 覆盖率"
+          items={socialLoopCoverageItems}
+          title="Loop ID Coverage"
+        />
+      </div>
+
+      <div className="mt-5">
+        <DataTable
+          emptyText="暂无闭环 trace link"
+          headers={[
+            'Task',
+            'Run / Thread',
+            'Publish / Match',
+            'Candidate',
+            'Handoff',
+            'Missing',
+          ]}
+          rows={socialLoopTraceRows}
         />
       </div>
     </PanelShell>
@@ -1645,6 +1715,117 @@ function tokenOptimizationSummaryItems(
             : 'warn',
     },
   ];
+}
+
+function socialLoopBusinessMetricItems(
+  snapshot: SocialLoopObservabilityDto | null,
+): Array<{
+  key: string;
+  label: string;
+  tone: 'danger' | 'good' | 'neutral' | 'warn';
+  value: string;
+}> {
+  const metrics = snapshot?.businessMetrics ?? {};
+  const ratio = (key: string) => metrics[key] as
+    | { numerator: number; denominator: number; rate: number | null }
+    | undefined;
+  const numeric = (key: string) =>
+    typeof metrics[key] === 'number' ? (metrics[key] as number) : null;
+  const rows: Array<{
+    key: string;
+    label: string;
+    warnBelow?: number;
+    warnAbove?: number;
+  }> = [
+    { key: 'publishSuccessRate', label: 'Publish success', warnBelow: 0.9 },
+    { key: 'noCandidateRate', label: 'No-candidate rate', warnAbove: 0.35 },
+    { key: 'candidateClickRate', label: 'Candidate click', warnBelow: 0.15 },
+    { key: 'openerGenerationRate', label: 'Opener generation', warnBelow: 0.2 },
+    {
+      key: 'openerSendConfirmationRate',
+      label: 'Opener send confirmation',
+      warnBelow: 0.4,
+    },
+    { key: 'messageReplyRate', label: 'Message reply', warnBelow: 0.15 },
+    {
+      key: 'applicationAcceptanceRate',
+      label: 'Application acceptance',
+      warnBelow: 0.25,
+    },
+    { key: 'activityCompletionRate', label: 'Activity completion', warnBelow: 0.25 },
+    { key: 'reviewSubmissionRate', label: 'Review submission', warnBelow: 0.25 },
+    { key: 'safetyInterventionRate', label: 'Safety intervention', warnAbove: 0.2 },
+    { key: 'sideEffectFailureRate', label: 'Side-effect failures', warnAbove: 0.03 },
+    { key: 'outboxFailureRate', label: 'Outbox failures', warnAbove: 0.03 },
+  ];
+
+  const items = rows.map((row) => {
+    const value = ratio(row.key);
+    const rate = value?.rate ?? null;
+    const tone: 'danger' | 'good' | 'neutral' | 'warn' =
+      rate == null
+        ? 'neutral'
+        : row.warnBelow != null && rate < row.warnBelow
+          ? 'warn'
+          : row.warnAbove != null && rate > row.warnAbove
+            ? 'warn'
+            : 'good';
+    return {
+      key: row.key,
+      label: row.label,
+      value: value
+        ? `${formatPercent(rate)} · ${value.numerator}/${value.denominator}`
+        : '-',
+      tone,
+    };
+  });
+
+  const p95 = numeric('matchingJobP95LatencyMs');
+  items.unshift({
+    key: 'matchingJobP95LatencyMs',
+    label: 'Matching P95 latency',
+    value: p95 == null ? '-' : `${Math.round(p95)}ms`,
+    tone: p95 == null ? 'neutral' : p95 > 30000 ? 'warn' : 'good',
+  });
+  items.push({
+    key: 'duplicateSideEffectInterceptions',
+    label: 'Duplicate side-effect interceptions',
+    value: compactNumber(numeric('duplicateSideEffectInterceptions') ?? 0),
+    tone: (numeric('duplicateSideEffectInterceptions') ?? 0) > 0 ? 'good' : 'neutral',
+  });
+  return items;
+}
+
+function socialLoopCoverageItemsFrom(
+  snapshot: SocialLoopObservabilityDto | null,
+): Array<{
+  key: string;
+  label: string;
+  tone: 'danger' | 'good' | 'neutral' | 'warn';
+  value: string;
+}> {
+  return Object.entries(snapshot?.traceCoverage ?? {}).map(([key, value]) => ({
+    key,
+    label: key,
+    value: `${formatPercent(value.coverage)} · ${value.present}/${value.present + value.missing}`,
+    tone:
+      value.present + value.missing === 0
+        ? 'neutral'
+        : value.coverage >= 0.8
+          ? 'good'
+          : value.coverage >= 0.4
+            ? 'warn'
+            : 'danger',
+  }));
+}
+
+function compactTraceIds(
+  entries: Array<[string, string | number | null]>,
+): string {
+  const visible = entries
+    .filter(([, value]) => value != null && `${value}`.trim())
+    .map(([label, value]) => `${label}:${String(value)}`);
+  return visible.length ? visible.join(' · ') : '-';
 }
 
 function deterministicActionSummaryItems(
