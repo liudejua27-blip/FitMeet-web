@@ -9,6 +9,7 @@ import type {
 } from './fitmeet-alpha-agent.types';
 import type { SocialAgentCardActionBody } from './social-agent-action.types';
 import type { SocialAgentIntentRouteResult } from './social-agent-chat.types';
+import { SocialAgentLoopStateTransitionEventService } from './social-agent-loop-state-transition-event.service';
 import { SocialSideEffectService } from './social-side-effect.service';
 
 type PresentedApplication = {
@@ -42,6 +43,8 @@ export class SocialAgentApplicationActionService {
     private readonly sideEffects: SocialSideEffectService,
     @Optional()
     private readonly outboxWorker?: DomainOutboxWorkerService,
+    @Optional()
+    private readonly loopStateEvents?: SocialAgentLoopStateTransitionEventService,
   ) {}
 
   async performApplicationAction(input: {
@@ -337,6 +340,13 @@ export class SocialAgentApplicationActionService {
       conversationId,
       meetId: result.meetId ?? application.meetId ?? null,
     });
+    await this.writeApplicationAcceptedLoopTransitions({
+      ownerUserId: input.ownerUserId,
+      taskId: input.taskId,
+      application,
+      conversationId,
+      meetId: result.meetId ?? application.meetId ?? null,
+    });
 
     return this.simpleRouteResult({
       taskId: input.taskId,
@@ -355,6 +365,54 @@ export class SocialAgentApplicationActionService {
         requiredConfirmation: false,
       },
     }) as SocialAgentIntentRouteResult & Record<string, unknown>;
+  }
+
+  private async writeApplicationAcceptedLoopTransitions(input: {
+    ownerUserId: number;
+    taskId: number;
+    application: PresentedApplication;
+    conversationId: string | null;
+    meetId: number | null;
+  }): Promise<void> {
+    await this.loopStateEvents?.writeTransition({
+      task: {
+        id: input.taskId,
+        ownerUserId: input.ownerUserId,
+      },
+      fromState: 'APPLICATION_PENDING',
+      toState: 'APPLICATION_ACCEPTED',
+      publicLoopStage: input.conversationId
+        ? 'messages_handoff'
+        : 'contact_confirmation_required',
+      workflowState: 'APPLICATION_ACCEPTED',
+      reason: 'application_accepted',
+      payload: {
+        applicationId: input.application.id,
+        publicIntentId: input.application.publicIntentId,
+        applicantUserId: input.application.applicantUserId,
+        meetId: input.meetId,
+        conversationId: input.conversationId,
+      },
+    });
+    if (!input.conversationId) return;
+    await this.loopStateEvents?.writeTransition({
+      task: {
+        id: input.taskId,
+        ownerUserId: input.ownerUserId,
+      },
+      fromState: 'APPLICATION_ACCEPTED',
+      toState: 'CONVERSATION_ACTIVE',
+      publicLoopStage: 'messages_handoff',
+      workflowState: 'CONVERSATION_ACTIVE',
+      reason: 'conversation_active',
+      payload: {
+        applicationId: input.application.id,
+        publicIntentId: input.application.publicIntentId,
+        applicantUserId: input.application.applicantUserId,
+        meetId: input.meetId,
+        conversationId: input.conversationId,
+      },
+    });
   }
 
   private async rejectApplication(input: {

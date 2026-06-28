@@ -47,13 +47,24 @@ function makeHarness() {
       reused: false,
     })),
   };
+  const loopStateEvents = {
+    writeTransition: jest.fn().mockResolvedValue(undefined),
+  };
   const service = new SocialAgentApplicationActionService(
     applications as never,
     contactPolicy as never,
     sideEffects as never,
     outboxWorker as never,
+    loopStateEvents as never,
   );
-  return { applications, contactPolicy, outboxWorker, sideEffects, service };
+  return {
+    applications,
+    contactPolicy,
+    loopStateEvents,
+    outboxWorker,
+    sideEffects,
+    service,
+  };
 }
 
 describe('SocialAgentApplicationActionService', () => {
@@ -78,8 +89,14 @@ describe('SocialAgentApplicationActionService', () => {
   });
 
   it('accepts an owner application without forcing outbox work into the request path by default', async () => {
-    const { applications, contactPolicy, outboxWorker, sideEffects, service } =
-      makeHarness();
+    const {
+      applications,
+      contactPolicy,
+      loopStateEvents,
+      outboxWorker,
+      sideEffects,
+      service,
+    } = makeHarness();
 
     const result = await service.performApplicationAction({
       ownerUserId: 7,
@@ -112,6 +129,36 @@ describe('SocialAgentApplicationActionService', () => {
     );
     expect(outboxWorker.processPending).not.toHaveBeenCalled();
     expect(contactPolicy.getRelationshipState).toHaveBeenCalledWith(7, 11);
+    expect(loopStateEvents.writeTransition).toHaveBeenCalledWith({
+      task: { id: 101, ownerUserId: 7 },
+      fromState: 'APPLICATION_PENDING',
+      toState: 'APPLICATION_ACCEPTED',
+      publicLoopStage: 'messages_handoff',
+      workflowState: 'APPLICATION_ACCEPTED',
+      reason: 'application_accepted',
+      payload: expect.objectContaining({
+        applicationId: 42,
+        publicIntentId: 'intent_abc',
+        applicantUserId: 11,
+        meetId: 99,
+        conversationId: 'conv_123',
+      }),
+    });
+    expect(loopStateEvents.writeTransition).toHaveBeenCalledWith({
+      task: { id: 101, ownerUserId: 7 },
+      fromState: 'APPLICATION_ACCEPTED',
+      toState: 'CONVERSATION_ACTIVE',
+      publicLoopStage: 'messages_handoff',
+      workflowState: 'CONVERSATION_ACTIVE',
+      reason: 'conversation_active',
+      payload: expect.objectContaining({
+        applicationId: 42,
+        publicIntentId: 'intent_abc',
+        applicantUserId: 11,
+        meetId: 99,
+        conversationId: 'conv_123',
+      }),
+    });
     expect(result.publicLoop).toEqual(
       expect.objectContaining({
         stage: 'messages_handoff',
