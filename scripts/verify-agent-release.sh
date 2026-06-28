@@ -41,6 +41,9 @@ else
   node "${ROOT_DIR}/scripts/run-agent-skill-evals.mjs"
 fi
 
+step "Run Agent social loop replay cases"
+pnpm --dir "${ROOT_DIR}/backend" run agent:replay
+
 step "Audit frontend release invariants"
 pnpm --dir "${ROOT_DIR}/frontend" run lint
 
