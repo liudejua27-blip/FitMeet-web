@@ -11,6 +11,7 @@ import {
   cleanDisplayText,
   sanitizeForDisplay,
 } from '../common/display-text.util';
+import { FeatureFlagService } from '../common/feature-flag.service';
 import { RealtimeEventService } from '../realtime/realtime-event.service';
 import {
   SocialRequestVisibility,
@@ -124,6 +125,8 @@ export class SocialAgentMatchingJobProcessorService {
     private readonly relaxation?: SocialAgentMatchRelaxationService,
     @Optional()
     private readonly candidateAudit?: SocialCandidateAuditService,
+    @Optional()
+    private readonly featureFlags?: FeatureFlagService,
   ) {}
 
   async processDueJobs(input: {
@@ -187,6 +190,7 @@ export class SocialAgentMatchingJobProcessorService {
     const heartbeat = this.startLeaseHeartbeat(job, options.leaseMs);
     try {
       const validation = await this.validateJob(job);
+      this.assertAutomaticCandidateSearchEnabled(validation);
       const indexHints = await this.resolveCandidateIndexHints(validation);
       const searchResult = await this.searchCandidates(
         job,
@@ -325,6 +329,24 @@ export class SocialAgentMatchingJobProcessorService {
       candidateUserIds: indexHints.used ? indexHints.candidateUserIds : null,
       publicIntentIds: indexHints.used ? indexHints.publicIntentIds : null,
     });
+  }
+
+  private assertAutomaticCandidateSearchEnabled(
+    validation: JobValidationResult,
+  ): void {
+    try {
+      this.featureFlags?.assertEnabled('automatic_candidate_search', {
+        userId: validation.ownerUserId,
+        city: validation.socialRequest.city || validation.publicIntent.city,
+        riskLevel: validation.publicIntent.riskLevel,
+      });
+    } catch (error) {
+      throw new FinalMatchingJobError(
+        error instanceof Error
+          ? error.message
+          : 'automatic_candidate_search_disabled',
+      );
+    }
   }
 
   private async resolveCandidateIndexHints(

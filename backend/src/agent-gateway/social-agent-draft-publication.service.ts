@@ -13,6 +13,7 @@ import {
   cleanDisplayText,
   sanitizeForDisplay,
 } from '../common/display-text.util';
+import { FeatureFlagService } from '../common/feature-flag.service';
 import { CreateSocialRequestDto } from '../social-requests/dto/create-social-request.dto';
 import {
   SocialRequestGenderPreference,
@@ -101,6 +102,8 @@ export class SocialAgentDraftPublicationService {
     private readonly privacyGuard?: PublicIntentPrivacyGuardService,
     @Optional()
     private readonly rateLimit?: SocialIntentRateLimitService,
+    @Optional()
+    private readonly featureFlags?: FeatureFlagService,
   ) {}
 
   async publishDraft(
@@ -109,6 +112,7 @@ export class SocialAgentDraftPublicationService {
     draft: CreateSocialRequestDto & { socialRequestId?: number | null },
   ): Promise<Record<string, unknown>> {
     this.assertRequiredPersistenceDependencies();
+    this.assertPublishFeaturesEnabled(ownerUserId, draft);
     const privacy = this.privacyGuard?.inspect(draft);
     if (privacy?.blocked) {
       throw new BadRequestException('public_intent_privacy_guard_blocked');
@@ -162,6 +166,21 @@ export class SocialAgentDraftPublicationService {
       });
     }
     return result;
+  }
+
+  private assertPublishFeaturesEnabled(
+    ownerUserId: number,
+    draft: CreateSocialRequestDto & { socialRequestId?: number | null },
+  ): void {
+    const context = {
+      userId: ownerUserId,
+      city: draft.city ?? null,
+      riskLevel: this.text(
+        (draft as unknown as Record<string, unknown>).riskLevel,
+      ),
+    };
+    this.featureFlags?.assertEnabled('agent_publish', context);
+    this.featureFlags?.assertEnabled('discover_public_intent', context);
   }
 
   async stagePrivateDraftForPublish<

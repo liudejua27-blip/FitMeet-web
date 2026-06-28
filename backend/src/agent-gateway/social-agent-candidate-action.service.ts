@@ -14,6 +14,7 @@ import {
   cleanDisplayText,
   sanitizeForDisplay,
 } from '../common/display-text.util';
+import { FeatureFlagService } from '../common/feature-flag.service';
 import { AgentApprovalService } from './agent-approval.service';
 import {
   AgentApprovalRequest,
@@ -113,6 +114,8 @@ export class SocialAgentCandidateActionService {
     private readonly interestEvents?: SocialAgentUserInterestEventService,
     @Optional()
     private readonly candidateAudit?: SocialCandidateAuditService,
+    @Optional()
+    private readonly featureFlags?: FeatureFlagService,
   ) {}
 
   async createActionApproval(input: {
@@ -1340,6 +1343,9 @@ export class SocialAgentCandidateActionService {
     },
   ): Promise<Record<string, unknown>> {
     const task = await this.assertTaskOwner(taskId, ownerUserId);
+    this.featureFlags?.assertEnabled('connect_candidate', {
+      userId: ownerUserId,
+    });
     const targetUserId = await this.executor.resolveCandidateTargetUser(
       body as Record<string, unknown>,
       ownerUserId,

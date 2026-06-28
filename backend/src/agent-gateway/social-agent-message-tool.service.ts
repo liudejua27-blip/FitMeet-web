@@ -1,5 +1,11 @@
-import { BadRequestException, Injectable, Logger } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  Logger,
+  Optional,
+} from '@nestjs/common';
 
+import { FeatureFlagService } from '../common/feature-flag.service';
 import { MatchService } from '../match/match.service';
 import { SocialRequestCandidateStatus } from '../match/social-request-candidate.entity';
 import { MessagesService } from '../messages/messages.service';
@@ -51,6 +57,8 @@ export class SocialAgentMessageToolService {
     private readonly toolInput: SocialAgentToolInputParserService,
     private readonly taskMemory: SocialAgentTaskMemoryService,
     private readonly contactPolicy: ContactPolicyService,
+    @Optional()
+    private readonly featureFlags?: FeatureFlagService,
   ) {}
 
   async sendMessage(
@@ -62,6 +70,9 @@ export class SocialAgentMessageToolService {
       input.text ?? input.message ?? input.content,
     );
     if (!text) throw new BadRequestException('text is required');
+    this.featureFlags?.assertEnabled('message_send', {
+      userId: task.ownerUserId,
+    });
 
     let conversationId = this.toolInput.string(input.conversationId);
     const targetUserId = this.toolInput.number(
@@ -186,6 +197,9 @@ export class SocialAgentMessageToolService {
       throw new BadRequestException('conversationId is required');
     }
     if (!text) throw new BadRequestException('text is required');
+    this.featureFlags?.assertEnabled('message_send', {
+      userId: task.ownerUserId,
+    });
     if (
       !task.agentConnectionId &&
       !this.confirmationPolicy.canRunAsConfirmedUserAction(
