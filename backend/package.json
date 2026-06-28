@@ -14,6 +14,7 @@
     "migration:run:prod": "typeorm -d dist/database/data-source.js migration:run --transaction each",
     "migration:status": "ts-node -r tsconfig-paths/register scripts/migration-status.ts",
     "agent:evaluate": "ts-node -r tsconfig-paths/register scripts/agent-evaluate.ts",
+    "agent:replay": "ts-node -r tsconfig-paths/register scripts/agent-loop-replay.ts",
     "db:check-critical-tables:prod": "node dist/scripts/check-production-tables.js",
     "uploads:check:prod": "node dist/scripts/check-upload-dir.js",
     "migration:generate": "typeorm-ts-node-commonjs migration:generate src/database/migrations/GeneratedMigration -d src/database/data-source.ts",
