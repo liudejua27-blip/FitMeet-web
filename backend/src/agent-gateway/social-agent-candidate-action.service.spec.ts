@@ -69,6 +69,9 @@ function makeHarness(initialTask = makeTask()) {
   const l5Runtime = {
     transitionMeetLoop: jest.fn().mockResolvedValue(undefined),
   };
+  const loopStateEvents = {
+    writeCurrentTaskTransition: jest.fn().mockResolvedValue(undefined),
+  };
   const executor = {
     resolveCandidateTargetUser: jest.fn((input: Record<string, unknown>) => {
       const candidate =
@@ -137,6 +140,10 @@ function makeHarness(initialTask = makeTask()) {
     undefined,
     longTermMemory as never,
     l5Runtime as never,
+    undefined,
+    undefined,
+    undefined,
+    loopStateEvents as never,
   );
   return {
     approvals,
@@ -144,6 +151,7 @@ function makeHarness(initialTask = makeTask()) {
     executor,
     l5Runtime,
     longTermMemory,
+    loopStateEvents,
     savedEvents,
     service,
     taskRepo,
@@ -169,7 +177,7 @@ describe('SocialAgentCandidateActionService', () => {
         },
       },
     });
-    const { approvals, service, taskRepo } = makeHarness(task);
+    const { approvals, loopStateEvents, service, taskRepo } = makeHarness(task);
 
     const approval = await service.createActionApproval({
       ownerUserId: 7,
@@ -202,6 +210,11 @@ describe('SocialAgentCandidateActionService', () => {
       riskLevel: 'high',
     });
     expect(taskRepo.save).toHaveBeenCalledWith(task);
+    expect(loopStateEvents.writeCurrentTaskTransition).toHaveBeenCalledWith({
+      task,
+      publicLoopStage: 'contact_confirmation_required',
+      workflowState: 'CONTACT_CONFIRMATION_REQUIRED',
+    });
     expect(task.memory).toMatchObject({
       taskMemory: {
         currentTask: {

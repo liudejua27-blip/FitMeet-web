@@ -48,6 +48,7 @@ import { MatchingJobService } from './matching-job.service';
 import { MatchingJob, MatchingJobStatus } from './entities/matching-job.entity';
 import { PublicIntentPrivacyGuardService } from './public-intent-privacy-guard.service';
 import { SocialIntentRateLimitService } from './social-intent-rate-limit.service';
+import { SocialAgentLoopStateTransitionEventService } from './social-agent-loop-state-transition-event.service';
 
 type DismissDraftContext = {
   action: string;
@@ -104,6 +105,8 @@ export class SocialAgentDraftPublicationService {
     private readonly rateLimit?: SocialIntentRateLimitService,
     @Optional()
     private readonly featureFlags?: FeatureFlagService,
+    @Optional()
+    private readonly loopStateEvents?: SocialAgentLoopStateTransitionEventService,
   ) {}
 
   async publishDraft(
@@ -1283,6 +1286,11 @@ export class SocialAgentDraftPublicationService {
       lastCompletedStep: 'published_to_discover',
     });
     await this.taskRepo.save(task);
+    await this.loopStateEvents?.writeCurrentTaskTransition({
+      task,
+      publicLoopStage: 'matching_queued',
+      workflowState: 'MATCHING_QUEUED',
+    });
     void this.longTermMemory?.summarizeTask(task).catch(() => undefined);
 
     return {

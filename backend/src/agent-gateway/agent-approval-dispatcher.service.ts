@@ -678,6 +678,18 @@ export class AgentApprovalDispatcherService {
       source: 'approval_dispatcher',
       tags: this.stringList(payload.tags),
     });
+    const resultRecord = this.record(result);
+    if (
+      resultRecord.success !== true ||
+      resultRecord.confirmationRequired === true ||
+      resultRecord.status === 'confirmation_required'
+    ) {
+      throw new Error(
+        `long_term_memory_dispatch_not_updated:${
+          this.text(resultRecord.status) ?? 'unknown'
+        }`,
+      );
+    }
     await this.writeLog(
       approval,
       conn,

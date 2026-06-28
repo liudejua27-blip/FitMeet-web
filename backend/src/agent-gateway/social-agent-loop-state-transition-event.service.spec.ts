@@ -3,6 +3,7 @@ import {
   AgentTaskEventActor,
   AgentTaskEventType,
 } from './entities/agent-task.entity';
+import { transitionSocialAgentState } from './social-agent-memory.util';
 
 describe('SocialAgentLoopStateTransitionEventService', () => {
   function makeRepo() {
@@ -66,5 +67,38 @@ describe('SocialAgentLoopStateTransitionEventService', () => {
         toState: 'discover_visible',
       }),
     ).resolves.toBeUndefined();
+  });
+
+  it('writes the latest transition stored on task memory', async () => {
+    const repo = makeRepo();
+    const service = new SocialAgentLoopStateTransitionEventService(
+      repo as never,
+    );
+    const task = { id: 100, ownerUserId: 7, memory: {} } as never;
+    transitionSocialAgentState(task, 'message_action', {
+      waitingFor: 'counterpart_reply',
+      lastCompletedStep: 'message_sent',
+    });
+
+    await service.writeCurrentTaskTransition({
+      task,
+      publicLoopStage: 'messages_handoff',
+      workflowState: 'CONTACT_CONFIRMATION_REQUIRED',
+    });
+
+    expect(repo.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventType: AgentTaskEventType.LoopStateTransition,
+        actor: AgentTaskEventActor.System,
+        summary: 'Loop state transition: IDLE -> WAITING_COUNTERPART_REPLY',
+        payload: expect.objectContaining({
+          fromState: 'IDLE',
+          toState: 'WAITING_COUNTERPART_REPLY',
+          reason: 'message_action',
+          publicLoopStage: 'messages_handoff',
+          workflowState: 'CONTACT_CONFIRMATION_REQUIRED',
+        }),
+      }),
+    );
   });
 });

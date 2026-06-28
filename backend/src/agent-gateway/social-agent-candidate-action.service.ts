@@ -86,6 +86,7 @@ import type { FitMeetAlphaCard } from './fitmeet-alpha-agent.types';
 import { SocialAgentUserInterestEventService } from './social-agent-user-interest-event.service';
 import { SocialCandidateAuditService } from './social-candidate-audit.service';
 import type { SocialCandidateEventType } from './entities/social-candidate-event.entity';
+import { SocialAgentLoopStateTransitionEventService } from './social-agent-loop-state-transition-event.service';
 
 type CandidateActionOptions = {
   signal?: AbortSignal | null;
@@ -116,6 +117,8 @@ export class SocialAgentCandidateActionService {
     private readonly candidateAudit?: SocialCandidateAuditService,
     @Optional()
     private readonly featureFlags?: FeatureFlagService,
+    @Optional()
+    private readonly loopStateEvents?: SocialAgentLoopStateTransitionEventService,
   ) {}
 
   async createActionApproval(input: {
@@ -161,6 +164,11 @@ export class SocialAgentCandidateActionService {
       );
       recordSocialAgentPendingAction(task, approvalState.pendingAction);
       await this.taskRepo.save(task);
+      await this.loopStateEvents?.writeCurrentTaskTransition({
+        task,
+        publicLoopStage: 'contact_confirmation_required',
+        workflowState: 'CONTACT_CONFIRMATION_REQUIRED',
+      });
       return pendingApproval;
     } catch (error) {
       this.logger.warn(
@@ -221,6 +229,11 @@ export class SocialAgentCandidateActionService {
       openerDraft.transitionPatch,
     );
     await this.taskRepo.save(task);
+    await this.loopStateEvents?.writeCurrentTaskTransition({
+      task,
+      publicLoopStage: 'contact_confirmation_required',
+      workflowState: 'CONTACT_CONFIRMATION_REQUIRED',
+    });
 
     const card = this.buildOpenerDraftCandidateCard({
       taskId: task.id,
@@ -423,6 +436,11 @@ export class SocialAgentCandidateActionService {
       confirmedMessage.transitionPatch,
     );
     await this.taskRepo.save(task);
+    await this.loopStateEvents?.writeCurrentTaskTransition({
+      task,
+      publicLoopStage: 'messages_handoff',
+      workflowState: 'MESSAGES_HANDOFF',
+    });
     await this.persistInviteSentState({
       task,
       targetUserId,
