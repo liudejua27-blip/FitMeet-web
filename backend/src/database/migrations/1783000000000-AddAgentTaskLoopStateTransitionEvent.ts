@@ -8,8 +8,14 @@ export class AddAgentTaskLoopStateTransitionEvent1783000000000 implements Migrat
     await queryRunner.query(`
       DO $$
       BEGIN
-        ALTER TYPE "agent_task_event_type_enum"
-        ADD VALUE IF NOT EXISTS 'social_agent.loop_state.transition';
+        IF EXISTS (
+          SELECT 1
+          FROM pg_type
+          WHERE typname = 'agent_task_event_type_enum'
+        ) THEN
+          ALTER TYPE "agent_task_event_type_enum"
+          ADD VALUE IF NOT EXISTS 'social_agent.loop_state.transition';
+        END IF;
       EXCEPTION
         WHEN duplicate_object THEN NULL;
       END $$;

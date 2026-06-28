@@ -1407,6 +1407,7 @@ describe('SocialAgentToolExecutorService', () => {
           toolName: 'publish_social_request',
           status: 'planned',
           input: {
+            socialRequestId: 21,
             type: 'custom',
             description: 'find Qingdao running partner',
           },
@@ -3393,6 +3394,50 @@ describe('SocialAgentToolExecutorService', () => {
     expect(approvals.create).toHaveBeenCalled();
     expect(socialRequests.update).not.toHaveBeenCalled();
     expect(socialRequests.create).not.toHaveBeenCalled();
+    expect(socialRequests.syncPublicIntentById).not.toHaveBeenCalled();
+  });
+
+  it('rejects publish_social_request without a staged socialRequestId before approval', async () => {
+    const { service, taskRepo, connectionRepo, socialRequests, approvals } =
+      makeService();
+    const task = makeTask({
+      permissionMode: AgentTaskPermissionMode.Confirm,
+      agentConnectionId: 7,
+    });
+    taskRepo.findOne.mockResolvedValue(task);
+    connectionRepo.findOne.mockResolvedValue({ id: 7, userId: 1 });
+
+    const call = await service.executeToolAction(
+      100,
+      SocialAgentToolName.PublishSocialRequest,
+      {
+        mode: 'publish',
+        publish: true,
+        syncPublicIntent: true,
+        type: SocialRequestType.RunningPartner,
+        title: '今天晚上青岛大学跑步搭子',
+        city: '青岛',
+        activityType: '跑步',
+        confirmedPublish: true,
+        approved: true,
+        confirmed: true,
+        metadata: {
+          publishOrchestrator: 'social_agent_draft_publication',
+        },
+      },
+      1,
+      {
+        internalPublishOrchestrator: 'social_agent_draft_publication',
+      },
+    );
+
+    expect(call.status).toBe('failed');
+    expect(call.error?.message).toBe(
+      'publish_social_request_requires_staged_social_request_id',
+    );
+    expect(approvals.create).not.toHaveBeenCalled();
+    expect(socialRequests.create).not.toHaveBeenCalled();
+    expect(socialRequests.update).not.toHaveBeenCalled();
     expect(socialRequests.syncPublicIntentById).not.toHaveBeenCalled();
   });
 

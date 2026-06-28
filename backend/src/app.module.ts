@@ -29,6 +29,9 @@ import { RealtimeModule } from './realtime/realtime.module';
 import { AgentObservabilityTypeOrmLogger } from './agent-gateway/agent-observability-typeorm.logger';
 import { AdminRbacModule } from './admin-rbac/admin-rbac.module';
 
+const shouldSkipThrottling = () =>
+  process.env.FITMEET_DISABLE_THROTTLE === 'true';
+
 @Module({
   imports: [
     ConfigModule.forRoot({
@@ -113,16 +116,19 @@ import { AdminRbacModule } from './admin-rbac/admin-rbac.module';
         name: 'short',
         ttl: 1000,
         limit: 10,
+        skipIf: shouldSkipThrottling,
       },
       {
         name: 'medium',
         ttl: 60000,
         limit: 100,
+        skipIf: shouldSkipThrottling,
       },
       {
         name: 'long',
         ttl: 3600000,
         limit: 1000,
+        skipIf: shouldSkipThrottling,
       },
     ]),
     ScheduleModule.forRoot(),

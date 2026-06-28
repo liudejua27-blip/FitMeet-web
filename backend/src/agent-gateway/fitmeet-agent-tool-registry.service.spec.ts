@@ -329,11 +329,46 @@ describe('FitMeetAgentToolRegistryService', () => {
     );
   });
 
+  it('declares create_social_request as draft-only in its public schema', () => {
+    const tool = service.getTool('create_social_request');
+    const inputSchema = tool?.inputSchema as {
+      properties?: Record<string, { enum?: string[] }>;
+    };
+
+    expect(tool).toMatchObject({
+      name: 'create_social_request',
+      requiresApproval: false,
+      requiresConfirmation: false,
+    });
+    expect(tool?.description).toContain('private social request draft');
+    expect(tool?.failureFallback).toContain('public publishing must use');
+    expect(inputSchema.properties?.mode?.enum).toEqual(
+      expect.arrayContaining([
+        'draft',
+        'ai_draft',
+        'draft_only',
+        'private_draft',
+      ]),
+    );
+    expect(inputSchema.properties?.mode?.enum).not.toContain('publish');
+  });
+
   it('declares publish_social_request public intent sync outputs and side effects', () => {
     const tool = service.getTool('publish_social_request');
+    const inputSchema = tool?.inputSchema as {
+      properties?: Record<string, unknown>;
+      required?: string[];
+    };
 
     expect(tool).toMatchObject({
       name: 'publish_social_request',
+      plannerEnabled: false,
+      inputSchema: expect.objectContaining({
+        required: ['socialRequestId'],
+        properties: expect.objectContaining({
+          socialRequestId: { type: 'integer' },
+        }),
+      }),
       outputSchema: expect.objectContaining({
         required: expect.arrayContaining([
           'socialRequestId',
@@ -348,6 +383,10 @@ describe('FitMeetAgentToolRegistryService', () => {
         }),
       }),
       sideEffects: ['social_request_create_or_update', 'public_intent_sync'],
+    });
+    expect(inputSchema.required).toEqual(['socialRequestId']);
+    expect(inputSchema.properties?.socialRequestId).toEqual({
+      type: 'integer',
     });
   });
 });
