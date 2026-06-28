@@ -13,6 +13,8 @@ describe('AddAgentTaskLoopStateTransitionEvent migration', () => {
     const migration = new AddAgentTaskLoopStateTransitionEvent1783000000000();
     const queryRunner = makeQueryRunner();
 
+    expect(migration.transaction).toBe(false);
+
     await migration.up(queryRunner);
 
     const sql = queryRunner.query.mock.calls

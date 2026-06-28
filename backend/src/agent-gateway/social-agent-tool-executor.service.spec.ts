@@ -3353,7 +3353,7 @@ describe('SocialAgentToolExecutorService', () => {
     expect(socialRequests.syncPublicIntentById).not.toHaveBeenCalled();
   });
 
-  it('allows publish_social_request to sync public intent after confirmation', async () => {
+  it('allows publish_social_request to sync public intent after confirmed publish credential', async () => {
     const { service, taskRepo, connectionRepo, socialRequests, approvals } =
       makeService();
     const task = makeTask({
@@ -3368,7 +3368,7 @@ describe('SocialAgentToolExecutorService', () => {
     });
     socialRequests.syncPublicIntentById.mockResolvedValue({
       id: 'social_request_301',
-      status: 'active',
+      status: 'searching',
     });
 
     const call = await service.executeToolAction(
@@ -3387,7 +3387,7 @@ describe('SocialAgentToolExecutorService', () => {
         approved: true,
         confirmed: true,
         metadata: {
-          publishSource: 'agent_card_action',
+          publishOrchestrator: 'social_agent_draft_publication',
         },
       },
       1,
@@ -3407,6 +3407,9 @@ describe('SocialAgentToolExecutorService', () => {
         type: SocialRequestType.RunningPartner,
         mode: 'publish',
         syncPublicIntent: true,
+        metadata: expect.objectContaining({
+          publishOrchestrator: 'social_agent_draft_publication',
+        }),
       }),
       { id: 7, userId: 1 },
     );
