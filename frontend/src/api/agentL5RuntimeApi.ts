@@ -31,6 +31,8 @@ export type AgentL5DashboardSummary = {
   negativeMessageFeedback?: number;
   agentFeedbackEvents?: number;
   negativeAgentFeedbackEvents?: number;
+  socialLoopTraceLinks?: number;
+  socialLoopMissingCriticalIds?: number;
 };
 
 export type AgentOnlineReplaySampleDto = {
@@ -293,6 +295,47 @@ export type SocialAgentRuntimeMetricsDto = {
   embeddingCacheSummary?: Record<string, AgentCacheSummaryDto>;
 };
 
+export type SocialLoopRatioMetricDto = {
+  numerator: number;
+  denominator: number;
+  rate: number | null;
+};
+
+export type SocialLoopTraceLinkDto = {
+  taskId: number;
+  runId: string | null;
+  threadId: string | null;
+  publicIntentId: string | null;
+  socialRequestId: number | null;
+  matchingJobId: number | null;
+  candidateSnapshotId: number | null;
+  candidateRecordId: number | null;
+  applicationId: number | null;
+  conversationId: string | null;
+  activityId: number | null;
+  approvalId: number | null;
+  status: string;
+  missing: string[];
+  updatedAt: string;
+};
+
+export type SocialLoopObservabilityDto = {
+  generatedAt: string;
+  sampleLimit: number;
+  identifiers: string[];
+  counts: Record<string, Record<string, number>>;
+  traceCoverage: Record<
+    string,
+    {
+      present: number;
+      missing: number;
+      coverage: number;
+    }
+  >;
+  businessMetrics: Record<string, SocialLoopRatioMetricDto | number | null>;
+  recentTraceLinks: SocialLoopTraceLinkDto[];
+};
+
 export type SocialAgentMessageFeedbackDto = {
   id: number;
   ownerUserId: number;
@@ -350,6 +393,7 @@ export type AgentL5DashboardDto = {
   agentFeedbackEvents?: AgentFeedbackEventDto[];
   observability?: AgentObservabilityDto;
   socialAgentMetrics?: SocialAgentRuntimeMetricsDto;
+  socialLoopObservability?: SocialLoopObservabilityDto;
   workerJobs?: SubagentWorkerJobDto[];
   workerHeartbeats?: SubagentWorkerHeartbeatDto[];
   workerFailures?: SubagentWorkerFailureDto[];

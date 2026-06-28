@@ -25,6 +25,7 @@ import { SocialAgentMessageFeedbackService } from './social-agent-message-feedba
 import { SocialAgentFeedbackEventService } from './social-agent-feedback-event.service';
 import { SocialAgentMetricsService } from './social-agent-metrics.service';
 import { SocialCandidateAuditService } from './social-candidate-audit.service';
+import { SocialAgentLoopObservabilityService } from './social-agent-loop-observability.service';
 
 type UserSatisfactionBody = {
   score?: number;
@@ -50,6 +51,7 @@ export class AgentL5RuntimeController {
     private readonly agentFeedbackEvents: SocialAgentFeedbackEventService,
     private readonly socialAgentMetrics: SocialAgentMetricsService,
     private readonly socialCandidateAudit: SocialCandidateAuditService,
+    private readonly socialLoopObservability: SocialAgentLoopObservabilityService,
   ) {}
 
   @Get('dashboard')
@@ -85,6 +87,9 @@ export class AgentL5RuntimeController {
     const candidateEvents = await this.socialCandidateAudit.listRecentEvents({
       limit: Number(limit),
     });
+    const socialLoopObservability = await this.socialLoopObservability.snapshot(
+      Number(limit),
+    );
     return {
       ...dashboard,
       summary: {
@@ -111,6 +116,13 @@ export class AgentL5RuntimeController {
         ).length,
         candidateSnapshots: candidateSnapshots.length,
         candidateEvents: candidateEvents.length,
+        socialLoopTraceLinks: socialLoopObservability.recentTraceLinks.length,
+        socialLoopMissingCriticalIds:
+          socialLoopObservability.recentTraceLinks.filter(
+            (item) =>
+              item.missing.includes('publicIntentId') ||
+              item.missing.includes('matchingJobId'),
+          ).length,
       },
       autoRuns,
       messageFeedback,
@@ -123,6 +135,7 @@ export class AgentL5RuntimeController {
       workerFailures,
       observability,
       socialAgentMetrics,
+      socialLoopObservability,
     };
   }
 
