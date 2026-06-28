@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { UserBlock } from '../safety/user-block.entity';
+import { isPublicIntentAcceptingApplications } from '../social-loop/public-intent-status-policy';
 import { OnboardingService } from '../users/onboarding.service';
 import {
   allowDecision,
@@ -152,7 +153,7 @@ export class SocialPolicyService {
         },
       );
     }
-    if (String(input.status) !== 'active') {
+    if (!isPublicIntentAcceptingApplications(input.status)) {
       return denyDecision(
         action,
         'public_intent_not_active',

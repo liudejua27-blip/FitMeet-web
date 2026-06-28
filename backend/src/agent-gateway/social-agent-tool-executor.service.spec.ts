@@ -1294,6 +1294,39 @@ describe('SocialAgentToolExecutorService', () => {
     );
   });
 
+  it('fails closed when long-term memory approval is not approved even if called directly', async () => {
+    const { service, approvals, longTermMemory } = makeService();
+    approvals.getById.mockResolvedValue({
+      id: 502,
+      userId: 1,
+      agentTaskId: 100,
+      status: 'pending',
+      skillName: SocialAgentToolName.UpdateLongTermMemory,
+      actionType: 'update_profile',
+      payload: {},
+      expiresAt: new Date(Date.now() + 10 * 60 * 1000),
+    });
+    const task = makeTask();
+
+    await expect(
+      (
+        service as unknown as {
+          updateLongTermMemory(
+            task: AgentTask,
+            input: Record<string, unknown>,
+          ): Promise<unknown>;
+        }
+      ).updateLongTermMemory(task, {
+        memoryKey: 'availability',
+        value: ['周末下午'],
+        proposalId: 'proposal_pending',
+        approvalId: 502,
+        confirmed: true,
+      }),
+    ).rejects.toThrow('LONG_TERM_MEMORY_APPROVAL_NOT_APPROVED');
+    expect(longTermMemory.updateConfirmedMemory).not.toHaveBeenCalled();
+  });
+
   it('optimizes recommendations using only owner-scoped candidate rows', async () => {
     const { service, taskRepo, candidateRepo, longTermMemory } = makeService();
     const queryBuilder = {

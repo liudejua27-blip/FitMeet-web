@@ -105,21 +105,29 @@ export class SocialAgentToolExecutionPolicyService {
   ): Record<string, unknown> {
     const limit = SOCIAL_AGENT_HIGH_RISK_TOOL_DAILY_LIMITS[toolName] ?? null;
     const registeredTool = this.toolRegistry.getToolByExecutorName(toolName);
+    const isExplicitSafetyReport =
+      toolName === SocialAgentToolName.ReportSafetyIssue;
     const sceneRisk = this.sceneRisk.evaluate({
       sceneType: this.string(
         input.sceneType ?? input.activityType ?? input.type,
       ),
-      actionType: getSocialAgentToolSceneActionType(toolName),
-      text: `${task.goal ?? ''} ${task.title ?? ''} ${this.safeUnknownText(input)}`,
+      actionType: isExplicitSafetyReport
+        ? 'chat'
+        : getSocialAgentToolSceneActionType(toolName),
+      text: isExplicitSafetyReport
+        ? this.safeUnknownText(input)
+        : `${task.goal ?? ''} ${task.title ?? ''} ${this.safeUnknownText(input)}`,
       permissionMode: task.permissionMode,
-      involvesMoney: this.bool(
-        input.involvesMoney ?? input.hasMoney ?? input.money,
-      ),
-      preciseLocation: this.bool(
-        input.preciseLocation ??
-          input.sharePreciseLocation ??
-          input.exactLocation,
-      ),
+      involvesMoney: isExplicitSafetyReport
+        ? false
+        : this.bool(input.involvesMoney ?? input.hasMoney ?? input.money),
+      preciseLocation: isExplicitSafetyReport
+        ? false
+        : this.bool(
+            input.preciseLocation ??
+              input.sharePreciseLocation ??
+              input.exactLocation,
+          ),
     });
     const mandatoryApproval = requiresMandatorySocialAgentApproval(
       toolName,

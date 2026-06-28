@@ -1266,7 +1266,8 @@ const TOOL_DEFINITIONS: FitMeetAgentToolDefinition[] = [
     description: '代表用户提交站内安全风险上报。',
     category: FitMeetAgentToolCategory.Safety,
     riskLevel: AgentActionRiskLevel.Medium,
-    requiresApproval: true,
+    requiresApproval: false,
+    requiresConfirmation: true,
     inputSchema: objectSchema(
       {
         targetType: { type: 'string' },

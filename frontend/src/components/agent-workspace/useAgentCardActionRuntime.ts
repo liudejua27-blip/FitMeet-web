@@ -216,7 +216,8 @@ export function useAgentCardActionRuntime({
         action === 'candidate.connect' ||
         action === 'opener.confirm_send' ||
         action === 'publish_to_discover' ||
-        action === 'activity.confirm_create'
+        action === 'activity.confirm_create' ||
+        action === 'public_intent_application.accept'
           ? 'approval'
           : 'social';
       setRecovery(null);
@@ -384,7 +385,11 @@ function isExecutableToolUISchemaAction(
     value === 'meet_loop.reschedule' ||
     value === 'slot_completion.use_default_safety' ||
     value === 'slot_completion.custom_safety' ||
-    value === 'slot_completion.cancel'
+    value === 'slot_completion.cancel' ||
+    value === 'public_intent_application.accept' ||
+    value === 'public_intent_application.reject' ||
+    value === 'public_intent_application.view_profile' ||
+    value === 'public_intent_application.open_conversation'
   );
 }
 
@@ -484,7 +489,8 @@ function shouldAppendActionResultMessage(
     (action === 'candidate.connect' && confirmsExistingApproval) ||
     (action === 'opener.confirm_send' && confirmsExistingApproval) ||
     (action === 'publish_to_discover' && confirmsExistingApproval) ||
-    (action === 'activity.confirm_create' && confirmsExistingApproval)
+    (action === 'activity.confirm_create' && confirmsExistingApproval) ||
+    action === 'public_intent_application.accept'
   );
 }
 
@@ -512,7 +518,10 @@ function shouldRenderCardActionResultInline(
     action === 'opener.confirm_send' ||
     action === 'opener.regenerate' ||
     action === 'publish_to_discover' ||
-    action === 'activity.confirm_create'
+    action === 'activity.confirm_create' ||
+    action === 'public_intent_application.reject' ||
+    action === 'public_intent_application.view_profile' ||
+    action === 'public_intent_application.open_conversation'
   );
 }
 
@@ -561,6 +570,9 @@ function idempotencyKeyForCardAction(
     stringFromUnknown(payload?.candidateId) ||
     stringFromUnknown(payload?.candidateRecordId) ||
     stringFromUnknown(payload?.targetUserId) ||
+    stringFromUnknown(payload?.applicationId) ||
+    stringFromUnknown(payload?.publicIntentApplicationId) ||
+    stringFromUnknown(payload?.publicIntentId) ||
     stringFromUnknown(payload?.activityId) ||
     stringFromUnknown(payload?.cardId) ||
     stringFromUnknown(payload?.message).slice(0, 48) ||
@@ -596,6 +608,10 @@ const CARD_ACTION_ASSISTANT_MESSAGES: Partial<Record<FitMeetAgentCardExecutableA
   'review.submit': '已提交这次评价，后续会用于改进推荐和约练闭环。',
   'meet_loop.resume': '已从约练进展继续推进，新的状态会回到消息流。',
   'meet_loop.reschedule': '已准备改期流程，改动前会继续征得确认。',
+  'public_intent_application.accept': '已接受报名，正在准备会话和约练进展。',
+  'public_intent_application.reject': '已暂不接受这次报名。',
+  'public_intent_application.view_profile': '已打开申请人的公开资料。',
+  'public_intent_application.open_conversation': '已进入消息页继续沟通。',
 };
 
 function assistantMessageForCardAction(
@@ -632,3 +648,10 @@ function numberFromUnknown(value: unknown): number | null {
   }
   return null;
 }
+
+export const agentCardActionRuntimeTestUtils = {
+  schemaActionFromToolInput,
+  shouldAppendActionResultMessage,
+  shouldRenderCardActionResultInline,
+  idempotencyKeyForCardAction,
+};

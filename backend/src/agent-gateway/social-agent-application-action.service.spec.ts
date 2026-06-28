@@ -57,7 +57,27 @@ function makeHarness() {
 }
 
 describe('SocialAgentApplicationActionService', () => {
-  it('accepts an owner application, processes outbox, and returns a messages handoff', async () => {
+  const originalInlineOutbox =
+    process.env.FITMEET_AGENT_INLINE_OUTBOX_PROVISIONING;
+  const originalInlineOutboxTimeout =
+    process.env.FITMEET_AGENT_INLINE_OUTBOX_PROVISIONING_TIMEOUT_MS;
+
+  afterEach(() => {
+    if (originalInlineOutbox === undefined) {
+      delete process.env.FITMEET_AGENT_INLINE_OUTBOX_PROVISIONING;
+    } else {
+      process.env.FITMEET_AGENT_INLINE_OUTBOX_PROVISIONING =
+        originalInlineOutbox;
+    }
+    if (originalInlineOutboxTimeout === undefined) {
+      delete process.env.FITMEET_AGENT_INLINE_OUTBOX_PROVISIONING_TIMEOUT_MS;
+    } else {
+      process.env.FITMEET_AGENT_INLINE_OUTBOX_PROVISIONING_TIMEOUT_MS =
+        originalInlineOutboxTimeout;
+    }
+  });
+
+  it('accepts an owner application without forcing outbox work into the request path by default', async () => {
     const { applications, contactPolicy, outboxWorker, sideEffects, service } =
       makeHarness();
 
@@ -90,7 +110,7 @@ describe('SocialAgentApplicationActionService', () => {
         execute: expect.any(Function),
       }),
     );
-    expect(outboxWorker.processPending).toHaveBeenCalledWith(5);
+    expect(outboxWorker.processPending).not.toHaveBeenCalled();
     expect(contactPolicy.getRelationshipState).toHaveBeenCalledWith(7, 11);
     expect(result.publicLoop).toEqual(
       expect.objectContaining({
@@ -115,6 +135,24 @@ describe('SocialAgentApplicationActionService', () => {
         messagesHref: '/messages?conversationId=conv_123',
       }),
     );
+  });
+
+  it('can provision one outbox item inline behind an explicit feature flag', async () => {
+    process.env.FITMEET_AGENT_INLINE_OUTBOX_PROVISIONING = '1';
+    const { outboxWorker, service } = makeHarness();
+
+    await service.performApplicationAction({
+      ownerUserId: 7,
+      taskId: 101,
+      action: 'public_intent_application.accept',
+      body: {
+        action: 'public_intent_application.accept',
+        idempotencyKey: 'accept:42:inline',
+        payload: { applicationId: 42 },
+      },
+    });
+
+    expect(outboxWorker.processPending).toHaveBeenCalledWith(1);
   });
 
   it('rejects an owner application without creating a conversation handoff', async () => {

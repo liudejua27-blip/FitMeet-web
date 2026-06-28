@@ -18,6 +18,7 @@ import {
   socialForbidden,
   socialNotFound,
 } from './social-loop.errors';
+import { isPublicIntentAcceptingApplications } from './public-intent-status-policy';
 
 type CreateApplicationBody = {
   message?: string;
@@ -448,7 +449,7 @@ export class PublicIntentApplicationsService {
   }
 
   private assertIntentActive(intent: PublicSocialIntent) {
-    if (intent.status !== SocialRequestStatus.Active) {
+    if (!isPublicIntentAcceptingApplications(intent.status)) {
       throw socialConflict(SocialLoopErrorCode.PublicIntentNotActive);
     }
     if (intent.closesAt && intent.closesAt.getTime() <= Date.now()) {

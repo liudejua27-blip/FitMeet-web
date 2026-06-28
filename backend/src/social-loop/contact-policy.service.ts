@@ -2,7 +2,11 @@ import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { EntityManager, Repository } from 'typeorm';
 import { UserBlock } from '../safety/user-block.entity';
-import { OnboardingService } from '../users/onboarding.service';
+import type {
+  SocialPolicyAction,
+  SocialPolicyDecision,
+} from '../social-policy/social-policy.types';
+import { SocialPolicyService } from '../social-policy/social-policy.service';
 import { ContactPermission } from './contact-permission.entity';
 import {
   ContactPermissionGrant,
@@ -45,7 +49,7 @@ export type RelationshipState = {
 @Injectable()
 export class ContactPolicyService {
   constructor(
-    private readonly onboarding: OnboardingService,
+    private readonly socialPolicy: SocialPolicyService,
     @InjectRepository(ContactPermission)
     private readonly permissionRepo: Repository<ContactPermission>,
     @InjectRepository(ContactPermissionGrant)
@@ -55,11 +59,14 @@ export class ContactPolicyService {
   ) {}
 
   async assertSociallyEligible(userId: number) {
-    const status = await this.onboarding.getStatus(userId);
-    if (status.status !== 'ready') {
+    const decision = await this.socialPolicy.evaluateSocialEligibility(
+      userId,
+      'message.send',
+    );
+    if (!decision.allowed) {
       throw socialForbidden(SocialLoopErrorCode.SocialProfileNotReady, {
-        message: 'Complete onboarding before using social actions.',
-        details: { onboardingStatus: status.status },
+        message: decision.publicMessage,
+        details: decision.metadata,
       });
     }
   }
@@ -77,9 +84,7 @@ export class ContactPolicyService {
     targetUserId: number,
     context: ContactContext,
   ) {
-    await this.assertSociallyEligible(userId);
-    await this.assertSociallyEligible(targetUserId);
-    await this.assertNotBlocked(userId, targetUserId);
+    await this.assertPairAllowed(userId, targetUserId, 'message.send');
     const permission = await this.getPermission(userId, targetUserId);
     if (!permission) {
       throw socialForbidden(SocialLoopErrorCode.ContactNotAllowed);
@@ -104,9 +109,7 @@ export class ContactPolicyService {
     targetUserId: number,
     context?: ContactContext,
   ): Promise<{ permission: ContactPermission; shouldOpenAfterReply: boolean }> {
-    await this.assertSociallyEligible(senderId);
-    await this.assertSociallyEligible(targetUserId);
-    await this.assertNotBlocked(senderId, targetUserId);
+    await this.assertPairAllowed(senderId, targetUserId, 'message.send');
     const permission = await this.getPermission(senderId, targetUserId);
     if (!permission || permission.status === 'none') {
       throw socialForbidden(SocialLoopErrorCode.ContactNotAllowed);
@@ -392,6 +395,40 @@ export class ContactPolicyService {
   ) {
     await this.assertNotBlocked(userId, targetUserId);
     return this.getOrCreatePermission(userId, targetUserId, manager);
+  }
+
+  private async assertPairAllowed(
+    userId: number,
+    targetUserId: number,
+    action: SocialPolicyAction,
+  ) {
+    const decision = await this.socialPolicy.evaluateUserPair(
+      userId,
+      targetUserId,
+      action,
+    );
+    if (!decision.allowed) {
+      this.throwSocialPolicyDecision(decision);
+    }
+  }
+
+  private throwSocialPolicyDecision(decision: SocialPolicyDecision): never {
+    if (decision.code === 'social_profile_not_ready') {
+      throw socialForbidden(SocialLoopErrorCode.SocialProfileNotReady, {
+        message: decision.publicMessage,
+        details: decision.metadata,
+      });
+    }
+    if (decision.code === 'user_blocked') {
+      throw socialForbidden(SocialLoopErrorCode.UserBlocked, {
+        message: decision.publicMessage,
+        details: decision.metadata,
+      });
+    }
+    throw socialForbidden(SocialLoopErrorCode.ContactNotAllowed, {
+      message: decision.publicMessage,
+      details: decision.metadata,
+    });
   }
 
   private async getOrCreatePermission(
