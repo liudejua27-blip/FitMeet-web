@@ -73,11 +73,10 @@ const HIGH_RISK_ACTIONS = new Set<SocialCodexActionType>([
 
 const MEDIUM_APPROVAL_ACTIONS = new Set<SocialCodexActionType>([
   'publish_social_request',
-]);
-
-const MEDIUM_RISK_ACTIONS = new Set<SocialCodexActionType>([
   'life_graph_writeback',
 ]);
+
+const MEDIUM_RISK_ACTIONS = new Set<SocialCodexActionType>([]);
 
 const ACTION_BY_TOOL: Partial<
   Record<SocialAgentToolName, SocialCodexActionType>
@@ -104,6 +103,7 @@ const ACTION_BY_TOOL: Partial<
   [SocialAgentToolName.UpdateAiProfileFromAnswers]: 'update_sensitive_profile',
   [SocialAgentToolName.UpdateProfileFromAgentContext]:
     'update_sensitive_profile',
+  [SocialAgentToolName.UpdateLongTermMemory]: 'life_graph_writeback',
 };
 
 @Injectable()
