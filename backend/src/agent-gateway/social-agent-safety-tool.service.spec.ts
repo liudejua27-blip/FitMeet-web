@@ -12,8 +12,18 @@ describe('SocialAgentSafetyToolService', () => {
         targetId: 42,
       }),
     };
-    const service = new SocialAgentSafetyToolService(safety as never);
-    return { safety, service };
+    const socialPolicy = {
+      inspectPublicText: jest.fn().mockReturnValue({
+        allowed: true,
+        publicMessage: '',
+        fields: [],
+      }),
+    };
+    const service = new SocialAgentSafetyToolService(
+      safety as never,
+      socialPolicy as never,
+    );
+    return { safety, socialPolicy, service };
   }
 
   it('blocks risky side effects and returns a safety boundary card with redacted payload', async () => {
@@ -65,6 +75,34 @@ describe('SocialAgentSafetyToolService', () => {
       nested: { email: '[REDACTED_EMAIL]' },
     });
     expect(result.text).toContain('[REDACTED_EMAIL]');
+  });
+
+  it('uses SocialPolicy public text decisions as a blocking source for side effects', async () => {
+    const { service, socialPolicy } = makeService();
+    socialPolicy.inspectPublicText.mockReturnValue({
+      allowed: false,
+      publicMessage: '公开内容不能包含微信号。',
+      fields: ['wechat'],
+    });
+
+    const result = await service.checkSafetyPolicy({
+      ownerUserId: 1,
+      taskId: 100,
+      action: 'publish_social_request',
+      text: '一起散步，加我微信 fitmeet_test',
+      payload: { title: '散步搭子' },
+    });
+
+    expect(socialPolicy.inspectPublicText).toHaveBeenCalledWith({
+      action: 'publish_social_request',
+      text: '一起散步，加我微信 fitmeet_test',
+      payload: { title: '散步搭子' },
+    });
+    expect(result).toMatchObject({
+      allowed: false,
+      level: 'blocked',
+      reasons: expect.arrayContaining(['公开内容不能包含微信号。']),
+    });
   });
 
   it('creates safety reports through SafetyService', async () => {

@@ -137,7 +137,6 @@ export const SOCIAL_AGENT_MODEL_TOOL_NAMES = [
   'get_conversation_messages',
   'get_candidate_detail',
   'check_safety_policy',
-  'report_safety_issue',
   'redact_sensitive_output',
 ] as const;
 
@@ -1266,7 +1265,8 @@ const TOOL_DEFINITIONS: FitMeetAgentToolDefinition[] = [
     description: '代表用户提交站内安全风险上报。',
     category: FitMeetAgentToolCategory.Safety,
     riskLevel: AgentActionRiskLevel.Medium,
-    requiresApproval: true,
+    requiresApproval: false,
+    requiresConfirmation: true,
     inputSchema: objectSchema(
       {
         targetType: { type: 'string' },
@@ -1289,7 +1289,7 @@ const TOOL_DEFINITIONS: FitMeetAgentToolDefinition[] = [
     permissionMode: [...CONFIRM_AND_AUTO],
     executorToolName: 'report_safety_issue',
     runtimeStatus: 'implemented',
-    plannerEnabled: true,
+    plannerEnabled: false,
     dataScope: 'reported_target_only',
     sideEffects: ['safety_report_create'],
   },

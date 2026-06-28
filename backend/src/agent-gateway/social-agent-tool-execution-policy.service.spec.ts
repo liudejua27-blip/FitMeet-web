@@ -429,6 +429,33 @@ describe('SocialAgentToolExecutionPolicyService', () => {
     });
   });
 
+  it('keeps explicit safety reporting confirmation-based instead of approval-gated', () => {
+    const service = makePolicyService();
+
+    const policy = service.buildPolicyMetadata(
+      makeTask(),
+      SocialAgentToolName.ReportSafetyIssue,
+      {
+        targetType: 'user',
+        targetId: 42,
+        reason: '骚扰',
+      },
+    );
+
+    expect(
+      requiresMandatorySocialAgentApproval(
+        SocialAgentToolName.ReportSafetyIssue,
+      ),
+    ).toBe(false);
+    expect(policy).toEqual(
+      expect.objectContaining({
+        requiresApproval: false,
+        mandatoryApproval: false,
+        highRisk: false,
+      }),
+    );
+  });
+
   it('marks contact exchange as blocked by the Social Codex sandbox until confirmed', () => {
     const service = makePolicyService();
 

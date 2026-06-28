@@ -2834,6 +2834,19 @@ export class SocialAgentToolExecutorService {
     task: AgentTask,
     input: Record<string, unknown>,
   ): Promise<unknown> {
+    const approvalId = this.toolInput.number(
+      input.approvalId ?? input.approvalRequestId,
+    );
+    if (!approvalId) {
+      throw new ForbiddenException('LONG_TERM_MEMORY_APPROVAL_REQUIRED');
+    }
+    const approval = await this.approvals.getById(approvalId, task.ownerUserId);
+    if (approval.status !== ApprovalStatus.Approved) {
+      throw new ForbiddenException('LONG_TERM_MEMORY_APPROVAL_NOT_APPROVED');
+    }
+    if (approval.agentTaskId && approval.agentTaskId !== task.id) {
+      throw new ForbiddenException('LONG_TERM_MEMORY_APPROVAL_TASK_MISMATCH');
+    }
     return this.longTermMemory.updateConfirmedMemory({
       userId: task.ownerUserId,
       taskId: task.id,
@@ -2844,11 +2857,7 @@ export class SocialAgentToolExecutorService {
         this.toolInput.string(input.proposalId) ??
         this.toolInput.number(input.proposalId) ??
         null,
-      confirmed:
-        this.toolInput.bool(input.confirmed) === true ||
-        Boolean(
-          this.toolInput.number(input.approvalId ?? input.approvalRequestId),
-        ),
+      confirmed: true,
       source: 'agent_tool_confirmed_memory_proposal',
       tags: this.toolInput.stringArray(input.tags),
     });

@@ -1,4 +1,4 @@
-import { AgentTask } from './entities/agent-task.entity';
+import { AgentTask, AgentTaskEventType } from './entities/agent-task.entity';
 import { cleanDisplayText } from '../common/display-text.util';
 import { SOCIAL_AGENT_DEFAULT_CONTEXT_TURNS } from './social-agent-context-window';
 import type { SocialAgentKnownTaskSlotConstraints } from './social-agent-task-slot-constraints.presenter';
@@ -338,6 +338,7 @@ export type SocialAgentTaskMemory = {
     loopRequiresApproval: boolean;
     loopIdempotencyScope: string;
     loopValidationWarnings: string[];
+    lastLoopStateTransitionEvent: SocialAgentLoopStateTransitionEventPayload | null;
     objective: string;
     nextStep: string;
     shouldSearchNow: boolean;
@@ -356,6 +357,19 @@ export type SocialAgentTaskMemory = {
   taskSlotSummary?: Record<string, string>;
   knownTaskSlotConstraints?: SocialAgentKnownTaskSlotConstraints | null;
   updatedAt: string;
+};
+
+export type SocialAgentLoopStateTransitionEventPayload = {
+  eventType: AgentTaskEventType.LoopStateTransition;
+  from: SocialAgentLoopState;
+  to: SocialAgentLoopState;
+  reason: SocialAgentStateTransitionReason;
+  sideEffects: string[];
+  requiresApproval: boolean;
+  idempotencyScope: string;
+  sourceService: string;
+  sourceAction: string;
+  validationWarnings: string[];
 };
 
 export const SOCIAL_AGENT_TASK_MEMORY_MESSAGE_LIMIT =
@@ -409,6 +423,7 @@ function defaultTaskMemory(): SocialAgentTaskMemory {
       loopRequiresApproval: false,
       loopIdempotencyScope: '',
       loopValidationWarnings: [],
+      lastLoopStateTransitionEvent: null,
       objective: '',
       nextStep: '',
       shouldSearchNow: false,
@@ -569,6 +584,13 @@ export function readSocialAgentTaskMemory(
                   .filter((item): item is string => typeof item === 'string')
                   .slice(0, 12)
               : base.currentTask.loopValidationWarnings,
+            lastLoopStateTransitionEvent: isRecord(
+              stored.currentTask.lastLoopStateTransitionEvent,
+            )
+              ? normalizeLoopStateTransitionEvent(
+                  stored.currentTask.lastLoopStateTransitionEvent,
+                )
+              : base.currentTask.lastLoopStateTransitionEvent,
             profileSaved: stored.currentTask.profileSaved === true,
             awaitingSearchConfirmation:
               stored.currentTask.awaitingSearchConfirmation === true,
@@ -848,11 +870,25 @@ export function transitionSocialAgentState(
     reason,
     patch,
   });
-  if (!loopTransition.allowed) {
+  if (!loopTransition.allowed && isSocialAgentLoopStateStrict()) {
     throw new Error(
       `illegal_social_agent_loop_transition:${loopTransition.violations.join('; ')}`,
     );
   }
+  const nextLoopState = loopTransition.allowed ? loopTransition.to : 'RECOVERY';
+  const transitionEvent = buildSocialAgentLoopStateTransitionEventPayload({
+    from: previousLoopState,
+    to: nextLoopState,
+    reason,
+    sideEffects: loopTransition.allowed ? loopTransition.sideEffects : [],
+    requiresApproval: loopTransition.allowed
+      ? loopTransition.requiresApproval
+      : false,
+    idempotencyScope: loopTransition.allowed
+      ? loopTransition.idempotencyScope
+      : '',
+    validationWarnings: loopTransition.violations,
+  });
   memory.currentTask = {
     ...memory.currentTask,
     ...patch,
@@ -860,17 +896,85 @@ export function transitionSocialAgentState(
     previousState,
     stateReason: reason,
     stateUpdatedAt: new Date().toISOString(),
-    loopState: loopTransition.to,
+    loopState: nextLoopState,
     previousLoopState,
     loopStateReason: reason,
     loopStateUpdatedAt: new Date().toISOString(),
-    loopSideEffects: loopTransition.sideEffects,
-    loopRequiresApproval: loopTransition.requiresApproval,
-    loopIdempotencyScope: loopTransition.idempotencyScope,
+    loopSideEffects: loopTransition.allowed ? loopTransition.sideEffects : [],
+    loopRequiresApproval: loopTransition.allowed
+      ? loopTransition.requiresApproval
+      : false,
+    loopIdempotencyScope: loopTransition.allowed
+      ? loopTransition.idempotencyScope
+      : '',
     loopValidationWarnings: loopTransition.violations,
+    lastLoopStateTransitionEvent: transitionEvent,
   };
   writeSocialAgentTaskMemory(task, memory);
   return memory;
+}
+
+export function buildSocialAgentLoopStateTransitionEventPayload(input: {
+  from: SocialAgentLoopState;
+  to: SocialAgentLoopState;
+  reason: SocialAgentStateTransitionReason;
+  sideEffects: string[];
+  requiresApproval: boolean;
+  idempotencyScope: string;
+  validationWarnings: string[];
+  sourceService?: string;
+  sourceAction?: string;
+}): SocialAgentLoopStateTransitionEventPayload {
+  return {
+    eventType: AgentTaskEventType.LoopStateTransition,
+    from: input.from,
+    to: input.to,
+    reason: input.reason,
+    sideEffects: input.sideEffects.slice(0, 12),
+    requiresApproval: input.requiresApproval,
+    idempotencyScope: input.idempotencyScope,
+    sourceService: input.sourceService ?? 'transitionSocialAgentState',
+    sourceAction: input.sourceAction ?? input.reason,
+    validationWarnings: input.validationWarnings.slice(0, 12),
+  };
+}
+
+function normalizeLoopStateTransitionEvent(
+  value: Record<string, unknown>,
+): SocialAgentLoopStateTransitionEventPayload | null {
+  const from = isSocialAgentLoopState(value.from) ? value.from : null;
+  const to = isSocialAgentLoopState(value.to) ? value.to : null;
+  const reason = isSocialAgentStateReason(value.reason) ? value.reason : null;
+  if (!from || !to || !reason) return null;
+  return buildSocialAgentLoopStateTransitionEventPayload({
+    from,
+    to,
+    reason,
+    sideEffects: Array.isArray(value.sideEffects)
+      ? value.sideEffects.filter(
+          (item): item is string => typeof item === 'string',
+        )
+      : [],
+    requiresApproval: value.requiresApproval === true,
+    idempotencyScope:
+      typeof value.idempotencyScope === 'string' ? value.idempotencyScope : '',
+    sourceService:
+      typeof value.sourceService === 'string' ? value.sourceService : undefined,
+    sourceAction:
+      typeof value.sourceAction === 'string' ? value.sourceAction : undefined,
+    validationWarnings: Array.isArray(value.validationWarnings)
+      ? value.validationWarnings.filter(
+          (item): item is string => typeof item === 'string',
+        )
+      : [],
+  });
+}
+
+function isSocialAgentLoopStateStrict(): boolean {
+  return (
+    process.env.FITMEET_AGENT_LOOP_STATE_STRICT === '1' ||
+    process.env.NODE_ENV === 'test'
+  );
 }
 
 export function stateForTransition(

@@ -308,7 +308,12 @@ export class SocialAgentApplicationActionService {
       { reason: input.reason ?? undefined },
       input.idempotencyKey,
     );
-    await this.outboxWorker?.processPending(5);
+    if (this.shouldRunInlineOutboxProvisioning()) {
+      await withTimeout(
+        this.outboxWorker?.processPending(1),
+        this.inlineOutboxTimeoutMs(),
+      ).catch(() => null);
+    }
     const relationship = await this.contactPolicy.getRelationshipState(
       input.ownerUserId,
       application.applicantUserId,
@@ -520,4 +525,38 @@ export class SocialAgentApplicationActionService {
     const num = Number(value);
     return Number.isFinite(num) && num > 0 ? num : null;
   }
+
+  private shouldRunInlineOutboxProvisioning(): boolean {
+    return ['1', 'true', 'yes'].includes(
+      String(process.env.FITMEET_AGENT_INLINE_OUTBOX_PROVISIONING ?? '')
+        .trim()
+        .toLowerCase(),
+    );
+  }
+
+  private inlineOutboxTimeoutMs(): number {
+    const parsed = Number(
+      process.env.FITMEET_AGENT_INLINE_OUTBOX_PROVISIONING_TIMEOUT_MS,
+    );
+    if (Number.isFinite(parsed) && parsed >= 100 && parsed <= 5_000) {
+      return Math.floor(parsed);
+    }
+    return 1_200;
+  }
+}
+
+function withTimeout<T>(
+  promise: Promise<T> | undefined,
+  timeoutMs: number,
+): Promise<T | undefined> {
+  if (!promise) return Promise.resolve(undefined);
+  let timer: NodeJS.Timeout | null = null;
+  return Promise.race([
+    promise,
+    new Promise<undefined>((resolve) => {
+      timer = setTimeout(() => resolve(undefined), timeoutMs);
+    }),
+  ]).finally(() => {
+    if (timer) clearTimeout(timer);
+  });
 }

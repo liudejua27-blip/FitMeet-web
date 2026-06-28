@@ -35,6 +35,7 @@ import {
   removeLocalCoveringStatusSteps,
   streamEventReplacesLocalCoveringStatus,
 } from '../components/agent-workspace/useAgentSubmitRuntime';
+import { agentCardActionRuntimeTestUtils } from '../components/agent-workspace/useAgentCardActionRuntime';
 import {
   findAssistantRunResultMergeIndex,
   dedupeUserFacingResponseCards,
@@ -125,6 +126,50 @@ describe('agent workspace runtime fallback boundaries', () => {
 
     expect(findTaskId(response)).toBe(117);
     expect(threadIdFromResponse(response)).toBe('agent-task:117');
+  });
+
+  it('treats public intent application actions as executable card actions', () => {
+    const {
+      schemaActionFromToolInput,
+      shouldAppendActionResultMessage,
+      shouldRenderCardActionResultInline,
+      idempotencyKeyForCardAction,
+    } = agentCardActionRuntimeTestUtils;
+
+    expect(schemaActionFromToolInput('public_intent_application.accept')).toBe(
+      'public_intent_application.accept',
+    );
+    expect(schemaActionFromToolInput('public_intent_application.reject')).toBe(
+      'public_intent_application.reject',
+    );
+    expect(
+      schemaActionFromToolInput('public_intent_application.view_profile'),
+    ).toBe('public_intent_application.view_profile');
+    expect(
+      schemaActionFromToolInput('public_intent_application.open_conversation'),
+    ).toBe('public_intent_application.open_conversation');
+
+    expect(
+      shouldAppendActionResultMessage('public_intent_application.accept', {
+        applicationId: 42,
+      }),
+    ).toBe(true);
+    expect(
+      shouldRenderCardActionResultInline(
+        'public_intent_application.reject',
+        { applicationId: 42 },
+      ),
+    ).toBe(true);
+    expect(
+      idempotencyKeyForCardAction(
+        101,
+        'public_intent_application.accept',
+        {
+          applicationId: 42,
+          publicIntentId: 'intent-abc',
+        },
+      ),
+    ).toBe('agent-card-action:101:public_intent_application.accept:42');
   });
 
   it('classifies explicit social matching prompts as social even with rich candidate preferences', () => {

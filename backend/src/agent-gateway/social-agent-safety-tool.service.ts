@@ -1,10 +1,11 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable, Optional } from '@nestjs/common';
 
 import {
   redactSensitiveText,
   redactSensitiveValue,
 } from '../common/privacy-redaction.util';
 import { SafetyService } from '../safety/safety.service';
+import { SocialPolicyService } from '../social-policy/social-policy.service';
 import type { FitMeetAlphaCard } from './fitmeet-alpha-agent.types';
 
 export type SocialAgentSafetyLevel = 'low' | 'medium' | 'high' | 'blocked';
@@ -48,7 +49,11 @@ const BLOCKED_ACTIONS = new Set([
 
 @Injectable()
 export class SocialAgentSafetyToolService {
-  constructor(private readonly safety: SafetyService) {}
+  constructor(
+    private readonly safety: SafetyService,
+    @Optional()
+    private readonly socialPolicy?: SocialPolicyService,
+  ) {}
 
   async checkSafetyPolicy(
     input: SocialAgentSafetyPolicyInput,
@@ -60,6 +65,11 @@ export class SocialAgentSafetyToolService {
       .join('\n');
     const reasons: string[] = [];
     const requiredConfirmations: string[] = [];
+    const publicTextDecision = this.socialPolicy?.inspectPublicText({
+      action: input.action,
+      text: input.text,
+      payload,
+    });
 
     const hasContact = CONTACT_RE.test(combinedText);
     const hasPreciseLocation = PRECISE_LOCATION_RE.test(combinedText);
@@ -73,15 +83,25 @@ export class SocialAgentSafetyToolService {
     if (hasHighRiskContent) {
       reasons.push('检测到疑似骚扰、诈骗、转账或其他高风险内容。');
     }
+    if (publicTextDecision && !publicTextDecision.allowed) {
+      reasons.push(
+        publicTextDecision.publicMessage || '公开内容包含隐私或安全风险字段。',
+      );
+    }
 
     const shouldBlock =
       BLOCKED_ACTIONS.has(input.action) &&
-      (hasContact || hasPreciseLocation || hasHighRiskContent);
+      (hasContact ||
+        hasPreciseLocation ||
+        hasHighRiskContent ||
+        publicTextDecision?.allowed === false);
     const level: SocialAgentSafetyLevel = shouldBlock
       ? 'blocked'
       : hasHighRiskContent
         ? 'high'
-        : hasContact || hasPreciseLocation
+        : hasContact ||
+            hasPreciseLocation ||
+            publicTextDecision?.allowed === false
           ? 'medium'
           : 'low';
 

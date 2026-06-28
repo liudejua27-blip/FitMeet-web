@@ -1,5 +1,6 @@
 import {
   AgentTask,
+  AgentTaskEventType,
   AgentTaskPermissionMode,
   AgentTaskStatus,
 } from './entities/agent-task.entity';
@@ -20,6 +21,18 @@ function makeTask(): AgentTask {
 }
 
 describe('Social Agent state machine', () => {
+  const originalNodeEnv = process.env.NODE_ENV;
+  const originalStrict = process.env.FITMEET_AGENT_LOOP_STATE_STRICT;
+
+  afterEach(() => {
+    process.env.NODE_ENV = originalNodeEnv;
+    if (originalStrict === undefined) {
+      delete process.env.FITMEET_AGENT_LOOP_STATE_STRICT;
+    } else {
+      process.env.FITMEET_AGENT_LOOP_STATE_STRICT = originalStrict;
+    }
+  });
+
   it('keeps an explicit state across profile, search and confirmation transitions', () => {
     const task = makeTask();
 
@@ -36,6 +49,17 @@ describe('Social Agent state machine', () => {
     expect(memory.currentTask.state).toBe('profile_building');
     expect(memory.currentTask.loopState).toBe('PROFILE_REQUIRED');
     expect(memory.currentTask.previousState).toBe('casual_chatting');
+    expect(memory.currentTask.lastLoopStateTransitionEvent).toEqual(
+      expect.objectContaining({
+        eventType: AgentTaskEventType.LoopStateTransition,
+        from: 'IDLE',
+        to: 'PROFILE_REQUIRED',
+        reason: 'profile_detected',
+        sourceService: 'transitionSocialAgentState',
+        sourceAction: 'profile_detected',
+        validationWarnings: [],
+      }),
+    );
 
     transitionSocialAgentState(task, 'profile_saved', {
       profileSaved: true,
@@ -101,5 +125,41 @@ describe('Social Agent state machine', () => {
         lastCompletedStep: 'message_sent',
       }),
     ).toThrow(/illegal_social_agent_loop_transition/);
+  });
+
+  it('records illegal public-loop jumps as recovery outside strict mode', () => {
+    process.env.NODE_ENV = 'production';
+    delete process.env.FITMEET_AGENT_LOOP_STATE_STRICT;
+    const task = makeTask();
+
+    transitionSocialAgentState(task, 'activity_planning', {
+      waitingFor: 'opportunity_slot_completion',
+      lastCompletedStep: 'activity_slots_partial',
+    });
+
+    expect(() =>
+      transitionSocialAgentState(task, 'message_action', {
+        waitingFor: 'candidate_reply',
+        lastCompletedStep: 'message_sent',
+      }),
+    ).not.toThrow();
+    const memory = readSocialAgentTaskMemory(task);
+    expect(memory.currentTask.loopState).toBe('RECOVERY');
+    expect(memory.currentTask.loopValidationWarnings).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining('INTENT_DRAFT cannot jump'),
+      ]),
+    );
+    expect(memory.currentTask.lastLoopStateTransitionEvent).toEqual(
+      expect.objectContaining({
+        eventType: AgentTaskEventType.LoopStateTransition,
+        from: 'INTENT_DRAFT',
+        to: 'RECOVERY',
+        reason: 'message_action',
+        validationWarnings: expect.arrayContaining([
+          expect.stringContaining('INTENT_DRAFT cannot jump'),
+        ]),
+      }),
+    );
   });
 });

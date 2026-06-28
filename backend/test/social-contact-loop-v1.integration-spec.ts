@@ -324,6 +324,55 @@ describe('Social Contact Loop V1 integration', () => {
     });
   }, 120_000);
 
+  it('allows applications while public intents are searching or matched', async () => {
+    const owner = await registerReadyUser('applicable-owner');
+    const applicant = await registerReadyUser('applicable-applicant');
+
+    for (const status of [
+      SocialRequestStatus.Searching,
+      SocialRequestStatus.Matched,
+    ]) {
+      const publicIntentId = publicIntentIdFor(`applicable-${status}`);
+      await createPublicIntent(owner.id, publicIntentId, { status });
+
+      const response = await request(app.getHttpServer())
+        .post(`/api/public/social-intents/${publicIntentId}/applications`)
+        .set('Authorization', `Bearer ${applicant.token}`)
+        .set('Idempotency-Key', `${runId}:apply-${status}`)
+        .send({ message: `我可以参加 ${status} 状态的约练` })
+        .expect(201);
+
+      expect(response.body).toEqual(
+        expect.objectContaining({
+          publicIntentId,
+          applicantUserId: applicant.id,
+          status: 'pending',
+        }),
+      );
+    }
+  }, 120_000);
+
+  it('rejects applications while public intents are not accepting applications', async () => {
+    const owner = await registerReadyUser('not-applicable-owner');
+    const applicant = await registerReadyUser('not-applicable-applicant');
+
+    for (const status of [
+      SocialRequestStatus.Closed,
+      SocialRequestStatus.Inactive,
+      SocialRequestStatus.Cancelled,
+    ]) {
+      const publicIntentId = publicIntentIdFor(`not-applicable-${status}`);
+      await createPublicIntent(owner.id, publicIntentId, { status });
+
+      await request(app.getHttpServer())
+        .post(`/api/public/social-intents/${publicIntentId}/applications`)
+        .set('Authorization', `Bearer ${applicant.token}`)
+        .set('Idempotency-Key', `${runId}:reject-${status}`)
+        .send({ message: `我尝试报名 ${status} 状态的约练` })
+        .expect(409);
+    }
+  }, 120_000);
+
   it('keeps accepted application durable when Mongo is temporarily unavailable and provisions once after recovery', async () => {
     const owner = await registerReadyUser('mongo-owner');
     const applicant = await registerReadyUser('mongo-applicant');
@@ -575,7 +624,7 @@ describe('Social Contact Loop V1 integration', () => {
   async function createPublicIntent(
     ownerUserId: number,
     intentId: string,
-    options: { capacityMax?: number } = {},
+    options: { capacityMax?: number; status?: SocialRequestStatus } = {},
   ) {
     await publicIntentRepo.save(
       publicIntentRepo.create({
@@ -607,7 +656,7 @@ describe('Social Contact Loop V1 integration', () => {
         applicationPolicy: 'approval_required',
         linkedMeetId: null,
         closesAt: new Date(Date.now() + 60 * 60 * 1000),
-        status: SocialRequestStatus.Active,
+        status: options.status ?? SocialRequestStatus.Active,
         metadata: { integrationTestId: runId },
       }),
     );

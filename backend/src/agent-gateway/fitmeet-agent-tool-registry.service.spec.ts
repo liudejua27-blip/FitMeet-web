@@ -7,6 +7,8 @@ import {
   FitMeetAgentToolRegistryService,
   SOCIAL_AGENT_MODEL_TOOL_NAMES,
 } from './fitmeet-agent-tool-registry.service';
+import { requiresMandatorySocialAgentApproval } from './social-agent-tool-policy';
+import { SocialAgentToolName } from './social-agent-tool.types';
 
 describe('FitMeetAgentToolRegistryService', () => {
   const service = new FitMeetAgentToolRegistryService();
@@ -187,6 +189,25 @@ describe('FitMeetAgentToolRegistryService', () => {
     });
   });
 
+  it('treats safety reporting as an explicit user confirmation action, not approval-gated automation', () => {
+    expect(service.getTool('report_safety_issue')).toMatchObject({
+      name: 'report_safety_issue',
+      category: FitMeetAgentToolCategory.Safety,
+      riskLevel: AgentActionRiskLevel.Medium,
+      requiresApproval: false,
+      requiresConfirmation: true,
+      executorToolName: 'report_safety_issue',
+      runtimeStatus: 'implemented',
+      plannerEnabled: false,
+      sideEffects: ['safety_report_create'],
+    });
+    expect(
+      requiresMandatorySocialAgentApproval(
+        SocialAgentToolName.ReportSafetyIssue,
+      ),
+    ).toBe(false);
+  });
+
   it('returns only implemented planner-visible tools for planning', () => {
     const plannerTools = service.listPlannerTools(
       AgentTaskPermissionMode.Assist,
@@ -210,6 +231,9 @@ describe('FitMeetAgentToolRegistryService', () => {
     );
     expect(plannerTools.map((tool) => tool.name)).not.toContain(
       'get_candidate_pool_debug',
+    );
+    expect(plannerTools.map((tool) => tool.name)).not.toContain(
+      'report_safety_issue',
     );
     expect(
       plannerTools.every(

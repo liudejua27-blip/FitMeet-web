@@ -1,6 +1,7 @@
 import { Test } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { UserBlock } from '../safety/user-block.entity';
+import { SocialRequestStatus } from '../agent-gateway/entities/social-request.entity';
 import { OnboardingService } from '../users/onboarding.service';
 import { SocialPolicyService } from './social-policy.service';
 
@@ -85,6 +86,43 @@ describe('SocialPolicyService', () => {
     expect(decision.requiredConfirmations).toContain(
       'public_intent_owner_approval',
     );
+  });
+
+  it.each([
+    SocialRequestStatus.Active,
+    SocialRequestStatus.Searching,
+    SocialRequestStatus.Matched,
+  ])('allows application while public intent is %s', async (status) => {
+    const decision = await service.evaluatePublicIntentApplication({
+      applicantUserId: 10,
+      ownerUserId: 20,
+      publicIntentId: `intent-${status}`,
+      status,
+      acceptedCount: 0,
+      capacityMax: 2,
+      applicationPolicy: 'approval_required',
+    });
+
+    expect(decision.allowed).toBe(true);
+  });
+
+  it.each([
+    SocialRequestStatus.Closed,
+    SocialRequestStatus.Inactive,
+    SocialRequestStatus.Cancelled,
+  ])('denies application while public intent is %s', async (status) => {
+    const decision = await service.evaluatePublicIntentApplication({
+      applicantUserId: 10,
+      ownerUserId: 20,
+      publicIntentId: `intent-${status}`,
+      status,
+      acceptedCount: 0,
+      capacityMax: 2,
+      applicationPolicy: 'approval_required',
+    });
+
+    expect(decision.allowed).toBe(false);
+    expect(decision.code).toBe('public_intent_not_active');
   });
 
   it('denies owner resolution when actor is not the owner', async () => {

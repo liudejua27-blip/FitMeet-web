@@ -78,6 +78,7 @@ export enum AgentTaskEventType {
   SocialAgentReplanCompleted = 'social_agent.replan.completed',
   SocialAgentReplanFailed = 'social_agent.replan.failed',
   SocialAgentLlmTimeout = 'social_agent.llm.timeout',
+  LoopStateTransition = 'social_agent.loop_state.transition',
   Note = 'note',
 }
 
