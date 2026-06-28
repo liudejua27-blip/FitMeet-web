@@ -82,6 +82,7 @@ type FinalizedMatchingJob = {
   message: string | null;
   matchingFallback: SocialAgentMatchingFallback | null;
   candidateSnapshotId: number | null;
+  noCandidatesFinal: boolean;
 };
 
 class CancelMatchingJobError extends Error {
@@ -523,6 +524,8 @@ export class SocialAgentMatchingJobProcessorService {
         candidateSnapshotId: snapshot?.id ?? null,
       }));
       const candidateCount = candidates.length;
+      const noCandidatesFinal =
+        candidateCount === 0 && lockedJob.parentJobId !== null;
       const noCandidateCards =
         candidateCount === 0 && taskId && input.matchingFallback
           ? [
@@ -533,6 +536,7 @@ export class SocialAgentMatchingJobProcessorService {
                 matchingJobId: lockedJob.id,
                 fallback: input.matchingFallback,
                 message: input.searchResult.message,
+                recoveryFinal: noCandidatesFinal,
               }),
             ]
           : [];
@@ -550,6 +554,7 @@ export class SocialAgentMatchingJobProcessorService {
         socialRequestId: validation.socialRequest.id,
         debugReasons: sanitizeForDisplay(input.searchResult.debugReasons),
         matchingFallback: sanitizeForDisplay(input.matchingFallback),
+        noCandidatesFinal,
         candidateSnapshotId: snapshot?.id ?? null,
         cards: noCandidateCards,
         candidateSearchIndex: {
@@ -613,6 +618,7 @@ export class SocialAgentMatchingJobProcessorService {
           candidateCount === 0
             ? sanitizeForDisplay(input.matchingFallback)
             : undefined,
+        noCandidatesFinal,
         candidateSnapshotId: snapshot?.id ?? undefined,
         candidateSearchIndex: {
           used: input.indexHints.used,
@@ -665,6 +671,7 @@ export class SocialAgentMatchingJobProcessorService {
         message: input.searchResult.message ?? null,
         matchingFallback: input.matchingFallback,
         candidateSnapshotId: snapshot?.id ?? null,
+        noCandidatesFinal,
       };
     });
   }
@@ -708,6 +715,8 @@ export class SocialAgentMatchingJobProcessorService {
     );
     const cards =
       candidateCards.length > 0 ? candidateCards : input.noCandidateCards;
+    const noCandidatesFinal =
+      candidateCount === 0 && input.job.parentJobId !== null;
     task.status =
       candidateCount > 0
         ? AgentTaskStatus.AwaitingConfirmation
@@ -715,7 +724,9 @@ export class SocialAgentMatchingJobProcessorService {
     task.statusReason =
       candidateCount > 0
         ? 'matching_job_candidates_ready'
-        : 'matching_job_no_candidates';
+        : noCandidatesFinal
+          ? 'matching_job_no_candidates_final'
+          : 'matching_job_no_candidates';
     task.result = {
       ...result,
       chatRun: {
@@ -736,6 +747,7 @@ export class SocialAgentMatchingJobProcessorService {
         debugReasons: sanitizeForDisplay(input.searchResult.debugReasons),
         matchingJobId: input.job.id,
         matchingJobStatus: input.job.status,
+        noCandidatesFinal,
         matchingFallback: sanitizeForDisplay(input.matchingFallback),
         candidateSnapshotId: input.candidateSnapshotId,
         candidateSearchIndex: {
@@ -774,6 +786,7 @@ export class SocialAgentMatchingJobProcessorService {
         })),
         matchingJobId: input.job.id,
         matchingJobStatus: input.job.status,
+        noCandidatesFinal,
         matchingFallback: sanitizeForDisplay(input.matchingFallback),
         candidateSnapshotId: input.candidateSnapshotId,
         candidateSearchIndex: {
@@ -805,6 +818,7 @@ export class SocialAgentMatchingJobProcessorService {
           message: input.searchResult.message,
           matchingJobId: input.job.id,
           publicIntentId: input.job.publicIntentId,
+          noCandidatesFinal,
           matchingFallback: sanitizeForDisplay(input.matchingFallback),
           candidateSnapshotId: input.candidateSnapshotId,
           candidateSearchIndex: {
@@ -1019,7 +1033,11 @@ export class SocialAgentMatchingJobProcessorService {
       matchingFallback: sanitizeForDisplay(result.matchingFallback),
       candidateSnapshotId: result.candidateSnapshotId,
       publicLoopStage:
-        result.candidateCount > 0 ? 'candidates_recommended' : 'no_candidates',
+        result.candidateCount > 0
+          ? 'candidates_recommended'
+          : result.noCandidatesFinal
+            ? 'no_candidates_final'
+            : 'no_candidates',
     });
   }
 

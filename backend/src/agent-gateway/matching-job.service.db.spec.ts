@@ -5,6 +5,7 @@ import { AgentPublicLoopP0DatabaseStabilization1781000000000 } from '../database
 import { MatchingJobs1781400000000 } from '../database/migrations/1781400000000-MatchingJobs';
 import { AgentDismissPersistenceStabilization1781600000000 } from '../database/migrations/1781600000000-AgentDismissPersistenceStabilization';
 import { MatchingWorkerReconcilerStabilization1781800000000 } from '../database/migrations/1781800000000-MatchingWorkerReconcilerStabilization';
+import { MatchingJobRecoveryLineage1782900000000 } from '../database/migrations/1782900000000-MatchingJobRecoveryLineage';
 import { MatchingJob, MatchingJobStatus } from './entities/matching-job.entity';
 import { MatchingJobService } from './matching-job.service';
 
@@ -94,6 +95,7 @@ async function serviceWithFreshDatabase() {
       MatchingJobs1781400000000,
       AgentDismissPersistenceStabilization1781600000000,
       MatchingWorkerReconcilerStabilization1781800000000,
+      MatchingJobRecoveryLineage1782900000000,
     ],
     migrationsTableName: `migrations_${schema}`,
     migrationsTransactionMode: 'each',

@@ -4,6 +4,7 @@ import { EntityManager, Repository } from 'typeorm';
 
 import { UserSocialRequest } from '../social-requests/social-request.entity';
 import { AgentTask } from './entities/agent-task.entity';
+import { MatchingJob, MatchingJobStatus } from './entities/matching-job.entity';
 import { PublicSocialIntent } from './entities/public-social-intent.entity';
 import { MatchingJobService } from './matching-job.service';
 import type { SocialAgentRelaxationStrategyId } from './social-agent-match-relaxation.types';
@@ -15,6 +16,7 @@ export type ApplyMatchingRelaxationResult = {
   publicIntentId: string;
   socialRequestId: number;
   matchingJobId: number;
+  parentMatchingJobId: number | null;
   sourceVersion: string;
   reused: boolean;
 };
@@ -79,6 +81,14 @@ export class SocialAgentMatchRelaxationActionService {
       this.applyToIntent(intent, strategyId, changedConstraints, sourceVersion);
       await manager.getRepository(UserSocialRequest).save(request);
       await manager.getRepository(PublicSocialIntent).save(intent);
+      const parentJob = await manager.getRepository(MatchingJob).findOne({
+        where: {
+          publicIntentId,
+          linkedSocialRequestId: socialRequestId,
+          status: MatchingJobStatus.NoCandidates,
+        },
+        order: { completedAt: 'DESC', updatedAt: 'DESC', id: 'DESC' },
+      });
 
       const { job, reused } = await this.matchingJobs.enqueue({
         publicIntentId,
@@ -86,12 +96,17 @@ export class SocialAgentMatchRelaxationActionService {
         idempotencyKey: `matching-job:${publicIntentId}:${sourceVersion}`,
         ownerUserId: input.ownerUserId,
         linkedSocialRequestId: socialRequestId,
+        parentJobId: parentJob?.id ?? null,
+        recoveryStrategyId: strategyId,
         metadata: {
           taskId: input.taskId,
           socialRequestId,
           publicIntentId,
           source: 'matching_relaxation',
           strategyId,
+          parentMatchingJobId: parentJob?.id ?? null,
+          recoveryTransition:
+            'NO_CANDIDATES->RELAXATION_SELECTED->MATCHING_QUEUED',
         },
       });
       return {
@@ -99,6 +114,7 @@ export class SocialAgentMatchRelaxationActionService {
         publicIntentId,
         socialRequestId,
         matchingJobId: job.id,
+        parentMatchingJobId: parentJob?.id ?? null,
         sourceVersion,
         reused,
       };

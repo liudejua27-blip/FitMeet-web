@@ -50,6 +50,14 @@ describe('SocialAgentMatchRelaxationActionService', () => {
             }),
           };
         }
+        if (entity.name === 'MatchingJob') {
+          return {
+            findOne: jest.fn(async () => ({
+              id: 44,
+              status: 'no_candidates',
+            })),
+          };
+        }
         return {};
       }),
     };
@@ -77,6 +85,7 @@ describe('SocialAgentMatchRelaxationActionService', () => {
     expect(result).toMatchObject({
       strategyId: 'expand_distance',
       matchingJobId: 55,
+      parentMatchingJobId: 44,
       sourceVersion: 'source-v1:relax:expand_distance',
     });
     expect(savedRequests[0]).toMatchObject({
@@ -97,8 +106,15 @@ describe('SocialAgentMatchRelaxationActionService', () => {
       expect.objectContaining({
         publicIntentId: 'public_301',
         sourceVersion: 'source-v1:relax:expand_distance',
+        parentJobId: 44,
+        recoveryStrategyId: 'expand_distance',
         idempotencyKey:
           'matching-job:public_301:source-v1:relax:expand_distance',
+        metadata: expect.objectContaining({
+          parentMatchingJobId: 44,
+          recoveryTransition:
+            'NO_CANDIDATES->RELAXATION_SELECTED->MATCHING_QUEUED',
+        }),
       }),
     );
   });

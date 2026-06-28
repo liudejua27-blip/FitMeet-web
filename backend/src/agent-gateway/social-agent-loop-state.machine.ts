@@ -6,6 +6,7 @@ export const SOCIAL_AGENT_LOOP_STATES = [
   'MATCHING_QUEUED',
   'CANDIDATES_READY',
   'NO_CANDIDATES',
+  'NO_CANDIDATES_FINAL',
   'OPENER_DRAFT_CREATED',
   'CONTACT_CONFIRMATION_REQUIRED',
   'MESSAGE_SENT',
@@ -121,6 +122,9 @@ function inferNextLoopState(
       : 'DISCOVER_VISIBLE';
   }
   if (step === 'matching_job_queued') return 'MATCHING_QUEUED';
+  if (step === 'matching_no_candidates_final') {
+    return 'NO_CANDIDATES_FINAL';
+  }
   if (step === 'no_candidates' || step === 'matching_no_candidates') {
     return 'NO_CANDIDATES';
   }
@@ -167,6 +171,7 @@ function inferNextLoopState(
     return 'PUBLISH_CONFIRMATION_REQUIRED';
   }
   if (/matching_job|search_results/.test(waitingFor)) return 'MATCHING_QUEUED';
+  if (/no_candidates_final/.test(waitingFor)) return 'NO_CANDIDATES_FINAL';
   if (/search_refinement|more_candidates/.test(waitingFor)) {
     return 'NO_CANDIDATES';
   }
@@ -237,7 +242,9 @@ function validateLoopTransition(
 ): string[] {
   const violations: string[] = [];
   if (
-    (from === 'INTENT_DRAFT' || from === 'NO_CANDIDATES') &&
+    (from === 'INTENT_DRAFT' ||
+      from === 'NO_CANDIDATES' ||
+      from === 'NO_CANDIDATES_FINAL') &&
     [
       'OPENER_DRAFT_CREATED',
       'CONTACT_CONFIRMATION_REQUIRED',

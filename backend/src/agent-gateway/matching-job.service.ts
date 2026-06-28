@@ -10,6 +10,8 @@ type EnqueueMatchingJobInput = {
   idempotencyKey: string;
   ownerUserId?: number | null;
   linkedSocialRequestId?: number | null;
+  parentJobId?: number | null;
+  recoveryStrategyId?: string | null;
   metadata?: Record<string, unknown>;
 };
 
@@ -50,17 +52,20 @@ export class MatchingJobService {
         manager,
         `INSERT INTO "matching_jobs"
           ("publicIntentId", "ownerUserId", "linkedSocialRequestId",
-           "sourceVersion", "idempotencyKey", "status", "attemptCount",
+           "parentJobId", "recoveryStrategyId", "sourceVersion",
+           "idempotencyKey", "status", "attemptCount",
            "candidateCount", "errorMessage", "result", "metadata",
            "nextRunAt", "startedAt", "completedAt", "createdAt", "updatedAt")
-         VALUES ($1, $2, $3, $4, $5, $6, 0, 0, '', '{}'::jsonb,
-           $7::jsonb, $8, NULL, NULL, $8, $8)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 0, 0, '', '{}'::jsonb,
+           $9::jsonb, $10, NULL, NULL, $10, $10)
          ON CONFLICT ("idempotencyKey") DO NOTHING
          RETURNING *`,
         [
           publicIntentId,
           input.ownerUserId ?? null,
           input.linkedSocialRequestId ?? null,
+          input.parentJobId ?? null,
+          this.text(input.recoveryStrategyId).slice(0, 40) || null,
           sourceVersion,
           idempotencyKey,
           MatchingJobStatus.Queued,
