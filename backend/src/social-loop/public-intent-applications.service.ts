@@ -5,6 +5,8 @@ import { PublicSocialIntent } from '../agent-gateway/entities/public-social-inte
 import { SocialRequestStatus } from '../agent-gateway/entities/social-request.entity';
 import { MeetParticipant } from '../meets/meet-participant.entity';
 import { Meet } from '../meets/meet.entity';
+import { SocialPolicyService } from '../social-policy/social-policy.service';
+import type { SocialPolicyDecision } from '../social-policy/social-policy.types';
 import { User } from '../users/user.entity';
 import { ApiIdempotencyService } from './api-idempotency.service';
 import { ContactPolicyService } from './contact-policy.service';
@@ -30,6 +32,7 @@ export class PublicIntentApplicationsService {
   constructor(
     private readonly idempotency: ApiIdempotencyService,
     private readonly contactPolicy: ContactPolicyService,
+    private readonly socialPolicy: SocialPolicyService,
     @InjectRepository(PublicIntentApplication)
     private readonly applicationRepo: Repository<PublicIntentApplication>,
     @InjectRepository(PublicSocialIntent)
@@ -145,14 +148,23 @@ export class PublicIntentApplicationsService {
     message: string,
     manager: EntityManager,
   ) {
-    await this.contactPolicy.assertSociallyEligible(applicantUserId);
     const intent = await this.lockIntent(publicIntentId, manager);
     this.assertIntentCanReceiveApplications(intent, applicantUserId);
     if (!intent.userId) {
       throw socialConflict(SocialLoopErrorCode.PublicIntentNotActive);
     }
-    await this.contactPolicy.assertSociallyEligible(intent.userId);
-    await this.contactPolicy.assertNotBlocked(applicantUserId, intent.userId);
+    this.assertPolicyAllowed(
+      await this.socialPolicy.evaluatePublicIntentApplication({
+        applicantUserId,
+        ownerUserId: intent.userId,
+        publicIntentId,
+        status: intent.status,
+        closesAt: intent.closesAt,
+        acceptedCount: intent.acceptedCount,
+        capacityMax: intent.capacityMax,
+        applicationPolicy: intent.applicationPolicy,
+      }),
+    );
     await this.assertUserExists(applicantUserId, manager);
     const duplicate = await manager
       .getRepository(PublicIntentApplication)
@@ -204,13 +216,14 @@ export class PublicIntentApplicationsService {
     }
     this.assertIntentActive(intent);
     this.assertCapacityAvailable(intent);
-    await this.contactPolicy.assertSociallyEligible(ownerUserId);
-    await this.contactPolicy.assertSociallyEligible(
-      application.applicantUserId,
-    );
-    await this.contactPolicy.assertNotBlocked(
-      ownerUserId,
-      application.applicantUserId,
+    this.assertPolicyAllowed(
+      await this.socialPolicy.evaluateOwnerApplicationResolution({
+        actorUserId: ownerUserId,
+        ownerUserId,
+        applicantUserId: application.applicantUserId,
+        applicationStatus: application.status,
+        resolution: 'accepted',
+      }),
     );
 
     const meet = await this.createOrReuseLinkedMeet(intent, manager);
@@ -271,6 +284,17 @@ export class PublicIntentApplicationsService {
     if (application.status !== 'pending') {
       throw socialConflict(
         SocialLoopErrorCode.PublicIntentApplicationAlreadyResolved,
+      );
+    }
+    if (status === 'rejected') {
+      this.assertPolicyAllowed(
+        await this.socialPolicy.evaluateOwnerApplicationResolution({
+          actorUserId: userId,
+          ownerUserId: application.ownerUserId,
+          applicantUserId: application.applicantUserId,
+          applicationStatus: application.status,
+          resolution: 'rejected',
+        }),
       );
     }
     application.status = status;
@@ -443,6 +467,53 @@ export class PublicIntentApplicationsService {
       .getRepository(User)
       .findOne({ where: { id: userId } });
     if (!user) throw socialForbidden(SocialLoopErrorCode.SocialProfileNotReady);
+  }
+
+  private assertPolicyAllowed(decision: SocialPolicyDecision) {
+    if (decision.allowed) return;
+    const details = {
+      policyCode: decision.code,
+      reasons: decision.reasons,
+      requiredConfirmations: decision.requiredConfirmations,
+      ...(decision.metadata ? { policyMetadata: decision.metadata } : {}),
+    };
+    if (decision.code === 'social_profile_not_ready') {
+      throw socialForbidden(SocialLoopErrorCode.SocialProfileNotReady, {
+        message: decision.publicMessage,
+        details,
+      });
+    }
+    if (decision.code === 'user_blocked') {
+      throw socialForbidden(SocialLoopErrorCode.UserBlocked, {
+        message: decision.publicMessage,
+        details,
+      });
+    }
+    if (
+      decision.code === 'public_intent_not_active' ||
+      decision.code === 'public_intent_expired'
+    ) {
+      throw socialConflict(SocialLoopErrorCode.PublicIntentNotActive, {
+        message: decision.publicMessage,
+        details,
+      });
+    }
+    if (decision.code === 'public_intent_full') {
+      throw socialConflict(SocialLoopErrorCode.PublicIntentFull, {
+        message: decision.publicMessage,
+        details,
+      });
+    }
+    if (decision.code === 'application_already_resolved') {
+      throw socialConflict(
+        SocialLoopErrorCode.PublicIntentApplicationAlreadyResolved,
+        { message: decision.publicMessage, details },
+      );
+    }
+    throw socialForbidden(SocialLoopErrorCode.ContactNotAllowed, {
+      message: decision.publicMessage,
+      details,
+    });
   }
 
   private async acceptedResponse(
