@@ -3,7 +3,7 @@ import { Cron } from '@nestjs/schedule';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, LessThan, Repository } from 'typeorm';
 
-import { shouldRunBackgroundJobs } from '../common/process-role.util';
+import { shouldRunWorkerRole } from '../common/process-role.util';
 import { NotificationsService } from '../notifications/notifications.service';
 import { PublicIntentApplication } from '../social-loop/public-intent-application.entity';
 import { UserSocialProfile } from '../users/user-social-profile.entity';
@@ -122,7 +122,7 @@ export class SocialAgentReminderService {
 
   @Cron('*/15 * * * *')
   async onCron(): Promise<void> {
-    if (!shouldRunBackgroundJobs()) return;
+    if (!shouldRunWorkerRole('worker-reminder')) return;
     if (!reminderRunnerEnabled()) return;
     try {
       await this.runDueReminders('cron');
@@ -185,7 +185,7 @@ export class SocialAgentReminderService {
   getRunnerStatus() {
     return {
       enabled: reminderRunnerEnabled(),
-      backgroundJobsEnabled: shouldRunBackgroundJobs(),
+      backgroundJobsEnabled: shouldRunWorkerRole('worker-reminder'),
       active: this.runnerActive,
       lastSummary: this.lastRunnerSummary,
     };

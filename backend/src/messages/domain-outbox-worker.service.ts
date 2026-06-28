@@ -4,7 +4,7 @@ import { InjectModel } from '@nestjs/mongoose';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Model, Types } from 'mongoose';
 import { DataSource, Repository } from 'typeorm';
-import { shouldRunBackgroundJobs } from '../common/process-role.util';
+import { shouldRunWorkerRole } from '../common/process-role.util';
 import { RealtimeEventService } from '../realtime/realtime-event.service';
 import { ContactPermission } from '../social-loop/contact-permission.entity';
 import { DomainOutboxEvent } from '../social-loop/domain-outbox-event.entity';
@@ -44,7 +44,7 @@ export class DomainOutboxWorkerService {
 
   @Cron('*/5 * * * * *')
   async tick() {
-    if (!shouldRunBackgroundJobs()) return;
+    if (!shouldRunWorkerRole('worker-outbox')) return;
     await this.processPending(10);
   }
 

@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 
+import { shouldRunWorkerRole } from '../common/process-role.util';
 import { SocialAgentMatchingJobProcessorService } from './social-agent-matching-job-processor.service';
 
 @Injectable()
@@ -19,6 +20,7 @@ export class SocialAgentMatchingJobWorkerCronService {
   @Cron('*/15 * * * * *')
   async processMatchingJobsCron(): Promise<void> {
     if (process.env.FITMEET_MATCHING_JOB_WORKER_ENABLED === '0') return;
+    if (!shouldRunWorkerRole('worker-matching')) return;
     try {
       const summary = await this.processDueMatchingJobs();
       if (summary.claimed > 0) {
