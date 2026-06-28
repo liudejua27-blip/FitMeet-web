@@ -259,6 +259,7 @@ export class SocialAgentActionSideEffectService {
       SocialAgentToolName.InviteActivity,
       SocialAgentToolName.JoinActivity,
       SocialAgentToolName.SaveCandidate,
+      SocialAgentToolName.UpdateLongTermMemory,
     ].includes(toolName);
   }
 
@@ -287,6 +288,7 @@ export class SocialAgentActionSideEffectService {
         return 'cancel_payment_intent_or_refund_via_manual_review';
       case SocialAgentToolName.UpdateAiProfileFromAnswers:
       case SocialAgentToolName.UpdateProfileFromAgentContext:
+      case SocialAgentToolName.UpdateLongTermMemory:
         return 'revert_profile_or_life_graph_field_from_audit';
       default:
         return null;
