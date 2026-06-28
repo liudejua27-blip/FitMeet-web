@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 
+import { FeatureFlagService } from '../common/feature-flag.service';
 import { shouldRunWorkerRole } from '../common/process-role.util';
 import { SocialAgentMatchingJobProcessorService } from './social-agent-matching-job-processor.service';
 
@@ -15,11 +16,12 @@ export class SocialAgentMatchingJobWorkerCronService {
 
   constructor(
     private readonly processor: SocialAgentMatchingJobProcessorService,
+    private readonly featureFlags: FeatureFlagService = new FeatureFlagService(),
   ) {}
 
   @Cron('*/15 * * * * *')
   async processMatchingJobsCron(): Promise<void> {
-    if (process.env.FITMEET_MATCHING_JOB_WORKER_ENABLED === '0') return;
+    if (!this.featureFlags.isEnabled('matching_worker')) return;
     if (!shouldRunWorkerRole('worker-matching')) return;
     try {
       const summary = await this.processDueMatchingJobs();

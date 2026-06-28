@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable, Optional } from '@nestjs/common';
 
 import { ActivitiesService } from '../activities/activities.service';
 import { CreateActivityDto } from '../activities/dto/activity.dto';
@@ -8,6 +8,7 @@ import {
   ActivityType,
 } from '../activities/entities/activity-template.entity';
 import { sanitizeCity } from '../common/city.util';
+import { FeatureFlagService } from '../common/feature-flag.service';
 import { MessagesService } from '../messages/messages.service';
 import { AgentTask } from './entities/agent-task.entity';
 import {
@@ -40,6 +41,8 @@ export class SocialAgentActivityToolService {
     private readonly toolInput: SocialAgentToolInputParserService,
     private readonly taskMemory: SocialAgentTaskMemoryService,
     private readonly sideEffects: SocialSideEffectService,
+    @Optional()
+    private readonly featureFlags?: FeatureFlagService,
   ) {}
 
   async createActivity(
@@ -58,6 +61,10 @@ export class SocialAgentActivityToolService {
     }
 
     const dto = this.buildActivityDto(task, input, toolName, invitedUserId);
+    this.featureFlags?.assertEnabled('activity_create', {
+      userId: task.ownerUserId,
+      city: dto.city ?? null,
+    });
     const activityDedupeKey = buildSocialAgentActivityInviteDedupeKey(
       toolName,
       dto,
@@ -175,6 +182,9 @@ export class SocialAgentActivityToolService {
   ): Promise<unknown> {
     const activityId = this.toolInput.number(input.activityId ?? input.id);
     if (!activityId) throw new BadRequestException('activityId is required');
+    this.featureFlags?.assertEnabled('activity_create', {
+      userId: task.ownerUserId,
+    });
     const idempotencyKey =
       this.readIdempotencyKey(input) ||
       `join_activity:${task.id}:${activityId}`;

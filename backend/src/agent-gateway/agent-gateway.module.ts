@@ -241,6 +241,7 @@ import { UserSocialProfile } from '../users/user-social-profile.entity';
 import { SocialActivity } from '../activities/entities/activity.entity';
 import { RealtimeModule } from '../realtime/realtime.module';
 import { AdminRbacModule } from '../admin-rbac/admin-rbac.module';
+import { FeatureFlagService } from '../common/feature-flag.service';
 
 @Module({
   imports: [
@@ -334,6 +335,7 @@ import { AdminRbacModule } from '../admin-rbac/admin-rbac.module';
     PublicIntentPrivacyGuardService,
     SocialIntentRateLimitService,
     SocialAgentDomainClassifierService,
+    FeatureFlagService,
     AgentApprovalDispatcherService,
     AgentSettingsService,
     AgentActionLogService,
@@ -502,6 +504,7 @@ import { AdminRbacModule } from '../admin-rbac/admin-rbac.module';
     PublicIntentPrivacyGuardService,
     SocialIntentRateLimitService,
     SocialAgentDomainClassifierService,
+    FeatureFlagService,
     AgentApprovalDispatcherService,
     AgentSettingsService,
     AgentActionLogService,
