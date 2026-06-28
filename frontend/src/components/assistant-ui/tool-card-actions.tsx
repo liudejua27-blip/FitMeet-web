@@ -1704,25 +1704,49 @@ function localInlineApprovalForCardAction(
   card: SchemaDrivenAssistantCard,
   action: VisibleCardAction,
 ): InlineCardApproval | null {
-  if (action.schemaAction !== 'publish_to_discover') return null;
   const payload = payloadForCardAction(card, action);
-  return {
-    approvalId: null,
-    title: '确认发布到发现',
-    summary: '确认后这张约练卡才会出现在发现页；你可以先修改或暂不发布。',
-    riskLevel: 'medium',
-    actionKey: cardActionKey(action),
-    confirmLabel: '确认发布',
-    confirmBusyLabel: '正在发布',
-    confirmAction: {
-      action: 'publish_to_discover',
-      schemaAction: 'publish_to_discover',
-      payload: {
-        ...payload,
-        confirmedPublish: true,
+  if (action.schemaAction === 'publish_to_discover') {
+    return {
+      approvalId: null,
+      title: '确认发布到发现',
+      summary: '确认后这张约练卡才会出现在发现页；你可以先修改或暂不发布。',
+      riskLevel: 'medium',
+      actionKey: cardActionKey(action),
+      confirmLabel: '确认发布',
+      confirmBusyLabel: '正在发布',
+      confirmAction: {
+        action: 'publish_to_discover',
+        schemaAction: 'publish_to_discover',
+        payload: {
+          ...payload,
+          confirmedPublish: true,
+        },
       },
-    },
-  };
+    };
+  }
+
+  if (action.schemaAction === 'public_intent_application.accept') {
+    return {
+      approvalId: null,
+      title: '确认接受报名',
+      summary:
+        '确认后会接受对方加入约练，并可能创建站内会话；不会公开手机号、微信或精确位置。',
+      riskLevel: 'medium',
+      actionKey: cardActionKey(action),
+      confirmLabel: '确认接受',
+      confirmBusyLabel: '正在接受',
+      confirmAction: {
+        action: 'public_intent_application.accept',
+        schemaAction: 'public_intent_application.accept',
+        payload: {
+          ...payload,
+          confirmedAccept: true,
+        },
+      },
+    };
+  }
+
+  return null;
 }
 
 function inlineOutcomeFromApprovalResponse(
@@ -2209,44 +2233,55 @@ function defaultCardActions(card: SchemaDrivenAssistantCard): VisibleCardAction[
     ];
   }
   if (card.schemaType === 'public_intent.application') {
-    return [
-      {
-        id: `${card.id}:accept`,
-        label: '接受并开聊',
-        requiresConfirmation: true,
-        schemaAction: 'public_intent_application.accept',
-        action: 'public_intent_application.accept',
-        payload: basePayload,
-        source: 'default' as const,
-      },
-      {
-        id: `${card.id}:reject`,
-        label: '暂不接受',
-        requiresConfirmation: false,
-        schemaAction: 'public_intent_application.reject',
-        action: 'public_intent_application.reject',
-        payload: basePayload,
-        source: 'default' as const,
-      },
-      {
-        id: `${card.id}:view-profile`,
-        label: '查看资料',
-        requiresConfirmation: false,
-        schemaAction: 'public_intent_application.view_profile',
-        action: 'public_intent_application.view_profile',
-        payload: basePayload,
-        source: 'default' as const,
-      },
-      {
-        id: `${card.id}:open-conversation`,
-        label: '去消息页',
-        requiresConfirmation: false,
-        schemaAction: 'public_intent_application.open_conversation',
-        action: 'public_intent_application.open_conversation',
-        payload: basePayload,
-        source: 'default' as const,
-      },
-    ];
+    const status = publicIntentApplicationStatus(card);
+    const isPending = status === 'pending' || status === 'waiting_confirmation';
+    const isAccepted = status === 'accepted' || status === 'completed';
+    const viewProfile: VisibleCardAction = {
+      id: `${card.id}:view-profile`,
+      label: '查看资料',
+      requiresConfirmation: false,
+      schemaAction: 'public_intent_application.view_profile',
+      action: 'public_intent_application.view_profile',
+      payload: basePayload,
+      source: 'default' as const,
+    };
+    const openConversation: VisibleCardAction = {
+      id: `${card.id}:open-conversation`,
+      label: '去消息页',
+      requiresConfirmation: false,
+      schemaAction: 'public_intent_application.open_conversation',
+      action: 'public_intent_application.open_conversation',
+      payload: basePayload,
+      source: 'default' as const,
+    };
+
+    if (isPending) {
+      return [
+        {
+          id: `${card.id}:accept`,
+          label: '接受并开聊',
+          requiresConfirmation: true,
+          schemaAction: 'public_intent_application.accept',
+          action: 'public_intent_application.accept',
+          payload: basePayload,
+          source: 'default' as const,
+        },
+        {
+          id: `${card.id}:reject`,
+          label: '暂不接受',
+          requiresConfirmation: false,
+          schemaAction: 'public_intent_application.reject',
+          action: 'public_intent_application.reject',
+          payload: basePayload,
+          source: 'default' as const,
+        },
+        viewProfile,
+      ];
+    }
+
+    if (isAccepted) return [viewProfile, openConversation];
+
+    return [viewProfile];
   }
   if (card.schemaType === 'social_match.no_candidates') {
     return [
@@ -2408,6 +2443,16 @@ function defaultCardActions(card: SchemaDrivenAssistantCard): VisibleCardAction[
     ];
   }
   return [];
+}
+
+function publicIntentApplicationStatus(card: SchemaDrivenAssistantCard) {
+  const application = isRecord(card.data.application) ? card.data.application : {};
+  return (
+    publicString(card.data.status) ??
+    publicString(application.status) ??
+    publicString(card.status) ??
+    'pending'
+  ).toLowerCase();
 }
 
 function meetLoopCurrentStepKey(card: SchemaDrivenAssistantCard) {

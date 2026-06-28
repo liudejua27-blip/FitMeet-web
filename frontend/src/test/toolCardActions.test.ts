@@ -118,7 +118,7 @@ describe('tool-card-actions runtime identity', () => {
     });
   });
 
-  it('shows owner-side public intent application actions and local navigation', () => {
+  it('shows owner-side pending public intent application actions and local navigation', () => {
     const card: SchemaDrivenAssistantCard = {
       id: 'application-42',
       type: 'public_intent_application_card',
@@ -131,6 +131,7 @@ describe('tool-card-actions runtime identity', () => {
         applicationId: 42,
         publicIntentId: 'intent_abc',
         applicantUserId: 11,
+        status: 'pending',
         profileHref: '/user/11',
         messagesHref: '/messages?conversationId=conv_123',
       },
@@ -143,7 +144,6 @@ describe('tool-card-actions runtime identity', () => {
       'public_intent_application.accept',
       'public_intent_application.reject',
       'public_intent_application.view_profile',
-      'public_intent_application.open_conversation',
     ]);
     expect(
       actions.find((action) => action.schemaAction === 'public_intent_application.accept'),
@@ -170,6 +170,35 @@ describe('tool-card-actions runtime identity', () => {
         )!,
       ),
     ).toBe('/user/11');
+  });
+
+  it('does not synthesize accept or reject for accepted public intent applications', () => {
+    const card: SchemaDrivenAssistantCard = {
+      id: 'application-42',
+      type: 'public_intent_application_card',
+      schemaVersion: FITMEET_TOOL_UI_SCHEMA_VERSION,
+      schemaType: 'public_intent.application',
+      title: '已接受约练申请',
+      status: 'completed',
+      data: {
+        schemaName: 'PublicIntentApplicationCard',
+        applicationId: 42,
+        publicIntentId: 'intent_abc',
+        applicantUserId: 11,
+        status: 'accepted',
+        profileHref: '/user/11',
+        messagesHref: '/messages?conversationId=conv_123',
+        conversationId: 'conv_123',
+      },
+      actions: [],
+    };
+
+    const actions = visibleCardActions(card, []);
+
+    expect(actions.map((action) => action.schemaAction)).toEqual([
+      'public_intent_application.view_profile',
+      'public_intent_application.open_conversation',
+    ]);
     expect(
       cardActionNavigationHrefForTests(
         card,
@@ -178,6 +207,33 @@ describe('tool-card-actions runtime identity', () => {
         )!,
       ),
     ).toBe('/messages?conversationId=conv_123');
+  });
+
+  it('does not synthesize accept or reject for rejected public intent applications', () => {
+    const card: SchemaDrivenAssistantCard = {
+      id: 'application-42',
+      type: 'public_intent_application_card',
+      schemaVersion: FITMEET_TOOL_UI_SCHEMA_VERSION,
+      schemaType: 'public_intent.application',
+      title: '已处理约练申请',
+      status: 'completed',
+      data: {
+        schemaName: 'PublicIntentApplicationCard',
+        applicationId: 42,
+        publicIntentId: 'intent_abc',
+        applicantUserId: 11,
+        status: 'rejected',
+        profileHref: '/user/11',
+        messagesHref: '/messages?conversationId=conv_123',
+      },
+      actions: [],
+    };
+
+    const actions = visibleCardActions(card, []);
+
+    expect(actions.map((action) => action.schemaAction)).toEqual([
+      'public_intent_application.view_profile',
+    ]);
   });
 
   it('keeps opener generation copy in draft mode instead of approval mode', () => {

@@ -88,7 +88,7 @@ describe('SocialAgentApplicationActionService', () => {
       body: {
         action: 'public_intent_application.accept',
         idempotencyKey: 'accept:42',
-        payload: { applicationId: 42 },
+        payload: { applicationId: 42, confirmedAccept: true },
       },
     });
 
@@ -148,11 +148,31 @@ describe('SocialAgentApplicationActionService', () => {
       body: {
         action: 'public_intent_application.accept',
         idempotencyKey: 'accept:42:inline',
-        payload: { applicationId: 42 },
+        payload: { applicationId: 42, confirmedAccept: true },
       },
     });
 
     expect(outboxWorker.processPending).toHaveBeenCalledWith(1);
+  });
+
+  it('requires an explicit confirmation field before accepting an application', async () => {
+    const { applications, sideEffects, service } = makeHarness();
+
+    await expect(
+      service.performApplicationAction({
+        ownerUserId: 7,
+        taskId: 101,
+        action: 'public_intent_application.accept',
+        body: {
+          action: 'public_intent_application.accept',
+          idempotencyKey: 'accept:42:missing-confirmation',
+          payload: { applicationId: 42 },
+        },
+      }),
+    ).rejects.toThrow('public_intent_application_accept_confirmation_required');
+
+    expect(applications.acceptApplication).not.toHaveBeenCalled();
+    expect(sideEffects.runOnce).not.toHaveBeenCalled();
   });
 
   it('rejects an owner application without creating a conversation handoff', async () => {

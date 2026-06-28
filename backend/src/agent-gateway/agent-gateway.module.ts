@@ -93,6 +93,7 @@ import { SocialAgentProfileEnrichmentService } from './social-agent-profile-enri
 import { SocialAgentMeetLoopService } from './social-agent-meet-loop.service';
 import { SocialAgentCardActionRouterService } from './social-agent-card-action-router.service';
 import { SocialAgentLifeGraphCardActionService } from './social-agent-life-graph-card-action.service';
+import { SocialAgentLoopStateTransitionEventService } from './social-agent-loop-state-transition-event.service';
 import { SocialAgentCandidateCommandService } from './social-agent-candidate-command.service';
 import { SocialAgentCandidateActionService } from './social-agent-candidate-action.service';
 import { SocialAgentDraftPublicationService } from './social-agent-draft-publication.service';
@@ -387,6 +388,7 @@ import { FeatureFlagService } from '../common/feature-flag.service';
     SocialAgentMeetLoopService,
     SocialAgentCardActionRouterService,
     SocialAgentLifeGraphCardActionService,
+    SocialAgentLoopStateTransitionEventService,
     SocialAgentCandidateCommandService,
     SocialAgentCandidateActionService,
     SocialAgentDraftPublicationService,

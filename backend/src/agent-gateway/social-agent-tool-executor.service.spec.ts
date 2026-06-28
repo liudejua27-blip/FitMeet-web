@@ -3311,7 +3311,7 @@ describe('SocialAgentToolExecutorService', () => {
     expect(approvals.create).not.toHaveBeenCalled();
   });
 
-  it('publishes an inline-confirmed Discover card without creating another approval', async () => {
+  it('rejects inline-confirmed create_social_request public sync and requires publish_to_discover', async () => {
     const { service, taskRepo, connectionRepo, socialRequests, approvals } =
       makeService();
     const task = makeTask({
@@ -3320,14 +3320,6 @@ describe('SocialAgentToolExecutorService', () => {
     });
     taskRepo.findOne.mockResolvedValue(task);
     connectionRepo.findOne.mockResolvedValue({ id: 7, userId: 1 });
-    socialRequests.update.mockResolvedValue({
-      id: 301,
-      status: 'matching',
-    });
-    socialRequests.syncPublicIntentById.mockResolvedValue({
-      id: 'social_request_301',
-      status: 'active',
-    });
 
     const call = await service.executeToolAction(
       100,
@@ -3351,24 +3343,62 @@ describe('SocialAgentToolExecutorService', () => {
       1,
     );
 
+    expect(call.status).toBe('failed');
+    expect(call.error?.message).toBe(
+      'create_social_request_public_sync_disabled_use_publish_to_discover',
+    );
+    expect(approvals.create).not.toHaveBeenCalled();
+    expect(socialRequests.update).not.toHaveBeenCalled();
+    expect(socialRequests.create).not.toHaveBeenCalled();
+    expect(socialRequests.syncPublicIntentById).not.toHaveBeenCalled();
+  });
+
+  it('routes legacy publish_social_request through approval before public side effects', async () => {
+    const { service, taskRepo, connectionRepo, socialRequests, approvals } =
+      makeService();
+    const task = makeTask({
+      permissionMode: AgentTaskPermissionMode.Confirm,
+      agentConnectionId: 7,
+    });
+    taskRepo.findOne.mockResolvedValue(task);
+    connectionRepo.findOne.mockResolvedValue({ id: 7, userId: 1 });
+
+    const call = await service.executeToolAction(
+      100,
+      SocialAgentToolName.PublishSocialRequest,
+      {
+        mode: 'publish',
+        publish: true,
+        syncPublicIntent: true,
+        socialRequestId: 301,
+        type: SocialRequestType.RunningPartner,
+        title: '今天晚上青岛大学跑步搭子',
+        city: '青岛',
+        activityType: '跑步',
+        confirmedPublish: true,
+        approved: true,
+        confirmed: true,
+        metadata: {
+          publishSource: 'agent_card_action',
+        },
+      },
+      1,
+    );
+
     expect(call.status).toBe('succeeded');
     expect(call.output).toMatchObject({
-      socialRequestId: 301,
-      publicIntentId: 'social_request_301',
-      synced: true,
+      pendingApproval: true,
+      status: 'pending_approval',
     });
-    expect(approvals.create).not.toHaveBeenCalled();
-    expect(socialRequests.update).toHaveBeenCalledWith(
-      301,
-      1,
+    expect(approvals.create).toHaveBeenCalledWith(
       expect.objectContaining({
-        type: SocialRequestType.RunningPartner,
-        mode: 'publish',
-        syncPublicIntent: true,
+        actionType: 'create_social_request',
+        type: 'post_publish',
       }),
-      { id: 7, userId: 1 },
     );
-    expect(socialRequests.syncPublicIntentById).toHaveBeenCalledWith(301, 1);
+    expect(socialRequests.update).not.toHaveBeenCalled();
+    expect(socialRequests.create).not.toHaveBeenCalled();
+    expect(socialRequests.syncPublicIntentById).not.toHaveBeenCalled();
   });
 
   it('does not fail a completed social action when its audit log is unavailable', async () => {

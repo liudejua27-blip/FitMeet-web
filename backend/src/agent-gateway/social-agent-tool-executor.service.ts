@@ -2314,6 +2314,12 @@ export class SocialAgentToolExecutorService {
     );
     const agent = await this.loadAgentConnection(task.agentConnectionId);
 
+    if (parsed.shouldSyncPublicIntent) {
+      throw new BadRequestException(
+        'create_social_request_public_sync_disabled_use_publish_to_discover',
+      );
+    }
+
     if (parsed.shouldCreateDraft) {
       return this.socialRequests.aiDraft(task.ownerUserId, parsed.rawText, {
         agentTaskId: task.id,
@@ -2347,20 +2353,8 @@ export class SocialAgentToolExecutorService {
           agent,
         });
 
-    if (!parsed.shouldSyncPublicIntent) {
-      return buildSocialAgentSocialRequestResult({
-        request: this.toolInput.asRecord(request),
-        asRecord: (value) => this.toolInput.asRecord(value),
-      });
-    }
-
-    const publicIntent = await this.socialRequests.syncPublicIntentById(
-      request.id,
-      task.ownerUserId,
-    );
     return buildSocialAgentSocialRequestResult({
       request: this.toolInput.asRecord(request),
-      publicIntent: this.toolInput.asRecord(publicIntent),
       asRecord: (value) => this.toolInput.asRecord(value),
     });
   }
