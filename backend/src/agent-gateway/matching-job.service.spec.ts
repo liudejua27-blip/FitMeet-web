@@ -75,6 +75,35 @@ describe('MatchingJobService', () => {
     });
   });
 
+  it('enqueues a recovery child job with parent lineage', async () => {
+    const { manager, repo } = makeRepo();
+    manager.query.mockResolvedValueOnce([
+      {
+        id: 2,
+        publicIntentId: 'social_request_301',
+        sourceVersion: 'source-v1:relax:expand_time',
+        idempotencyKey: 'matching-job:social_request_301:source-v1:relax',
+        status: MatchingJobStatus.Queued,
+        parentJobId: 1,
+        recoveryStrategyId: 'expand_time',
+      },
+    ]);
+    const service = new MatchingJobService(repo as never);
+
+    await service.enqueue({
+      publicIntentId: 'social_request_301',
+      sourceVersion: 'source-v1:relax:expand_time',
+      idempotencyKey: 'matching-job:social_request_301:source-v1:relax',
+      parentJobId: 1,
+      recoveryStrategyId: 'expand_time',
+    });
+
+    expect(manager.query).toHaveBeenCalledWith(
+      expect.stringContaining('"parentJobId", "recoveryStrategyId"'),
+      expect.arrayContaining([1, 'expand_time']),
+    );
+  });
+
   it('rejects idempotency key reuse for another public intent version', async () => {
     const { manager, repo } = makeRepo();
     manager.query.mockResolvedValueOnce([]).mockResolvedValueOnce([

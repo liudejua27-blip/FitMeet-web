@@ -318,8 +318,13 @@ export class UserFacingResponseSanitizerService {
       (card) => card.schemaType === 'social_match.no_candidates',
     );
     if (publicIntentId && hasNoCandidatesCard) {
+      const isFinalNoCandidates = cards.some(
+        (card) =>
+          card.schemaType === 'social_match.no_candidates' &&
+          this.recordValue(card.data).recoveryFinal === true,
+      );
       return {
-        stage: 'no_candidates',
+        stage: isFinalNoCandidates ? 'no_candidates_final' : 'no_candidates',
         publicIntentId,
         discoverHref,
         publicIntentHref,
@@ -430,6 +435,8 @@ export class UserFacingResponseSanitizerService {
           return 'MATCHING_QUEUED';
         case 'no_candidates':
           return 'NO_CANDIDATES';
+        case 'no_candidates_final':
+          return 'NO_CANDIDATES_FINAL';
         case 'candidates_recommended':
           return 'CANDIDATES_READY';
         case 'contact_confirmation_required':

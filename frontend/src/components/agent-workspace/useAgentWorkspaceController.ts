@@ -681,8 +681,10 @@ function shouldPollMatchingSnapshot(
   if (response.publicLoop?.stage === 'dismissed') return false;
   if (response.publicLoop?.stage === 'candidates_recommended') return false;
   if (response.publicLoop?.stage === 'no_candidates') return false;
+  if (response.publicLoop?.stage === 'no_candidates_final') return false;
   if (response.workflow?.state === 'CANDIDATES_READY') return false;
   if (response.workflow?.state === 'NO_CANDIDATES') return false;
+  if (response.workflow?.state === 'NO_CANDIDATES_FINAL') return false;
   const normalizedTaskStatus = (taskStatus ?? '').trim().toLowerCase();
   if (normalizedTaskStatus === 'cancelled' || normalizedTaskStatus === 'failed') return false;
   const matchingJobStatus = response.cards

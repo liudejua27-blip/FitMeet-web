@@ -11,6 +11,7 @@ export function buildSocialAgentNoCandidatesCard(input: {
   matchingJobId: number;
   fallback: SocialAgentMatchingFallback;
   message?: string | null;
+  recoveryFinal?: boolean;
 }): FitMeetAlphaCard {
   const strategies = input.fallback.strategies;
   const recommended =
@@ -35,6 +36,7 @@ export function buildSocialAgentNoCandidatesCard(input: {
       socialRequestId: input.socialRequestId,
       publicIntentId: input.publicIntentId,
       matchingJobId: input.matchingJobId,
+      recoveryFinal: input.recoveryFinal === true,
       matchingFallback: input.fallback,
       criteria: criteriaFromFallback(input.fallback),
       recoveryOptions: strategies.map((strategy) =>

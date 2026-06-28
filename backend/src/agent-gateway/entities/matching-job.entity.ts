@@ -21,6 +21,7 @@ export enum MatchingJobStatus {
 @Index(['publicIntentId', 'sourceVersion'])
 @Index(['status', 'nextRunAt'])
 @Index(['idempotencyKey'], { unique: true })
+@Index(['parentJobId', 'status'])
 export class MatchingJob {
   @PrimaryGeneratedColumn()
   id: number;
@@ -33,6 +34,12 @@ export class MatchingJob {
 
   @Column({ type: 'int', nullable: true })
   linkedSocialRequestId: number | null;
+
+  @Column({ type: 'int', nullable: true })
+  parentJobId: number | null;
+
+  @Column({ type: 'varchar', length: 40, nullable: true })
+  recoveryStrategyId: string | null;
 
   @Column({ type: 'varchar', length: 128 })
   sourceVersion: string;

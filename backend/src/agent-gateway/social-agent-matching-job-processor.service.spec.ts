@@ -126,6 +126,50 @@ describe('SocialAgentMatchingJobProcessorService', () => {
     );
   });
 
+  it('marks a recovery child search with zero candidates as final no_candidates', async () => {
+    const recoveryJob = {
+      parentJobId: 44,
+      recoveryStrategyId: 'expand_distance',
+    };
+    const harness = makeHarness({
+      candidates: [],
+      jobOverrides: recoveryJob,
+    });
+
+    await expect(
+      harness.service.processClaimedJob(makeJob(recoveryJob)),
+    ).resolves.toBe(MatchingJobStatus.NoCandidates);
+
+    expect(harness.taskRepo.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: AgentTaskStatus.WaitingResult,
+        statusReason: 'matching_job_no_candidates_final',
+        result: expect.objectContaining({
+          chatRun: expect.objectContaining({
+            noCandidatesFinal: true,
+          }),
+          cards: expect.arrayContaining([
+            expect.objectContaining({
+              schemaType: 'social_match.no_candidates',
+              data: expect.objectContaining({
+                recoveryFinal: true,
+              }),
+            }),
+          ]),
+        }),
+      }),
+    );
+    expect(harness.realtime.emitAgentEvent).toHaveBeenCalledWith(
+      7,
+      'agent:candidates',
+      expect.objectContaining({
+        taskId: 101,
+        candidateCount: 0,
+        publicLoopStage: 'no_candidates_final',
+      }),
+    );
+  });
+
   it('does not mark the job completed when task/event writeback fails', async () => {
     const harness = makeHarness({
       candidates: [makeCandidate()],
@@ -258,6 +302,7 @@ function makeHarness(
         publicIntentId?: string | null;
       }>
     >;
+    jobOverrides?: Record<string, unknown>;
   } = {},
 ) {
   const publicIntent = options.publicIntent ?? makePublicIntent();
@@ -387,12 +432,12 @@ function makeHarness(
     query: jest.fn(async (sql: string, params?: unknown[]) => {
       if (/SELECT pg_advisory_xact_lock/.test(sql)) return [];
       if (/FROM "matching_jobs"/.test(sql) && /FOR UPDATE/.test(sql)) {
-        return [makeJob()];
+        return [makeJob(options.jobOverrides)];
       }
       if (/UPDATE "matching_jobs"/.test(sql)) {
         return [
           {
-            ...makeJob(),
+            ...makeJob(options.jobOverrides),
             status: params?.[0] as MatchingJobStatus,
             candidateCount: params?.[1] as number,
             result:
@@ -522,12 +567,14 @@ function makeSocialRequest() {
   };
 }
 
-function makeJob() {
+function makeJob(overrides: Record<string, unknown> = {}) {
   return {
     id: 9001,
     publicIntentId: 'social_request_301',
     ownerUserId: 7,
     linkedSocialRequestId: 301,
+    parentJobId: null,
+    recoveryStrategyId: null,
     sourceVersion: 'source-v1',
     idempotencyKey: 'matching-job:social_request_301:source-v1',
     status: MatchingJobStatus.Running,
@@ -544,6 +591,7 @@ function makeJob() {
     completedAt: null,
     createdAt: new Date(),
     updatedAt: new Date(),
+    ...overrides,
   };
 }
 
