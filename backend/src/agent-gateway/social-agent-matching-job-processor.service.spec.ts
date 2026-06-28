@@ -69,6 +69,24 @@ describe('SocialAgentMatchingJobProcessorService', () => {
         eventType: AgentTaskEventType.SocialAgentCandidatesReturned,
       }),
     );
+    expect(harness.eventRepo.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actor: AgentTaskEventActor.System,
+        eventType: AgentTaskEventType.LoopStateTransition,
+        summary: 'Loop state transition: IDLE -> CANDIDATES_READY',
+        payload: expect.objectContaining({
+          fromState: 'IDLE',
+          toState: 'CANDIDATES_READY',
+          workflowState: 'CANDIDATES_READY',
+          publicLoopStage: 'candidates_ready',
+          reason: 'candidates_returned',
+          matchingJobId: 9001,
+          publicIntentId: 'social_request_301',
+          socialRequestId: 301,
+          candidateCount: 1,
+        }),
+      }),
+    );
     expect(harness.realtime.emitAgentEvent).toHaveBeenCalledWith(
       7,
       'agent:candidates',
@@ -107,6 +125,25 @@ describe('SocialAgentMatchingJobProcessorService', () => {
               version: 'fitmeet.matching-fallback.v1',
             }),
           }),
+        }),
+      }),
+    );
+    expect(harness.eventRepo.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actor: AgentTaskEventActor.System,
+        eventType: AgentTaskEventType.LoopStateTransition,
+        summary: 'Loop state transition: IDLE -> NO_CANDIDATES',
+        payload: expect.objectContaining({
+          fromState: 'IDLE',
+          toState: 'NO_CANDIDATES',
+          workflowState: 'NO_CANDIDATES',
+          publicLoopStage: 'no_candidates',
+          reason: 'candidates_returned',
+          matchingJobId: 9001,
+          publicIntentId: 'social_request_301',
+          socialRequestId: 301,
+          candidateCount: 0,
+          noCandidatesFinal: false,
         }),
       }),
     );
@@ -166,6 +203,23 @@ describe('SocialAgentMatchingJobProcessorService', () => {
         taskId: 101,
         candidateCount: 0,
         publicLoopStage: 'no_candidates_final',
+      }),
+    );
+    expect(harness.eventRepo.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actor: AgentTaskEventActor.System,
+        eventType: AgentTaskEventType.LoopStateTransition,
+        summary: 'Loop state transition: IDLE -> NO_CANDIDATES_FINAL',
+        payload: expect.objectContaining({
+          fromState: 'IDLE',
+          toState: 'NO_CANDIDATES_FINAL',
+          workflowState: 'NO_CANDIDATES_FINAL',
+          publicLoopStage: 'no_candidates_final',
+          reason: 'candidates_returned',
+          matchingJobId: 9001,
+          candidateCount: 0,
+          noCandidatesFinal: true,
+        }),
       }),
     );
   });

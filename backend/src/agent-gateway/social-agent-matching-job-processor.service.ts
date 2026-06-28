@@ -45,6 +45,10 @@ import { buildSocialAgentNoCandidatesCard } from './social-agent-no-candidates-c
 import { SocialAgentMatchRelaxationService } from './social-agent-match-relaxation.service';
 import type { SocialAgentMatchingFallback } from './social-agent-match-relaxation.types';
 import { SocialCandidateAuditService } from './social-candidate-audit.service';
+import {
+  transitionSocialAgentState,
+  type SocialAgentTaskMemory,
+} from './social-agent-memory.util';
 
 const SOCIAL_REQUEST_ADVISORY_LOCK_NAMESPACE = 1_782_160_006;
 
@@ -818,6 +822,29 @@ export class SocialAgentMatchingJobProcessorService {
         updatedAt: now,
       },
     };
+    const loopMemory = transitionSocialAgentState(task, 'candidates_returned', {
+      objective: 'candidate_matching',
+      nextStep:
+        candidateCount > 0
+          ? '查看候选、生成开场白，或选择邀请/私信/加好友'
+          : noCandidatesFinal
+            ? '修改约练卡片，或暂不继续本次匹配'
+            : '选择扩大距离、放宽时间、减少偏好限制，或修改卡片',
+      shouldSearchNow: false,
+      awaitingSearchConfirmation: candidateCount === 0,
+      waitingFor:
+        candidateCount > 0
+          ? 'candidate_selection'
+          : noCandidatesFinal
+            ? 'no_candidates_final'
+            : 'search_refinement',
+      lastCompletedStep:
+        candidateCount > 0
+          ? 'candidates_ready'
+          : noCandidatesFinal
+            ? 'matching_no_candidates_final'
+            : 'matching_no_candidates',
+    });
     await manager.getRepository(AgentTask).save(task);
     await manager.getRepository(AgentTaskEvent).save(
       manager.getRepository(AgentTaskEvent).create({
@@ -848,6 +875,65 @@ export class SocialAgentMatchingJobProcessorService {
             sourceCount: input.indexHints.sourceCount,
           },
           createdAt: now,
+        }) as Record<string, unknown>,
+      }),
+    );
+    await this.writeLoopStateTransitionInTransaction(manager, {
+      task,
+      memory: loopMemory,
+      publicLoopStage:
+        candidateCount > 0
+          ? 'candidates_ready'
+          : noCandidatesFinal
+            ? 'no_candidates_final'
+            : 'no_candidates',
+      workflowState: noCandidatesFinal
+        ? 'NO_CANDIDATES_FINAL'
+        : candidateCount > 0
+          ? 'CANDIDATES_READY'
+          : 'NO_CANDIDATES',
+      payload: {
+        matchingJobId: input.job.id,
+        publicIntentId: input.job.publicIntentId,
+        socialRequestId: input.validation.socialRequest.id,
+        candidateCount,
+        noCandidatesFinal,
+        candidateSnapshotId: input.candidateSnapshotId,
+      },
+    });
+  }
+
+  private async writeLoopStateTransitionInTransaction(
+    manager: EntityManager,
+    input: {
+      task: AgentTask;
+      memory: SocialAgentTaskMemory;
+      publicLoopStage: string;
+      workflowState: string;
+      payload: Record<string, unknown>;
+    },
+  ): Promise<void> {
+    const transition = input.memory.currentTask.lastLoopStateTransitionEvent;
+    if (!transition) return;
+    await manager.getRepository(AgentTaskEvent).save(
+      manager.getRepository(AgentTaskEvent).create({
+        taskId: input.task.id,
+        ownerUserId: input.task.ownerUserId,
+        actor: AgentTaskEventActor.System,
+        eventType: AgentTaskEventType.LoopStateTransition,
+        summary:
+          `Loop state transition: ${transition.from} -> ${transition.to}`.slice(
+            0,
+            500,
+          ),
+        payload: sanitizeForDisplay({
+          ...transition,
+          fromState: transition.from,
+          toState: transition.to,
+          publicLoopStage: input.publicLoopStage,
+          workflowState: input.workflowState,
+          reason: transition.reason,
+          ...input.payload,
         }) as Record<string, unknown>,
       }),
     );
