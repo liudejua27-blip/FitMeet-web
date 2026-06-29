@@ -1,8 +1,9 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Optional } from '@nestjs/common';
 
 import { extractKnownCity, sanitizeCity } from '../../common/city.util';
 import { cleanDisplayText } from '../../common/display-text.util';
-import type { GeoResolution } from './geo-resolver.types';
+import { AmapChinaGeoProviderService } from './amap-china-geo-provider.service';
+import type { GeoCandidate, GeoResolution } from './geo-resolver.types';
 
 type ResolveGeoInput = {
   message: string;
@@ -98,6 +99,13 @@ const GENERIC_PLACE_PATTERN = /(学校|公司)(?:附近)?/;
 
 @Injectable()
 export class GeoResolverService {
+  private readonly cache = new Map<string, GeoResolution>();
+
+  constructor(
+    @Optional()
+    private readonly chinaGeoProvider?: AmapChinaGeoProviderService,
+  ) {}
+
   resolve(input: ResolveGeoInput): GeoResolution {
     const message = cleanDisplayText(input.message, '');
     const locationText = cleanDisplayText(input.locationText, '');
@@ -229,11 +237,108 @@ export class GeoResolverService {
     };
   }
 
+  async resolveAsync(input: ResolveGeoInput): Promise<GeoResolution> {
+    const fallback = this.resolve(input);
+    const query = this.normalizedLocationQuery(input);
+    if (!query || !this.chinaGeoProvider) return fallback;
+
+    const cityHint = sanitizeCity(
+      input.city ?? fallback.city ?? input.profileCity ?? input.clientCity,
+    );
+    const cacheKey = [query, cityHint ?? ''].join(':');
+    const cached = this.cache.get(cacheKey);
+    if (cached) return cached;
+
+    const result = await this.chinaGeoProvider.resolve({
+      query,
+      cityHint: cityHint ?? null,
+      userCity: input.profileCity ?? null,
+      limit: 5,
+    });
+    const selected = result.selected ?? result.candidates[0] ?? null;
+    if (!selected || result.source === 'unknown') return fallback;
+
+    const geo = this.resolutionFromCandidate({
+      query,
+      fallback,
+      selected,
+      needsConfirmation: result.needsConfirmation,
+      ambiguityReason: result.ambiguityReason ?? null,
+    });
+    this.cache.set(cacheKey, geo);
+    return geo;
+  }
+
   private findPoi(rawText: string): PoiEntry | null {
     return (
       POI_DICTIONARY.find((entry) =>
         entry.aliases.some((alias) => rawText.includes(alias)),
       ) ?? null
     );
+  }
+
+  private normalizedLocationQuery(input: ResolveGeoInput): string {
+    return (
+      cleanDisplayText(input.poiName, '') ||
+      cleanDisplayText(input.locationText, '') ||
+      cleanDisplayText(input.message, '')
+    )
+      .replace(/附近$/, '')
+      .trim();
+  }
+
+  private resolutionFromCandidate(input: {
+    query: string;
+    fallback: GeoResolution;
+    selected: GeoCandidate;
+    needsConfirmation: boolean;
+    ambiguityReason: string | null;
+  }): GeoResolution {
+    const locationText =
+      this.displayLocation(input.selected) ||
+      input.fallback.locationText ||
+      input.query;
+    return {
+      rawText: input.query,
+      locationText,
+      city: sanitizeCity(input.selected.city) ?? input.fallback.city,
+      district: input.selected.district ?? input.fallback.district,
+      poiName: input.selected.name ?? input.fallback.poiName,
+      province: input.selected.province ?? input.fallback.province,
+      lat: input.selected.lat ?? input.fallback.lat,
+      lng: input.selected.lng ?? input.fallback.lng,
+      source: 'amap',
+      confidence: input.selected.confidence,
+      needsConfirmation: input.needsConfirmation,
+      confirmationQuestion: input.needsConfirmation
+        ? this.confirmationQuestion({
+            candidate: input.selected,
+            fallback: input.fallback,
+            ambiguityReason: input.ambiguityReason,
+          })
+        : undefined,
+    };
+  }
+
+  private displayLocation(candidate: GeoCandidate): string {
+    return [candidate.city, candidate.district, candidate.name]
+      .map((value) => cleanDisplayText(value, ''))
+      .filter(Boolean)
+      .filter((value, index, values) => values.indexOf(value) === index)
+      .join('');
+  }
+
+  private confirmationQuestion(input: {
+    candidate: GeoCandidate;
+    fallback: GeoResolution;
+    ambiguityReason: string | null;
+  }): string {
+    if (input.ambiguityReason === 'multiple_city_candidates') {
+      return `我查到多个城市可能匹配“${input.candidate.name}”，这次约练是在${this.displayLocation(input.candidate)}吗？`;
+    }
+    if (input.fallback.confirmationQuestion) {
+      return input.fallback.confirmationQuestion;
+    }
+    return `地点我理解为${this.displayLocation(input.candidate) || input.candidate.name}，对吗？`;
   }
 }

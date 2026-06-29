@@ -108,6 +108,7 @@ describe('Workout Loop MVP E2E contract', () => {
     const task = makeTask();
     const taskRepo = {
       findOne: jest.fn().mockResolvedValue(task),
+      save: jest.fn(async (entity) => entity),
     };
     const messageLog = {
       recordUserMessage: jest.fn().mockResolvedValue(undefined),
@@ -176,6 +177,29 @@ describe('Workout Loop MVP E2E contract', () => {
       task,
       '今晚青岛大学附近轻松跑步，找同校的人一起',
     );
+    expect(draftPublication.stagePrivateDraftForPublish).not.toHaveBeenCalled();
+    const intakeCard = entranceResult.earlyResult?.cards?.[0];
+    expect(intakeCard).toMatchObject({
+      schemaType: 'workout.intake',
+      data: expect.objectContaining({
+        activityType: '跑步',
+        timePreference: '今晚',
+        locationText: expect.stringContaining('青岛大学'),
+      }),
+    });
+    const submitAction = intakeCard?.actions.find(
+      (action) => action.schemaAction === 'workout_intake.submit',
+    );
+
+    const draftResult = await workoutLoop.performWorkoutAction({
+      ownerUserId: 7,
+      taskId: 101,
+      body: {
+        action: 'workout_intake.submit' as never,
+        payload: submitAction?.payload ?? {},
+      },
+    });
+
     expect(draftPublication.stagePrivateDraftForPublish).toHaveBeenCalledWith(
       7,
       101,
@@ -187,7 +211,7 @@ describe('Workout Loop MVP E2E contract', () => {
         }),
       }),
     );
-    const draftCard = entranceResult.earlyResult?.cards?.[0];
+    const draftCard = draftResult.cards?.[0];
     expect(draftCard).toMatchObject({
       schemaType: 'workout.draft',
       data: expect.objectContaining({ socialRequestId: 501 }),

@@ -278,7 +278,7 @@ export const TOOL_UI_CARD_ACTION_COPY: Record<ToolUISchemaAction, ToolUICardActi
   'clarification.yes': {
     busy: '正在确认',
     done: '已确认',
-    result: '已按这个理解继续生成约练卡。',
+    result: '已按这个理解更新约练填写卡。',
   },
   'clarification.no': {
     busy: '正在切换填写',
@@ -306,9 +306,9 @@ export const TOOL_UI_CARD_ACTION_COPY: Record<ToolUISchemaAction, ToolUICardActi
     result: '已发布到发现页，并进入约练匹配队列。',
   },
   'workout_draft.private_match': {
-    busy: '正在保存草稿',
-    done: '已保存草稿',
-    result: '已保存为不公开约练卡，不会出现在发现页。',
+    busy: '正在进入私密匹配',
+    done: '已进入私密匹配',
+    result: '已保存为不公开约练卡，正在当前对话里继续私密匹配。',
   },
   'workout_draft.edit': {
     busy: '正在打开修改',

@@ -46,6 +46,7 @@ describe('WorkoutDraftCard', () => {
         locationText: '青岛大学附近',
         radiusKm: 3,
         safetyBoundary: '公共场所、站内沟通',
+        visibilityPreference: 'private',
       },
       actions: [
         {
@@ -62,7 +63,7 @@ describe('WorkoutDraftCard', () => {
         },
         {
           id: 'private_match',
-          label: '不公开，先保存',
+          label: '不公开，继续私密匹配',
           action: 'workout_draft.private_match',
           schemaAction: 'workout_draft.private_match',
           requiresConfirmation: false,
@@ -76,6 +77,8 @@ describe('WorkoutDraftCard', () => {
         <WorkoutDraftCard card={card} />
       </FitMeetToolUIActionsProvider>,
     );
+
+    expect(screen.getByText('公开设置：不公开，继续私密匹配')).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: '发布到发现' }));
 

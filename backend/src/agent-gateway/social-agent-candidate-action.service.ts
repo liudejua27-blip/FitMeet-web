@@ -87,6 +87,7 @@ import { SocialAgentUserInterestEventService } from './social-agent-user-interes
 import { SocialCandidateAuditService } from './social-candidate-audit.service';
 import type { SocialCandidateEventType } from './entities/social-candidate-event.entity';
 import { SocialAgentLoopStateTransitionEventService } from './social-agent-loop-state-transition-event.service';
+import { WorkoutOpenerDraftService } from './workout-loop/workout-opener-draft.service';
 
 type CandidateActionOptions = {
   signal?: AbortSignal | null;
@@ -124,6 +125,8 @@ export class SocialAgentCandidateActionService {
     private readonly featureFlags?: FeatureFlagService,
     @Optional()
     private readonly loopStateEvents?: SocialAgentLoopStateTransitionEventService,
+    @Optional()
+    private readonly workoutOpenerDrafts?: WorkoutOpenerDraftService,
   ) {}
 
   async createActionApproval(input: {
@@ -207,7 +210,7 @@ export class SocialAgentCandidateActionService {
       this.number(candidate.targetUserId) ??
       this.number(candidate.candidateUserId) ??
       this.number(candidate.userId);
-    const draft =
+    const fallbackDraft =
       cleanDisplayText(
         payload.message ??
           payload.suggestedOpener ??
@@ -215,6 +218,13 @@ export class SocialAgentCandidateActionService {
           candidate.suggestedMessage,
         '',
       ).trim() || this.candidateMessageDraft(task);
+    const draft =
+      (await this.workoutOpenerDrafts?.draft({
+        task,
+        candidate,
+        payload,
+        fallbackDraft,
+      })) ?? fallbackDraft;
 
     const openerDraft = this.buildOpenerDraftPreviewState({
       action: schemaAction,

@@ -544,7 +544,7 @@ describe('SocialAgentDraftPublicationService', () => {
       discoverHref: '/discover?publicIntentId=social_request_301',
       publicIntentHref: '/public-intent/social_request_301',
       status: 'published',
-      taskStatus: AgentTaskStatus.Succeeded,
+      taskStatus: AgentTaskStatus.WaitingResult,
       synced: true,
       sourceVersion: 'source-v1',
       matchingJob: {
@@ -576,7 +576,9 @@ describe('SocialAgentDraftPublicationService', () => {
     expect(publicIntentRepo.findOne).toHaveBeenCalledWith({
       where: { id: 'social_request_301' },
     });
-    expect(task.status).toBe(AgentTaskStatus.Succeeded);
+    expect(task.status).toBe(AgentTaskStatus.WaitingResult);
+    expect(task.statusReason).toBe('workout_matching_queued');
+    expect(task.completedAt).toBeNull();
     expect(task.result).toMatchObject({
       chatRun: {
         socialRequestId: 301,
@@ -653,6 +655,7 @@ describe('SocialAgentDraftPublicationService', () => {
         publicIntentHref: '/public-intent/social_request_301',
         matchingJobId: 9001,
         matchingJobStatus: MatchingJobStatus.Queued,
+        waitingFor: 'matching_job',
         sourceVersion: 'source-v1',
         slots: {
           activityType: '跑步',

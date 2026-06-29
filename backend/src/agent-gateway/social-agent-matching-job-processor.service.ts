@@ -1161,18 +1161,28 @@ export class SocialAgentMatchingJobProcessorService {
   private emitMatchingResult(result: FinalizedMatchingJob): void {
     if (!this.realtime || !result.taskId) return;
     const cards =
-      result.candidateCount === 0 && result.matchingFallback
-        ? [
-            buildSocialAgentNoCandidatesCard({
-              taskId: result.taskId,
-              socialRequestId: result.socialRequestId,
-              publicIntentId: result.publicIntentId,
-              matchingJobId: result.job.id,
-              fallback: result.matchingFallback,
-              message: result.message,
+      result.candidateCount > 0
+        ? result.candidates.map((candidate) =>
+            buildSocialAgentCandidateDetailCard({
+              taskId: result.taskId!,
+              candidate: sanitizeForDisplay(candidate) as Record<
+                string,
+                unknown
+              >,
             }),
-          ]
-        : [];
+          )
+        : result.matchingFallback
+          ? [
+              buildSocialAgentNoCandidatesCard({
+                taskId: result.taskId,
+                socialRequestId: result.socialRequestId,
+                publicIntentId: result.publicIntentId,
+                matchingJobId: result.job.id,
+                fallback: result.matchingFallback,
+                message: result.message,
+              }),
+            ]
+          : [];
     this.realtime.emitAgentEvent(result.ownerUserId, 'agent:candidates', {
       taskId: result.taskId,
       publicIntentId: result.publicIntentId,

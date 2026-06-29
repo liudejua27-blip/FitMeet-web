@@ -318,11 +318,81 @@ export function useAgentWorkspaceController(view: AgentView) {
       if (detail?.eventType !== 'agent:candidates') return;
       const eventTaskId = numberFromUnknown(detail.payload?.taskId);
       if (activeTaskId && eventTaskId && eventTaskId !== activeTaskId) return;
+      const response = realtimeCandidateResponseFromPayload(
+        detail.payload,
+        eventTaskId ?? activeTaskId,
+      );
+      if (response) {
+        const responseTaskId = response.taskId ?? eventTaskId ?? activeTaskId;
+        const conversationIntent = intentForRestoredResponse(response, 'social');
+        const assistantMessage = assistantMessageForUserFacingResult(
+          response,
+          '已找到候选，等待你确认下一步。',
+        );
+        setActiveTaskId(responseTaskId ?? null);
+        setUserResult((current) =>
+          mergeRealtimeCandidateResponse(current, response),
+        );
+        setMessages((current) => {
+          const existingIndex = [...current]
+            .reverse()
+            .findIndex(
+              (message) =>
+                message.role === 'assistant' &&
+                (message.taskId === responseTaskId ||
+                  findTaskId(message.result ?? null) === responseTaskId),
+            );
+          const message = {
+            id: nextId('assistant'),
+            role: 'assistant' as const,
+            status: 'done' as const,
+            content: assistantMessage,
+            result: response,
+            taskId: responseTaskId ?? null,
+            conversationIntent,
+            showSocialResult: true,
+            surfaceKind: 'answer' as const,
+            assistantMessageSource: response.assistantMessageSource,
+            branchable: false,
+          };
+          if (existingIndex < 0) return [...current, message];
+          const index = current.length - 1 - existingIndex;
+          const mergedResult = mergeRealtimeCandidateResponse(
+            current[index].result ?? null,
+            response,
+          );
+          return [
+            ...current.slice(0, index),
+            {
+              ...current[index],
+              content: assistantMessage || current[index].content,
+              status: 'done',
+              result: mergedResult,
+              taskId: responseTaskId ?? current[index].taskId,
+              conversationIntent,
+              showSocialResult: true,
+              surfaceKind: 'answer',
+              assistantMessageSource: response.assistantMessageSource,
+              branchable: false,
+            },
+            ...current.slice(index + 1),
+          ];
+        });
+      }
       void refreshMatchingSnapshot(eventTaskId ?? activeTaskId);
     };
     window.addEventListener('fitmeet:realtime', onRealtime);
     return () => window.removeEventListener('fitmeet:realtime', onRealtime);
-  }, [activeTaskId, isLoggedIn, isRealAgent, refreshMatchingSnapshot, shellView]);
+  }, [
+    activeTaskId,
+    isLoggedIn,
+    isRealAgent,
+    refreshMatchingSnapshot,
+    setActiveTaskId,
+    setMessages,
+    setUserResult,
+    shellView,
+  ]);
 
   useEffect(() => {
     if (!isRealAgent || !isLoggedIn || shellView !== 'chat') return undefined;
@@ -769,6 +839,126 @@ function messageHasLoopChoiceCard(message: { result?: UserFacingAgentResponse | 
   return Boolean(message.result?.cards?.some((card) => card.schemaType === 'loop.choice'));
 }
 
+function realtimeCandidateResponseFromPayload(
+  payload: Record<string, unknown> | undefined,
+  fallbackTaskId: number | null | undefined,
+): UserFacingAgentResponse | null {
+  const cards = fitMeetCardsFromUnknown(payload?.cards);
+  if (cards.length === 0) return null;
+  const taskId = numberFromUnknown(payload?.taskId) ?? fallbackTaskId ?? null;
+  const candidateCount = numberFromUnknown(payload?.candidateCount);
+  const message =
+    textFromUnknown(payload?.message) ||
+    (candidateCount && candidateCount > 0
+      ? `已找到 ${candidateCount} 个适合这次约练的候选。`
+      : '当前约练进度已更新。');
+  return {
+    taskId,
+    assistantMessage: message,
+    assistantMessageSource: 'deterministic_route',
+    lightStatus: '已整理回复',
+    cards,
+    safeStatus: {
+      blocked: false,
+      level: 'low',
+      boundaryNotes: [],
+      requiredConfirmations: [],
+    },
+    pendingConfirmations: [],
+    publicLoop: {
+      stage: publicLoopStageFromUnknown(payload?.publicLoopStage),
+      publicIntentId: textFromUnknown(payload?.publicIntentId) || null,
+      discoverHref: null,
+      publicIntentHref: null,
+      messagesHref: null,
+      requiredConfirmation: false,
+    },
+    workflow:
+      publicLoopStageFromUnknown(payload?.publicLoopStage) === 'candidates_ready'
+        ? {
+            workflowId: null,
+            state: 'CANDIDATES_READY',
+            requiredAction: null,
+            retryable: false,
+            recoveryMessage: null,
+          }
+        : undefined,
+    permissionMode: 'confirm',
+  };
+}
+
+function mergeRealtimeCandidateResponse(
+  existing: UserFacingAgentResponse | null,
+  incoming: UserFacingAgentResponse,
+): UserFacingAgentResponse {
+  if (!existing) return incoming;
+  return {
+    ...existing,
+    ...incoming,
+    assistantMessage: incoming.assistantMessage || existing.assistantMessage,
+    cards: mergeFitMeetCards(existing.cards, incoming.cards),
+    pendingConfirmations: existing.pendingConfirmations,
+    publicLoop: incoming.publicLoop ?? existing.publicLoop,
+    workflow: incoming.workflow ?? existing.workflow,
+  };
+}
+
+function fitMeetCardsFromUnknown(value: unknown): FitMeetAlphaCard[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter(isRecord)
+    .filter((card) => typeof card.schemaType === 'string')
+    .map((card) => card as unknown as FitMeetAlphaCard);
+}
+
+function mergeFitMeetCards(
+  existing: FitMeetAlphaCard[],
+  incoming: FitMeetAlphaCard[],
+): FitMeetAlphaCard[] {
+  const merged = [...existing];
+  const keys = new Set(merged.map(fitMeetCardKey));
+  for (const card of incoming) {
+    const key = fitMeetCardKey(card);
+    if (keys.has(key)) continue;
+    keys.add(key);
+    merged.push(card);
+  }
+  return merged;
+}
+
+function fitMeetCardKey(card: FitMeetAlphaCard): string {
+  return [card.id, card.schemaType, card.type, card.title]
+    .map((value) => textFromUnknown(value))
+    .filter(Boolean)
+    .join(':');
+}
+
+function publicLoopStageFromUnknown(
+  value: unknown,
+): NonNullable<UserFacingAgentResponse['publicLoop']>['stage'] {
+  const stage = textFromUnknown(value);
+  if (
+    stage === 'profile_completion' ||
+    stage === 'opportunity_card_generated' ||
+    stage === 'publish_confirmation_required' ||
+    stage === 'discover_visible' ||
+    stage === 'matching_queued' ||
+    stage === 'exploring_index' ||
+    stage === 'ranking_candidates' ||
+    stage === 'safety_checking' ||
+    stage === 'no_candidates' ||
+    stage === 'no_candidates_final' ||
+    stage === 'candidates_ready' ||
+    stage === 'candidates_recommended' ||
+    stage === 'contact_confirmation_required' ||
+    stage === 'messages_handoff' ||
+    stage === 'dismissed'
+  ) {
+    return stage;
+  }
+  return 'candidates_ready';
+}
+
 function shouldPollMatchingSnapshot(
   response: UserFacingAgentResponse | null,
   taskStatus: string | null,
@@ -802,6 +992,10 @@ function shouldPollMatchingSnapshot(
   if (response.publicLoop?.stage === 'discover_visible') return true;
   if (response.workflow?.state === 'DISCOVER_VISIBLE') return true;
   return /正在匹配|正在筛选|等待匹配/.test(response.assistantMessage);
+}
+
+function textFromUnknown(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : '';
 }
 
 function numberFromUnknown(value: unknown): number | null {

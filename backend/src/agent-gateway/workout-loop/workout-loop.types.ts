@@ -32,6 +32,8 @@ export type WorkoutSlots = {
     lat?: number;
     lng?: number;
     source:
+      | 'amap'
+      | 'cache'
       | 'explicit_city'
       | 'poi_dictionary'
       | 'profile_city'

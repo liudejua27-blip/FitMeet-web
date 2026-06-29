@@ -46,6 +46,16 @@ describe('WorkoutIntakeCard', () => {
     fireEvent.change(screen.getByPlaceholderText('3'), {
       target: { value: '5' },
     });
+    fireEvent.change(screen.getByPlaceholderText('轻松 / 中等 / 进阶'), {
+      target: { value: '中等' },
+    });
+    fireEvent.change(screen.getByPlaceholderText('例如：同校、轻松一点、资料公开完整的人优先'), {
+      target: { value: '同校优先' },
+    });
+    fireEvent.change(screen.getByLabelText('安全边界'), {
+      target: { value: '只在公共球馆见面，先站内沟通' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: '不公开，继续私密匹配' }));
     fireEvent.click(screen.getByRole('button', { name: '生成约练卡' }));
 
     await waitFor(() => expect(onCardAction).toHaveBeenCalledTimes(1));
@@ -62,7 +72,10 @@ describe('WorkoutIntakeCard', () => {
             locationText: '市北体育馆',
             city: '青岛',
             radiusKm: 5,
-            visibilityPreference: 'public',
+            intensity: '中等',
+            candidatePreference: '同校优先',
+            safetyBoundary: '只在公共球馆见面，先站内沟通',
+            visibilityPreference: 'private',
           }),
         }),
       }),
