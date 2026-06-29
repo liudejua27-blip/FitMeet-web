@@ -384,6 +384,57 @@ describe('SocialAgentCardActionRouterService', () => {
     expect(result.assistantMessage).toContain('进入约练匹配队列');
   });
 
+  it('infers missing workout publish slots from staged draft text before blocking publish', async () => {
+    const { draftPublication, handleMessage, service } = makeHarness();
+    draftPublication.publishDraft.mockResolvedValue({
+      success: true,
+      status: 'published',
+      synced: true,
+      socialRequestId: 501,
+      publicIntentId: 'public-intent:workout-501',
+      discoverHref: '/discover?publicIntentId=public-intent%3Aworkout-501',
+      publicIntentHref: '/public-intent/public-intent%3Aworkout-501',
+      sourceVersion: 'source-v1',
+      matchingJob: { id: 9001, status: 'queued' },
+    });
+
+    const result = await service.perform({
+      ownerUserId: 7,
+      taskId: 101,
+      body: {
+        action: 'workout_draft.publish' as never,
+        payload: {
+          confirmedPublish: true,
+          socialRequestId: 501,
+          socialRequestDraft: {
+            title: '今晚青岛大学跑步约练',
+            activityType: '跑步',
+            city: '青岛',
+            visibility: 'public',
+            metadata: { loop: 'workout' },
+          },
+        },
+      },
+      handleMessage,
+    });
+
+    expect(handleMessage).not.toHaveBeenCalled();
+    expect(draftPublication.publishDraft).toHaveBeenCalledWith(
+      7,
+      101,
+      expect.objectContaining({
+        socialRequestId: 501,
+        title: '今晚青岛大学跑步约练',
+        city: '青岛',
+        visibility: 'public',
+      }),
+    );
+    expect(result.publicLoop).toMatchObject({
+      stage: 'matching_queued',
+      publicIntentId: 'public-intent:workout-501',
+    });
+  });
+
   it('does not publish workout drafts with an empty city or default them to Qingdao', async () => {
     const { draftPublication, handleMessage, service } = makeHarness();
 
