@@ -943,6 +943,12 @@ function isPrimaryVisualCardAction(card: SchemaDrivenAssistantCard, action: Visi
   if (card.schemaType === 'workout.draft') {
     return action.schemaAction === 'workout_draft.publish';
   }
+  if (card.schemaType === 'friend.draft') {
+    return action.schemaAction === 'friend_draft.publish';
+  }
+  if (card.schemaType === 'travel.companion_draft') {
+    return action.schemaAction === 'travel_draft.publish';
+  }
   if (card.schemaType === 'social_match.candidate') {
     return (
       action.schemaAction === 'opener.confirm_send' || action.schemaAction === 'candidate.connect'
@@ -1289,6 +1295,8 @@ const HIGH_RISK_VISIBLE_SCHEMA_ACTIONS = new Set<ToolUISchemaAction>([
   'opener.confirm_send',
   'publish_to_discover',
   'workout_draft.publish',
+  'friend_draft.publish',
+  'travel_draft.publish',
   'activity.confirm_create',
   'public_intent_application.accept',
 ]);
@@ -1304,6 +1312,8 @@ const HIGH_RISK_VISIBLE_RAW_ACTIONS = new Set([
   'publish_social_request',
   'publish_to_discover',
   'workout_draft.publish',
+  'friend_draft.publish',
+  'travel_draft.publish',
   'create_activity',
   'activity.confirm_create',
   'public_intent_application.accept',
@@ -1376,9 +1386,19 @@ function sortVisibleCardActions(
               'workout_draft.cancel',
             ]
           : schemaType === 'friend.draft'
-            ? ['friend_draft.private_match', 'friend_draft.edit', 'friend_draft.cancel']
+            ? [
+                'friend_draft.publish',
+                'friend_draft.private_match',
+                'friend_draft.edit',
+                'friend_draft.cancel',
+              ]
             : schemaType === 'travel.companion_draft'
-              ? ['travel_draft.private_match', 'travel_draft.edit', 'travel_draft.cancel']
+              ? [
+                  'travel_draft.publish',
+                  'travel_draft.private_match',
+                  'travel_draft.edit',
+                  'travel_draft.cancel',
+                ]
               : schemaType === 'social_match.empty' ||
                   schemaType === 'social_match.no_candidates' ||
                   schemaType === 'social_match.privacy_guard' ||
@@ -1571,6 +1591,8 @@ function inlineApprovalConfirmActionFromCard(
       schemaAction === 'candidate.connect' ||
       schemaAction === 'publish_to_discover' ||
       schemaAction === 'workout_draft.publish' ||
+      schemaAction === 'friend_draft.publish' ||
+      schemaAction === 'travel_draft.publish' ||
       schemaAction === 'activity.confirm_create' ||
       /send|invite|connect|publish|create/i.test(action ?? '')
     );
@@ -1629,6 +1651,14 @@ function inlineOutcomeFromActionResponse(
     action.schemaAction !== 'workout_draft.private_match' &&
     action.schemaAction !== 'workout_draft.edit' &&
     action.schemaAction !== 'workout_draft.cancel' &&
+    action.schemaAction !== 'friend_draft.publish' &&
+    action.schemaAction !== 'friend_draft.private_match' &&
+    action.schemaAction !== 'friend_draft.edit' &&
+    action.schemaAction !== 'friend_draft.cancel' &&
+    action.schemaAction !== 'travel_draft.publish' &&
+    action.schemaAction !== 'travel_draft.private_match' &&
+    action.schemaAction !== 'travel_draft.edit' &&
+    action.schemaAction !== 'travel_draft.cancel' &&
     action.schemaAction !== 'activity.view_detail' &&
     action.schemaAction !== 'activity.modify_time' &&
     action.schemaAction !== 'activity.modify_location' &&
@@ -1651,7 +1681,9 @@ function inlineOutcomeFromActionResponse(
     href: inlineOutcomeHrefFromResponse(response, action.schemaAction),
     hrefLabel:
       action.schemaAction === 'publish_to_discover' ||
-      action.schemaAction === 'workout_draft.publish'
+      action.schemaAction === 'workout_draft.publish' ||
+      action.schemaAction === 'friend_draft.publish' ||
+      action.schemaAction === 'travel_draft.publish'
         ? '查看发现详情'
         : null,
   };
@@ -1690,6 +1722,12 @@ function inlineOutcomeStableBody(schemaAction: ToolUISchemaAction | null | undef
   }
   if (schemaAction === 'workout_draft.publish') {
     return '这张约练卡已发布到发现页，并进入约练匹配队列。';
+  }
+  if (schemaAction === 'friend_draft.publish') {
+    return '这张交友卡已发布到发现页，并进入交友匹配队列。';
+  }
+  if (schemaAction === 'travel_draft.publish') {
+    return '这张旅行寻伴卡已发布到发现页，并进入旅行寻伴匹配队列。';
   }
   if (schemaAction === 'workout_draft.private_match') {
     return '已保存为不公开约练卡，正在当前对话里继续私密匹配。';
@@ -1730,6 +1768,8 @@ function inlineOutcomeTitle(schemaAction: ToolUISchemaAction | null | undefined)
   if (schemaAction === 'candidate.more_like_this') return '继续找类似机会';
   if (schemaAction === 'publish_to_discover') return '已发布到发现';
   if (schemaAction === 'workout_draft.publish') return '已发布到发现';
+  if (schemaAction === 'friend_draft.publish') return '已发布到发现';
+  if (schemaAction === 'travel_draft.publish') return '已发布到发现';
   if (schemaAction === 'workout_draft.private_match') return '已进入私密匹配';
   if (schemaAction === 'workout_draft.edit') return '继续修改';
   if (schemaAction === 'workout_draft.cancel') return '已取消';
@@ -1809,13 +1849,21 @@ function localInlineApprovalForCardAction(
   const payload = payloadForCardAction(card, action);
   if (
     action.schemaAction === 'publish_to_discover' ||
-    action.schemaAction === 'workout_draft.publish'
+    action.schemaAction === 'workout_draft.publish' ||
+    action.schemaAction === 'friend_draft.publish' ||
+    action.schemaAction === 'travel_draft.publish'
   ) {
     const schemaAction = action.schemaAction;
+    const cardNoun =
+      schemaAction === 'friend_draft.publish'
+        ? '交友卡'
+        : schemaAction === 'travel_draft.publish'
+          ? '旅行寻伴卡'
+          : '约练卡';
     return {
       approvalId: null,
       title: '确认发布到发现',
-      summary: '确认后这张约练卡才会出现在发现页；你可以先修改或暂不发布。',
+      summary: `确认后这张${cardNoun}才会出现在发现页；你可以先修改或暂不发布。`,
       riskLevel: 'medium',
       actionKey: cardActionKey(action),
       confirmLabel: '确认发布',
@@ -1893,7 +1941,9 @@ function inlineOutcomeFromApprovalResponse(
   if (!response?.assistantMessage) return null;
   const publishedHref =
     inlineOutcomeHrefFromResponse(response, 'publish_to_discover') ??
-    inlineOutcomeHrefFromResponse(response, 'workout_draft.publish');
+    inlineOutcomeHrefFromResponse(response, 'workout_draft.publish') ??
+    inlineOutcomeHrefFromResponse(response, 'friend_draft.publish') ??
+    inlineOutcomeHrefFromResponse(response, 'travel_draft.publish');
   if (publishedHref && /publish|social_request|发现|发布/i.test(approval.actionKey)) {
     return {
       title: '已发布到发现',
@@ -1919,6 +1969,8 @@ function inlineOutcomeHrefFromResponse(
   if (
     schemaAction !== 'publish_to_discover' &&
     schemaAction !== 'workout_draft.publish' &&
+    schemaAction !== 'friend_draft.publish' &&
+    schemaAction !== 'travel_draft.publish' &&
     schemaAction !== 'activity.view_detail'
   ) {
     return null;
@@ -2098,6 +2150,14 @@ function confirmationMatchesActionKey(
   }
   if (actionKey === 'workout_draft.publish') {
     return /publish|social_request|workout|发现|发布|约练/.test(actionText);
+  }
+  if (actionKey === 'friend_draft.publish') {
+    return /publish|social_request|friend|发现|发布|交友/.test(actionText);
+  }
+  if (actionKey === 'travel_draft.publish') {
+    return /publish|social_request|travel|发现|发布|旅行|旅游|寻伴/.test(
+      actionText,
+    );
   }
   if (actionKey === 'activity.confirm_create') {
     return /activity|meet|create|活动|约练|创建/.test(actionText);

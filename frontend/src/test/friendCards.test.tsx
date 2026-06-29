@@ -119,4 +119,54 @@ describe('Friend loop cards', () => {
       }),
     );
   });
+
+  it('publishes friend draft to Discover from the draft card', async () => {
+    const onCardAction = vi
+      .fn()
+      .mockResolvedValue({ assistantMessage: '已发布到发现，并进入交友匹配队列' });
+    const card: SchemaDrivenAssistantCard = {
+      id: 'friend_draft:101:701',
+      type: 'friend_draft',
+      schemaVersion: FITMEET_TOOL_UI_SCHEMA_VERSION,
+      schemaType: 'friend.draft',
+      title: '上海认识新朋友',
+      body: '可以发布到发现，也可以不公开继续私密匹配。',
+      data: {
+        taskId: 101,
+        socialRequestId: 701,
+        friendGoal: '认识新朋友',
+        city: '上海',
+        topicTags: ['咖啡'],
+        scenePreference: '先站内聊天',
+        safetyBoundary: '站内先聊，不交换联系方式',
+        socialRequestDraft: { title: '上海认识新朋友', city: '上海' },
+      },
+      actions: [],
+    };
+
+    render(
+      <FitMeetToolUIActionsProvider value={{ onCardAction }}>
+        <FriendDraftCard card={card} />
+      </FitMeetToolUIActionsProvider>,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '发布到发现' }));
+
+    await waitFor(() => expect(onCardAction).toHaveBeenCalledTimes(1));
+    expect(onCardAction).toHaveBeenCalledWith(
+      expect.objectContaining({
+        taskId: 101,
+        cardId: 'friend_draft:101:701',
+        action: 'friend_draft.publish',
+        schemaAction: 'friend_draft.publish',
+        payload: expect.objectContaining({
+          socialRequestId: 701,
+          socialRequestDraft: expect.objectContaining({
+            title: '上海认识新朋友',
+            city: '上海',
+          }),
+        }),
+      }),
+    );
+  });
 });

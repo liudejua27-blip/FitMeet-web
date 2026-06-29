@@ -208,6 +208,8 @@ export function useAgentCardActionRuntime({
         action === 'opener.confirm_send' ||
         action === 'publish_to_discover' ||
         action === 'workout_draft.publish' ||
+        action === 'friend_draft.publish' ||
+        action === 'travel_draft.publish' ||
         action === 'activity.confirm_create' ||
         action === 'public_intent_application.accept'
           ? 'approval'
@@ -393,12 +395,14 @@ function isExecutableToolUISchemaAction(
     value === 'friend_intake.submit' ||
     value === 'friend_intake.use_defaults' ||
     value === 'friend_intake.cancel' ||
+    value === 'friend_draft.publish' ||
     value === 'friend_draft.private_match' ||
     value === 'friend_draft.edit' ||
     value === 'friend_draft.cancel' ||
     value === 'travel_intake.submit' ||
     value === 'travel_intake.use_defaults' ||
     value === 'travel_intake.cancel' ||
+    value === 'travel_draft.publish' ||
     value === 'travel_draft.private_match' ||
     value === 'travel_draft.edit' ||
     value === 'travel_draft.cancel' ||
@@ -508,12 +512,14 @@ const WORKOUT_ACTIONS_APPEND_FEEDBACK = new Set<FitMeetAgentCardExecutableAction
   'friend_intake.submit',
   'friend_intake.use_defaults',
   'friend_intake.cancel',
+  'friend_draft.publish',
   'friend_draft.private_match',
   'friend_draft.edit',
   'friend_draft.cancel',
   'travel_intake.submit',
   'travel_intake.use_defaults',
   'travel_intake.cancel',
+  'travel_draft.publish',
   'travel_draft.private_match',
   'travel_draft.edit',
   'travel_draft.cancel',
@@ -677,12 +683,14 @@ const CARD_ACTION_ASSISTANT_MESSAGES: Partial<Record<FitMeetAgentCardExecutableA
   'friend_intake.submit': '已根据本次填写生成交友卡，确认前不会匹配。',
   'friend_intake.use_defaults': '已使用默认安全设置继续生成交友卡。',
   'friend_intake.cancel': '已取消本次交友卡，不会匹配或联系任何人。',
+  'friend_draft.publish': '已发布到发现页，并进入交友匹配队列。',
   'friend_draft.private_match': '已保存为不公开交友卡，正在当前对话里继续私密匹配。',
   'friend_draft.edit': '可以继续修改本次交友需求。',
   'friend_draft.cancel': '已取消这次交友卡，不会匹配或联系任何人。',
   'travel_intake.submit': '已根据本次填写生成旅行寻伴卡，确认前不会匹配。',
   'travel_intake.use_defaults': '已使用默认安全设置继续生成旅行寻伴卡。',
   'travel_intake.cancel': '已取消本次旅行寻伴卡，不会匹配或联系任何人。',
+  'travel_draft.publish': '已发布到发现页，并进入旅行寻伴匹配队列。',
   'travel_draft.private_match': '已保存为不公开旅行寻伴卡，正在当前对话里继续私密匹配。',
   'travel_draft.edit': '可以继续修改本次旅行寻伴需求。',
   'travel_draft.cancel': '已取消这次旅行寻伴卡，不会匹配或联系任何人。',

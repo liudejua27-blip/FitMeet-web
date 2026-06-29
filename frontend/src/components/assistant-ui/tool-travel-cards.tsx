@@ -320,14 +320,23 @@ export function TravelDraftCard({ card }: { card: SchemaDrivenAssistantCard }) {
         </div>
         <div className="flex flex-wrap gap-2">
           <ActionButton
+            busy={status.key === 'travel_draft.publish'}
+            onClick={() =>
+              void run('travel_draft.publish', '已发布到发现，并进入旅行寻伴匹配队列。')
+            }
+          >
+            发布到发现
+          </ActionButton>
+          <ActionButton
             busy={status.key === 'travel_draft.private_match'}
+            tone="secondary"
             onClick={() => void run('travel_draft.private_match', '已进入私密旅行匹配。')}
           >
             不公开，开始私密匹配
           </ActionButton>
           <ActionButton
             busy={status.key === 'travel_draft.edit'}
-            tone="secondary"
+            tone="ghost"
             onClick={() => void run('travel_draft.edit', '可以继续修改旅行寻伴需求。')}
           >
             修改

@@ -25,8 +25,20 @@ import { SocialIntentRateLimitService } from './social-intent-rate-limit.service
 import { SocialAgentMatchRelaxationActionService } from './social-agent-match-relaxation-action.service';
 import { SocialAgentApplicationActionService } from './social-agent-application-action.service';
 import { ClarificationCardActionService } from './clarification/clarification-card-action.service';
+import { buildFriendIntakeCard } from './friend-loop/friend-card.presenter';
 import { FriendLoopService } from './friend-loop/friend-loop.service';
+import type { FriendSlots } from './friend-loop/friend-loop.types';
+import {
+  normalizeFriendSlots,
+  validateFriendSlots,
+} from './friend-loop/friend-slot-extractor';
+import { buildTravelIntakeCard } from './travel-loop/travel-card.presenter';
 import { TravelLoopService } from './travel-loop/travel-loop.service';
+import type { TravelSlots } from './travel-loop/travel-loop.types';
+import {
+  normalizeTravelSlots,
+  validateTravelSlots,
+} from './travel-loop/travel-slot-extractor';
 import { buildWorkoutIntakeCard } from './workout-loop/workout-card.presenter';
 import { WorkoutLoopService } from './workout-loop/workout-loop.service';
 import type { WorkoutSlots } from './workout-loop/workout-loop.types';
@@ -37,6 +49,8 @@ type HandleMessage = (
   emit?: StreamEmit,
   options?: SocialAgentStreamOptions,
 ) => Promise<SocialAgentIntentRouteResult>;
+
+type LoopDraftPublishKind = 'workout' | 'friend' | 'travel';
 
 @Injectable()
 export class SocialAgentCardActionRouterService {
@@ -226,11 +240,18 @@ export class SocialAgentCardActionRouterService {
       });
     }
 
-    if (action === 'workout_draft.publish') {
+    if (this.isLoopDraftPublishAction(action)) {
       const publishResult = await this.publishToDiscoverFromCardAction(
         ownerUserId,
         taskId,
-        { ...normalizedBody, action: 'publish_to_discover' },
+        {
+          ...normalizedBody,
+          action: 'publish_to_discover',
+          payload: {
+            ...this.record(normalizedBody.payload),
+            loopDraftPublishAction: action,
+          },
+        },
         input.handleMessage,
         input.emit,
         input.options,
@@ -238,10 +259,10 @@ export class SocialAgentCardActionRouterService {
       if (publishResult.publicLoop?.stage !== 'discover_visible') {
         return publishResult;
       }
+      const publishKind = this.loopDraftPublishKind(action) ?? 'workout';
       return {
         ...publishResult,
-        assistantMessage:
-          '已发布到发现页，并进入约练匹配队列。发送邀请、加好友或私信前仍会让你确认。',
+        assistantMessage: this.loopPublishQueuedMessage(publishKind),
         publicLoop: {
           ...publishResult.publicLoop,
           stage: 'matching_queued',
@@ -381,8 +402,25 @@ export class SocialAgentCardActionRouterService {
     return (
       action === 'publish_to_discover' ||
       action === 'publish_social_request' ||
-      action === 'workout_draft.publish'
+      this.isLoopDraftPublishAction(action)
     );
+  }
+
+  private isLoopDraftPublishAction(
+    action: string,
+  ): action is `${LoopDraftPublishKind}_draft.publish` {
+    return (
+      action === 'workout_draft.publish' ||
+      action === 'friend_draft.publish' ||
+      action === 'travel_draft.publish'
+    );
+  }
+
+  private loopDraftPublishKind(action: string): LoopDraftPublishKind | null {
+    if (action === 'workout_draft.publish') return 'workout';
+    if (action === 'friend_draft.publish') return 'friend';
+    if (action === 'travel_draft.publish') return 'travel';
+    return null;
   }
 
   private isPublishDismissAction(action: string) {
@@ -780,10 +818,12 @@ export class SocialAgentCardActionRouterService {
     if (
       normalized === 'publish_social_request' ||
       normalized === 'publish_to_discover' ||
-      normalized === 'workout_draft.publish'
+      normalized === 'workout_draft.publish' ||
+      normalized === 'friend_draft.publish' ||
+      normalized === 'travel_draft.publish'
     ) {
-      return normalized === 'workout_draft.publish'
-        ? 'workout_draft.publish'
+      return this.isLoopDraftPublishAction(normalized)
+        ? normalized
         : 'publish_to_discover';
     }
     if (normalized === 'create_activity') {
@@ -930,8 +970,9 @@ export class SocialAgentCardActionRouterService {
     void emit;
     void options;
     const payload = this.record(body.payload);
-    const isWorkoutPublish = this.isWorkoutPublishPayload(body, payload);
-    if (isWorkoutPublish) {
+    const publishKind = this.loopPublishKindFromPayload(body, payload);
+    const publishCopy = this.loopPublishCopy(publishKind);
+    if (publishKind === 'workout') {
       const slots = this.workoutSlotsFromPublishPayload(payload);
       const validation = validateWorkoutSlotsForPublish(slots);
       if (!validation.valid) {
@@ -959,6 +1000,66 @@ export class SocialAgentCardActionRouterService {
         });
       }
     }
+    if (publishKind === 'friend') {
+      const slots = this.friendSlotsFromPublishPayload(payload);
+      const validation = validateFriendSlots(slots);
+      if (!validation.valid) {
+        return this.simpleRouteResult({
+          taskId,
+          assistantMessage:
+            '发布到发现前需要补充交友目标和城市，避免生成错误城市的交友卡。',
+          cards: [
+            buildFriendIntakeCard({
+              taskId,
+              slots,
+              missing: validation.missing,
+              title: '补充交友发布信息',
+              body: '请补充本次交友卡的目标和城市；不会使用默认城市代替。',
+            }),
+          ],
+          publicLoop: {
+            stage: 'publish_confirmation_required',
+            publicIntentId: null,
+            discoverHref: null,
+            publicIntentHref: null,
+            messagesHref: null,
+            requiredConfirmation: true,
+          },
+        });
+      }
+    }
+    if (publishKind === 'travel') {
+      const slots = this.travelSlotsFromPublishPayload(payload);
+      const validation = validateTravelSlots(slots);
+      const city = this.travelPublishCityFromPayload(payload);
+      const missing = city
+        ? validation.missing
+        : ([...validation.missing, 'city'] as string[]);
+      if (missing.length > 0) {
+        return this.simpleRouteResult({
+          taskId,
+          assistantMessage:
+            '发布到发现前需要补充可公开展示的目的地城市，避免生成错误城市的旅行寻伴卡。',
+          cards: [
+            buildTravelIntakeCard({
+              taskId,
+              slots,
+              missing,
+              title: '补充旅行发布信息',
+              body: '请补充目的地、出发时间、预算、交通方式，以及可公开展示的目的地城市；不会使用默认城市代替。',
+            }),
+          ],
+          publicLoop: {
+            stage: 'publish_confirmation_required',
+            publicIntentId: null,
+            discoverHref: null,
+            publicIntentHref: null,
+            messagesHref: null,
+            requiredConfirmation: true,
+          },
+        });
+      }
+    }
     const confirmed =
       payload.confirmedPublish === true ||
       payload.approved === true ||
@@ -966,8 +1067,7 @@ export class SocialAgentCardActionRouterService {
     if (!confirmed) {
       return this.simpleRouteResult({
         taskId,
-        assistantMessage:
-          '发布到发现前需要你确认。确认后这张约练卡才会公开给附近可发现用户。',
+        assistantMessage: publishCopy.confirmMessage,
         cards: [
           {
             id: `publish_to_discover:confirm:${taskId}`,
@@ -975,7 +1075,7 @@ export class SocialAgentCardActionRouterService {
             schemaVersion: 'fitmeet.tool-ui.v1',
             schemaType: 'safety.approval',
             title: '确认发布到发现',
-            body: '确认后，这张约练卡会公开给附近可发现用户。不会公开精确位置或联系方式。',
+            body: publishCopy.confirmBody,
             status: 'waiting_confirmation',
             data: {
               taskId,
@@ -985,7 +1085,7 @@ export class SocialAgentCardActionRouterService {
               approval: {
                 actionType: 'publish_social_request',
                 riskLevel: 'medium',
-                summary: '发布约练卡到发现页',
+                summary: publishCopy.approvalSummary,
                 boundary: '不会公开精确位置、联系方式或私密资料',
               },
             },
@@ -1032,7 +1132,7 @@ export class SocialAgentCardActionRouterService {
       throw new BadRequestException('Discover publish runtime is unavailable');
     }
     const publishDraft = this.publishDraftFromPayload(payload, {
-      requireCity: isWorkoutPublish,
+      requireCity: publishKind !== null,
     });
     const privacyResult = this.privacyGuard?.inspect(publishDraft);
     if (privacyResult?.blocked) {
@@ -1088,8 +1188,7 @@ export class SocialAgentCardActionRouterService {
     if (publishStatus === 'pending_approval' || approvalId) {
       return this.simpleRouteResult({
         taskId,
-        assistantMessage:
-          '发布到发现前还需要你确认。确认后，这张约练卡才会公开给附近可发现用户。',
+        assistantMessage: publishCopy.pendingApprovalMessage,
         pendingApproval:
           approvalId && Object.keys(pendingApproval).length > 0
             ? ({
@@ -1099,7 +1198,8 @@ export class SocialAgentCardActionRouterService {
                   this.text(pendingApproval.actionType) ||
                   'publish_social_request',
                 summary:
-                  this.text(pendingApproval.summary) || '发布约练卡到发现页',
+                  this.text(pendingApproval.summary) ||
+                  publishCopy.approvalSummary,
                 riskLevel: pendingApproval.riskLevel,
                 payload: this.record(pendingApproval.payload),
                 expiresAt: this.text(pendingApproval.expiresAt) || null,
@@ -1112,7 +1212,7 @@ export class SocialAgentCardActionRouterService {
             schemaVersion: 'fitmeet.tool-ui.v1',
             schemaType: 'safety.approval',
             title: '确认发布到发现',
-            body: '确认后，这张约练卡会公开给附近可发现用户。不会公开精确位置或联系方式。',
+            body: publishCopy.confirmBody,
             status: 'waiting_confirmation',
             data: {
               taskId,
@@ -1231,7 +1331,7 @@ export class SocialAgentCardActionRouterService {
     }
     if (!publicIntentId) {
       throw new BadRequestException(
-        '发布约练缺少 publicIntentId，无法确认发现页可见',
+        '发布缺少 publicIntentId，无法确认发现页可见',
       );
     }
     const socialRequestId = this.number(result.socialRequestId);
@@ -1258,7 +1358,7 @@ export class SocialAgentCardActionRouterService {
       schemaVersion: 'fitmeet.tool-ui.v1',
       schemaType: 'social_match.activity',
       title: '已发布到发现',
-      body: '公开可发现用户现在可以看到这张约练卡。',
+      body: publishCopy.publishedCardBody,
       status: 'completed',
       data: {
         taskId,
@@ -1292,8 +1392,7 @@ export class SocialAgentCardActionRouterService {
     };
     const publishResult = this.simpleRouteResult({
       taskId,
-      assistantMessage:
-        '已发布到发现页。我会根据这张约练卡继续帮你匹配合适的人；发送邀请、加好友或私信前仍会让你确认。',
+      assistantMessage: publishCopy.publishedMessage,
       cards: [publishedCard],
       publicLoop: {
         stage: 'discover_visible',
@@ -1365,11 +1464,15 @@ export class SocialAgentCardActionRouterService {
     } as CreateSocialRequestDto & { socialRequestId?: number | null };
   }
 
-  private isWorkoutPublishPayload(
+  private loopPublishKindFromPayload(
     body: SocialAgentCardActionBody,
     payload: Record<string, unknown>,
-  ): boolean {
-    if (this.text(body.action) === 'workout_draft.publish') return true;
+  ): LoopDraftPublishKind | null {
+    const directAction =
+      this.loopDraftPublishKind(this.text(body.action)) ??
+      this.loopDraftPublishKind(this.text(payload.loopDraftPublishAction)) ??
+      this.loopDraftPublishKind(this.text(payload.sourceAction));
+    if (directAction) return directAction;
     const draft = {
       ...this.record(payload.socialRequestDraft),
       ...this.record(payload.draft),
@@ -1380,11 +1483,30 @@ export class SocialAgentCardActionRouterService {
       ...this.record(draft.metadata),
       ...this.record(payload.metadata),
     };
-    return (
-      this.text(metadata.loop) === 'workout' ||
-      this.text(metadata.source) === 'workout_loop_mvp' ||
+    const loop = this.text(metadata.loop);
+    if (loop === 'workout' || loop === 'friend' || loop === 'travel') {
+      return loop;
+    }
+    const source = this.text(metadata.source);
+    if (
+      source === 'workout_loop_mvp' ||
       this.text(metadata.workoutLoopStage).length > 0
-    );
+    ) {
+      return 'workout';
+    }
+    if (
+      source === 'friend_loop_mvp' ||
+      this.text(metadata.friendLoopStage).length > 0
+    ) {
+      return 'friend';
+    }
+    if (
+      source === 'travel_loop_mvp' ||
+      this.text(metadata.travelLoopStage).length > 0
+    ) {
+      return 'travel';
+    }
+    return null;
   }
 
   private workoutSlotsFromPublishPayload(
@@ -1470,6 +1592,194 @@ export class SocialAgentCardActionRouterService {
         ) === 'private'
           ? 'private'
           : 'public',
+    };
+  }
+
+  private friendSlotsFromPublishPayload(
+    payload: Record<string, unknown>,
+  ): FriendSlots {
+    const draft = {
+      ...this.record(payload.socialRequestDraft),
+      ...this.record(payload.draft),
+      ...this.record(payload.activity),
+      ...payload,
+    };
+    const slots = this.record(payload.slots);
+    const metadata = {
+      ...this.record(draft.metadata),
+      ...this.record(payload.metadata),
+    };
+    return normalizeFriendSlots({
+      friendGoal:
+        this.text(
+          slots.friendGoal ??
+            draft.friendGoal ??
+            metadata.friendGoal ??
+            draft.activityType ??
+            metadata.activityType,
+        ) || undefined,
+      city: this.text(slots.city ?? draft.city ?? metadata.city) || undefined,
+      topicTags: this.stringArray(
+        slots.topicTags ?? draft.topicTags ?? metadata.topicTags ?? draft.tags,
+      ),
+      scenePreference:
+        this.text(
+          slots.scenePreference ??
+            draft.scenePreference ??
+            metadata.scenePreference,
+        ) || undefined,
+      timePreference:
+        this.text(
+          slots.timePreference ??
+            draft.timePreference ??
+            metadata.timePreference,
+        ) || undefined,
+      candidatePreference:
+        this.text(
+          slots.candidatePreference ??
+            draft.candidatePreference ??
+            metadata.candidatePreference,
+        ) || undefined,
+      safetyBoundary:
+        this.text(
+          slots.safetyBoundary ??
+            draft.safetyBoundary ??
+            metadata.safetyBoundary,
+        ) || undefined,
+      visibilityPreference: 'private',
+    });
+  }
+
+  private travelSlotsFromPublishPayload(
+    payload: Record<string, unknown>,
+  ): TravelSlots {
+    const draft = {
+      ...this.record(payload.socialRequestDraft),
+      ...this.record(payload.draft),
+      ...this.record(payload.activity),
+      ...payload,
+    };
+    const slots = this.record(payload.slots);
+    const metadata = {
+      ...this.record(draft.metadata),
+      ...this.record(payload.metadata),
+    };
+    return normalizeTravelSlots({
+      destination:
+        this.text(
+          slots.destination ??
+            draft.destination ??
+            metadata.destination ??
+            draft.locationName ??
+            draft.locationPreference,
+        ) || undefined,
+      departureTime:
+        this.text(
+          slots.departureTime ??
+            draft.departureTime ??
+            draft.timePreference ??
+            metadata.departureTime,
+        ) || undefined,
+      duration:
+        this.text(slots.duration ?? draft.duration ?? metadata.duration) ||
+        undefined,
+      budgetRange:
+        this.text(
+          slots.budgetRange ?? draft.budgetRange ?? metadata.budgetRange,
+        ) || undefined,
+      transportMode:
+        this.text(
+          slots.transportMode ?? draft.transportMode ?? metadata.transportMode,
+        ) || undefined,
+      tags: this.stringArray(slots.tags ?? draft.tags ?? metadata.tags),
+      genderPreference:
+        this.text(
+          slots.genderPreference ??
+            draft.genderPreference ??
+            metadata.genderPreference,
+        ) || undefined,
+      photoPreference:
+        this.text(
+          slots.photoPreference ??
+            draft.photoPreference ??
+            metadata.photoPreference,
+        ) || undefined,
+      accommodationPreference:
+        this.text(
+          slots.accommodationPreference ??
+            draft.accommodationPreference ??
+            metadata.accommodationPreference,
+        ) || undefined,
+      foodPreference:
+        this.text(
+          slots.foodPreference ??
+            draft.foodPreference ??
+            metadata.foodPreference,
+        ) || undefined,
+      candidatePreference:
+        this.text(
+          slots.candidatePreference ??
+            draft.candidatePreference ??
+            metadata.candidatePreference,
+        ) || undefined,
+      safetyBoundary:
+        this.text(
+          slots.safetyBoundary ??
+            draft.safetyBoundary ??
+            metadata.safetyBoundary,
+        ) || undefined,
+      visibilityPreference: 'private',
+    });
+  }
+
+  private travelPublishCityFromPayload(
+    payload: Record<string, unknown>,
+  ): string {
+    const draft = {
+      ...this.record(payload.socialRequestDraft),
+      ...this.record(payload.draft),
+      ...this.record(payload.activity),
+      ...payload,
+    };
+    const slots = this.record(payload.slots);
+    const metadata = {
+      ...this.record(draft.metadata),
+      ...this.record(payload.metadata),
+    };
+    return this.text(slots.city ?? draft.city ?? metadata.city);
+  }
+
+  private loopPublishQueuedMessage(kind: LoopDraftPublishKind): string {
+    if (kind === 'friend') {
+      return '已发布到发现页，并进入交友匹配队列。发送邀请、加好友或私信前仍会让你确认。';
+    }
+    if (kind === 'travel') {
+      return '已发布到发现页，并进入旅行寻伴匹配队列。发送邀请、加好友或私信前仍会让你确认。';
+    }
+    return '已发布到发现页，并进入约练匹配队列。发送邀请、加好友或私信前仍会让你确认。';
+  }
+
+  private loopPublishCopy(kind: LoopDraftPublishKind | null): {
+    confirmMessage: string;
+    confirmBody: string;
+    pendingApprovalMessage: string;
+    approvalSummary: string;
+    publishedCardBody: string;
+    publishedMessage: string;
+  } {
+    const noun =
+      kind === 'friend'
+        ? '交友卡'
+        : kind === 'travel'
+          ? '旅行寻伴卡'
+          : '约练卡';
+    return {
+      confirmMessage: `发布到发现前需要你确认。确认后这张${noun}才会公开给附近可发现用户。`,
+      confirmBody: `确认后，这张${noun}会公开给附近可发现用户。不会公开精确位置或联系方式。`,
+      pendingApprovalMessage: `发布到发现前还需要你确认。确认后，这张${noun}才会公开给附近可发现用户。`,
+      approvalSummary: `发布${noun}到发现页`,
+      publishedCardBody: `公开可发现用户现在可以看到这张${noun}。`,
+      publishedMessage: `已发布到发现页。我会根据这张${noun}继续帮你匹配合适的人；发送邀请、加好友或私信前仍会让你确认。`,
     };
   }
 

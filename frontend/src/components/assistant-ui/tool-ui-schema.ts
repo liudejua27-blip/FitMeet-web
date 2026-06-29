@@ -101,12 +101,14 @@ export type ToolUISchemaAction =
   | 'friend_intake.submit'
   | 'friend_intake.use_defaults'
   | 'friend_intake.cancel'
+  | 'friend_draft.publish'
   | 'friend_draft.private_match'
   | 'friend_draft.edit'
   | 'friend_draft.cancel'
   | 'travel_intake.submit'
   | 'travel_intake.use_defaults'
   | 'travel_intake.cancel'
+  | 'travel_draft.publish'
   | 'travel_draft.private_match'
   | 'travel_draft.edit'
   | 'travel_draft.cancel'
@@ -1196,12 +1198,14 @@ export function toolUISchemaActionFromUnknown(value: unknown): ToolUISchemaActio
     text === 'friend_intake.submit' ||
     text === 'friend_intake.use_defaults' ||
     text === 'friend_intake.cancel' ||
+    text === 'friend_draft.publish' ||
     text === 'friend_draft.private_match' ||
     text === 'friend_draft.edit' ||
     text === 'friend_draft.cancel' ||
     text === 'travel_intake.submit' ||
     text === 'travel_intake.use_defaults' ||
     text === 'travel_intake.cancel' ||
+    text === 'travel_draft.publish' ||
     text === 'travel_draft.private_match' ||
     text === 'travel_draft.edit' ||
     text === 'travel_draft.cancel' ||

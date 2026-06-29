@@ -62,12 +62,14 @@ export const TOOL_UI_SCHEMA_ACTIONS = [
   'friend_intake.submit',
   'friend_intake.use_defaults',
   'friend_intake.cancel',
+  'friend_draft.publish',
   'friend_draft.private_match',
   'friend_draft.edit',
   'friend_draft.cancel',
   'travel_intake.submit',
   'travel_intake.use_defaults',
   'travel_intake.cancel',
+  'travel_draft.publish',
   'travel_draft.private_match',
   'travel_draft.edit',
   'travel_draft.cancel',
@@ -353,6 +355,11 @@ export const TOOL_UI_CARD_ACTION_COPY: Record<ToolUISchemaAction, ToolUICardActi
     done: '已取消',
     result: '已取消本次交友卡，不会匹配或联系任何人。',
   },
+  'friend_draft.publish': {
+    busy: '正在发布到发现',
+    done: '已发布到发现',
+    result: '交友卡已发布到发现页，并进入交友匹配队列。',
+  },
   'friend_draft.private_match': {
     busy: '正在进入私密匹配',
     done: '已进入私密匹配',
@@ -382,6 +389,11 @@ export const TOOL_UI_CARD_ACTION_COPY: Record<ToolUISchemaAction, ToolUICardActi
     busy: '正在取消',
     done: '已取消',
     result: '已取消本次旅行寻伴卡，不会匹配或联系任何人。',
+  },
+  'travel_draft.publish': {
+    busy: '正在发布到发现',
+    done: '已发布到发现',
+    result: '旅行寻伴卡已发布到发现页，并进入旅行寻伴匹配队列。',
   },
   'travel_draft.private_match': {
     busy: '正在进入私密匹配',
