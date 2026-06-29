@@ -248,6 +248,7 @@ import { AdminRbacModule } from '../admin-rbac/admin-rbac.module';
 import { FeatureFlagService } from '../common/feature-flag.service';
 import { AgentEntryOrchestratorService } from './agent-entry/agent-entry-orchestrator.service';
 import { LegacyAgentAdapterService } from './legacy-agent/legacy-agent-adapter.service';
+import { FriendLoopService } from './friend-loop/friend-loop.service';
 import { ProfileLoopService } from './profile-loop/profile-loop.service';
 import { GeoResolverService } from './geo/geo-resolver.service';
 import { AmapChinaGeoProviderService } from './geo/amap-china-geo-provider.service';
@@ -352,6 +353,7 @@ import { WorkoutUnderstandingService } from './workout-loop/workout-understandin
     SocialAgentDomainClassifierService,
     AgentEntryOrchestratorService,
     LegacyAgentAdapterService,
+    FriendLoopService,
     FitMeetLoopRouterService,
     ClarificationCardActionService,
     ProfileLoopService,

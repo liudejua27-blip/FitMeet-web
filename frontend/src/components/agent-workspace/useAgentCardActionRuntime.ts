@@ -1,9 +1,6 @@
 import { useCallback, useEffect, useRef, type MutableRefObject } from 'react';
 
-import {
-  submitAgentFeedbackEvent,
-  type AgentFeedbackReasonCode,
-} from '../../api/agentFeedbackApi';
+import { submitAgentFeedbackEvent, type AgentFeedbackReasonCode } from '../../api/agentFeedbackApi';
 import type {
   FitMeetAgentCardExecutableAction,
   FitMeetAgentSchemaAction,
@@ -109,11 +106,7 @@ export function useAgentCardActionRuntime({
             permissionMode: 'confirm',
             conversationIntent: 'social',
             taskId,
-            idempotencyKey: idempotencyKeyForCardAction(
-              taskId,
-              action,
-              input?.payload,
-            ),
+            idempotencyKey: idempotencyKeyForCardAction(taskId, action, input?.payload),
           },
           {
             onEvent: handleAgentStreamEvent,
@@ -133,9 +126,7 @@ export function useAgentCardActionRuntime({
         }
         setSteps((current) =>
           current.map((step) =>
-            step.status === 'running'
-              ? { ...step, status: stopped ? 'pending' : 'error' }
-              : step,
+            step.status === 'running' ? { ...step, status: stopped ? 'pending' : 'error' } : step,
           ),
         );
         if (!stopped) throw error;
@@ -399,6 +390,12 @@ function isExecutableToolUISchemaAction(
     value === 'workout_draft.private_match' ||
     value === 'workout_draft.edit' ||
     value === 'workout_draft.cancel' ||
+    value === 'friend_intake.submit' ||
+    value === 'friend_intake.use_defaults' ||
+    value === 'friend_intake.cancel' ||
+    value === 'friend_draft.private_match' ||
+    value === 'friend_draft.edit' ||
+    value === 'friend_draft.cancel' ||
     value === 'public_intent_application.accept' ||
     value === 'public_intent_application.reject' ||
     value === 'public_intent_application.view_profile' ||
@@ -502,6 +499,12 @@ const WORKOUT_ACTIONS_APPEND_FEEDBACK = new Set<FitMeetAgentCardExecutableAction
   'workout_draft.private_match',
   'workout_draft.edit',
   'workout_draft.cancel',
+  'friend_intake.submit',
+  'friend_intake.use_defaults',
+  'friend_intake.cancel',
+  'friend_draft.private_match',
+  'friend_draft.edit',
+  'friend_draft.cancel',
 ]);
 
 function shouldAppendActionResultMessage(
@@ -648,7 +651,7 @@ const CARD_ACTION_ASSISTANT_MESSAGES: Partial<Record<FitMeetAgentCardExecutableA
   'public_intent_application.view_profile': '已打开申请人的公开资料。',
   'public_intent_application.open_conversation': '已进入消息页继续沟通。',
   'loop_choice.workout': '已进入约练闭环，我会帮你整理本次约练卡。',
-  'loop_choice.friend': '交友闭环即将支持。当前可以先使用约练闭环。',
+  'loop_choice.friend': '已进入交友闭环，我会帮你整理本次交友卡。',
   'loop_choice.travel': '旅游闭环即将支持。当前可以先使用约练闭环。',
   'clarification.yes': '已按这个理解更新约练填写卡。',
   'clarification.no': '已切换为填写卡，你可以自己补充本次约练需求。',
@@ -659,6 +662,12 @@ const CARD_ACTION_ASSISTANT_MESSAGES: Partial<Record<FitMeetAgentCardExecutableA
   'workout_draft.private_match': '已保存为不公开约练卡，正在当前对话里继续私密匹配。',
   'workout_draft.edit': '可以继续修改本次约练需求。',
   'workout_draft.cancel': '已取消这次约练卡，不会发布或匹配。',
+  'friend_intake.submit': '已根据本次填写生成交友卡，确认前不会匹配。',
+  'friend_intake.use_defaults': '已使用默认安全设置继续生成交友卡。',
+  'friend_intake.cancel': '已取消本次交友卡，不会匹配或联系任何人。',
+  'friend_draft.private_match': '已保存为不公开交友卡，正在当前对话里继续私密匹配。',
+  'friend_draft.edit': '可以继续修改本次交友需求。',
+  'friend_draft.cancel': '已取消这次交友卡，不会匹配或联系任何人。',
 };
 
 function assistantMessageForCardAction(

@@ -190,6 +190,12 @@ export type FitMeetAgentSchemaAction =
   | 'workout_draft.private_match'
   | 'workout_draft.edit'
   | 'workout_draft.cancel'
+  | 'friend_intake.submit'
+  | 'friend_intake.use_defaults'
+  | 'friend_intake.cancel'
+  | 'friend_draft.private_match'
+  | 'friend_draft.edit'
+  | 'friend_draft.cancel'
   | 'public_intent_application.accept'
   | 'public_intent_application.reject'
   | 'public_intent_application.view_profile'
@@ -390,6 +396,7 @@ export type FitMeetAlphaCardType =
   | 'workout_intake'
   | 'workout_draft'
   | 'friend_intake'
+  | 'friend_draft'
   | 'travel_intake'
   | 'travel_companion_draft';
 
@@ -443,6 +450,7 @@ export interface FitMeetAlphaCard {
     | 'workout.intake'
     | 'workout.draft'
     | 'friend.intake'
+    | 'friend.draft'
     | 'travel.intake'
     | 'travel.companion_draft'
     | 'generic.card';

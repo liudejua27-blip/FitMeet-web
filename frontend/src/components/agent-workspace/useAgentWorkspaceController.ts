@@ -330,9 +330,7 @@ export function useAgentWorkspaceController(view: AgentView) {
           '已找到候选，等待你确认下一步。',
         );
         setActiveTaskId(responseTaskId ?? null);
-        setUserResult((current) =>
-          mergeRealtimeCandidateResponse(current, response),
-        );
+        setUserResult((current) => mergeRealtimeCandidateResponse(current, response));
         setMessages((current) => {
           const existingIndex = [...current]
             .reverse()
@@ -1031,7 +1029,7 @@ function buildLoopChoiceBootstrapResponse(input: {
     schemaVersion: 'fitmeet.tool-ui.v1',
     schemaType: 'loop.choice',
     title: '你今天想做什么？',
-    body: '先选一个闭环。我会优先让约练走最短链路；交友和旅游即将支持。',
+    body: '先选一个闭环。我会优先让约练和交友走卡片闭环；旅游即将支持。',
     status: 'waiting_confirmation',
     data: {
       taskId: input.taskId,
@@ -1120,8 +1118,7 @@ function buildProfileCompletionBootstrapResponse(input: {
     actions: [],
   };
   return {
-    assistantMessage:
-      '资料还不完整，我可以帮你补充。你也可以先创建本次约练卡。',
+    assistantMessage: '资料还不完整，我可以帮你补充。你也可以先创建本次约练卡。',
     assistantMessageSource: 'deterministic_route',
     lightStatus: '正在整理回复',
     cards: [card],

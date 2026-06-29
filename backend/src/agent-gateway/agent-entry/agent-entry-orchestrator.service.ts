@@ -2,6 +2,7 @@ import { Injectable, Logger, Optional } from '@nestjs/common';
 
 import { LegacyAgentAdapterService } from '../legacy-agent/legacy-agent-adapter.service';
 import { FitMeetLoopRouterService } from '../loop-router/fitmeet-loop-router.service';
+import { FriendLoopService } from '../friend-loop/friend-loop.service';
 import { ProfileLoopService } from '../profile-loop/profile-loop.service';
 import { WorkoutEntryArbitrationService } from '../workout-loop/workout-entry-arbitration.service';
 import { WorkoutLoopService } from '../workout-loop/workout-loop.service';
@@ -23,6 +24,8 @@ export class AgentEntryOrchestratorService {
     private readonly profileLoop?: ProfileLoopService,
     @Optional()
     private readonly workoutArbitration?: WorkoutEntryArbitrationService,
+    @Optional()
+    private readonly friendLoop?: FriendLoopService,
   ) {}
 
   async handle(input: AgentEntryInput): Promise<AgentEntryResult> {
@@ -72,6 +75,30 @@ export class AgentEntryOrchestratorService {
           result: workout.result,
         };
       }
+    }
+
+    if (
+      loopIntent.disposition === 'accept_loop' &&
+      loopIntent.intent === 'friend' &&
+      this.friendLoop
+    ) {
+      const friend = await this.friendLoop.tryHandleEntrance({
+        ownerUserId: input.ownerUserId,
+        task: input.task,
+        message: input.message,
+      });
+      this.logRoute(input, {
+        source: 'friend_loop_intent',
+        loopIntent: loopIntent.intent,
+        workoutStage,
+        cards: this.cardSchemaTypes(friend.result.cards),
+        legacyBlocked: true,
+      });
+      return {
+        source: 'friend_loop_intent',
+        task: friend.task,
+        result: friend.result,
+      };
     }
 
     if (

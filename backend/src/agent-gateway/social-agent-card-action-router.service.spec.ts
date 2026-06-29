@@ -87,6 +87,10 @@ function makeHarness(options: { runRunner?: boolean } = {}) {
     startWorkoutIntake: jest.fn(),
     performWorkoutAction: jest.fn(),
   };
+  const friendLoop = {
+    startFriendIntake: jest.fn(),
+    performFriendAction: jest.fn(),
+  };
   const clarificationActions = {
     perform: jest.fn(),
   };
@@ -103,6 +107,7 @@ function makeHarness(options: { runRunner?: boolean } = {}) {
     undefined as never,
     workoutLoop as never,
     clarificationActions as never,
+    friendLoop as never,
   );
   const handleMessage = jest.fn().mockResolvedValue(
     routeResult({
@@ -119,6 +124,7 @@ function makeHarness(options: { runRunner?: boolean } = {}) {
     metrics,
     draftPublication,
     workoutLoop,
+    friendLoop,
     clarificationActions,
     service,
   };
@@ -168,7 +174,46 @@ describe('SocialAgentCardActionRouterService', () => {
     );
   });
 
-  it('returns friend and travel loop choices as coming-soon generic cards', async () => {
+  it('dispatches loop choice friend directly to FriendLoop without re-entering chat LLM', async () => {
+    const { friendLoop, handleMessage, service } = makeHarness();
+    friendLoop.startFriendIntake.mockResolvedValue(
+      routeResult({
+        action: 'clarify',
+        assistantMessage: '好的，我们先进入交友流程。',
+        cards: [
+          {
+            id: 'friend_intake:101',
+            type: 'friend_intake',
+            schemaVersion: 'fitmeet.tool-ui.v1',
+            schemaType: 'friend.intake',
+            title: '填写本次交友需求',
+            data: { taskId: 101 },
+            actions: [],
+          },
+        ],
+      }),
+    );
+
+    const result = await service.perform({
+      ownerUserId: 7,
+      taskId: 101,
+      body: {
+        action: 'loop_choice.friend' as never,
+        payload: { source: 'bootstrap' },
+      },
+      handleMessage,
+    });
+
+    expect(handleMessage).not.toHaveBeenCalled();
+    expect(friendLoop.startFriendIntake).toHaveBeenCalledWith({
+      ownerUserId: 7,
+      taskId: 101,
+      payload: { source: 'bootstrap' },
+    });
+    expect(result.cards?.[0]).toMatchObject({ schemaType: 'friend.intake' });
+  });
+
+  it('returns travel loop choice as a coming-soon generic card', async () => {
     const { handleMessage, service } = makeHarness();
 
     const result = await service.perform({
