@@ -16,6 +16,7 @@ export function EnterpriseHero({
   layout = 'split',
   pageName,
   proofItems,
+  subtitle,
   title,
   visual,
 }: {
@@ -25,6 +26,7 @@ export function EnterpriseHero({
   layout?: 'split' | 'center';
   pageName?: string;
   proofItems?: string[];
+  subtitle?: string;
   title: ReactNode;
   visual?: ReactNode;
 }) {
@@ -42,6 +44,7 @@ export function EnterpriseHero({
       <div className="fm-enterprise-hero-system__copy">
         {eyebrow ? <span className="fm-eyebrow">{eyebrow}</span> : null}
         <h1>{title}</h1>
+        {subtitle ? <strong className="fm-enterprise-hero-system__subtitle">{subtitle}</strong> : null}
         <p>{description}</p>
         <div className="fm-actions">
           {actions.map((action) => (

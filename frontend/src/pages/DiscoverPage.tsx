@@ -7,10 +7,8 @@ import {
   useState,
 } from 'react';
 import clsx from 'clsx';
-import { ShieldCheck, Sparkles, UsersRound } from 'lucide-react';
 import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { SiteLink } from '../components/navigation/SiteLink';
-import { useCinematicMotion } from '../components/website/useCinematicMotion';
 import * as dataService from '../services/dataService';
 import { socialAgentApi } from '../api/socialAgentApi';
 import { getMeetDistanceMeters } from '../lib/distance';
@@ -227,8 +225,6 @@ export const DiscoverPage = () => {
     [displayMeets],
   );
 
-  const spotlightMeets = useMemo(() => displayMeets.slice(0, 3), [displayMeets]);
-
   const handleUseLocation = useCallback(() => {
     setIsLocating(true);
     getBrowserLocation()
@@ -424,9 +420,14 @@ export const DiscoverPage = () => {
               ))}
             </div>
           </div>
-          <div className="discover-hero__visual" aria-label="FitMeet 发现页产品预览">
-            <DiscoverScenePreview meets={spotlightMeets} people={activePeople} />
-          </div>
+          <figure className="discover-hero__visual fm-discover-product-visual" aria-label="FitMeet 发现页产品预览">
+            <img
+              src="/images/fitmeet/website/social-world-discover-product-v1.jpg"
+              alt="FitMeet 发现页黑金产品视觉，展示需求卡、Discover 可见和候选匹配"
+              loading="eager"
+              decoding="async"
+            />
+          </figure>
         </section>
 
         {error ? (
@@ -679,96 +680,6 @@ function DiscoverSiteFooter() {
         </a>
       </nav>
     </footer>
-  );
-}
-
-function DiscoverScenePreview({
-  meets,
-  people,
-}: {
-  meets: DiscoverMeet[];
-  people: Array<{
-    id: number | string;
-    name: string;
-    avatar: string;
-    color: string;
-    sport: string;
-    distance: string;
-  }>;
-}) {
-  const scopeRef = useCinematicMotion<HTMLDivElement>();
-  const primaryMeet = meets[0];
-  const secondaryMeets = meets.slice(1, 3);
-  const location = primaryMeet?.loc || primaryMeet?.city || '青岛 · 市南区';
-  const time = primaryMeet ? formatMeetTime(primaryMeet) : '06/26 19:00';
-  const sport = primaryMeet ? getSportLabel(primaryMeet.sport) : '跑步';
-
-  return (
-    <div ref={scopeRef} className="discover-cinematic-preview">
-      <div className="discover-cinematic-preview__beams" aria-hidden="true">
-        <span data-cinematic-beam />
-        <span data-cinematic-beam />
-        <span data-cinematic-beam />
-      </div>
-      <picture className="discover-cinematic-preview__media" data-cinematic-media>
-        <img
-          src="/images/fitmeet/website/social-world-phone-discover-v3.jpg"
-          alt="FitMeet 发现页黑金 App 产品预览"
-          width="1600"
-          height="900"
-          loading="lazy"
-          decoding="async"
-        />
-      </picture>
-      <div className="discover-cinematic-preview__veil" aria-hidden="true" />
-
-      <article className="discover-cinematic-card discover-cinematic-card--primary" data-cinematic-float>
-        <span>
-          <Sparkles size={18} aria-hidden="true" />
-        </span>
-        <strong>{primaryMeet?.title || '附近新的需求卡片'}</strong>
-        <small>
-          {sport} · {time} · {location}
-        </small>
-      </article>
-
-      <article className="discover-cinematic-card discover-cinematic-card--safety" data-cinematic-float>
-        <span>
-          <ShieldCheck size={18} aria-hidden="true" />
-        </span>
-        <strong>确认后再公开</strong>
-        <small>发布、邀请、私信和位置都由你决定</small>
-      </article>
-
-      <div className="discover-cinematic-card discover-cinematic-card--stack" data-cinematic-float>
-        {(secondaryMeets.length > 0
-          ? secondaryMeets
-          : [
-              { id: 'fallback-1', title: '周末海边散步', loc: '五四广场', sport: 'walk' },
-              { id: 'fallback-2', title: '下班后轻健身', loc: '市南健身房', sport: 'gym' },
-            ]
-        ).map((meet) => (
-          <span key={String(meet.id)}>
-            <span>{getSportLabel(meet.sport)}</span>
-            <strong>{meet.title}</strong>
-            <small>{meet.loc || '附近'}</small>
-          </span>
-        ))}
-      </div>
-
-      <div className="discover-cinematic-card discover-cinematic-card--people" data-cinematic-float>
-        <UsersRound size={18} aria-hidden="true" />
-        {people.slice(0, 3).map((person) => (
-          <span key={person.id} style={{ '--person-color': person.color } as CSSProperties}>
-            <b>{person.avatar}</b>
-            <small>
-              {person.sport} · {person.distance}
-            </small>
-          </span>
-        ))}
-        {people.length === 0 ? <small>真实用户完善资料后会出现在这里</small> : null}
-      </div>
-    </div>
   );
 }
 
