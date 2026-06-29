@@ -56,13 +56,19 @@ The Workout loop is the first real loop-agent implementation. It uses:
 - `WorkoutUnderstandingService` for DeepSeek JSON understanding. It extracts
   workout slots and `locationMention`; it does not publish, match, or send.
 - `GeoResolverService` and `AmapChinaGeoProviderService` for nationwide China
-  POI/geocode resolution. AMap results can return multiple candidates.
+  POI/geocode resolution. AMap results can return multiple candidates, and
+  `clarification.geo_candidates` lets the user select one instead of answering
+  a binary yes/no prompt.
 - `WorkoutLoopService` to turn brain decisions into cards and deterministic
   route results.
 - `SocialAgentDraftPublicationService`, `MatchingJobService`, and
   `SocialAgentMatchingJobProcessorService` for public and private matching.
 - `SocialAgentCandidateActionService` and `WorkoutOpenerDraftService` for
   candidate actions, opener drafts, and approval-gated sends.
+- `AgentLoopBrainRuntime` at the controlled decision boundaries: entrance,
+  continuation, intake submit, no-candidate recovery, opener drafting, and
+  opener send confirmation. The runtime observes and records these decisions,
+  while backend services still own side effects.
 
 The minimal workout state path is:
 
@@ -80,6 +86,11 @@ Public publish and private match both enter the durable matching-job path. A
 private job does not create a public discover intent, but it is still recoverable
 and auditable through the matching job, task memory, and realtime candidate
 payload.
+
+Workout slot merges use `LoopSlotMeta` source/confidence data so user-confirmed
+and geo-confirmed fields win over lower-confidence rule fallbacks. DeepSeek
+understanding can enrich slots, but it cannot override user-confirmed values or
+execute publish, matching, or message actions.
 
 ## Tool And Safety Boundaries
 
@@ -121,10 +132,11 @@ or shared loop tool.
 Friend and Travel now follow the card-driven loop template instead of returning
 coming-soon placeholders. They have lightweight loop brains, dedicated loop
 services, intake cards, draft cards, private matching jobs, and route/action
-wiring. They are lighter than Workout because they do not yet have dedicated
-LLM understanding or nationwide geo-confirmation, but they should keep using the
-shared loop contract and the same durable matching, realtime, opener, and
-approval boundaries.
+wiring. They also have dedicated understanding services for structured slot
+fallback. They are still lighter than Workout because they do not yet have the
+same nationwide multi-candidate geo-confirmation depth or dedicated opener
+prompting, but they must keep using the shared loop contract and the same
+durable matching, realtime, opener, and approval boundaries.
 
 ## Next Loop Template
 
@@ -144,3 +156,16 @@ LoopRouter candidate
 Shared foundations should be reused: `GeoResolverService`, `MatchingJobService`,
 candidate pool/index, realtime, approval, side-effect ledger, user-facing
 sanitizer, and card action router.
+
+## Current Follow-Ups
+
+The remaining work should not re-expand the legacy agent. Continue tightening
+the loop agents in place:
+
+- keep Profile completion as a non-blocking nudge, not a gate
+- extend Friend and Travel toward Workout-level geo-confirmation and opener
+  prompts
+- add broader real-database smoke coverage for public and private matching
+- move shared card, intake, draft, and opener helpers only when duplication
+  becomes a real maintenance cost
+- keep legacy route-search/action turns deprecated and out of new loop paths
