@@ -65,6 +65,12 @@ export const TOOL_UI_SCHEMA_ACTIONS = [
   'friend_draft.private_match',
   'friend_draft.edit',
   'friend_draft.cancel',
+  'travel_intake.submit',
+  'travel_intake.use_defaults',
+  'travel_intake.cancel',
+  'travel_draft.private_match',
+  'travel_draft.edit',
+  'travel_draft.cancel',
   'public_intent_application.accept',
   'public_intent_application.reject',
   'public_intent_application.view_profile',
@@ -278,9 +284,9 @@ export const TOOL_UI_CARD_ACTION_COPY: Record<ToolUISchemaAction, ToolUICardActi
     result: '已进入交友闭环，我会帮你整理本次交友卡。',
   },
   'loop_choice.travel': {
-    busy: '正在记录选择',
-    done: '已记录选择',
-    result: '旅游闭环即将支持。当前可以先使用约练闭环。',
+    busy: '正在进入旅游闭环',
+    done: '已进入旅游闭环',
+    result: '已进入旅游闭环，我会帮你整理本次旅行寻伴卡。',
   },
   'clarification.yes': {
     busy: '正在确认',
@@ -361,6 +367,36 @@ export const TOOL_UI_CARD_ACTION_COPY: Record<ToolUISchemaAction, ToolUICardActi
     busy: '正在取消',
     done: '已取消',
     result: '已取消这次交友卡，不会匹配或联系任何人。',
+  },
+  'travel_intake.submit': {
+    busy: '正在生成旅行寻伴卡',
+    done: '已生成旅行寻伴卡',
+    result: '已根据本次填写生成旅行寻伴卡，确认前不会匹配。',
+  },
+  'travel_intake.use_defaults': {
+    busy: '正在套用默认安全设置',
+    done: '已套用默认设置',
+    result: '已使用默认安全设置继续生成旅行寻伴卡。',
+  },
+  'travel_intake.cancel': {
+    busy: '正在取消',
+    done: '已取消',
+    result: '已取消本次旅行寻伴卡，不会匹配或联系任何人。',
+  },
+  'travel_draft.private_match': {
+    busy: '正在进入私密匹配',
+    done: '已进入私密匹配',
+    result: '已保存为不公开旅行寻伴卡，正在当前对话里继续私密匹配。',
+  },
+  'travel_draft.edit': {
+    busy: '正在打开修改',
+    done: '已打开修改',
+    result: '可以继续修改本次旅行寻伴需求。',
+  },
+  'travel_draft.cancel': {
+    busy: '正在取消',
+    done: '已取消',
+    result: '已取消这次旅行寻伴卡，不会匹配或联系任何人。',
   },
   'public_intent_application.accept': {
     busy: '正在接受报名',

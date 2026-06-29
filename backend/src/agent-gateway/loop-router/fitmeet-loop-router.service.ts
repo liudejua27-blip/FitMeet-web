@@ -37,7 +37,7 @@ export class FitMeetLoopRouterService {
     if (PROFILE.test(text))
       return result('profile', 0.9, 'profile_keyword', 'accept_loop');
     if (TRAVEL.test(text))
-      return result('travel', 0.88, 'travel_keyword', 'handoff_legacy');
+      return result('travel', 0.88, 'travel_keyword', 'accept_loop');
 
     const workoutIntent = classifyWorkoutIntent(text);
     if (workoutIntent === 'negative') {

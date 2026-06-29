@@ -108,6 +108,12 @@ const LazyFriendIntakeCard = lazy(() =>
 const LazyFriendDraftCard = lazy(() =>
   import('./tool-friend-cards').then((module) => ({ default: module.FriendDraftCard })),
 );
+const LazyTravelIntakeCard = lazy(() =>
+  import('./tool-travel-cards').then((module) => ({ default: module.TravelIntakeCard })),
+);
+const LazyTravelDraftCard = lazy(() =>
+  import('./tool-travel-cards').then((module) => ({ default: module.TravelDraftCard })),
+);
 
 const ASSISTANT_CARD_RENDERERS: Record<ToolUISchemaType, ToolUICardRenderer> = {
   'social_match.candidate': CandidateResultCard,
@@ -129,8 +135,8 @@ const ASSISTANT_CARD_RENDERERS: Record<ToolUISchemaType, ToolUICardRenderer> = {
   'workout.draft': WorkoutDraftResultCard,
   'friend.intake': FriendIntakeResultCard,
   'friend.draft': FriendDraftResultCard,
-  'travel.intake': GenericResultCard,
-  'travel.companion_draft': GenericResultCard,
+  'travel.intake': TravelIntakeResultCard,
+  'travel.companion_draft': TravelDraftResultCard,
   'generic.card': GenericResultCard,
 };
 
@@ -438,6 +444,22 @@ function FriendDraftResultCard({ card }: { card: SchemaDrivenAssistantCard }) {
   return (
     <Suspense fallback={<GenericResultCard card={card} />}>
       <LazyFriendDraftCard card={card} />
+    </Suspense>
+  );
+}
+
+function TravelIntakeResultCard({ card }: { card: SchemaDrivenAssistantCard }) {
+  return (
+    <Suspense fallback={<GenericResultCard card={card} />}>
+      <LazyTravelIntakeCard card={card} />
+    </Suspense>
+  );
+}
+
+function TravelDraftResultCard({ card }: { card: SchemaDrivenAssistantCard }) {
+  return (
+    <Suspense fallback={<GenericResultCard card={card} />}>
+      <LazyTravelDraftCard card={card} />
     </Suspense>
   );
 }

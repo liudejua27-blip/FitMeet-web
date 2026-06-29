@@ -61,8 +61,8 @@ describe('tool-ui-schema', () => {
     expect(productComponentForSchemaType('workout.draft')).toBe('WorkoutDraftCard');
     expect(productComponentForSchemaType('friend.intake')).toBe('FriendIntakeCard');
     expect(productComponentForSchemaType('friend.draft')).toBe('FriendDraftCard');
-    expect(productComponentForSchemaType('travel.intake')).toBe('GenericCard');
-    expect(productComponentForSchemaType('travel.companion_draft')).toBe('GenericCard');
+    expect(productComponentForSchemaType('travel.intake')).toBe('TravelIntakeCard');
+    expect(productComponentForSchemaType('travel.companion_draft')).toBe('TravelDraftCard');
 
     const cards = [
       normalizeAssistantCard({
@@ -193,7 +193,7 @@ describe('tool-ui-schema', () => {
     expect(summarizeToolUICardCollection(cards).detail).toContain('约练闭环');
   });
 
-  it('keeps friend loop schemas executable while travel remains an explicit placeholder protocol', () => {
+  it('keeps friend and travel loop schemas executable', () => {
     const cards = [
       normalizeAssistantCard({
         schemaVersion: FITMEET_TOOL_UI_SCHEMA_VERSION,
@@ -218,7 +218,7 @@ describe('tool-ui-schema', () => {
       normalizeAssistantCard({
         schemaVersion: FITMEET_TOOL_UI_SCHEMA_VERSION,
         schemaType: 'travel.intake',
-        title: '旅游闭环即将支持',
+        title: '填写本次旅行寻伴需求',
         data: {
           schemaName: 'TravelIntakeCard',
           schemaVersion: FITMEET_TOOL_UI_SCHEMA_VERSION,
@@ -228,7 +228,7 @@ describe('tool-ui-schema', () => {
       normalizeAssistantCard({
         schemaVersion: FITMEET_TOOL_UI_SCHEMA_VERSION,
         schemaType: 'travel.companion_draft',
-        title: '旅游搭子草稿即将支持',
+        title: '旅行寻伴卡草稿',
         data: {
           schemaName: 'TravelCompanionDraftCard',
           schemaVersion: FITMEET_TOOL_UI_SCHEMA_VERSION,
@@ -245,12 +245,14 @@ describe('tool-ui-schema', () => {
       travelCompanionDraftCount: 1,
       opportunityCount: 4,
       genericCount: 0,
-      components: ['FriendIntakeCard', 'FriendDraftCard', 'GenericCard'],
+      components: ['FriendIntakeCard', 'FriendDraftCard', 'TravelIntakeCard', 'TravelDraftCard'],
     });
-    expect(summary.title).toBe(
-      '1 张交友填写卡 · 1 张交友草稿 · 1 张旅游填写占位卡 · 1 张旅游搭子占位卡',
-    );
+    expect(summary.title).toBe('1 张交友填写卡 · 1 张交友草稿 · 1 张旅行填写卡 · 1 张旅行寻伴草稿');
     expect(summary.detail).toContain('交友闭环');
+    expect(toolUISchemaActionFromUnknown('travel_intake.submit')).toBe('travel_intake.submit');
+    expect(toolUISchemaActionFromUnknown('travel_draft.private_match')).toBe(
+      'travel_draft.private_match',
+    );
     expect(cards.map((card) => card.schemaType)).toEqual([
       'friend.intake',
       'friend.draft',

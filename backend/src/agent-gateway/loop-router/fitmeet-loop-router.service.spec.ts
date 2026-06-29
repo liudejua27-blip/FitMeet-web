@@ -62,14 +62,14 @@ describe('FitMeetLoopRouterService', () => {
     }
   });
 
-  it('accepts friend loop intent while travel stays on legacy placeholder path', () => {
+  it('accepts friend and travel loop intents before legacy fallback', () => {
     expect(service.classify('想认识同城朋友')).toMatchObject({
       intent: 'friend',
       disposition: 'accept_loop',
     });
     expect(service.classify('周末想找人结伴旅游')).toMatchObject({
       intent: 'travel',
-      disposition: 'handoff_legacy',
+      disposition: 'accept_loop',
     });
   });
 

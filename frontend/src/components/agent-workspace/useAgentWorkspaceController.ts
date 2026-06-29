@@ -1029,7 +1029,7 @@ function buildLoopChoiceBootstrapResponse(input: {
     schemaVersion: 'fitmeet.tool-ui.v1',
     schemaType: 'loop.choice',
     title: '你今天想做什么？',
-    body: '先选一个闭环。我会优先让约练和交友走卡片闭环；旅游即将支持。',
+    body: '先选一个闭环。我会优先让约练、交友和旅游走卡片闭环。',
     status: 'waiting_confirmation',
     data: {
       taskId: input.taskId,

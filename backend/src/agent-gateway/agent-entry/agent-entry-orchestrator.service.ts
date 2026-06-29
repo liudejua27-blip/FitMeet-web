@@ -4,6 +4,7 @@ import { LegacyAgentAdapterService } from '../legacy-agent/legacy-agent-adapter.
 import { FitMeetLoopRouterService } from '../loop-router/fitmeet-loop-router.service';
 import { FriendLoopService } from '../friend-loop/friend-loop.service';
 import { ProfileLoopService } from '../profile-loop/profile-loop.service';
+import { TravelLoopService } from '../travel-loop/travel-loop.service';
 import { WorkoutEntryArbitrationService } from '../workout-loop/workout-entry-arbitration.service';
 import { WorkoutLoopService } from '../workout-loop/workout-loop.service';
 import {
@@ -26,6 +27,8 @@ export class AgentEntryOrchestratorService {
     private readonly workoutArbitration?: WorkoutEntryArbitrationService,
     @Optional()
     private readonly friendLoop?: FriendLoopService,
+    @Optional()
+    private readonly travelLoop?: TravelLoopService,
   ) {}
 
   async handle(input: AgentEntryInput): Promise<AgentEntryResult> {
@@ -98,6 +101,30 @@ export class AgentEntryOrchestratorService {
         source: 'friend_loop_intent',
         task: friend.task,
         result: friend.result,
+      };
+    }
+
+    if (
+      loopIntent.disposition === 'accept_loop' &&
+      loopIntent.intent === 'travel' &&
+      this.travelLoop
+    ) {
+      const travel = await this.travelLoop.tryHandleEntrance({
+        ownerUserId: input.ownerUserId,
+        task: input.task,
+        message: input.message,
+      });
+      this.logRoute(input, {
+        source: 'travel_loop_intent',
+        loopIntent: loopIntent.intent,
+        workoutStage,
+        cards: this.cardSchemaTypes(travel.result.cards),
+        legacyBlocked: true,
+      });
+      return {
+        source: 'travel_loop_intent',
+        task: travel.task,
+        result: travel.result,
       };
     }
 
