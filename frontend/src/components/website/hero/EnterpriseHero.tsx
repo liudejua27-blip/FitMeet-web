@@ -14,6 +14,7 @@ export function EnterpriseHero({
   description,
   eyebrow,
   layout = 'split',
+  pageName,
   proofItems,
   title,
   visual,
@@ -22,6 +23,7 @@ export function EnterpriseHero({
   description: string;
   eyebrow?: string;
   layout?: 'split' | 'center';
+  pageName?: string;
   proofItems?: string[];
   title: ReactNode;
   visual?: ReactNode;
@@ -34,6 +36,7 @@ export function EnterpriseHero({
         'fm-enterprise-hero-system',
         visual && !isCenter && 'fm-enterprise-hero-system--split',
         isCenter && 'fm-enterprise-hero-system--center',
+        pageName && `fm-enterprise-hero-system--${pageName}`,
       )}
     >
       <div className="fm-enterprise-hero-system__copy">

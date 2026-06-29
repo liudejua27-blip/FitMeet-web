@@ -1,4 +1,4 @@
-import { safetyItems } from '../../components/website/content/website-content';
+import { safetyItems, safetyPrimitives } from '../../components/website/content/website-content';
 import { WebsiteHero } from '../../components/website/sections/WebsiteHero';
 import { WebsiteSection } from '../../components/website/sections/WebsiteSection';
 
@@ -9,7 +9,24 @@ export function SafetyWebsitePage() {
   return (
     <>
       <WebsiteHero name="safety" />
-      <WebsiteSection label="安全机制" title="每个关键动作都要可解释、可确认、可追溯。">
+      <WebsiteSection label="安全机制" title="Social World 里的每个关键动作都要可解释、可确认、可追溯。">
+        <div className="fm-safety-ledger" aria-label="FitMeet 默认安全协议">
+          <div className="fm-safety-ledger__copy">
+            <span>Default protocol</span>
+            <h3>先保护人，再让连接自然发生。</h3>
+            <p>
+              FitMeet 把安全做在流程里：公开前、匹配前、私信前和加好友前都保留清晰边界。
+            </p>
+          </div>
+          <div className="fm-safety-ledger__rows">
+            {safetyPrimitives.map(([title, body]) => (
+              <article key={title}>
+                <strong>{title}</strong>
+                <p>{body}</p>
+              </article>
+            ))}
+          </div>
+        </div>
         <div className="fm-policy-table">
           {safetyItems.map(([title, body]) => (
             <article key={title}>
@@ -19,7 +36,7 @@ export function SafetyWebsitePage() {
           ))}
         </div>
       </WebsiteSection>
-      <WebsiteSection label="敏感数据" title="默认隐藏，只在本人界面可见。" tone="deep">
+      <WebsiteSection label="敏感数据" title="让社交更简单，也要让边界更清楚。" tone="deep">
         <div className="fm-private-data-panel">
           <p>
             FitMeet 的公开 Discover
@@ -32,7 +49,7 @@ export function SafetyWebsitePage() {
           </div>
         </div>
       </WebsiteSection>
-      <WebsiteSection id="governance" label="治理闭环" title="出现问题时，用户知道该去哪里。">
+      <WebsiteSection id="governance" label="治理闭环" title="出现问题时，用户知道该去哪里、如何撤回、如何反馈。">
         <div className="fm-governance-row">
           {governanceItems.map((item) => (
             <article key={item}>
