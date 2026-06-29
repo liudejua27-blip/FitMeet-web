@@ -46,9 +46,9 @@ Before deploying, verify the Railway production image can build locally:
 ```
 
 If Docker Hub is blocked or slow, the script may fail while fetching
-`node:20-alpine` metadata. That is a local network/base-image blocker, not proof
+`node:22-alpine` metadata. That is a local network/base-image blocker, not proof
 that the Dockerfile is broken. Retry on a stable network, pre-pull
-`node:20-alpine`, or set `NODE_IMAGE` to an approved reachable mirror before the
+`node:22-alpine`, or set `NODE_IMAGE` to an approved reachable mirror before the
 Railway deploy.
 
 Configure Railway variables from:

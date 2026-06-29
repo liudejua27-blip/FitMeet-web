@@ -24,8 +24,9 @@ the page and API cleanup.
 | Backend lint | `pnpm --dir backend lint` | Core API modules compile under lint without removed controller imports. |
 | Backend build | `pnpm --dir backend build` | Core Nest modules, Agent gateway, messages, friends, safety, uploads, waitlist, and admin compile. |
 | Agent release verification | `bash scripts/verify-agent-release.sh` | Agent contract specs, critical backend Jest specs, frontend Agent tests, and browser QA run from one entrypoint. |
+| Strict Agent release verification | `RELEASE_STRICT=1 RUN_AGENT_BROWSER_QA=auto FITMEET_AGENT_BROWSER_QA_EMAIL=<qa-email> FITMEET_AGENT_BROWSER_QA_PASSWORD=<qa-password> bash scripts/verify-agent-release.sh` | Production/staging releases cannot silently skip browser QA. Missing QA credentials or `RUN_AGENT_BROWSER_QA=false` fails the gate. |
 | Production verification | `BASE_URL=https://www.ourfitmeet.cn API_BASE_URL=https://www.ourfitmeet.cn/api scripts/verify-production.sh` | Health, readiness, public social intents, Discover data, auth guards, and core OpenAPI paths pass. |
-| Production goal verification | `BASE_URL=https://www.ourfitmeet.cn API_BASE_URL=https://www.ourfitmeet.cn/api scripts/verify-agent-goal-production.sh` | Discover has real public intents, production copy is not fake, and optional Agent browser QA can run with dedicated QA credentials. |
+| Production goal verification | `RELEASE_STRICT=1 BASE_URL=https://www.ourfitmeet.cn API_BASE_URL=https://www.ourfitmeet.cn/api scripts/verify-agent-goal-production.sh` | Discover has real public intents, production copy is not fake, and Agent browser QA must run with dedicated QA credentials. |
 | Release matrix | `scripts/agent-release-matrix.sh --build` | Runs worktree audit, Agent release verification, and frontend/backend builds. |
 | Deploy package | `scripts/build-deploy-zip.sh` | Package contains current frontend dist, backend dist, core scripts, and no deleted runtime smoke files. |
 

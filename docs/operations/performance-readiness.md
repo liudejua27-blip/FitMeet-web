@@ -105,15 +105,17 @@ Current blocker for accepted 1000-concurrency evidence:
 - Staging/production runs require intentional remote opt-in plus credentials or tokens for realtime auth.
 - The current Codex session does not have production/staging credentials and should not invent or commit them.
 
-The first accepted result should be pasted here with:
+## Accepted Results
 
-- git commit SHA
-- target URL
-- backend build/version
-- database target class
-- command and env used
-- JSON output from the smoke script
-- whether thresholds passed
+No accepted staging or production-scale result is recorded yet.
+
+Every accepted result must include the exact fields below. Runs that omit one of
+these fields remain exploratory and must not be used for marketing or launch
+claims.
+
+| Date | Commit SHA | Target URL | DB/Redis/Mongo sizing | Backend replicas | Worker replicas | Command | p50/p95/p99 | Error rate | DB CPU/connections/slow query | Artifact |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| _pending_ | _pending_ | _pending_ | _pending_ | _pending_ | _pending_ | _pending_ | _pending_ | _pending_ | _pending_ | _pending_ |
 
 ## Required Local Smoke
 

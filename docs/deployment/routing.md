@@ -76,9 +76,9 @@ If Docker Desktop is running but production image builds fail while fetching
 `https://auth.docker.io/token`, use a reachable Node base image mirror:
 
 ```powershell
-$env:NODE_IMAGE = "docker.m.daocloud.io/library/node:20-alpine"
+$env:NODE_IMAGE = "docker.m.daocloud.io/library/node:22-alpine"
 docker compose --env-file .env.production -f docker-compose.prod.yml build backend
 ```
 
-The default remains `node:20-alpine`; `NODE_IMAGE` only changes the build-time
+The default remains `node:22-alpine`; `NODE_IMAGE` only changes the build-time
 base image for the backend Dockerfile.

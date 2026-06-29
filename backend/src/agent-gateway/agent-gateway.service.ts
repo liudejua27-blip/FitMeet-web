@@ -1353,6 +1353,12 @@ export class AgentGatewayService {
   // ───────────────────────────────────────────────
 
   async searchMatches(conn: AgentConnection, dto: SearchMatchDto) {
+    if (!this.isLegacyMatchSearchAllowed()) {
+      throw new BadRequestException(
+        'legacy_match_search_disabled_use_matching_jobs',
+      );
+    }
+
     const pref = await this.prefRepo.findOne({
       where: { userId: conn.userId },
     });
@@ -1370,7 +1376,8 @@ export class AgentGatewayService {
 
     const limit = dto.limit ?? 10;
     const users = await qb
-      .orderBy('RANDOM()')
+      .orderBy('u.updatedAt', 'DESC')
+      .addOrderBy('u.id', 'ASC')
       .take(limit * 3)
       .getMany();
 
@@ -1382,7 +1389,7 @@ export class AgentGatewayService {
       let score = 0.3;
       if (pref?.idealPartnerDescription && u.bio?.length > 0) score += 0.1;
       if (owner?.city && u.city === owner.city) score += 0.2;
-      score += Math.random() * 0.3; // placeholder for real ML
+      score += this.deterministicLegacyMatchTieBreaker(conn.userId, u.id);
       return { user: u, score: Math.min(score, 1.0) };
     });
 
@@ -1423,6 +1430,22 @@ export class AgentGatewayService {
         interestTags: top[i].user.interestTags,
       },
     }));
+  }
+
+  private isLegacyMatchSearchAllowed(): boolean {
+    if (process.env.NODE_ENV !== 'production') return true;
+    return process.env.FITMEET_ENABLE_LEGACY_MATCH_SEARCH === 'true';
+  }
+
+  private deterministicLegacyMatchTieBreaker(
+    ownerUserId: number,
+    candidateUserId: number,
+  ): number {
+    const digest = crypto
+      .createHash('sha256')
+      .update(`${ownerUserId}:${candidateUserId}`)
+      .digest('hex');
+    return (Number.parseInt(digest.slice(0, 6), 16) / 0xffffff) * 0.05;
   }
 
   // ───────────────────────────────────────────────

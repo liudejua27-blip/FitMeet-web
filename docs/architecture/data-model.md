@@ -34,8 +34,9 @@ If a table does not support one of those loops, do not add it to the baseline.
 
 - `user_social_requests`: internal request/card created by the Agent when a user wants to find a partner or activity.
 - `public_social_intents`: Discover-visible projection. Successful Agent publish must return `publicIntentId` and `discoverHref`.
-- `social_request_candidates`: scored candidate rows for one user request.
-- `match_candidates`: legacy internal scratch table only when still referenced by Agent internals; do not expose it as a product surface.
+- `candidate_search_index`: canonical searchable projection for discoverable profiles and public intents. Matching workers should recall candidates from this index before deterministic scoring.
+- `social_request_candidates`: scored candidate result rows for one user request, including score version, explanation metadata, and downstream feedback state.
+- `match_candidates`: legacy internal scratch table only when still referenced by Agent internals; do not expose it as a product surface. Production candidate ranking must not depend on this table.
 
 ## Communication And Meet Loop
 

@@ -272,3 +272,27 @@ describe('AgentGatewayService public social intents', () => {
     expect(searchSpy).not.toHaveBeenCalled();
   });
 });
+
+describe('AgentGatewayService legacy match search', () => {
+  const previousNodeEnv = process.env.NODE_ENV;
+  const previousLegacyFlag = process.env.FITMEET_ENABLE_LEGACY_MATCH_SEARCH;
+
+  afterEach(() => {
+    process.env.NODE_ENV = previousNodeEnv;
+    if (previousLegacyFlag === undefined) {
+      delete process.env.FITMEET_ENABLE_LEGACY_MATCH_SEARCH;
+    } else {
+      process.env.FITMEET_ENABLE_LEGACY_MATCH_SEARCH = previousLegacyFlag;
+    }
+  });
+
+  it('fails closed in production unless the legacy match path is explicitly enabled', async () => {
+    process.env.NODE_ENV = 'production';
+    delete process.env.FITMEET_ENABLE_LEGACY_MATCH_SEARCH;
+    const service = makeService({});
+
+    await expect(
+      service.searchMatches({ userId: 1 } as never, { query: '找搭子' }),
+    ).rejects.toThrow('legacy_match_search_disabled_use_matching_jobs');
+  });
+});

@@ -3,6 +3,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 RUN_AGENT_BROWSER_QA="${RUN_AGENT_BROWSER_QA:-auto}"
+RELEASE_STRICT="${RELEASE_STRICT:-false}"
 
 # shellcheck source=scripts/lib/toolchain.sh
 source "${ROOT_DIR}/scripts/lib/toolchain.sh"
@@ -247,11 +248,18 @@ case "${RUN_AGENT_BROWSER_QA}" in
     if [[ -n "${FITMEET_AGENT_BROWSER_QA_EMAIL:-}" && -n "${FITMEET_AGENT_BROWSER_QA_PASSWORD:-}" ]]; then
       step "Run production browser QA for /agent/chat"
       pnpm --dir "${ROOT_DIR}/frontend" run qa:agent-chat:production
+    elif is_truthy "${RELEASE_STRICT}"; then
+      printf 'RELEASE_STRICT=1 requires FITMEET_AGENT_BROWSER_QA_EMAIL/PASSWORD or RUN_AGENT_BROWSER_QA=true\n' >&2
+      exit 1
     else
       step "Skip browser QA for /agent/chat; set FITMEET_AGENT_BROWSER_QA_EMAIL/PASSWORD or RUN_AGENT_BROWSER_QA=true to enable"
     fi
     ;;
   false)
+    if is_truthy "${RELEASE_STRICT}"; then
+      printf 'RELEASE_STRICT=1 does not allow RUN_AGENT_BROWSER_QA=false\n' >&2
+      exit 1
+    fi
     step "Skip browser QA for /agent/chat"
     ;;
   *)
