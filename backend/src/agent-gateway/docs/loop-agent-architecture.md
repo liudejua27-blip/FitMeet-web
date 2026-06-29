@@ -22,13 +22,30 @@ new workout intent or accepted arbitration
 profile intent
   -> ProfileLoop/Profile Nudge, non-blocking for workout
 friend/travel intent
-  -> loop-choice placeholders until those loops are implemented
+  -> FriendLoopService / TravelLoopService entrance
 unknown/casual/old tasks
   -> LegacyAgentAdapterService
 ```
 
 Profile completion is a nudge, not a gate. It can improve candidate quality but
 must not block workout intake, draft creation, publication, or matching.
+
+## Shared Loop Contract
+
+The three product loops share a small contract in
+`loop-agent/loop-agent.types.ts`:
+
+- `LoopKind`: `workout`, `friend`, or `travel`
+- `LoopStage`: intake, draft, matching, candidate, opener, send-confirmation,
+  handoff, and terminal stages
+- `LoopSlots`: shared side fields such as safety boundaries and visibility
+- `LoopSlotMeta`: source/confidence metadata for slots that come from the user,
+  rules, LLM understanding, geo resolution, memory, or defaults
+- `LoopAgentDecisionBase`: the common shape for loop-brain decisions
+
+Each loop owns its domain-specific required slots and card copy, but publication,
+private matching jobs, realtime candidate return, opener generation, and approval
+boundaries should continue to reuse shared gateway services.
 
 ## Workout Loop
 
@@ -98,6 +115,15 @@ main-flow logic must not be added to:
 Those files are allowed to support legacy fallback until Friend and Travel loops
 are implemented, but loop-specific behavior should be added under a loop module
 or shared loop tool.
+
+## Friend And Travel Loops
+
+Friend and Travel now follow the card-driven loop template instead of returning
+coming-soon placeholders. They have dedicated loop services, intake cards,
+draft cards, private matching jobs, and route/action wiring. They are lighter
+than Workout because they do not yet have a dedicated LLM brain or nationwide
+geo-confirmation flow, but they should keep using the shared loop contract and
+the same durable matching, realtime, opener, and approval boundaries.
 
 ## Next Loop Template
 
