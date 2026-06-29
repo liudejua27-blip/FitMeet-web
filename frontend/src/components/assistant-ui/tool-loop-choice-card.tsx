@@ -6,7 +6,7 @@ import type { SchemaDrivenAssistantCard } from './tool-ui-schema';
 const choices = [
   { key: 'workout', label: '约练', detail: '最快生成本次约练卡', icon: Dumbbell },
   { key: 'friend', label: '交友', detail: '生成交友卡并私密匹配', icon: UsersRound },
-  { key: 'travel', label: '旅游', detail: '即将支持结伴规划', icon: Plane },
+  { key: 'travel', label: '旅游', detail: '生成旅行寻伴卡并私密匹配', icon: Plane },
 ];
 
 export function LoopChoiceCard({ card }: { card: SchemaDrivenAssistantCard }) {

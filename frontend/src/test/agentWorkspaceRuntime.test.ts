@@ -142,12 +142,12 @@ describe('agent workspace runtime fallback boundaries', () => {
     expect(schemaActionFromToolInput('public_intent_application.reject')).toBe(
       'public_intent_application.reject',
     );
-    expect(
-      schemaActionFromToolInput('public_intent_application.view_profile'),
-    ).toBe('public_intent_application.view_profile');
-    expect(
-      schemaActionFromToolInput('public_intent_application.open_conversation'),
-    ).toBe('public_intent_application.open_conversation');
+    expect(schemaActionFromToolInput('public_intent_application.view_profile')).toBe(
+      'public_intent_application.view_profile',
+    );
+    expect(schemaActionFromToolInput('public_intent_application.open_conversation')).toBe(
+      'public_intent_application.open_conversation',
+    );
 
     expect(
       shouldAppendActionResultMessage('public_intent_application.accept', {
@@ -155,20 +155,13 @@ describe('agent workspace runtime fallback boundaries', () => {
       }),
     ).toBe(true);
     expect(
-      shouldRenderCardActionResultInline(
-        'public_intent_application.reject',
-        { applicationId: 42 },
-      ),
+      shouldRenderCardActionResultInline('public_intent_application.reject', { applicationId: 42 }),
     ).toBe(true);
     expect(
-      idempotencyKeyForCardAction(
-        101,
-        'public_intent_application.accept',
-        {
-          applicationId: 42,
-          publicIntentId: 'intent-abc',
-        },
-      ),
+      idempotencyKeyForCardAction(101, 'public_intent_application.accept', {
+        applicationId: 42,
+        publicIntentId: 'intent-abc',
+      }),
     ).toBe('agent-card-action:101:public_intent_application.accept:42');
   });
 
@@ -1613,8 +1606,7 @@ describe('agent workspace runtime fallback boundaries', () => {
         {
           id: 'user-1',
           role: 'user',
-          content:
-            '发布约练卡片，明天晚上7点在青岛五四广场散步，按默认安全设置处理',
+          content: '发布约练卡片，明天晚上7点在青岛五四广场散步，按默认安全设置处理',
         },
         {
           id: 'assistant-db-1',
@@ -2007,8 +1999,8 @@ describe('agent workspace runtime fallback boundaries', () => {
           id: 'travel-intake-placeholder-1',
           type: 'travel_intake',
           schemaType: 'travel.intake',
-          title: '旅游闭环即将支持',
-          body: '当前可以先使用约练闭环。',
+          title: '填写本次旅行寻伴需求',
+          body: '先确认必要信息。',
           data: {
             schemaType: 'travel.intake',
             schemaName: 'TravelIntakeCard',
@@ -2019,8 +2011,8 @@ describe('agent workspace runtime fallback boundaries', () => {
           id: 'travel-companion-placeholder-1',
           type: 'travel_companion_draft',
           schemaType: 'travel.companion_draft',
-          title: '旅游搭子草稿即将支持',
-          body: '当前只预留协议。',
+          title: '旅行寻伴卡草稿',
+          body: '确认后进入私密旅行搭子匹配。',
           data: {
             schemaType: 'travel.companion_draft',
             schemaName: 'TravelCompanionDraftCard',

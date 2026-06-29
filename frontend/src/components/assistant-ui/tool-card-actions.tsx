@@ -1236,6 +1236,12 @@ const LOW_RISK_VISIBLE_SCHEMA_ACTIONS = new Set<ToolUISchemaAction>([
   'friend_draft.private_match',
   'friend_draft.edit',
   'friend_draft.cancel',
+  'travel_intake.submit',
+  'travel_intake.use_defaults',
+  'travel_intake.cancel',
+  'travel_draft.private_match',
+  'travel_draft.edit',
+  'travel_draft.cancel',
 ]);
 
 const LOW_RISK_VISIBLE_RAW_ACTIONS = new Set([
@@ -1371,37 +1377,39 @@ function sortVisibleCardActions(
             ]
           : schemaType === 'friend.draft'
             ? ['friend_draft.private_match', 'friend_draft.edit', 'friend_draft.cancel']
-            : schemaType === 'social_match.empty' ||
-                schemaType === 'social_match.no_candidates' ||
-                schemaType === 'social_match.privacy_guard' ||
-                schemaType === 'social_match.rate_limited'
-              ? [
-                  'matching.relax_distance',
-                  'matching.relax_time',
-                  'matching.relax_tags',
-                  'candidate.more_like_this',
-                  'activity.modify_time',
-                  'social_intent.decline_publish',
-                  'activity.skip_publish',
-                ]
-              : schemaType === 'meet_loop.timeline'
+            : schemaType === 'travel.companion_draft'
+              ? ['travel_draft.private_match', 'travel_draft.edit', 'travel_draft.cancel']
+              : schemaType === 'social_match.empty' ||
+                  schemaType === 'social_match.no_candidates' ||
+                  schemaType === 'social_match.privacy_guard' ||
+                  schemaType === 'social_match.rate_limited'
                 ? [
-                    'activity.check_in',
-                    'activity.complete',
-                    'review.submit',
-                    'life_graph.accept_update',
-                    'meet_loop.resume',
-                    'meet_loop.reschedule',
-                    'activity.upload_proof',
+                    'matching.relax_distance',
+                    'matching.relax_time',
+                    'matching.relax_tags',
+                    'candidate.more_like_this',
+                    'activity.modify_time',
+                    'social_intent.decline_publish',
+                    'activity.skip_publish',
                   ]
-                : schemaType === 'public_intent.application'
+                : schemaType === 'meet_loop.timeline'
                   ? [
-                      'public_intent_application.accept',
-                      'public_intent_application.reject',
-                      'public_intent_application.view_profile',
-                      'public_intent_application.open_conversation',
+                      'activity.check_in',
+                      'activity.complete',
+                      'review.submit',
+                      'life_graph.accept_update',
+                      'meet_loop.resume',
+                      'meet_loop.reschedule',
+                      'activity.upload_proof',
                     ]
-                  : [];
+                  : schemaType === 'public_intent.application'
+                    ? [
+                        'public_intent_application.accept',
+                        'public_intent_application.reject',
+                        'public_intent_application.view_profile',
+                        'public_intent_application.open_conversation',
+                      ]
+                    : [];
   if (preferredOrder.length === 0) return actions;
   const rank = new Map(preferredOrder.map((item, index) => [item, index]));
   return actions
@@ -1701,6 +1709,15 @@ function inlineOutcomeStableBody(schemaAction: ToolUISchemaAction | null | undef
   if (schemaAction === 'friend_draft.cancel') {
     return '已取消这次交友卡，不会匹配或联系任何人。';
   }
+  if (schemaAction === 'travel_draft.private_match') {
+    return '已保存为不公开旅行寻伴卡，正在当前对话里继续私密匹配。';
+  }
+  if (schemaAction === 'travel_draft.edit') {
+    return '可以继续修改本次旅行寻伴需求。';
+  }
+  if (schemaAction === 'travel_draft.cancel') {
+    return '已取消这次旅行寻伴卡，不会匹配或联系任何人。';
+  }
   return null;
 }
 
@@ -1719,6 +1736,9 @@ function inlineOutcomeTitle(schemaAction: ToolUISchemaAction | null | undefined)
   if (schemaAction === 'friend_draft.private_match') return '已进入私密匹配';
   if (schemaAction === 'friend_draft.edit') return '继续修改';
   if (schemaAction === 'friend_draft.cancel') return '已取消';
+  if (schemaAction === 'travel_draft.private_match') return '已进入私密匹配';
+  if (schemaAction === 'travel_draft.edit') return '继续修改';
+  if (schemaAction === 'travel_draft.cancel') return '已取消';
   if (isPublishDismissSchemaAction(schemaAction)) return '已取消发布';
   if (schemaAction === 'activity.modify_time' || schemaAction === 'activity.modify_location') {
     return '已准备修改';

@@ -165,9 +165,7 @@ describe('tool-card-actions runtime identity', () => {
     expect(
       cardActionNavigationHrefForTests(
         card,
-        actions.find(
-          (action) => action.schemaAction === 'public_intent_application.view_profile',
-        )!,
+        actions.find((action) => action.schemaAction === 'public_intent_application.view_profile')!,
       ),
     ).toBe('/user/11');
   });
@@ -601,5 +599,58 @@ describe('tool-card-actions runtime identity', () => {
       label: '发布到发现',
       requiresConfirmation: true,
     });
+  });
+
+  it('keeps travel companion draft actions executable for private matching', () => {
+    const card: SchemaDrivenAssistantCard = {
+      id: 'travel_draft:101:801',
+      type: 'travel_companion_draft',
+      schemaVersion: FITMEET_TOOL_UI_SCHEMA_VERSION,
+      schemaType: 'travel.companion_draft',
+      title: '成都旅行寻伴',
+      data: {
+        taskId: 101,
+        socialRequestId: 801,
+      },
+      actions: [
+        {
+          id: 'private_match',
+          label: '不公开，开始私密匹配',
+          action: 'travel_draft.private_match',
+          schemaAction: 'travel_draft.private_match',
+          requiresConfirmation: false,
+          payload: { taskId: 101, socialRequestId: 801 },
+        },
+        {
+          id: 'edit',
+          label: '修改',
+          action: 'travel_draft.edit',
+          schemaAction: 'travel_draft.edit',
+          requiresConfirmation: false,
+          payload: { taskId: 101, socialRequestId: 801 },
+        },
+        {
+          id: 'cancel',
+          label: '取消',
+          action: 'travel_draft.cancel',
+          schemaAction: 'travel_draft.cancel',
+          requiresConfirmation: false,
+          payload: { taskId: 101, socialRequestId: 801 },
+        },
+      ],
+    };
+
+    const actions = visibleCardActions(card, card.actions);
+
+    expect(actions.map((action) => action.schemaAction)).toEqual([
+      'travel_draft.private_match',
+      'travel_draft.edit',
+      'travel_draft.cancel',
+    ]);
+    expect(actions[0]).toMatchObject({
+      label: '不公开，开始私密匹配',
+      requiresConfirmation: false,
+    });
+    expect(TOOL_UI_CARD_ACTION_COPY['travel_draft.private_match'].result).toContain('旅行寻伴卡');
   });
 });

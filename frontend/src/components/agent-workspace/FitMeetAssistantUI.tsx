@@ -909,6 +909,8 @@ function isAssistantVisibleResultCard(card: FitMeetAlphaCard) {
     card.schemaType === 'workout.draft' ||
     card.schemaType === 'friend.intake' ||
     card.schemaType === 'friend.draft' ||
+    card.schemaType === 'travel.intake' ||
+    card.schemaType === 'travel.companion_draft' ||
     card.schemaType === 'safety.approval'
   );
 }

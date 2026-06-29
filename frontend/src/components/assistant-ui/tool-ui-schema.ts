@@ -41,6 +41,8 @@ export type ToolUIProductComponent =
   | 'WorkoutDraftCard'
   | 'FriendIntakeCard'
   | 'FriendDraftCard'
+  | 'TravelIntakeCard'
+  | 'TravelDraftCard'
   | 'GenericCard';
 
 export type ToolUISchemaAction =
@@ -102,6 +104,12 @@ export type ToolUISchemaAction =
   | 'friend_draft.private_match'
   | 'friend_draft.edit'
   | 'friend_draft.cancel'
+  | 'travel_intake.submit'
+  | 'travel_intake.use_defaults'
+  | 'travel_intake.cancel'
+  | 'travel_draft.private_match'
+  | 'travel_draft.edit'
+  | 'travel_draft.cancel'
   | 'public_intent_application.accept'
   | 'public_intent_application.reject'
   | 'public_intent_application.view_profile'
@@ -918,9 +926,8 @@ export function productComponentForSchemaType(
   if (schemaType === 'workout.draft') return 'WorkoutDraftCard';
   if (schemaType === 'friend.intake') return 'FriendIntakeCard';
   if (schemaType === 'friend.draft') return 'FriendDraftCard';
-  if (schemaType === 'travel.intake' || schemaType === 'travel.companion_draft') {
-    return 'GenericCard';
-  }
+  if (schemaType === 'travel.intake') return 'TravelIntakeCard';
+  if (schemaType === 'travel.companion_draft') return 'TravelDraftCard';
   return 'GenericCard';
 }
 
@@ -994,8 +1001,8 @@ export function summarizeToolUICardCollection(
     workoutDraftCount > 0 ? `${workoutDraftCount} 张约练草稿` : null,
     friendIntakeCount > 0 ? `${friendIntakeCount} 张交友填写卡` : null,
     friendDraftCount > 0 ? `${friendDraftCount} 张交友草稿` : null,
-    travelIntakeCount > 0 ? `${travelIntakeCount} 张旅游填写占位卡` : null,
-    travelCompanionDraftCount > 0 ? `${travelCompanionDraftCount} 张旅游搭子占位卡` : null,
+    travelIntakeCount > 0 ? `${travelIntakeCount} 张旅行填写卡` : null,
+    travelCompanionDraftCount > 0 ? `${travelCompanionDraftCount} 张旅行寻伴草稿` : null,
     lifeGraphDiffCount > 0 ? `${lifeGraphDiffCount} 条画像建议` : null,
     profileCompletionCount > 0 ? `${profileCompletionCount} 张资料补全卡` : null,
     approvalCount > 0 ? `${approvalCount} 个待确认动作` : null,
@@ -1012,7 +1019,7 @@ export function summarizeToolUICardCollection(
   } else if (friendIntakeCount > 0 || friendDraftCount > 0) {
     detail = '交友闭环按填写、草稿和私密匹配确认展示；不会自动联系任何人。';
   } else if (travelIntakeCount > 0 || travelCompanionDraftCount > 0) {
-    detail = '旅游闭环已预留卡片协议，当前先以占位卡提示即将支持。';
+    detail = '旅游闭环按填写、草稿和私密匹配确认展示；不会自动联系任何人。';
   } else if (opportunityCount > 0) {
     detail = '候选、约练和真实动作都按结构化卡片展示；涉及连接、发送或公开时会先确认。';
   } else if (emptyCount > 0) {
@@ -1095,8 +1102,8 @@ export function schemaDefaultTitle(schemaType: ToolUISchemaType) {
   if (schemaType === 'workout.draft') return '约练卡草稿';
   if (schemaType === 'friend.intake') return '填写本次交友需求';
   if (schemaType === 'friend.draft') return '交友卡草稿';
-  if (schemaType === 'travel.intake') return '旅游闭环即将支持';
-  if (schemaType === 'travel.companion_draft') return '旅游搭子草稿即将支持';
+  if (schemaType === 'travel.intake') return '填写本次旅行寻伴需求';
+  if (schemaType === 'travel.companion_draft') return '旅行寻伴卡草稿';
   return '整理结果';
 }
 
@@ -1192,6 +1199,12 @@ export function toolUISchemaActionFromUnknown(value: unknown): ToolUISchemaActio
     text === 'friend_draft.private_match' ||
     text === 'friend_draft.edit' ||
     text === 'friend_draft.cancel' ||
+    text === 'travel_intake.submit' ||
+    text === 'travel_intake.use_defaults' ||
+    text === 'travel_intake.cancel' ||
+    text === 'travel_draft.private_match' ||
+    text === 'travel_draft.edit' ||
+    text === 'travel_draft.cancel' ||
     text === 'public_intent_application.accept' ||
     text === 'public_intent_application.reject' ||
     text === 'public_intent_application.view_profile' ||
@@ -1284,6 +1297,8 @@ export function schemaTypeFromLegacyCardType(type: string): ToolUISchemaType {
   if (type === 'opener_approval' || type === 'safety_boundary') return 'safety.approval';
   if (type === 'friend_intake') return 'friend.intake';
   if (type === 'friend_draft') return 'friend.draft';
+  if (type === 'travel_intake') return 'travel.intake';
+  if (type === 'travel_companion_draft') return 'travel.companion_draft';
   return 'generic.card';
 }
 

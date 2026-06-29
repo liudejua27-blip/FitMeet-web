@@ -91,6 +91,10 @@ function makeHarness(options: { runRunner?: boolean } = {}) {
     startFriendIntake: jest.fn(),
     performFriendAction: jest.fn(),
   };
+  const travelLoop = {
+    startTravelIntake: jest.fn(),
+    performTravelAction: jest.fn(),
+  };
   const clarificationActions = {
     perform: jest.fn(),
   };
@@ -108,6 +112,7 @@ function makeHarness(options: { runRunner?: boolean } = {}) {
     workoutLoop as never,
     clarificationActions as never,
     friendLoop as never,
+    travelLoop as never,
   );
   const handleMessage = jest.fn().mockResolvedValue(
     routeResult({
@@ -125,6 +130,7 @@ function makeHarness(options: { runRunner?: boolean } = {}) {
     draftPublication,
     workoutLoop,
     friendLoop,
+    travelLoop,
     clarificationActions,
     service,
   };
@@ -213,28 +219,79 @@ describe('SocialAgentCardActionRouterService', () => {
     expect(result.cards?.[0]).toMatchObject({ schemaType: 'friend.intake' });
   });
 
-  it('returns travel loop choice as a coming-soon generic card', async () => {
-    const { handleMessage, service } = makeHarness();
+  it('dispatches loop choice travel directly to TravelLoop without re-entering chat LLM', async () => {
+    const { handleMessage, service, travelLoop } = makeHarness();
+    travelLoop.startTravelIntake.mockResolvedValue(
+      routeResult({
+        action: 'clarify',
+        assistantMessage: '好的，我们先进入旅游闭环。',
+        cards: [
+          {
+            id: 'travel_intake:101',
+            type: 'travel_intake',
+            schemaVersion: 'fitmeet.tool-ui.v1',
+            schemaType: 'travel.intake',
+            title: '填写本次结伴旅行需求',
+            data: { taskId: 101 },
+            actions: [],
+          },
+        ],
+      }),
+    );
 
     const result = await service.perform({
       ownerUserId: 7,
       taskId: 101,
       body: {
         action: 'loop_choice.travel' as never,
-        payload: {},
+        payload: { source: 'bootstrap' },
       },
       handleMessage,
     });
 
     expect(handleMessage).not.toHaveBeenCalled();
-    expect(result).toMatchObject({
-      assistantMessage: expect.stringContaining('旅游闭环即将支持'),
-      cards: [
-        expect.objectContaining({
-          schemaType: 'generic.card',
-          data: expect.objectContaining({ selectedLoop: 'travel' }),
-        }),
-      ],
+    expect(travelLoop.startTravelIntake).toHaveBeenCalledWith({
+      ownerUserId: 7,
+      taskId: 101,
+      payload: { source: 'bootstrap' },
+    });
+    expect(result.cards?.[0]).toMatchObject({ schemaType: 'travel.intake' });
+  });
+
+  it('dispatches travel card actions to TravelLoop', async () => {
+    const { handleMessage, service, travelLoop } = makeHarness();
+    travelLoop.performTravelAction.mockResolvedValue(
+      routeResult({
+        assistantMessage: '已进入私密旅行匹配。',
+        publicLoop: {
+          stage: 'matching_queued',
+          publicIntentId: null,
+          discoverHref: null,
+          publicIntentHref: null,
+          messagesHref: null,
+          requiredConfirmation: false,
+        },
+      }),
+    );
+
+    await service.perform({
+      ownerUserId: 7,
+      taskId: 101,
+      body: {
+        action: 'travel_draft.private_match' as never,
+        payload: { socialRequestId: 801 },
+      },
+      handleMessage,
+    });
+
+    expect(handleMessage).not.toHaveBeenCalled();
+    expect(travelLoop.performTravelAction).toHaveBeenCalledWith({
+      ownerUserId: 7,
+      taskId: 101,
+      body: expect.objectContaining({
+        action: 'travel_draft.private_match',
+        payload: { socialRequestId: 801 },
+      }),
     });
   });
 

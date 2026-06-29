@@ -26,6 +26,7 @@ import { SocialAgentMatchRelaxationActionService } from './social-agent-match-re
 import { SocialAgentApplicationActionService } from './social-agent-application-action.service';
 import { ClarificationCardActionService } from './clarification/clarification-card-action.service';
 import { FriendLoopService } from './friend-loop/friend-loop.service';
+import { TravelLoopService } from './travel-loop/travel-loop.service';
 import { buildWorkoutIntakeCard } from './workout-loop/workout-card.presenter';
 import { WorkoutLoopService } from './workout-loop/workout-loop.service';
 import type { WorkoutSlots } from './workout-loop/workout-loop.types';
@@ -62,6 +63,8 @@ export class SocialAgentCardActionRouterService {
     private readonly clarificationActions?: ClarificationCardActionService,
     @Optional()
     private readonly friendLoop?: FriendLoopService,
+    @Optional()
+    private readonly travelLoop?: TravelLoopService,
   ) {}
 
   async perform(input: {
@@ -268,6 +271,17 @@ export class SocialAgentCardActionRouterService {
       });
     }
 
+    if (this.isTravelAction(action)) {
+      if (!this.travelLoop) {
+        throw new BadRequestException('Travel loop runtime is unavailable');
+      }
+      return this.travelLoop.performTravelAction({
+        ownerUserId,
+        taskId,
+        body: normalizedBody,
+      });
+    }
+
     if (
       action === 'candidate.view_detail' ||
       action === 'candidate.more_like_this' ||
@@ -430,6 +444,17 @@ export class SocialAgentCardActionRouterService {
       action === 'friend_draft.private_match' ||
       action === 'friend_draft.edit' ||
       action === 'friend_draft.cancel'
+    );
+  }
+
+  private isTravelAction(action: string) {
+    return (
+      action === 'travel_intake.submit' ||
+      action === 'travel_intake.use_defaults' ||
+      action === 'travel_intake.cancel' ||
+      action === 'travel_draft.private_match' ||
+      action === 'travel_draft.edit' ||
+      action === 'travel_draft.cancel'
     );
   }
 
@@ -619,6 +644,12 @@ export class SocialAgentCardActionRouterService {
       'friend_draft.private_match',
       'friend_draft.edit',
       'friend_draft.cancel',
+      'travel_intake.submit',
+      'travel_intake.use_defaults',
+      'travel_intake.cancel',
+      'travel_draft.private_match',
+      'travel_draft.edit',
+      'travel_draft.cancel',
       'candidate.generate_opener',
       'opener.regenerate',
       'opener.reject',
@@ -788,7 +819,8 @@ export class SocialAgentCardActionRouterService {
       action.startsWith('loop_choice.') ||
       action.startsWith('clarification.') ||
       action.startsWith('workout_') ||
-      action.startsWith('friend_')
+      action.startsWith('friend_') ||
+      action.startsWith('travel_')
     ) {
       return 'FitMeet Main Agent' as const;
     }
@@ -839,27 +871,20 @@ export class SocialAgentCardActionRouterService {
         payload: this.record(body.payload),
       });
     }
-    const label = action === 'loop_choice.travel' ? '旅游' : '交友';
+    if (action === 'loop_choice.travel') {
+      if (!this.travelLoop) {
+        throw new BadRequestException('Travel loop runtime is unavailable');
+      }
+      return this.travelLoop.startTravelIntake({
+        ownerUserId,
+        taskId,
+        payload: this.record(body.payload),
+      });
+    }
     return this.simpleRouteResult({
       taskId,
-      assistantMessage: `${label}闭环即将支持。你现在可以先使用约练闭环。`,
-      cards: [
-        {
-          id: `${action}:coming_soon:${taskId}`,
-          type: 'generic_card',
-          schemaVersion: 'fitmeet.tool-ui.v1',
-          schemaType: 'generic.card',
-          title: `${label}闭环即将支持`,
-          body: '本批 MVP 先开放约练闭环。该方向会保留在后续版本中。',
-          status: 'ready',
-          data: {
-            taskId,
-            selectedLoop: action.replace('loop_choice.', ''),
-            availability: 'coming_soon',
-          },
-          actions: [],
-        },
-      ],
+      assistantMessage: '该闭环即将支持。你现在可以先使用约练闭环。',
+      cards: [],
     });
   }
 
