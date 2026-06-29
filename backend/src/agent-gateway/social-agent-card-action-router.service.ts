@@ -29,6 +29,7 @@ import { buildFriendIntakeCard } from './friend-loop/friend-card.presenter';
 import { FriendLoopService } from './friend-loop/friend-loop.service';
 import type { FriendSlots } from './friend-loop/friend-loop.types';
 import {
+  extractFriendSlots,
   normalizeFriendSlots,
   validateFriendSlots,
 } from './friend-loop/friend-slot-extractor';
@@ -36,6 +37,7 @@ import { buildTravelIntakeCard } from './travel-loop/travel-card.presenter';
 import { TravelLoopService } from './travel-loop/travel-loop.service';
 import type { TravelSlots } from './travel-loop/travel-loop.types';
 import {
+  extractTravelSlots,
   normalizeTravelSlots,
   validateTravelSlots,
 } from './travel-loop/travel-slot-extractor';
@@ -46,6 +48,7 @@ import {
   extractWorkoutSlots,
   validateWorkoutSlotsForPublish,
 } from './workout-loop/workout-slot-extractor';
+import { extractKnownCity } from '../common/city.util';
 
 type HandleMessage = (
   body: SocialAgentRouteMessageBody,
@@ -1426,8 +1429,14 @@ export class SocialAgentCardActionRouterService {
     const socialRequestId = this.number(
       draft.socialRequestId ?? metadata.socialRequestId,
     );
+    const publishKind = this.loopPublishKindFromPayload(
+      { action: 'publish_to_discover', payload } as SocialAgentCardActionBody,
+      payload,
+    );
+    const loopFallback = this.loopPublishDraftFallback(payload, publishKind);
     const activityType =
       this.text(draft.activityType ?? draft.requestType ?? draft.type) ||
+      this.text(loopFallback.activityType) ||
       '散步';
     const title =
       this.text(draft.title ?? draft.activityTitle ?? draft.opportunityTitle) ||
@@ -1435,7 +1444,7 @@ export class SocialAgentCardActionRouterService {
     const description =
       this.text(draft.description ?? draft.summary ?? draft.body) ||
       '公共场所、低压力、先站内沟通的 FitMeet 约练。';
-    const city = this.text(draft.city);
+    const city = this.text(draft.city) || loopFallback.city;
     if (options.requireCity && !city) {
       throw new BadRequestException('Workout city is required before publish');
     }
@@ -1526,20 +1535,10 @@ export class SocialAgentCardActionRouterService {
       ...this.record(draft.metadata),
       ...this.record(payload.metadata),
     };
-    const draftText = [
-      draft.title,
-      draft.description,
-      draft.summary,
-      draft.body,
-      draft.rawText,
-      draft.activityType,
-      draft.city,
+    const draftText = this.publishDraftText(draft, metadata, [
       metadata.locationText,
       metadata.timePreference,
-    ]
-      .map((value) => this.text(value))
-      .filter(Boolean)
-      .join(' ');
+    ]);
     const inferredSlots = draftText
       ? extractWorkoutSlots({ message: draftText })
       : {};
@@ -1635,6 +1634,19 @@ export class SocialAgentCardActionRouterService {
       ...this.record(draft.metadata),
       ...this.record(payload.metadata),
     };
+    const draftText = this.publishDraftText(draft, metadata, [
+      metadata.friendGoal,
+      metadata.city,
+      metadata.scenePreference,
+      metadata.timePreference,
+      metadata.candidatePreference,
+    ]);
+    const inferredSlots = draftText
+      ? extractFriendSlots({ message: draftText })
+      : {};
+    const explicitTopicTags = this.stringArray(
+      slots.topicTags ?? draft.topicTags ?? metadata.topicTags ?? draft.tags,
+    );
     return normalizeFriendSlots({
       friendGoal:
         this.text(
@@ -1642,29 +1654,37 @@ export class SocialAgentCardActionRouterService {
             draft.friendGoal ??
             metadata.friendGoal ??
             draft.activityType ??
-            metadata.activityType,
+            metadata.activityType ??
+            inferredSlots.friendGoal,
         ) || undefined,
-      city: this.text(slots.city ?? draft.city ?? metadata.city) || undefined,
-      topicTags: this.stringArray(
-        slots.topicTags ?? draft.topicTags ?? metadata.topicTags ?? draft.tags,
-      ),
+      city:
+        this.text(slots.city ?? draft.city ?? metadata.city) ||
+        inferredSlots.city ||
+        undefined,
+      topicTags:
+        explicitTopicTags.length > 0
+          ? explicitTopicTags
+          : (inferredSlots.topicTags ?? []),
       scenePreference:
         this.text(
           slots.scenePreference ??
             draft.scenePreference ??
-            metadata.scenePreference,
+            metadata.scenePreference ??
+            inferredSlots.scenePreference,
         ) || undefined,
       timePreference:
         this.text(
           slots.timePreference ??
             draft.timePreference ??
-            metadata.timePreference,
+            metadata.timePreference ??
+            inferredSlots.timePreference,
         ) || undefined,
       candidatePreference:
         this.text(
           slots.candidatePreference ??
             draft.candidatePreference ??
-            metadata.candidatePreference,
+            metadata.candidatePreference ??
+            inferredSlots.candidatePreference,
         ) || undefined,
       safetyBoundary:
         this.text(
@@ -1690,6 +1710,20 @@ export class SocialAgentCardActionRouterService {
       ...this.record(draft.metadata),
       ...this.record(payload.metadata),
     };
+    const draftText = this.publishDraftText(draft, metadata, [
+      metadata.destination,
+      metadata.departureTime,
+      metadata.duration,
+      metadata.budgetRange,
+      metadata.transportMode,
+      metadata.city,
+    ]);
+    const inferredSlots = draftText
+      ? extractTravelSlots({ message: draftText })
+      : {};
+    const explicitTags = this.stringArray(
+      slots.tags ?? draft.tags ?? metadata.tags,
+    );
     return normalizeTravelSlots({
       destination:
         this.text(
@@ -1697,56 +1731,73 @@ export class SocialAgentCardActionRouterService {
             draft.destination ??
             metadata.destination ??
             draft.locationName ??
-            draft.locationPreference,
+            draft.locationPreference ??
+            inferredSlots.destination,
         ) || undefined,
       departureTime:
         this.text(
           slots.departureTime ??
             draft.departureTime ??
             draft.timePreference ??
-            metadata.departureTime,
+            metadata.departureTime ??
+            inferredSlots.departureTime,
         ) || undefined,
       duration:
-        this.text(slots.duration ?? draft.duration ?? metadata.duration) ||
-        undefined,
+        this.text(
+          slots.duration ??
+            draft.duration ??
+            metadata.duration ??
+            inferredSlots.duration,
+        ) || undefined,
       budgetRange:
         this.text(
-          slots.budgetRange ?? draft.budgetRange ?? metadata.budgetRange,
+          slots.budgetRange ??
+            draft.budgetRange ??
+            metadata.budgetRange ??
+            inferredSlots.budgetRange,
         ) || undefined,
       transportMode:
         this.text(
-          slots.transportMode ?? draft.transportMode ?? metadata.transportMode,
+          slots.transportMode ??
+            draft.transportMode ??
+            metadata.transportMode ??
+            inferredSlots.transportMode,
         ) || undefined,
-      tags: this.stringArray(slots.tags ?? draft.tags ?? metadata.tags),
+      tags: explicitTags.length > 0 ? explicitTags : (inferredSlots.tags ?? []),
       genderPreference:
         this.text(
           slots.genderPreference ??
             draft.genderPreference ??
-            metadata.genderPreference,
+            metadata.genderPreference ??
+            inferredSlots.genderPreference,
         ) || undefined,
       photoPreference:
         this.text(
           slots.photoPreference ??
             draft.photoPreference ??
-            metadata.photoPreference,
+            metadata.photoPreference ??
+            inferredSlots.photoPreference,
         ) || undefined,
       accommodationPreference:
         this.text(
           slots.accommodationPreference ??
             draft.accommodationPreference ??
-            metadata.accommodationPreference,
+            metadata.accommodationPreference ??
+            inferredSlots.accommodationPreference,
         ) || undefined,
       foodPreference:
         this.text(
           slots.foodPreference ??
             draft.foodPreference ??
-            metadata.foodPreference,
+            metadata.foodPreference ??
+            inferredSlots.foodPreference,
         ) || undefined,
       candidatePreference:
         this.text(
           slots.candidatePreference ??
             draft.candidatePreference ??
-            metadata.candidatePreference,
+            metadata.candidatePreference ??
+            inferredSlots.candidatePreference,
         ) || undefined,
       safetyBoundary:
         this.text(
@@ -1772,7 +1823,58 @@ export class SocialAgentCardActionRouterService {
       ...this.record(draft.metadata),
       ...this.record(payload.metadata),
     };
-    return this.text(slots.city ?? draft.city ?? metadata.city);
+    const explicitCity = this.text(slots.city ?? draft.city ?? metadata.city);
+    if (explicitCity) return explicitCity;
+    const inferredSlots = this.travelSlotsFromPublishPayload(payload);
+    return extractKnownCity(inferredSlots.destination);
+  }
+
+  private loopPublishDraftFallback(
+    payload: Record<string, unknown>,
+    kind: LoopDraftPublishKind | null,
+  ): { activityType?: string; city: string } {
+    if (kind === 'workout') {
+      const slots = this.workoutSlotsFromPublishPayload(payload);
+      return {
+        activityType: slots.activityType,
+        city: this.text(slots.city),
+      };
+    }
+    if (kind === 'friend') {
+      const slots = this.friendSlotsFromPublishPayload(payload);
+      return {
+        activityType: '交友',
+        city: this.text(slots.city),
+      };
+    }
+    if (kind === 'travel') {
+      return {
+        activityType: '结伴旅行',
+        city: this.travelPublishCityFromPayload(payload),
+      };
+    }
+    return { city: '' };
+  }
+
+  private publishDraftText(
+    draft: Record<string, unknown>,
+    metadata: Record<string, unknown>,
+    extra: unknown[] = [],
+  ): string {
+    return [
+      draft.title,
+      draft.description,
+      draft.summary,
+      draft.body,
+      draft.rawText,
+      draft.activityType,
+      draft.city,
+      metadata.city,
+      ...extra,
+    ]
+      .map((value) => this.text(value))
+      .filter(Boolean)
+      .join(' ');
   }
 
   private loopPublishQueuedMessage(kind: LoopDraftPublishKind): string {
