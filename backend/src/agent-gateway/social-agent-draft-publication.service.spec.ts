@@ -676,6 +676,120 @@ describe('SocialAgentDraftPublicationService', () => {
     expect(longTermMemory.summarizeTask).toHaveBeenCalledWith(task);
   });
 
+  it('keeps friend loop publish tasks waiting for matching instead of completing', async () => {
+    const { service, task } = makeHarness(
+      makeTask({
+        goal: '认识同城朋友',
+        memory: {
+          friendLoop: {
+            stage: 'draft_ready',
+            slots: {
+              friendGoal: '认识新朋友',
+              city: '青岛',
+              locationText: '青岛市南区',
+            },
+          },
+        },
+      }),
+    );
+
+    const result = await service.publishDraft(7, 101, {
+      socialRequestId: 301,
+      type: SocialRequestType.Custom,
+      rawText: '今晚青岛轻松跑步',
+      title: '今晚青岛轻松跑步',
+      city: '青岛',
+      activityType: '交友',
+      visibility: SocialRequestVisibility.Private,
+      status: UserSocialRequestStatus.Draft,
+      metadata: {
+        loop: 'friend',
+      },
+    });
+
+    expect(result.taskStatus).toBe(AgentTaskStatus.WaitingResult);
+    expect(task.status).toBe(AgentTaskStatus.WaitingResult);
+    expect(task.statusReason).toBe('friend_matching_queued');
+    expect(task.completedAt).toBeNull();
+    expect(task.memory).toMatchObject({
+      friendLoop: {
+        friendLoopStage: 'matching_queued',
+        stage: 'matching_queued',
+        socialRequestId: 301,
+        publicIntentId: 'social_request_301',
+        discoverHref: '/discover?publicIntentId=social_request_301',
+        publicIntentHref: '/public-intent/social_request_301',
+        matchingJobId: 9001,
+        matchingJobStatus: MatchingJobStatus.Queued,
+        waitingFor: 'matching_job',
+        sourceVersion: 'source-v1',
+        slots: {
+          friendGoal: '认识新朋友',
+          city: '青岛',
+        },
+        updatedAt: expect.any(String),
+      },
+    });
+  });
+
+  it('keeps travel loop publish tasks waiting for matching instead of completing', async () => {
+    const { service, task } = makeHarness(
+      makeTask({
+        goal: '找旅行搭子',
+        memory: {
+          travelLoop: {
+            stage: 'draft_ready',
+            slots: {
+              destination: '成都',
+              city: '成都',
+              departureTime: '周末',
+              budgetRange: '1000元',
+              transportMode: '高铁',
+            },
+          },
+        },
+      }),
+    );
+
+    const result = await service.publishDraft(7, 101, {
+      socialRequestId: 301,
+      type: SocialRequestType.Custom,
+      rawText: '今晚青岛轻松跑步',
+      title: '今晚青岛轻松跑步',
+      city: '成都',
+      activityType: '结伴旅行',
+      visibility: SocialRequestVisibility.Private,
+      status: UserSocialRequestStatus.Draft,
+      metadata: {
+        loop: 'travel',
+      },
+    });
+
+    expect(result.taskStatus).toBe(AgentTaskStatus.WaitingResult);
+    expect(task.status).toBe(AgentTaskStatus.WaitingResult);
+    expect(task.statusReason).toBe('travel_matching_queued');
+    expect(task.completedAt).toBeNull();
+    expect(task.memory).toMatchObject({
+      travelLoop: {
+        travelLoopStage: 'matching_queued',
+        stage: 'matching_queued',
+        socialRequestId: 301,
+        publicIntentId: 'social_request_301',
+        discoverHref: '/discover?publicIntentId=social_request_301',
+        publicIntentHref: '/public-intent/social_request_301',
+        matchingJobId: 9001,
+        matchingJobStatus: MatchingJobStatus.Queued,
+        waitingFor: 'matching_job',
+        sourceVersion: 'source-v1',
+        slots: {
+          destination: '成都',
+          city: '成都',
+        },
+        updatedAt: expect.any(String),
+      },
+    });
+  });
+
   it('surfaces publish tool failures', async () => {
     const { executor, service } = makeHarness();
     executor.executeToolAction.mockResolvedValueOnce({
