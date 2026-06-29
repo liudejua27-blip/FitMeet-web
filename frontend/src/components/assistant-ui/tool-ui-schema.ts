@@ -15,6 +15,7 @@ export type ToolUISchemaType =
   | 'safety.approval'
   | 'loop.choice'
   | 'clarification.binary'
+  | 'clarification.geo_candidates'
   | 'workout.intake'
   | 'workout.draft'
   | 'friend.intake'
@@ -34,6 +35,7 @@ export type ToolUIProductComponent =
   | 'ApprovalPanel'
   | 'LoopChoiceCard'
   | 'ClarificationBinaryCard'
+  | 'ClarificationGeoCandidatesCard'
   | 'WorkoutIntakeCard'
   | 'WorkoutDraftCard'
   | 'GenericCard';
@@ -83,6 +85,7 @@ export type ToolUISchemaAction =
   | 'loop_choice.travel'
   | 'clarification.yes'
   | 'clarification.no'
+  | 'clarification.select'
   | 'workout_intake.submit'
   | 'workout_intake.use_defaults'
   | 'workout_intake.cancel'
@@ -900,6 +903,7 @@ export function productComponentForSchemaType(
   if (schemaType === 'safety.approval') return 'ApprovalPanel';
   if (schemaType === 'loop.choice') return 'LoopChoiceCard';
   if (schemaType === 'clarification.binary') return 'ClarificationBinaryCard';
+  if (schemaType === 'clarification.geo_candidates') return 'ClarificationGeoCandidatesCard';
   if (schemaType === 'workout.intake') return 'WorkoutIntakeCard';
   if (schemaType === 'workout.draft') return 'WorkoutDraftCard';
   if (
@@ -940,7 +944,9 @@ export function summarizeToolUICardCollection(
   ).length;
   const loopChoiceCount = cards.filter((card) => card.schemaType === 'loop.choice').length;
   const clarificationCount = cards.filter(
-    (card) => card.schemaType === 'clarification.binary',
+    (card) =>
+      card.schemaType === 'clarification.binary' ||
+      card.schemaType === 'clarification.geo_candidates',
   ).length;
   const workoutIntakeCount = cards.filter((card) => card.schemaType === 'workout.intake').length;
   const workoutDraftCount = cards.filter((card) => card.schemaType === 'workout.draft').length;
@@ -1096,6 +1102,7 @@ export function toolUISchemaTypeFromUnknown(value: unknown): ToolUISchemaType | 
     text === 'safety.approval' ||
     text === 'loop.choice' ||
     text === 'clarification.binary' ||
+    text === 'clarification.geo_candidates' ||
     text === 'workout.intake' ||
     text === 'workout.draft' ||
     text === 'friend.intake' ||
@@ -1155,6 +1162,7 @@ export function toolUISchemaActionFromUnknown(value: unknown): ToolUISchemaActio
     text === 'loop_choice.travel' ||
     text === 'clarification.yes' ||
     text === 'clarification.no' ||
+    text === 'clarification.select' ||
     text === 'workout_intake.submit' ||
     text === 'workout_intake.use_defaults' ||
     text === 'workout_intake.cancel' ||

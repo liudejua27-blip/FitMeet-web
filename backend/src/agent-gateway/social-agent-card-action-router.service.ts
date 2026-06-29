@@ -390,7 +390,11 @@ export class SocialAgentCardActionRouterService {
   }
 
   private isClarificationAction(action: string) {
-    return action === 'clarification.yes' || action === 'clarification.no';
+    return (
+      action === 'clarification.yes' ||
+      action === 'clarification.no' ||
+      action === 'clarification.select'
+    );
   }
 
   private isWorkoutAction(action: string) {

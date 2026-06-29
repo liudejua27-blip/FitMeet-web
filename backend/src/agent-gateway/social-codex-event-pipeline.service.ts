@@ -33,6 +33,7 @@ const FITMEET_TOOL_UI_SCHEMA_TYPES = new Set([
   'safety.approval',
   'loop.choice',
   'clarification.binary',
+  'clarification.geo_candidates',
   'workout.intake',
   'workout.draft',
   'friend.intake',

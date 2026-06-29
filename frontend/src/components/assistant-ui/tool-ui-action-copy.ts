@@ -51,6 +51,7 @@ export const TOOL_UI_SCHEMA_ACTIONS = [
   'loop_choice.travel',
   'clarification.yes',
   'clarification.no',
+  'clarification.select',
   'workout_intake.submit',
   'workout_intake.use_defaults',
   'workout_intake.cancel',
@@ -284,6 +285,11 @@ export const TOOL_UI_CARD_ACTION_COPY: Record<ToolUISchemaAction, ToolUICardActi
     busy: '正在切换填写',
     done: '已切换',
     result: '已切换为手动填写约练需求。',
+  },
+  'clarification.select': {
+    busy: '正在确认地点',
+    done: '已确认地点',
+    result: '已按你选择的地点更新约练需求，公开或匹配前仍会让你确认。',
   },
   'workout_intake.submit': {
     busy: '正在生成约练卡',

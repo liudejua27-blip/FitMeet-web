@@ -22,6 +22,7 @@ export type GeoResolution = {
   confidence: number;
   needsConfirmation: boolean;
   confirmationQuestion?: string;
+  candidates?: GeoCandidate[];
 };
 
 export type GeoCandidate = {
