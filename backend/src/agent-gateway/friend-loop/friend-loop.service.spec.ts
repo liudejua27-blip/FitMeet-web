@@ -27,6 +27,7 @@ function makeService(
     decideEntrance?: jest.Mock;
     decideIntakeSubmit?: jest.Mock;
   },
+  geoResolver?: { resolveAsync: jest.Mock },
 ) {
   const taskRepo = {
     findOne: jest.fn().mockResolvedValue(task),
@@ -62,6 +63,7 @@ function makeService(
     draftPublication as never,
     matchingJobs as never,
     friendBrain as never,
+    geoResolver as never,
   );
   return {
     draftPublication,
@@ -156,6 +158,144 @@ describe('FriendLoopService', () => {
     expect(draftPublication.stagePrivateDraftForPublish).not.toHaveBeenCalled();
     expect((task.memory as Record<string, unknown>).friendLoop).toMatchObject({
       stage: 'intake',
+    });
+  });
+
+  it('returns geo candidate selection when friend location is ambiguous', async () => {
+    const geoResolver = {
+      resolveAsync: jest.fn().mockResolvedValue({
+        rawText: '太古里',
+        locationText: '成都锦江区成都远洋太古里',
+        city: '成都',
+        district: '锦江区',
+        poiName: '成都远洋太古里',
+        source: 'amap',
+        confidence: 0.72,
+        needsConfirmation: true,
+        confirmationQuestion:
+          '我查到多个城市可能匹配“太古里”，请选择这次交友所在地点。',
+        candidates: [
+          {
+            name: '成都远洋太古里',
+            address: '成都市锦江区中纱帽街',
+            city: '成都',
+            district: '锦江区',
+            level: 'poi',
+            source: 'amap',
+            confidence: 0.72,
+          },
+          {
+            name: '三里屯太古里',
+            address: '北京市朝阳区三里屯路',
+            city: '北京',
+            district: '朝阳区',
+            level: 'poi',
+            source: 'amap',
+            confidence: 0.68,
+          },
+        ],
+      }),
+    };
+    const { service, task } = makeService(makeTask(), undefined, geoResolver);
+
+    const result = await service.tryHandleEntrance({
+      ownerUserId: 7,
+      task,
+      message:
+        '想在太古里附近认识同城朋友，咖啡聊天，不限性别，身材不限，外貌不限',
+    });
+
+    expect(geoResolver.resolveAsync).toHaveBeenCalledWith(
+      expect.objectContaining({
+        locationText: expect.stringContaining('太古里'),
+      }),
+    );
+    expect(result.result.cards?.[0]).toMatchObject({
+      schemaType: 'clarification.geo_candidates',
+      data: expect.objectContaining({
+        inferredIntent: 'friend',
+        noFallback: 'friend_intake',
+        candidates: expect.arrayContaining([
+          expect.objectContaining({ name: '成都远洋太古里', source: 'amap' }),
+          expect.objectContaining({ name: '三里屯太古里', source: 'amap' }),
+        ]),
+      }),
+    });
+    expect((task.memory as Record<string, unknown>).friendLoop).toMatchObject({
+      stage: 'intake',
+      slots: expect.objectContaining({
+        geoResolution: expect.objectContaining({
+          source: 'amap',
+          needsConfirmation: true,
+        }),
+      }),
+    });
+  });
+
+  it('applies selected friend geo candidates back to friend intake', async () => {
+    const task = makeTask({
+      memory: {
+        friendLoop: {
+          stage: 'intake',
+          slots: completeFriendSlots({
+            city: undefined,
+            locationText: '太古里',
+          }),
+        },
+      },
+    });
+    const { service } = makeService(task);
+
+    const result = await service.applySelectedSlots({
+      ownerUserId: 7,
+      taskId: 101,
+      payload: {
+        inferredSlots: {
+          friendGoal: '认识新朋友',
+          locationText: '太古里',
+          topicTags: ['咖啡'],
+          genderPreference: '不限性别',
+          bodyPreference: '身材不限',
+          appearancePreference: '外貌不限，看聊得来',
+        },
+        selectedPatch: {
+          locationText: '成都锦江区成都远洋太古里',
+          city: '成都',
+          district: '锦江区',
+          poiName: '成都远洋太古里',
+          geoResolution: {
+            rawText: '成都远洋太古里',
+            locationText: '成都锦江区成都远洋太古里',
+            city: '成都',
+            district: '锦江区',
+            poiName: '成都远洋太古里',
+            source: 'user_confirmed',
+            confidence: 1,
+            needsConfirmation: false,
+          },
+        },
+      },
+    });
+
+    expect(result.cards?.[0]).toMatchObject({
+      schemaType: 'friend.intake',
+      data: expect.objectContaining({
+        city: '成都',
+        locationText: '成都锦江区成都远洋太古里',
+        district: '锦江区',
+        poiName: '成都远洋太古里',
+        geoResolution: expect.objectContaining({
+          source: 'user_confirmed',
+          needsConfirmation: false,
+        }),
+      }),
+    });
+    expect((task.memory as Record<string, unknown>).friendLoop).toMatchObject({
+      stage: 'intake',
+      slots: expect.objectContaining({
+        city: '成都',
+        geoResolution: expect.objectContaining({ source: 'user_confirmed' }),
+      }),
     });
   });
 

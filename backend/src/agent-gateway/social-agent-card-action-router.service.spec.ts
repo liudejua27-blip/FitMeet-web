@@ -320,6 +320,23 @@ describe('SocialAgentCardActionRouterService', () => {
       taskId: 101,
       body: expect.objectContaining({ action: 'clarification.yes' }),
     });
+
+    await service.perform({
+      ownerUserId: 7,
+      taskId: 101,
+      body: {
+        action: 'clarification.select' as never,
+        payload: { selectedPatch: { city: '成都' } },
+      },
+      handleMessage,
+    });
+
+    expect(handleMessage).not.toHaveBeenCalled();
+    expect(clarificationActions.perform).toHaveBeenLastCalledWith({
+      ownerUserId: 7,
+      taskId: 101,
+      body: expect.objectContaining({ action: 'clarification.select' }),
+    });
   });
 
   it('publishes workout drafts through the existing discover publish flow and marks matching queued', async () => {
