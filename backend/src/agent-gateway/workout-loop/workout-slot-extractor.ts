@@ -61,17 +61,10 @@ function extractActivity(message: string): string | undefined {
 
 function extractTime(message: string): string | undefined {
   const explicit = message.match(
-    /(今天|今晚|明天|后天|周末|本周末|下周末)?\s*(上午|中午|下午|晚上|早上)?\s*(\d{1,2}\s*[点:：]\s*\d{0,2})?/,
+    /(今天|今晚|明天|后天|本周末|下周末|周末)(上午|中午|下午|晚上|早上)?|(上午|中午|下午|晚上|早上)|(\d{1,2}\s*[点:：]\s*\d{0,2})/,
   );
   const raw = explicit?.[0]?.replace(/\s+/g, '');
-  if (
-    raw &&
-    /(今天|今晚|明天|后天|周末|上午|中午|下午|晚上|早上|\d{1,2}[点:：])/.test(
-      raw,
-    )
-  ) {
-    return raw;
-  }
+  if (raw) return raw;
   const weekday = message.match(
     /(周一|周二|周三|周四|周五|周六|周日|星期[一二三四五六日天])/,
   );
@@ -95,6 +88,8 @@ function cleanPlaceText(value: string): string {
       /^(今天|今晚|明天|后天|周末|本周末|下周末|上午|中午|下午|晚上|早上)+/,
       '',
     )
+    .replace(/^(我想在|想在|我在|在|去|到|地点在|位置在)/, '')
+    .replace(/(找个?搭子|找人|一起|健身|跑步|运动|散步|打球).*$/, '')
     .trim();
 }
 

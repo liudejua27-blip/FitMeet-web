@@ -10,6 +10,7 @@ import {
 import {
   socialAgentApi,
   type FitMeetAlphaCard,
+  type FitMeetAgentThreadSummary,
   type UserFacingAgentResponse,
 } from '../../api/socialAgentApi';
 import { buildAgentAssistantProps } from './buildAgentAssistantProps';
@@ -136,6 +137,10 @@ export function useAgentWorkspaceController(view: AgentView) {
   });
   const skipNextRestoreRef = useRef(false);
   const loopChoiceBootstrapRef = useRef<string | null>(null);
+  const loopChoiceBootstrapRequestRef = useRef<{
+    userKey: string;
+    promise: ReturnType<typeof socialAgentApi.createThread>;
+  } | null>(null);
   const profileCompletionBootstrapRef = useRef<string | null>(null);
   const createBranchForNextAssistantRef = useRef(false);
   const { agentAdapter, isRealAgent } = useAgentAdapterRuntime();
@@ -157,17 +162,32 @@ export function useAgentWorkspaceController(view: AgentView) {
     if (messages.length > 0 || activeTaskId) return;
     if (loopChoiceBootstrapRef.current === userKey) return;
     let cancelled = false;
-    loopChoiceBootstrapRef.current = userKey;
-    socialAgentApi
-      .createThread('新对话')
+    let bootstrapRequest = loopChoiceBootstrapRequestRef.current;
+    if (!bootstrapRequest || bootstrapRequest.userKey !== userKey) {
+      bootstrapRequest = {
+        userKey,
+        promise: socialAgentApi.createThread('新对话'),
+      };
+      loopChoiceBootstrapRequestRef.current = bootstrapRequest;
+    }
+    bootstrapRequest.promise
       .then(({ thread }) => {
         if (cancelled) return;
-        const taskId = numberFromUnknown(thread.taskId);
-        if (!taskId) return;
+        const taskId = taskIdFromThread(thread);
+        if (!taskId) {
+          if (loopChoiceBootstrapRequestRef.current === bootstrapRequest) {
+            loopChoiceBootstrapRequestRef.current = null;
+          }
+          return;
+        }
         const response = buildLoopChoiceBootstrapResponse({
           taskId,
           permissionMode: mode,
         });
+        loopChoiceBootstrapRef.current = userKey;
+        if (loopChoiceBootstrapRequestRef.current === bootstrapRequest) {
+          loopChoiceBootstrapRequestRef.current = null;
+        }
         setActiveTaskId(taskId);
         setActiveThreadId(thread.id);
         setUserResult(response);
@@ -189,6 +209,9 @@ export function useAgentWorkspaceController(view: AgentView) {
         });
       })
       .catch(() => {
+        if (loopChoiceBootstrapRequestRef.current === bootstrapRequest) {
+          loopChoiceBootstrapRequestRef.current = null;
+        }
         loopChoiceBootstrapRef.current = null;
       });
     return () => {
@@ -369,6 +392,7 @@ export function useAgentWorkspaceController(view: AgentView) {
     clearStoredAgentThread(currentUserId);
     skipNextRestoreRef.current = true;
     loopChoiceBootstrapRef.current = null;
+    loopChoiceBootstrapRequestRef.current = null;
     profileCompletionBootstrapRef.current = null;
     resetConversationCore(conversationSteps);
     setIsRunning(false);
@@ -382,8 +406,8 @@ export function useAgentWorkspaceController(view: AgentView) {
     if (!isRealAgent || !isLoggedIn || shellView !== 'chat' || sessionRestoring || isRunning) {
       return;
     }
-    if (messages.length === 0 && !explicitProfileIntent) return;
-    if (profileCompletionBootstrapRef.current === userKey && !explicitProfileIntent) return;
+    if (!explicitProfileIntent) return;
+    if (profileCompletionBootstrapRef.current === userKey) return;
     if (messages.some(messageHasProfileCompletionCard)) return;
 
     let cancelled = false;
@@ -730,8 +754,7 @@ export function useAgentWorkspaceController(view: AgentView) {
 
 function shouldShowProfileCompletionCard(completion: SocialProfileCompletion | null | undefined) {
   if (!completion) return true;
-  if (completion.readinessLevel !== 'agent_ready') return true;
-  return (completion.missingFields ?? []).length > 0;
+  return (completion.missingRequired ?? []).length > 0;
 }
 
 function messageHasProfileCompletionCard(message: { result?: UserFacingAgentResponse | null }) {
@@ -783,6 +806,20 @@ function shouldPollMatchingSnapshot(
 function numberFromUnknown(value: unknown): number | null {
   const numeric = Number(value);
   return Number.isFinite(numeric) && numeric > 0 ? numeric : null;
+}
+
+function taskIdFromThread(thread: FitMeetAgentThreadSummary): number | null {
+  return (
+    numberFromUnknown(thread.taskId) ??
+    numberFromUnknown(thread.threadId) ??
+    numberFromThreadIdentifier(thread.id)
+  );
+}
+
+function numberFromThreadIdentifier(value: unknown): number | null {
+  if (typeof value !== 'string') return null;
+  const match = value.match(/(\d+)$/);
+  return match ? numberFromUnknown(match[1]) : null;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

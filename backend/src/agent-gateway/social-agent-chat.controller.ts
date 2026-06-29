@@ -1140,34 +1140,42 @@ export class SocialAgentChatController {
           taskId: streamResult.taskId ?? result.taskId ?? body.taskId ?? null,
           runId,
         });
-        const streamed = await this.writeLlmAssistantTextForResult(write, {
-          rawResult: streamResult as unknown as Record<string, unknown>,
-          userMessage: body.message ?? '',
-          messageId: assistantMessageId,
-          userId: req.user.id,
-          taskId: streamResult.taskId ?? result.taskId ?? body.taskId ?? null,
-          threadId: this.eventThreadId(
-            streamResult.taskId ?? result.taskId ?? body.taskId,
-            body.clientContext?.threadId,
-          ),
-          signal,
-          socialCodexEvents,
-          v2: assistantV2,
-        });
-        hasAssistantDelta = streamed.streamed;
-        if (streamed.streamed) {
-          streamedAssistantMessageId = assistantMessageId;
+        if (this.shouldUseDeterministicRouteReply(streamResult)) {
           streamResult = {
             ...streamResult,
-            assistantMessage: streamed.text ?? '',
-            assistantStreamed: true,
-            assistantMessageSource: 'llm',
+            assistantMessageSource:
+              streamResult.assistantMessageSource ?? 'deterministic_route',
           };
         } else {
-          streamResult = {
-            ...streamResult,
-            assistantMessageSource: streamed.source ?? 'fallback',
-          };
+          const streamed = await this.writeLlmAssistantTextForResult(write, {
+            rawResult: streamResult as unknown as Record<string, unknown>,
+            userMessage: body.message ?? '',
+            messageId: assistantMessageId,
+            userId: req.user.id,
+            taskId: streamResult.taskId ?? result.taskId ?? body.taskId ?? null,
+            threadId: this.eventThreadId(
+              streamResult.taskId ?? result.taskId ?? body.taskId,
+              body.clientContext?.threadId,
+            ),
+            signal,
+            socialCodexEvents,
+            v2: assistantV2,
+          });
+          hasAssistantDelta = streamed.streamed;
+          if (streamed.streamed) {
+            streamedAssistantMessageId = assistantMessageId;
+            streamResult = {
+              ...streamResult,
+              assistantMessage: streamed.text ?? '',
+              assistantStreamed: true,
+              assistantMessageSource: 'llm',
+            };
+          } else {
+            streamResult = {
+              ...streamResult,
+              assistantMessageSource: streamed.source ?? 'fallback',
+            };
+          }
         }
       }
       const assistantMessageId =
@@ -2126,6 +2134,37 @@ export class SocialAgentChatController {
     return source === 'deterministic_route' || source === 'deterministic_action'
       ? source
       : null;
+  }
+
+  private shouldUseDeterministicRouteReply(
+    result: SocialAgentIntentRouteResult | SocialAgentChatRunResult,
+  ): boolean {
+    const record = result as unknown as Record<string, unknown>;
+    const source = this.stringValue(record.assistantMessageSource);
+    if (source === 'deterministic_route' || source === 'deterministic_action') {
+      return true;
+    }
+
+    const deterministicCardSchemaTypes = new Set([
+      'loop.choice',
+      'clarification.binary',
+      'workout.intake',
+      'workout.draft',
+      'social_match.candidate',
+      'social_match.activity',
+      'meet_loop.timeline',
+      'safety.approval',
+    ]);
+    const cards = Array.isArray(record.cards) ? record.cards : [];
+    return cards.some((card) => {
+      if (!card || typeof card !== 'object') return false;
+      const cardRecord = card as Record<string, unknown>;
+      const dataRecord = this.recordValue(cardRecord.data);
+      const schemaType =
+        this.stringValue(cardRecord.schemaType) ||
+        this.stringValue(dataRecord?.schemaType);
+      return deterministicCardSchemaTypes.has(schemaType);
+    });
   }
 
   private async writeSocialCodexAssistantDelta(input: {

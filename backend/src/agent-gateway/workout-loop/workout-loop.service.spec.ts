@@ -130,6 +130,31 @@ describe('WorkoutLoopService', () => {
     });
   });
 
+  it('creates a workout draft for 青岛大学 健身 明天晚上 wording', async () => {
+    const { service, task } = makeService();
+
+    const result = await service.tryHandleEntrance({
+      ownerUserId: 7,
+      task,
+      message: '我想在青岛大学找个搭子，健身，明天晚上',
+    });
+
+    expect(result?.result).toMatchObject({
+      action: 'await_confirmation',
+      cards: [
+        expect.objectContaining({
+          schemaType: 'workout.draft',
+          data: expect.objectContaining({
+            activityType: '健身',
+            timePreference: '明天晚上',
+            locationText: expect.stringContaining('青岛大学'),
+            city: '青岛',
+          }),
+        }),
+      ],
+    });
+  });
+
   it('turns intake submit payload into a staged draft', async () => {
     const { service } = makeService();
 
