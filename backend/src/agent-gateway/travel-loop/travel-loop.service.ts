@@ -23,6 +23,7 @@ import {
   buildTravelDraftCard,
   buildTravelIntakeCard,
 } from './travel-card.presenter';
+import { TravelAgentBrainService } from './travel-agent-brain.service';
 import type { TravelLoopStage, TravelSlots } from './travel-loop.types';
 import {
   defaultTravelSafetyBoundary,
@@ -49,6 +50,8 @@ export class TravelLoopService {
     private readonly draftPublication?: SocialAgentDraftPublicationService,
     @Optional()
     private readonly matchingJobs?: MatchingJobService,
+    @Optional()
+    private readonly travelBrain?: TravelAgentBrainService,
   ) {}
 
   async tryHandleEntrance(input: {
@@ -60,9 +63,10 @@ export class TravelLoopService {
       message: input.message,
       previousSlots: this.readTravelSlots(input.task),
     });
+    const decision = this.travelBrain?.decideEntrance({ slots });
     const result = await this.intakeResultForSlots({
       task: input.task,
-      slots,
+      slots: decision?.slots ?? slots,
       assistantMessage:
         '可以，我先帮你整理结伴旅行需求。确认下面信息后，我再生成寻伴旅行卡。',
     });
@@ -158,10 +162,16 @@ export class TravelLoopService {
       ...this.slotsFromPayload(input.body.payload),
     });
     const validation = validateTravelSlots(slots);
-    if (!validation.valid) {
+    const decision = this.travelBrain?.decideIntakeSubmit({
+      slots,
+      validation,
+    });
+    const action =
+      decision?.action ?? (validation.valid ? 'CREATE_DRAFT' : 'ASK_INTAKE');
+    if (action === 'ASK_INTAKE') {
       return this.intakeResultForSlots({
         task,
-        slots,
+        slots: decision?.slots ?? slots,
         assistantMessage:
           '还需要补齐目的地、出发时间、预算和交通方式，才能生成旅行寻伴卡。',
       });
@@ -169,7 +179,7 @@ export class TravelLoopService {
     return this.createDraftResult({
       ownerUserId: input.ownerUserId,
       task,
-      slots,
+      slots: decision?.slots ?? slots,
       assistantMessage: '已收到旅行需求，我正在生成寻伴旅行卡。',
     });
   }

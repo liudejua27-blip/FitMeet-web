@@ -19,7 +19,13 @@ function makeTask(overrides: Partial<AgentTask> = {}): AgentTask {
   } as AgentTask;
 }
 
-function makeService(task = makeTask()) {
+function makeService(
+  task = makeTask(),
+  travelBrain?: {
+    decideEntrance?: jest.Mock;
+    decideIntakeSubmit?: jest.Mock;
+  },
+) {
   const taskRepo = {
     findOne: jest.fn().mockResolvedValue(task),
     save: jest.fn(async (entity) => entity),
@@ -53,6 +59,7 @@ function makeService(task = makeTask()) {
     messageLog as never,
     draftPublication as never,
     matchingJobs as never,
+    travelBrain as never,
   );
   return {
     draftPublication,
@@ -65,6 +72,43 @@ function makeService(task = makeTask()) {
 }
 
 describe('TravelLoopService', () => {
+  it('routes travel entrance through TravelAgentBrain when available', async () => {
+    const travelBrain = {
+      decideEntrance: jest.fn().mockImplementation(({ slots }) => ({
+        loopKind: 'travel',
+        action: 'ASK_INTAKE',
+        reason: 'test_travel_brain_entrance',
+        slots: {
+          ...slots,
+          foodPreference: '川菜和本地小吃',
+        },
+        missing: [],
+      })),
+    };
+    const { service, task } = makeService(makeTask(), travelBrain);
+
+    const result = await service.tryHandleEntrance({
+      ownerUserId: 7,
+      task,
+      message: '周末想去成都旅游，预算1000元，高铁，找会拍照的搭子',
+    });
+
+    expect(travelBrain.decideEntrance).toHaveBeenCalledWith(
+      expect.objectContaining({
+        slots: expect.objectContaining({
+          destination: '成都',
+          departureTime: '周末',
+        }),
+      }),
+    );
+    expect(result.result.cards?.[0]).toMatchObject({
+      schemaType: 'travel.intake',
+      data: expect.objectContaining({
+        foodPreference: '川菜和本地小吃',
+      }),
+    });
+  });
+
   it('returns a prefilled travel intake card from natural language', async () => {
     const { draftPublication, service, task } = makeService();
 
@@ -159,6 +203,59 @@ describe('TravelLoopService', () => {
         metadata: expect.objectContaining({
           loop: 'travel',
           travelLoopStage: 'draft_ready',
+        }),
+      }),
+    );
+  });
+
+  it('routes travel intake submit through TravelAgentBrain before drafting', async () => {
+    const travelBrain = {
+      decideIntakeSubmit: jest.fn().mockImplementation(({ slots }) => ({
+        loopKind: 'travel',
+        action: 'CREATE_DRAFT',
+        reason: 'test_travel_brain_ready',
+        slots: {
+          ...slots,
+          foodPreference: '川菜和本地小吃',
+        },
+        missing: [],
+      })),
+    };
+    const { draftPublication, service } = makeService(makeTask(), travelBrain);
+
+    const result = await service.performTravelAction({
+      ownerUserId: 7,
+      taskId: 101,
+      body: {
+        action: 'travel_intake.submit' as never,
+        payload: {
+          slots: {
+            destination: '成都',
+            departureTime: '周末',
+            budgetRange: '1000元',
+            transportMode: '高铁',
+          },
+        },
+      },
+    });
+
+    expect(travelBrain.decideIntakeSubmit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        validation: { valid: true, missing: [] },
+      }),
+    );
+    expect(result.cards?.[0]).toMatchObject({
+      schemaType: 'travel.companion_draft',
+      data: expect.objectContaining({
+        foodPreference: '川菜和本地小吃',
+      }),
+    });
+    expect(draftPublication.stagePrivateDraftForPublish).toHaveBeenCalledWith(
+      7,
+      101,
+      expect.objectContaining({
+        metadata: expect.objectContaining({
+          foodPreference: '川菜和本地小吃',
         }),
       }),
     );

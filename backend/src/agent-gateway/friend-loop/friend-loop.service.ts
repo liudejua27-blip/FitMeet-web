@@ -23,6 +23,7 @@ import {
   buildFriendDraftCard,
   buildFriendIntakeCard,
 } from './friend-card.presenter';
+import { FriendAgentBrainService } from './friend-agent-brain.service';
 import type { FriendLoopStage, FriendSlots } from './friend-loop.types';
 import {
   defaultFriendSafetyBoundary,
@@ -49,6 +50,8 @@ export class FriendLoopService {
     private readonly draftPublication?: SocialAgentDraftPublicationService,
     @Optional()
     private readonly matchingJobs?: MatchingJobService,
+    @Optional()
+    private readonly friendBrain?: FriendAgentBrainService,
   ) {}
 
   async tryHandleEntrance(input: {
@@ -60,9 +63,10 @@ export class FriendLoopService {
       message: input.message,
       previousSlots: this.readFriendSlots(input.task),
     });
+    const decision = this.friendBrain?.decideEntrance({ slots });
     const result = await this.intakeResultForSlots({
       task: input.task,
-      slots,
+      slots: decision?.slots ?? slots,
       assistantMessage:
         '可以，我先帮你整理交友需求。确认下面信息后，我再生成交友卡。',
     });
@@ -157,17 +161,23 @@ export class FriendLoopService {
       ...this.slotsFromPayload(input.body.payload),
     });
     const validation = validateFriendSlots(slots);
-    if (!validation.valid) {
+    const decision = this.friendBrain?.decideIntakeSubmit({
+      slots,
+      validation,
+    });
+    const action =
+      decision?.action ?? (validation.valid ? 'CREATE_DRAFT' : 'ASK_INTAKE');
+    if (action === 'ASK_INTAKE') {
       return this.intakeResultForSlots({
         task,
-        slots,
+        slots: decision?.slots ?? slots,
         assistantMessage: '还需要补齐交友目标和城市，才能生成交友卡。',
       });
     }
     return this.createDraftResult({
       ownerUserId: input.ownerUserId,
       task,
-      slots,
+      slots: decision?.slots ?? slots,
       assistantMessage: '已收到交友需求，我正在生成交友卡。',
     });
   }
