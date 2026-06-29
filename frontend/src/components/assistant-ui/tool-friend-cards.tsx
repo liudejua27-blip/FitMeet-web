@@ -276,14 +276,21 @@ export function FriendDraftCard({ card }: { card: SchemaDrivenAssistantCard }) {
         </div>
         <div className="flex flex-wrap gap-2">
           <ActionButton
+            busy={status.key === 'friend_draft.publish'}
+            onClick={() => void run('friend_draft.publish', '已发布到发现，并进入交友匹配队列。')}
+          >
+            发布到发现
+          </ActionButton>
+          <ActionButton
             busy={status.key === 'friend_draft.private_match'}
+            tone="secondary"
             onClick={() => void run('friend_draft.private_match', '已进入私密匹配。')}
           >
             不公开，开始私密匹配
           </ActionButton>
           <ActionButton
             busy={status.key === 'friend_draft.edit'}
-            tone="secondary"
+            tone="ghost"
             onClick={() => void run('friend_draft.edit', '可以继续修改交友需求。')}
           >
             修改

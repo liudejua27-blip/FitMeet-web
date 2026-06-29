@@ -72,7 +72,7 @@ export function buildTravelDraftCard(input: {
     schemaVersion: 'fitmeet.tool-ui.v1',
     schemaType: 'travel.companion_draft',
     title,
-    body: '确认后进入私密旅行搭子匹配；不会发布到发现页，也不会自动联系任何人。',
+    body: '可以发布到发现，也可以不公开继续私密旅行搭子匹配；不会自动联系任何人。',
     status: 'waiting_confirmation',
     data: {
       taskId: input.taskId,
@@ -94,6 +94,14 @@ export function buildTravelDraftCard(input: {
       socialRequestDraft: input.draft,
     },
     actions: [
+      {
+        id: 'publish',
+        label: '发布到发现',
+        action: 'travel_draft.publish',
+        schemaAction: 'travel_draft.publish',
+        requiresConfirmation: true,
+        payload: basePayload,
+      },
       {
         id: 'private_match',
         label: '不公开，开始私密匹配',

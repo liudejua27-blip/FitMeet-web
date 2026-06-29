@@ -141,4 +141,56 @@ describe('Travel loop cards', () => {
       }),
     );
   });
+
+  it('publishes travel draft to Discover from the draft card', async () => {
+    const onCardAction = vi
+      .fn()
+      .mockResolvedValue({ assistantMessage: '已发布到发现，并进入旅行寻伴匹配队列' });
+    const card: SchemaDrivenAssistantCard = {
+      id: 'travel_draft:101:801',
+      type: 'travel_companion_draft',
+      schemaVersion: FITMEET_TOOL_UI_SCHEMA_VERSION,
+      schemaType: 'travel.companion_draft',
+      title: '成都旅行寻伴',
+      body: '可以发布到发现，也可以不公开继续私密旅行搭子匹配。',
+      data: {
+        taskId: 101,
+        socialRequestId: 801,
+        destination: '成都',
+        departureTime: '周末',
+        duration: '两天一晚',
+        budgetRange: '人均1000元',
+        transportMode: '高铁',
+        tags: ['美食'],
+        safetyBoundary: '站内先聊，不交换联系方式',
+        socialRequestDraft: { title: '成都旅行寻伴', city: '成都' },
+      },
+      actions: [],
+    };
+
+    render(
+      <FitMeetToolUIActionsProvider value={{ onCardAction }}>
+        <TravelDraftCard card={card} />
+      </FitMeetToolUIActionsProvider>,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '发布到发现' }));
+
+    await waitFor(() => expect(onCardAction).toHaveBeenCalledTimes(1));
+    expect(onCardAction).toHaveBeenCalledWith(
+      expect.objectContaining({
+        taskId: 101,
+        cardId: 'travel_draft:101:801',
+        action: 'travel_draft.publish',
+        schemaAction: 'travel_draft.publish',
+        payload: expect.objectContaining({
+          socialRequestId: 801,
+          socialRequestDraft: expect.objectContaining({
+            title: '成都旅行寻伴',
+            city: '成都',
+          }),
+        }),
+      }),
+    );
+  });
 });

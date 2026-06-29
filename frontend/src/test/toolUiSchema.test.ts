@@ -250,6 +250,8 @@ describe('tool-ui-schema', () => {
     expect(summary.title).toBe('1 张交友填写卡 · 1 张交友草稿 · 1 张旅行填写卡 · 1 张旅行寻伴草稿');
     expect(summary.detail).toContain('交友闭环');
     expect(toolUISchemaActionFromUnknown('travel_intake.submit')).toBe('travel_intake.submit');
+    expect(toolUISchemaActionFromUnknown('friend_draft.publish')).toBe('friend_draft.publish');
+    expect(toolUISchemaActionFromUnknown('travel_draft.publish')).toBe('travel_draft.publish');
     expect(toolUISchemaActionFromUnknown('travel_draft.private_match')).toBe(
       'travel_draft.private_match',
     );

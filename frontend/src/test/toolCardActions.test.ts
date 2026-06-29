@@ -614,6 +614,14 @@ describe('tool-card-actions runtime identity', () => {
       },
       actions: [
         {
+          id: 'publish',
+          label: '发布到发现',
+          action: 'travel_draft.publish',
+          schemaAction: 'travel_draft.publish',
+          requiresConfirmation: true,
+          payload: { taskId: 101, socialRequestId: 801 },
+        },
+        {
           id: 'private_match',
           label: '不公开，开始私密匹配',
           action: 'travel_draft.private_match',
@@ -643,14 +651,60 @@ describe('tool-card-actions runtime identity', () => {
     const actions = visibleCardActions(card, card.actions);
 
     expect(actions.map((action) => action.schemaAction)).toEqual([
+      'travel_draft.publish',
       'travel_draft.private_match',
       'travel_draft.edit',
       'travel_draft.cancel',
     ]);
     expect(actions[0]).toMatchObject({
-      label: '不公开，开始私密匹配',
-      requiresConfirmation: false,
+      label: '发布到发现',
+      requiresConfirmation: true,
     });
+    expect(TOOL_UI_CARD_ACTION_COPY['travel_draft.publish'].result).toContain('旅行寻伴卡');
     expect(TOOL_UI_CARD_ACTION_COPY['travel_draft.private_match'].result).toContain('旅行寻伴卡');
+  });
+
+  it('keeps friend draft publish as the primary confirmable action', () => {
+    const card: SchemaDrivenAssistantCard = {
+      id: 'friend_draft:101:701',
+      type: 'friend_draft',
+      schemaVersion: FITMEET_TOOL_UI_SCHEMA_VERSION,
+      schemaType: 'friend.draft',
+      title: '上海认识新朋友',
+      data: {
+        taskId: 101,
+        socialRequestId: 701,
+      },
+      actions: [
+        {
+          id: 'publish',
+          label: '发布到发现',
+          action: 'friend_draft.publish',
+          schemaAction: 'friend_draft.publish',
+          requiresConfirmation: true,
+          payload: { taskId: 101, socialRequestId: 701 },
+        },
+        {
+          id: 'private_match',
+          label: '不公开，开始私密匹配',
+          action: 'friend_draft.private_match',
+          schemaAction: 'friend_draft.private_match',
+          requiresConfirmation: false,
+          payload: { taskId: 101, socialRequestId: 701 },
+        },
+      ],
+    };
+
+    const actions = visibleCardActions(card, card.actions);
+
+    expect(actions.map((action) => action.schemaAction)).toEqual([
+      'friend_draft.publish',
+      'friend_draft.private_match',
+    ]);
+    expect(actions[0]).toMatchObject({
+      label: '发布到发现',
+      requiresConfirmation: true,
+    });
+    expect(TOOL_UI_CARD_ACTION_COPY['friend_draft.publish'].result).toContain('交友卡');
   });
 });
