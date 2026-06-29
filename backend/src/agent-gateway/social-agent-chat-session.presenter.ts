@@ -52,6 +52,14 @@ export function readSocialAgentRestorableResult(input: {
   visibleStepLabel: VisibleStepLabeler;
 }): SocialAgentChatRunResult | SocialAgentChatReplanRunResult | null {
   const { task, latestRun, events, visibleStepLabel } = input;
+  const taskMemoryResult = readResultFromTaskMemory(
+    task,
+    events,
+    visibleStepLabel,
+  );
+  if (shouldPreferTaskMemoryResult(task, taskMemoryResult, latestRun)) {
+    return taskMemoryResult;
+  }
   if (latestRun?.result && isRecord(latestRun.result)) {
     const runResult = latestRun.result as
       | SocialAgentChatRunResult
@@ -74,7 +82,7 @@ export function readSocialAgentRestorableResult(input: {
     );
   }
 
-  return readResultFromTaskMemory(task, events, visibleStepLabel);
+  return taskMemoryResult;
 }
 
 function sanitizeRestorableRunResult(
@@ -221,8 +229,27 @@ function buildRestoredOpportunityCard(
     null;
   const discoverHref =
     cleanDisplayText(draft.discoverHref ?? metadata.discoverHref, '') || null;
+  const publishStatus = cleanDisplayText(
+    draftRecord.publishStatus ?? metadata.publishStatus,
+    '',
+  );
+  const visibility = cleanDisplayText(
+    draftRecord.visibility ?? metadata.visibility,
+    '',
+  );
+  const matchingJobId =
+    numberValue(draftRecord.matchingJobId) ??
+    numberValue(metadata.matchingJobId);
+  const matchingJobStatus =
+    cleanDisplayText(
+      draftRecord.matchingJobStatus ?? metadata.matchingJobStatus,
+      '',
+    ) || null;
   const autoPublished =
-    draft.autoPublished === true || metadata.autoPublished === true;
+    draft.autoPublished === true ||
+    metadata.autoPublished === true ||
+    ((publishStatus === 'published' || visibility === 'public') &&
+      Boolean(publicIntentId || discoverHref));
   const title =
     cleanDisplayText(draft.title ?? card.title ?? metadata.title, '') ||
     '约练卡草稿';
@@ -268,6 +295,8 @@ function buildRestoredOpportunityCard(
     socialRequestId,
     publicIntentId,
     discoverHref,
+    matchingJobId,
+    matchingJobStatus,
     socialRequestDraft: draft,
     draft,
     approvalRequired: !autoPublished,
@@ -336,6 +365,8 @@ function buildRestoredOpportunityCard(
       socialRequestId,
       publicIntentId,
       discoverHref,
+      matchingJobId,
+      matchingJobStatus,
       autoPublished,
       publishStatus: autoPublished
         ? 'published'
@@ -360,6 +391,8 @@ function buildRestoredOpportunityCard(
         autoPublished,
         publicIntentId,
         discoverHref,
+        matchingJobId,
+        matchingJobStatus,
       },
       city,
       locationName: location,
@@ -372,6 +405,110 @@ function buildRestoredOpportunityCard(
     },
     actions,
   };
+}
+
+function shouldPreferTaskMemoryResult(
+  task: AgentTask,
+  taskMemoryResult: SocialAgentChatRunResult | null,
+  latestRun: SocialAgentAsyncRunSnapshot | null,
+): taskMemoryResult is SocialAgentChatRunResult {
+  if (!taskMemoryResult) return false;
+  if (!latestRun?.result || !isRecord(latestRun.result)) return true;
+  if (isOpportunityDraftCancelled(task)) return false;
+  if (hasMatchingOutcome(taskMemoryResult)) return true;
+  if (!hasPublishedOrMatchingState(taskMemoryResult)) return false;
+  if (!hasPublishedOrMatchingState(latestRun.result)) return true;
+  return taskUpdatedAfterLatestRun(task, latestRun);
+}
+
+function hasMatchingOutcome(
+  result: SocialAgentChatRunResult | SocialAgentChatReplanRunResult,
+): boolean {
+  if ((result.candidates?.length ?? 0) > 0) return true;
+  return (result.cards ?? []).some((card) => {
+    const data = isRecord(card.data) ? card.data : {};
+    const schemaType =
+      cleanDisplayText(card.schemaType, '') ||
+      cleanDisplayText(data.schemaType, '');
+    return (
+      schemaType === 'social_match.candidate' ||
+      schemaType === 'social_match.no_candidates'
+    );
+  });
+}
+
+function hasPublishedOrMatchingState(value: unknown): boolean {
+  if (!isRecord(value)) return false;
+  const draft = isRecord(value.socialRequestDraft)
+    ? value.socialRequestDraft
+    : {};
+  const cards = Array.isArray(value.cards) ? value.cards : [];
+  const publicIntentId = firstText(
+    draft.publicIntentId,
+    value.publicIntentId,
+    ...cards.map((card) =>
+      isRecord(card) && isRecord(card.data) ? card.data.publicIntentId : null,
+    ),
+  );
+  const discoverHref = firstText(
+    draft.discoverHref,
+    value.discoverHref,
+    ...cards.map((card) =>
+      isRecord(card) && isRecord(card.data) ? card.data.discoverHref : null,
+    ),
+  );
+  const state = [
+    draft.publishStatus,
+    draft.visibility,
+    draft.matchingJobStatus,
+    value.publishStatus,
+    value.matchingJobStatus,
+    isRecord(value.publicLoop) ? value.publicLoop.stage : null,
+    ...cards.flatMap((card) => {
+      if (!isRecord(card)) return [];
+      const data = isRecord(card.data) ? card.data : {};
+      return [
+        card.status,
+        data.publishStatus,
+        data.visibility,
+        data.matchingJobStatus,
+      ];
+    }),
+  ]
+    .map((item) => cleanDisplayText(item, '').toLowerCase())
+    .filter(Boolean)
+    .join(' ');
+  return (
+    Boolean(publicIntentId || discoverHref) &&
+    /published|public|queued|running|candidate|matched|no_candidates/.test(
+      state,
+    )
+  );
+}
+
+function taskUpdatedAfterLatestRun(
+  task: AgentTask,
+  latestRun: SocialAgentAsyncRunSnapshot,
+): boolean {
+  const taskTime = dateMillis(task.updatedAt);
+  const runTime = dateMillis(latestRun.updatedAt ?? latestRun.completedAt);
+  return taskTime !== null && runTime !== null && taskTime >= runTime;
+}
+
+function firstText(...values: unknown[]): string | null {
+  for (const value of values) {
+    const text = cleanDisplayText(value, '');
+    if (text) return text;
+  }
+  return null;
+}
+
+function dateMillis(value: unknown): number | null {
+  if (value instanceof Date) return value.getTime();
+  const text = cleanDisplayText(value, '');
+  if (!text) return null;
+  const time = Date.parse(text);
+  return Number.isFinite(time) ? time : null;
 }
 
 function isOpportunityDraftCancelled(task: AgentTask): boolean {
