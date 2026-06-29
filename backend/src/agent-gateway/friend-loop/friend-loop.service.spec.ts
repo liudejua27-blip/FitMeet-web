@@ -73,6 +73,20 @@ function makeService(
   };
 }
 
+function completeFriendSlots(overrides: Record<string, unknown> = {}) {
+  return {
+    friendGoal: '认识新朋友',
+    city: '青岛',
+    locationText: '青岛市南区',
+    topicTags: ['咖啡', '电影'],
+    genderPreference: '不限性别',
+    bodyPreference: '身材不限',
+    appearancePreference: '外貌不限，看聊得来',
+    scenePreference: '先站内聊天',
+    ...overrides,
+  };
+}
+
 describe('FriendLoopService', () => {
   it('routes friend entrance through FriendAgentBrain when available', async () => {
     const friendBrain = {
@@ -128,7 +142,13 @@ describe('FriendLoopService', () => {
           data: expect.objectContaining({
             friendGoal: '认识新朋友',
             city: '青岛',
+            locationText: expect.stringContaining('青岛'),
             topicTags: expect.arrayContaining(['咖啡', '聊天', '同城']),
+            missingFields: expect.arrayContaining([
+              'genderPreference',
+              'bodyPreference',
+              'appearancePreference',
+            ]),
           }),
         }),
       ],
@@ -146,7 +166,11 @@ describe('FriendLoopService', () => {
         confidence: 0.88,
         friendGoal: '认识同城朋友',
         city: '上海',
+        locationText: '上海市区',
         topicTags: ['咖啡', '低压力社交'],
+        genderPreference: '不限性别',
+        bodyPreference: '身材不限',
+        appearancePreference: '外貌不限，看聊得来',
         scenePreference: '先站内聊聊',
         timePreference: '周末',
         candidatePreference: '兴趣相近',
@@ -177,7 +201,11 @@ describe('FriendLoopService', () => {
       data: expect.objectContaining({
         friendGoal: '认识同城朋友',
         city: '上海',
+        locationText: '上海市区',
         topicTags: expect.arrayContaining(['咖啡', '低压力社交']),
+        genderPreference: '不限性别',
+        bodyPreference: '身材不限',
+        appearancePreference: '外貌不限，看聊得来',
         scenePreference: '先站内聊聊',
         timePreference: '周末',
         candidatePreference: '兴趣相近',
@@ -193,6 +221,11 @@ describe('FriendLoopService', () => {
           stage: 'intake',
           slots: {
             friendGoal: '认识新朋友',
+            locationText: '上海市区',
+            topicTags: ['咖啡'],
+            genderPreference: '不限性别',
+            bodyPreference: '身材不限',
+            appearancePreference: '外貌不限，看聊得来',
           },
         },
       },
@@ -244,7 +277,11 @@ describe('FriendLoopService', () => {
       schemaType: 'friend.intake',
       data: expect.objectContaining({
         friendGoal: '认识新朋友',
-        missingFields: expect.arrayContaining(['city']),
+        missingFields: expect.arrayContaining([
+          'genderPreference',
+          'bodyPreference',
+          'appearancePreference',
+        ]),
       }),
     });
     expect(draftPublication.stagePrivateDraftForPublish).not.toHaveBeenCalled();
@@ -269,7 +306,13 @@ describe('FriendLoopService', () => {
     expect(result.cards?.[0]).toMatchObject({
       schemaType: 'friend.intake',
       data: expect.objectContaining({
-        missingFields: expect.arrayContaining(['city']),
+        missingFields: expect.arrayContaining([
+          'locationText',
+          'topicTags',
+          'genderPreference',
+          'bodyPreference',
+          'appearancePreference',
+        ]),
       }),
     });
     expect(draftPublication.stagePrivateDraftForPublish).not.toHaveBeenCalled();
@@ -284,12 +327,7 @@ describe('FriendLoopService', () => {
       body: {
         action: 'friend_intake.submit' as never,
         payload: {
-          slots: {
-            friendGoal: '认识新朋友',
-            city: '青岛',
-            topicTags: ['咖啡', '电影'],
-            scenePreference: '先站内聊天',
-          },
+          slots: completeFriendSlots(),
         },
       },
     });
@@ -299,6 +337,10 @@ describe('FriendLoopService', () => {
       data: expect.objectContaining({
         friendGoal: '认识新朋友',
         city: '青岛',
+        locationText: '青岛市南区',
+        genderPreference: '不限性别',
+        bodyPreference: '身材不限',
+        appearancePreference: '外貌不限，看聊得来',
         socialRequestId: 701,
       }),
     });
@@ -337,10 +379,7 @@ describe('FriendLoopService', () => {
       body: {
         action: 'friend_intake.submit' as never,
         payload: {
-          slots: {
-            friendGoal: '认识新朋友',
-            city: '青岛',
-          },
+          slots: completeFriendSlots({ topicTags: ['咖啡'] }),
         },
       },
     });
@@ -372,11 +411,7 @@ describe('FriendLoopService', () => {
       memory: {
         friendLoop: {
           stage: 'draft_ready',
-          slots: {
-            friendGoal: '认识新朋友',
-            city: '青岛',
-            topicTags: ['咖啡'],
-          },
+          slots: completeFriendSlots({ topicTags: ['咖啡'] }),
         },
       },
     });
@@ -389,11 +424,7 @@ describe('FriendLoopService', () => {
         action: 'friend_draft.private_match' as never,
         payload: {
           socialRequestId: 701,
-          slots: {
-            friendGoal: '认识新朋友',
-            city: '青岛',
-            topicTags: ['咖啡'],
-          },
+          slots: completeFriendSlots({ topicTags: ['咖啡'] }),
         },
       },
     });

@@ -37,8 +37,20 @@ describe('Friend loop cards', () => {
     fireEvent.change(screen.getByPlaceholderText('青岛 / 上海 / 成都'), {
       target: { value: '青岛' },
     });
+    fireEvent.change(screen.getByPlaceholderText('市南区 / 学校附近 / 公司附近'), {
+      target: { value: '市南区' },
+    });
     fireEvent.change(screen.getByPlaceholderText('咖啡、电影、摄影'), {
       target: { value: '咖啡、电影' },
+    });
+    fireEvent.change(screen.getByPlaceholderText('不限性别 / 女生优先 / 男生优先'), {
+      target: { value: '不限性别' },
+    });
+    fireEvent.change(screen.getByPlaceholderText('身材不限 / 爱运动 / 健康体型'), {
+      target: { value: '身材不限' },
+    });
+    fireEvent.change(screen.getByPlaceholderText('外貌不限 / 清爽 / 照片真实'), {
+      target: { value: '外貌不限，看聊得来' },
     });
     fireEvent.change(screen.getByPlaceholderText('先站内聊天 / 同城低压力认识'), {
       target: { value: '先站内聊天' },
@@ -62,7 +74,11 @@ describe('Friend loop cards', () => {
           slots: expect.objectContaining({
             friendGoal: '认识新朋友',
             city: '青岛',
+            locationText: '市南区',
             topicTags: ['咖啡', '电影'],
+            genderPreference: '不限性别',
+            bodyPreference: '身材不限',
+            appearancePreference: '外貌不限，看聊得来',
             scenePreference: '先站内聊天',
             timePreference: '周末',
             candidatePreference: '兴趣相近',
@@ -87,7 +103,11 @@ describe('Friend loop cards', () => {
         socialRequestId: 701,
         friendGoal: '认识新朋友',
         city: '青岛',
+        locationText: '市南区',
         topicTags: ['咖啡'],
+        genderPreference: '不限性别',
+        bodyPreference: '身材不限',
+        appearancePreference: '外貌不限，看聊得来',
         scenePreference: '先站内聊天',
         safetyBoundary: '站内先聊，不交换联系方式',
         socialRequestDraft: { title: '青岛认识新朋友' },
@@ -136,7 +156,11 @@ describe('Friend loop cards', () => {
         socialRequestId: 701,
         friendGoal: '认识新朋友',
         city: '上海',
+        locationText: '上海市区',
         topicTags: ['咖啡'],
+        genderPreference: '不限性别',
+        bodyPreference: '身材不限',
+        appearancePreference: '外貌不限，看聊得来',
         scenePreference: '先站内聊天',
         safetyBoundary: '站内先聊，不交换联系方式',
         socialRequestDraft: { title: '上海认识新朋友', city: '上海' },

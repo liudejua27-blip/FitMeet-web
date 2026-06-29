@@ -20,13 +20,23 @@ export type FriendLoopStage = Extract<
 export type FriendSlots = LoopSlots & {
   friendGoal?: string;
   city?: string;
+  locationText?: string;
   topicTags?: string[];
+  genderPreference?: string;
+  bodyPreference?: string;
+  appearancePreference?: string;
   scenePreference?: string;
   timePreference?: string;
   candidatePreference?: string;
   visibilityPreference?: 'private';
 };
 
-export type FriendRequiredSlot = 'friendGoal' | 'city';
+export type FriendRequiredSlot =
+  | 'friendGoal'
+  | 'locationText'
+  | 'topicTags'
+  | 'genderPreference'
+  | 'bodyPreference'
+  | 'appearancePreference';
 
 export type FriendSlotValidation = LoopSlotValidation<FriendRequiredSlot>;

@@ -15,11 +15,26 @@ const FriendUnderstandingSchema = z.object({
   confidence: z.number().min(0).max(1).catch(0),
   friendGoal: z.string().optional(),
   city: z.string().optional(),
+  locationText: z.string().optional(),
   topicTags: z.array(z.string()).catch([]),
+  genderPreference: z.string().optional(),
+  bodyPreference: z.string().optional(),
+  appearancePreference: z.string().optional(),
   scenePreference: z.string().optional(),
   timePreference: z.string().optional(),
   candidatePreference: z.string().optional(),
-  missing: z.array(z.enum(['friendGoal', 'city'])).catch([]),
+  missing: z
+    .array(
+      z.enum([
+        'friendGoal',
+        'locationText',
+        'topicTags',
+        'genderPreference',
+        'bodyPreference',
+        'appearancePreference',
+      ]),
+    )
+    .catch([]),
   assumptions: z.array(z.string()).catch([]),
   needsClarification: z.boolean().catch(false),
   clarificationQuestion: z.string().optional(),
@@ -76,7 +91,12 @@ export class FriendUnderstandingService {
     return {
       friendGoal: this.text(understanding.friendGoal) || undefined,
       city: sanitizeCity(understanding.city) ?? undefined,
+      locationText: this.text(understanding.locationText) || undefined,
       topicTags: this.stringList(understanding.topicTags),
+      genderPreference: this.text(understanding.genderPreference) || undefined,
+      bodyPreference: this.text(understanding.bodyPreference) || undefined,
+      appearancePreference:
+        this.text(understanding.appearancePreference) || undefined,
       scenePreference: this.text(understanding.scenePreference) || undefined,
       timePreference: this.text(understanding.timePreference) || undefined,
       candidatePreference:
@@ -99,8 +119,17 @@ export class FriendUnderstandingService {
     return {
       ...ruleSlots,
       friendGoal: this.friendGoal(ruleSlots, llmSlots),
-      city: ruleSlots.city || llmSlots.city,
+      city: llmSlots.city || ruleSlots.city,
+      locationText: llmSlots.locationText || ruleSlots.locationText,
       topicTags,
+      genderPreference:
+        llmSlots.genderPreference || ruleSlots.genderPreference || undefined,
+      bodyPreference:
+        llmSlots.bodyPreference || ruleSlots.bodyPreference || undefined,
+      appearancePreference:
+        llmSlots.appearancePreference ||
+        ruleSlots.appearancePreference ||
+        undefined,
       scenePreference:
         llmSlots.scenePreference || ruleSlots.scenePreference || undefined,
       timePreference:
@@ -144,7 +173,11 @@ export class FriendUnderstandingService {
         'confidence',
         'friendGoal',
         'city',
+        'locationText',
         'topicTags',
+        'genderPreference',
+        'bodyPreference',
+        'appearancePreference',
         'scenePreference',
         'timePreference',
         'candidatePreference',
