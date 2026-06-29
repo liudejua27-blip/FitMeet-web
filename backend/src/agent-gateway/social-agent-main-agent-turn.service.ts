@@ -17,6 +17,13 @@ import { SocialAgentMainAgentTurnResultService } from './social-agent-main-agent
 import { socialAgentAlphaNeedsClarification } from './social-agent-route-response.presenter';
 import { SocialAgentContextHydratorService } from './social-agent-context-hydrator.service';
 
+/**
+ * @deprecated Legacy comprehensive Social Agent turn.
+ *
+ * This remains behind LegacyAgentAdapterService for casual chat, unknown
+ * fallback, and old-task compatibility. New Workout/Friend/Travel main-loop
+ * behavior belongs in loop agents, not this service.
+ */
 @Injectable()
 export class SocialAgentMainAgentTurnService {
   constructor(

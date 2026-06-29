@@ -7,7 +7,7 @@ import type {
 } from './legacy-agent.types';
 
 /**
- * Legacy comprehensive agent.
+ * @deprecated Legacy comprehensive agent.
  *
  * Do not add Workout/Friend/Travel main-loop logic here.
  * This adapter is only for casual chat, explanation, old task compatibility,

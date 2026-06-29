@@ -176,6 +176,38 @@ describe('Social Agent route branch production boundary', () => {
     expect(violations).toEqual([]);
   });
 
+  it('keeps new loop modules independent from legacy route turns and profile gate', () => {
+    const loopDirs = new Set(['workout-loop', 'friend-loop', 'travel-loop']);
+    const forbiddenSymbols = [
+      'SocialAgentRouteSearchTurnService',
+      'SocialAgentRouteActionTurnService',
+      'social-agent-route-search-turn',
+      'social-agent-route-action-turn',
+      'SocialAgentProfileGateService',
+      'social-agent-profile-gate',
+      'SocialAgentMainAgentTurnService',
+      'legacy-agent',
+    ];
+    const violations: Array<{ file: string; symbol: string }> = [];
+
+    for (const file of listProductionTypeScriptFiles(__dirname)) {
+      const segments = file.split(path.sep);
+      const loopDir = segments.find((segment) => loopDirs.has(segment));
+      if (!loopDir) continue;
+      const source = fs.readFileSync(file, 'utf8');
+      for (const symbol of forbiddenSymbols) {
+        if (source.includes(symbol)) {
+          violations.push({
+            file: path.relative(__dirname, file),
+            symbol,
+          });
+        }
+      }
+    }
+
+    expect(violations).toEqual([]);
+  });
+
   it('keeps route branch services from owning tool execution or run orchestration', () => {
     const branchFiles = [
       'social-agent-route-conversation-turn.service.ts',
