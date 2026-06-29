@@ -401,6 +401,9 @@ describe('AgentWorkspacePage', () => {
     });
     vi.spyOn(socialAgentApi, 'restoreSession').mockResolvedValue(emptySession());
     vi.spyOn(socialAgentApi, 'listThreads').mockResolvedValue({ threads: [] });
+    vi.spyOn(socialAgentApi, 'createThread').mockRejectedValue(
+      new Error('Loop choice bootstrap is outside this profile-gate test.'),
+    );
     vi.spyOn(socialAgentApi, 'getProfileGate').mockResolvedValue({
       passed: false,
       missing: ['city', 'availability', 'publicAuthorization'],
