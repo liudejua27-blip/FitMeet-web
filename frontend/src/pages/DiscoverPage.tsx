@@ -87,7 +87,7 @@ export const DiscoverPage = () => {
     try {
       const [meetData, intentData] = await Promise.all([
         dataService.getMeets({ lat: userLocation?.lat, lng: userLocation?.lng }),
-        loadPublicDiscoverIntents(),
+        loadPublicDiscoverIntents(focusPublicIntentId),
       ]);
       setMeets(
         filterDisplayableMeets(meetData).map((meet) => ({
@@ -103,7 +103,7 @@ export const DiscoverPage = () => {
     } finally {
       setLoading(false);
     }
-  }, [userLocation]);
+  }, [focusPublicIntentId, userLocation]);
 
   useEffect(() => {
     document.title = '发现 - FitMeet';
@@ -950,7 +950,7 @@ function cssEscapeValue(value: string | null | undefined) {
   return value.replace(/["\\]/g, '\\$&');
 }
 
-async function loadPublicDiscoverIntents() {
+async function loadPublicDiscoverIntents(focusPublicIntentId?: string | null) {
   const statuses: Array<PublicSocialIntent['status']> = ['active', 'searching', 'matched'];
   const batches = await Promise.all(
     statuses.map((status) =>
@@ -963,8 +963,17 @@ async function loadPublicDiscoverIntents() {
         .catch(() => [] as PublicSocialIntent[]),
     ),
   );
+  const focused = focusPublicIntentId
+    ? await dataService
+        .getPublicSocialIntents({
+          page: 1,
+          limit: 1,
+          publicIntentId: focusPublicIntentId,
+        })
+        .catch(() => [] as PublicSocialIntent[])
+    : [];
   const byId = new Map<string, PublicSocialIntent>();
-  for (const intent of batches.flat()) {
+  for (const intent of [...focused, ...batches.flat()]) {
     if (
       intent.status !== 'cancelled' &&
       intent.status !== 'closed' &&

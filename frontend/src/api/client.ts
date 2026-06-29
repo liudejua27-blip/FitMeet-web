@@ -71,6 +71,7 @@ export function getPublicSocialIntents(params?: {
   city?: string;
   requestType?: string;
   status?: string;
+  publicIntentId?: string;
 }): Promise<PublicSocialIntent[]> {
   const search = new URLSearchParams();
   if (params?.page) search.set('page', String(params.page));
@@ -79,6 +80,7 @@ export function getPublicSocialIntents(params?: {
   if (params?.city) search.set('city', params.city);
   if (params?.requestType) search.set('requestType', params.requestType);
   if (params?.status) search.set('status', params.status);
+  if (params?.publicIntentId) search.set('publicIntentId', params.publicIntentId);
   const qs = search.toString();
   return request<{ data: PublicSocialIntent[] }>(
     `${fitMeetCoreEndpoints.discover.publicSocialIntents}${qs ? `?${qs}` : ''}`,
