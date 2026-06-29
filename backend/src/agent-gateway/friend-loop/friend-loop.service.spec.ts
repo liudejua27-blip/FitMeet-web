@@ -28,6 +28,7 @@ function makeService(
     decideIntakeSubmit?: jest.Mock;
   },
   geoResolver?: { resolveAsync: jest.Mock },
+  agentLoop?: { execute: jest.Mock },
 ) {
   const taskRepo = {
     findOne: jest.fn().mockResolvedValue(task),
@@ -64,6 +65,7 @@ function makeService(
     matchingJobs as never,
     friendBrain as never,
     geoResolver as never,
+    agentLoop as never,
   );
   return {
     draftPublication,
@@ -72,6 +74,44 @@ function makeService(
     service,
     task,
     taskRepo,
+  };
+}
+
+function makeAgentLoopHarness(expectedToolName: string) {
+  return {
+    execute: jest.fn(async (input) => {
+      const firstDecision = await input.brain.decide({
+        loop: {} as never,
+        observations: [],
+        remainingToolCalls: 2,
+      });
+      expect(firstDecision.tool?.toolName).toBe(expectedToolName);
+      const observation = await input.runner({
+        runId: 'friend-loop-run',
+        traceId: 'friend-loop-trace',
+        taskId: 101,
+        agent: 'Agent Brain',
+        toolName: firstDecision.tool?.toolName ?? expectedToolName,
+        input: firstDecision.tool?.input ?? {},
+        attempt: 1,
+      });
+      const finalDecision = await input.brain.decide({
+        loop: {} as never,
+        observations: [observation],
+        remainingToolCalls: 1,
+      });
+      expect(finalDecision.done).toBe(true);
+      return {
+        loop: {} as never,
+        observations: [observation],
+        answerBoundary: {
+          fromObservationsOnly: true,
+          requiresApproval: false,
+          canContinue: true,
+          status: 'ready',
+        },
+      };
+    }),
   };
 }
 
@@ -119,6 +159,49 @@ describe('FriendLoopService', () => {
         }),
       }),
     );
+    expect(result.result.cards?.[0]).toMatchObject({
+      schemaType: 'friend.intake',
+      data: expect.objectContaining({
+        scenePreference: '先站内聊聊',
+      }),
+    });
+  });
+
+  it('runs friend entrance brain decisions through AgentLoop when available', async () => {
+    const friendBrain = {
+      decideEntrance: jest.fn().mockImplementation(({ slots }) => ({
+        loopKind: 'friend',
+        action: 'ASK_INTAKE',
+        reason: 'test_friend_agent_loop_entrance',
+        slots: {
+          ...slots,
+          scenePreference: '先站内聊聊',
+        },
+        missing: [],
+      })),
+    };
+    const agentLoop = makeAgentLoopHarness('friend_agent.entrance');
+    const { service, task } = makeService(
+      makeTask(),
+      friendBrain,
+      undefined,
+      agentLoop,
+    );
+
+    const result = await service.tryHandleEntrance({
+      ownerUserId: 7,
+      task,
+      message: '想认识青岛同城朋友，咖啡聊天，周末有空',
+    });
+
+    expect(agentLoop.execute).toHaveBeenCalledWith(
+      expect.objectContaining({
+        taskId: 101,
+        goal: 'Friend agent decides the next safe card-driven loop step.',
+        brain: expect.any(Object),
+      }),
+    );
+    expect(friendBrain.decideEntrance).toHaveBeenCalledTimes(1);
     expect(result.result.cards?.[0]).toMatchObject({
       schemaType: 'friend.intake',
       data: expect.objectContaining({

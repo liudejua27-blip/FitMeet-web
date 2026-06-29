@@ -12,6 +12,8 @@ import {
   SocialRequestVisibility,
   UserSocialRequestStatus,
 } from '../../social-requests/social-request.entity';
+import { AgentLoopService } from '../agent-loop.service';
+import type { AgentLoopBrainRuntime } from '../agent-loop.types';
 import { AgentTask, AgentTaskStatus } from '../entities/agent-task.entity';
 import type { MatchingJob } from '../entities/matching-job.entity';
 import { buildClarificationGeoCandidatesCard } from '../clarification/clarification-geo-candidates-card.presenter';
@@ -26,8 +28,15 @@ import {
   buildTravelDraftCard,
   buildTravelIntakeCard,
 } from './travel-card.presenter';
-import { TravelAgentBrainService } from './travel-agent-brain.service';
-import type { TravelLoopStage, TravelSlots } from './travel-loop.types';
+import {
+  TravelAgentBrainService,
+  type TravelAgentDecision,
+} from './travel-agent-brain.service';
+import type {
+  TravelLoopStage,
+  TravelSlotValidation,
+  TravelSlots,
+} from './travel-loop.types';
 import {
   defaultTravelSafetyBoundary,
   extractTravelSlots,
@@ -57,6 +66,8 @@ export class TravelLoopService {
     private readonly travelBrain?: TravelAgentBrainService,
     @Optional()
     private readonly geoResolver?: GeoResolverService,
+    @Optional()
+    private readonly agentLoop?: AgentLoopService,
   ) {}
 
   async tryHandleEntrance(input: {
@@ -68,7 +79,8 @@ export class TravelLoopService {
       message: input.message,
       previousSlots: this.readTravelSlots(input.task),
     });
-    const decision = await this.travelBrain?.decideEntrance({
+    const decision = await this.decideWithAgentLoop({
+      mode: 'entrance',
       task: input.task,
       message: input.message,
       slots,
@@ -97,7 +109,8 @@ export class TravelLoopService {
       message: input.message,
       previousSlots: this.readTravelSlots(input.task),
     });
-    const decision = await this.travelBrain?.decideEntrance({
+    const decision = await this.decideWithAgentLoop({
+      mode: 'continuation',
       task: input.task,
       message: input.message,
       slots,
@@ -270,7 +283,10 @@ export class TravelLoopService {
     });
     if (prepared.result) return prepared.result;
     const validation = validateTravelSlots(prepared.slots);
-    const decision = this.travelBrain?.decideIntakeSubmit({
+    const decision = await this.decideWithAgentLoop({
+      mode: 'intake_submit',
+      task,
+      message: this.text(slots.destination ?? slots.city),
       slots: prepared.slots,
       validation,
     });
@@ -290,6 +306,116 @@ export class TravelLoopService {
       slots: decision?.slots ?? prepared.slots,
       assistantMessage: '已收到旅行需求，我正在生成寻伴旅行卡。',
     });
+  }
+
+  private async decideWithAgentLoop(
+    input:
+      | {
+          mode: 'entrance' | 'continuation';
+          task: AgentTask;
+          message: string;
+          slots: TravelSlots;
+        }
+      | {
+          mode: 'intake_submit';
+          task: AgentTask;
+          message: string;
+          slots: TravelSlots;
+          validation: TravelSlotValidation;
+        },
+  ): Promise<TravelAgentDecision | null> {
+    if (!this.travelBrain) return null;
+    if (!this.agentLoop) return this.directBrainDecision(input);
+
+    let decision: TravelAgentDecision | null = null;
+    const toolName = `travel_agent.${input.mode}`;
+    const runtime: AgentLoopBrainRuntime = {
+      decide: ({ observations }) => {
+        if (observations.length === 0) {
+          return {
+            reason: `select_${toolName}`,
+            tool: {
+              agent: 'Agent Brain',
+              toolName,
+              input: {
+                mode: input.mode,
+                message: input.message,
+                taskId: input.task.id,
+              },
+            },
+          };
+        }
+        return {
+          done: true,
+          reason: `completed_${toolName}`,
+          finalObservation: {
+            toolName,
+            status: 'completed',
+            decision: this.decisionObservation(decision),
+          },
+        };
+      },
+    };
+
+    await this.agentLoop.execute({
+      taskId: input.task.id,
+      goal: 'Travel agent decides the next safe card-driven loop step.',
+      agent: 'Agent Brain',
+      plan: { reason: 'TravelAgentBrain dynamic runtime', tools: [] },
+      brain: runtime,
+      maxToolCalls: 2,
+      runner: async () => {
+        decision = await this.directBrainDecision(input);
+        return {
+          toolName,
+          status: 'observed',
+          decision: this.decisionObservation(decision),
+        };
+      },
+    });
+
+    return decision ?? this.directBrainDecision(input);
+  }
+
+  private directBrainDecision(
+    input:
+      | {
+          mode: 'entrance' | 'continuation';
+          task: AgentTask;
+          message: string;
+          slots: TravelSlots;
+        }
+      | {
+          mode: 'intake_submit';
+          task: AgentTask;
+          message: string;
+          slots: TravelSlots;
+          validation: TravelSlotValidation;
+        },
+  ): Promise<TravelAgentDecision> | TravelAgentDecision {
+    if (!this.travelBrain) {
+      throw new BadRequestException('Travel agent brain unavailable');
+    }
+    if (input.mode === 'intake_submit') {
+      return this.travelBrain.decideIntakeSubmit({
+        slots: input.slots,
+        validation: input.validation,
+      });
+    }
+    return this.travelBrain.decideEntrance({
+      task: input.task,
+      message: input.message,
+      slots: input.slots,
+    });
+  }
+
+  private decisionObservation(decision: TravelAgentDecision | null) {
+    return {
+      action: decision?.action ?? null,
+      reason: decision?.reason ?? null,
+      missing: decision?.missing ?? [],
+      loopKind: decision?.loopKind ?? 'travel',
+    };
   }
 
   private async intakeResultForSlots(input: {

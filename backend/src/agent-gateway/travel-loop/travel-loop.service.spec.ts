@@ -28,6 +28,7 @@ function makeService(
     decideIntakeSubmit?: jest.Mock;
   },
   geoResolver?: { resolveAsync?: jest.Mock },
+  agentLoop?: { execute: jest.Mock },
 ) {
   const taskRepo = {
     findOne: jest.fn().mockResolvedValue(task),
@@ -64,6 +65,7 @@ function makeService(
     matchingJobs as never,
     travelBrain as never,
     geoResolver as never,
+    agentLoop as never,
   );
   return {
     draftPublication,
@@ -72,6 +74,44 @@ function makeService(
     service,
     task,
     taskRepo,
+  };
+}
+
+function makeAgentLoopHarness(expectedToolName: string) {
+  return {
+    execute: jest.fn(async (input) => {
+      const firstDecision = await input.brain.decide({
+        loop: {} as never,
+        observations: [],
+        remainingToolCalls: 2,
+      });
+      expect(firstDecision.tool?.toolName).toBe(expectedToolName);
+      const observation = await input.runner({
+        runId: 'travel-loop-run',
+        traceId: 'travel-loop-trace',
+        taskId: 101,
+        agent: 'Agent Brain',
+        toolName: firstDecision.tool?.toolName ?? expectedToolName,
+        input: firstDecision.tool?.input ?? {},
+        attempt: 1,
+      });
+      const finalDecision = await input.brain.decide({
+        loop: {} as never,
+        observations: [observation],
+        remainingToolCalls: 1,
+      });
+      expect(finalDecision.done).toBe(true);
+      return {
+        loop: {} as never,
+        observations: [observation],
+        answerBoundary: {
+          fromObservationsOnly: true,
+          requiresApproval: false,
+          canContinue: true,
+          status: 'ready',
+        },
+      };
+    }),
   };
 }
 
@@ -105,6 +145,49 @@ describe('TravelLoopService', () => {
         }),
       }),
     );
+    expect(result.result.cards?.[0]).toMatchObject({
+      schemaType: 'travel.intake',
+      data: expect.objectContaining({
+        foodPreference: '川菜和本地小吃',
+      }),
+    });
+  });
+
+  it('runs travel entrance brain decisions through AgentLoop when available', async () => {
+    const travelBrain = {
+      decideEntrance: jest.fn().mockImplementation(({ slots }) => ({
+        loopKind: 'travel',
+        action: 'ASK_INTAKE',
+        reason: 'test_travel_agent_loop_entrance',
+        slots: {
+          ...slots,
+          foodPreference: '川菜和本地小吃',
+        },
+        missing: [],
+      })),
+    };
+    const agentLoop = makeAgentLoopHarness('travel_agent.entrance');
+    const { service, task } = makeService(
+      makeTask(),
+      travelBrain,
+      undefined,
+      agentLoop,
+    );
+
+    const result = await service.tryHandleEntrance({
+      ownerUserId: 7,
+      task,
+      message: '周末想去成都旅游，预算1000元，高铁，找会拍照的搭子',
+    });
+
+    expect(agentLoop.execute).toHaveBeenCalledWith(
+      expect.objectContaining({
+        taskId: 101,
+        goal: 'Travel agent decides the next safe card-driven loop step.',
+        brain: expect.any(Object),
+      }),
+    );
+    expect(travelBrain.decideEntrance).toHaveBeenCalledTimes(1);
     expect(result.result.cards?.[0]).toMatchObject({
       schemaType: 'travel.intake',
       data: expect.objectContaining({
