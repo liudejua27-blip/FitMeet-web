@@ -44,9 +44,11 @@ baseline, not a running issue list.
 
 - Dependabot monitors backend, frontend, GitHub Actions, and the backend Docker
   base image.
-- The `Security Baseline` GitHub Actions workflow runs CodeQL, dependency
-  review for pull requests, Gitleaks secret scanning, and warning-level
-  production dependency audits.
+- The `Security Baseline` GitHub Actions workflow runs CodeQL, Gitleaks secret
+  scanning, and warning-level production dependency audits. GitHub Dependency
+  Review is opt-in through repository variable
+  `ENABLE_GITHUB_DEPENDENCY_REVIEW=true` because it requires GitHub Dependency
+  graph support to be enabled in repository settings.
 - Release archives still require local forbidden-file scans and SHA256 output.
   Artifact signing or attestation is not yet implemented and remains a release
   hardening item before enterprise-grade production claims.
