@@ -2,7 +2,7 @@ import { Injectable, Optional } from '@nestjs/common';
 
 import type { AgentTask } from '../entities/agent-task.entity';
 import { GeoResolverService } from '../geo/geo-resolver.service';
-import type { GeoResolution } from '../geo/geo-resolver.types';
+import type { GeoCandidate, GeoResolution } from '../geo/geo-resolver.types';
 import type { FitMeetLoopRouterResult } from '../loop-router/fitmeet-loop-router.types';
 import type { WorkoutSlots, WorkoutSlotValidation } from './workout-loop.types';
 import {
@@ -28,6 +28,7 @@ export type WorkoutAgentDecision = {
   missing: WorkoutSlotValidation['missing'];
   understanding: WorkoutUnderstandingResult | null;
   geoResolution?: GeoResolution | null;
+  geoCandidates?: GeoCandidate[];
   clarificationQuestion?: string | null;
   yesPatch?: Record<string, unknown>;
 };
@@ -130,8 +131,8 @@ export class WorkoutAgentBrainService {
       this.understanding?.slotsFromUnderstanding(understanding) ?? {};
     slots = await this.resolveGeo(
       this.normalizeSlots({
-        ...this.compactSlots(llmSlots),
         ...this.compactSlots(ruleSlots),
+        ...this.compactSlots(llmSlots),
         ...this.compactSlots(input.prefilledSlots ?? {}),
       }),
       input.message,
@@ -203,6 +204,7 @@ export class WorkoutAgentBrainService {
       missing: input.validation.missing,
       understanding: input.understanding,
       geoResolution: geo ?? null,
+      geoCandidates: geo?.candidates ?? [],
       clarificationQuestion:
         geo?.confirmationQuestion ??
         '我需要先确认这次约练的地点，再继续生成约练卡。',
@@ -237,6 +239,26 @@ export class WorkoutAgentBrainService {
       lat: geo.lat ?? normalized.lat,
       lng: geo.lng ?? normalized.lng,
       geoResolution: geo,
+      slotMeta: {
+        ...(normalized.slotMeta ?? {}),
+        ...(geo.locationText
+          ? {
+              locationText: {
+                source: 'geo' as const,
+                confidence: geo.confidence,
+              },
+            }
+          : {}),
+        ...(geo.city
+          ? { city: { source: 'geo' as const, confidence: geo.confidence } }
+          : {}),
+        ...(geo.district
+          ? { district: { source: 'geo' as const, confidence: geo.confidence } }
+          : {}),
+        ...(geo.poiName
+          ? { poiName: { source: 'geo' as const, confidence: geo.confidence } }
+          : {}),
+      },
     });
   }
 

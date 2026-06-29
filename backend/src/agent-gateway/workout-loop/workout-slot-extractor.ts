@@ -51,15 +51,49 @@ export function extractWorkoutSlots(input: {
 }): WorkoutSlots {
   const message = cleanDisplayText(input.message, '');
   const previous = input.previousSlots ?? {};
+  const activityType = extractActivity(message) ?? previous.activityType;
+  const timePreference = extractTime(message) ?? previous.timePreference;
+  const locationText = extractPlace(message) ?? previous.locationText;
+  const city = extractCity(message) ?? previous.city;
+  const radiusKm = extractRadius(message) ?? previous.radiusKm ?? 3;
+  const intensity = extractIntensity(message) ?? previous.intensity;
+  const candidatePreference =
+    extractCandidatePreference(message) ?? previous.candidatePreference;
   return {
-    activityType: extractActivity(message) ?? previous.activityType,
-    timePreference: extractTime(message) ?? previous.timePreference,
-    locationText: extractPlace(message) ?? previous.locationText,
-    city: extractCity(message) ?? previous.city,
-    radiusKm: extractRadius(message) ?? previous.radiusKm ?? 3,
-    intensity: extractIntensity(message) ?? previous.intensity,
-    candidatePreference:
-      extractCandidatePreference(message) ?? previous.candidatePreference,
+    activityType,
+    timePreference,
+    locationText,
+    city,
+    radiusKm,
+    intensity,
+    candidatePreference,
+    slotMeta: {
+      ...(previous.slotMeta ?? {}),
+      ...(activityType && activityType !== previous.activityType
+        ? { activityType: { source: 'rule' as const, confidence: 0.72 } }
+        : {}),
+      ...(timePreference && timePreference !== previous.timePreference
+        ? { timePreference: { source: 'rule' as const, confidence: 0.7 } }
+        : {}),
+      ...(locationText && locationText !== previous.locationText
+        ? { locationText: { source: 'rule' as const, confidence: 0.64 } }
+        : {}),
+      ...(city && city !== previous.city
+        ? { city: { source: 'rule' as const, confidence: 0.78 } }
+        : {}),
+      ...(intensity && intensity !== previous.intensity
+        ? { intensity: { source: 'rule' as const, confidence: 0.65 } }
+        : {}),
+      ...(candidatePreference &&
+      candidatePreference !== previous.candidatePreference
+        ? {
+            candidatePreference: {
+              source: 'rule' as const,
+              confidence: 0.62,
+            },
+          }
+        : {}),
+    },
     safetyBoundary: previous.safetyBoundary ?? DEFAULT_SAFETY_BOUNDARY,
     visibilityPreference: previous.visibilityPreference ?? 'public',
   };

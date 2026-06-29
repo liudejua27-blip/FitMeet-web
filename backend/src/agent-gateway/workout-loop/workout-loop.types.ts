@@ -44,7 +44,44 @@ export type WorkoutSlots = {
     confidence: number;
     needsConfirmation: boolean;
     confirmationQuestion?: string;
+    candidates?: Array<{
+      name: string;
+      address: string;
+      province?: string;
+      city?: string;
+      district?: string;
+      adcode?: string;
+      lat?: number;
+      lng?: number;
+      level: 'poi' | 'district' | 'street' | 'address' | 'city' | 'unknown';
+      source: 'amap' | 'baidu' | 'tencent' | 'llm' | 'cache' | 'dictionary';
+      confidence: number;
+    }>;
   };
+  slotMeta?: Partial<
+    Record<
+      | 'activityType'
+      | 'timePreference'
+      | 'locationText'
+      | 'city'
+      | 'district'
+      | 'poiName'
+      | 'radiusKm'
+      | 'intensity'
+      | 'candidatePreference',
+      {
+        source:
+          | 'user'
+          | 'user_confirmed'
+          | 'rule'
+          | 'llm'
+          | 'geo'
+          | 'memory'
+          | 'default';
+        confidence: number;
+      }
+    >
+  >;
   radiusKm?: number;
   intensity?: string;
   candidatePreference?: string;

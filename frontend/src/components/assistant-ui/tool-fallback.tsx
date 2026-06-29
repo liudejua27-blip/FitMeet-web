@@ -91,6 +91,11 @@ const LazyClarificationBinaryCard = lazy(() =>
     default: module.ClarificationBinaryCard,
   })),
 );
+const LazyClarificationGeoCandidatesCard = lazy(() =>
+  import('./tool-clarification-geo-candidates-card').then((module) => ({
+    default: module.ClarificationGeoCandidatesCard,
+  })),
+);
 const LazyWorkoutIntakeCard = lazy(() =>
   import('./tool-workout-intake-card').then((module) => ({ default: module.WorkoutIntakeCard })),
 );
@@ -113,6 +118,7 @@ const ASSISTANT_CARD_RENDERERS: Record<ToolUISchemaType, ToolUICardRenderer> = {
   'safety.approval': SafetyResultCard,
   'loop.choice': LoopChoiceResultCard,
   'clarification.binary': ClarificationBinaryResultCard,
+  'clarification.geo_candidates': ClarificationGeoCandidatesResultCard,
   'workout.intake': WorkoutIntakeResultCard,
   'workout.draft': WorkoutDraftResultCard,
   'friend.intake': GenericResultCard,
@@ -385,6 +391,14 @@ function ClarificationBinaryResultCard({ card }: { card: SchemaDrivenAssistantCa
   return (
     <Suspense fallback={<GenericResultCard card={card} />}>
       <LazyClarificationBinaryCard card={card} />
+    </Suspense>
+  );
+}
+
+function ClarificationGeoCandidatesResultCard({ card }: { card: SchemaDrivenAssistantCard }) {
+  return (
+    <Suspense fallback={<GenericResultCard card={card} />}>
+      <LazyClarificationGeoCandidatesCard card={card} />
     </Suspense>
   );
 }

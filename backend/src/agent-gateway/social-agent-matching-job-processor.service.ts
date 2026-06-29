@@ -39,7 +39,10 @@ import {
   SocialAgentCandidatePoolService,
 } from './social-agent-candidate-pool.service';
 import { buildSocialAgentCandidateDetailCard } from './social-agent-card-action.presenter';
-import { CandidateSearchIndexService } from './candidate-search-index.service';
+import {
+  CandidateSearchIndexService,
+  type CandidateSearchIndexQuery,
+} from './candidate-search-index.service';
 import { CandidateSearchIndex } from './entities/candidate-search-index.entity';
 import { buildSocialAgentNoCandidatesCard } from './social-agent-no-candidates-card.presenter';
 import { SocialAgentMatchRelaxationService } from './social-agent-match-relaxation.service';
@@ -65,8 +68,9 @@ type MatchingJobProcessorSummary = {
 type JobValidationResult = {
   ownerUserId: number;
   socialRequest: UserSocialRequest;
-  publicIntent: PublicSocialIntent;
+  publicIntent: PublicSocialIntent | null;
   sourceVersion: string;
+  privateMatchMode: boolean;
 };
 
 type CandidateIndexHints = {
@@ -216,7 +220,7 @@ export class SocialAgentMatchingJobProcessorService {
         indexHints,
       );
       const matchingFallback =
-        searchResult.candidates.length === 0
+        searchResult.candidates.length === 0 && validation.publicIntent
           ? await this.relaxation?.buildFallback({
               ownerUserId: validation.ownerUserId,
               query: searchResult.query,
@@ -304,20 +308,34 @@ export class SocialAgentMatchingJobProcessorService {
   ): Promise<CandidatePoolSearchResult> {
     const request = validation.socialRequest;
     const intent = validation.publicIntent;
-    const metadata = this.record(intent.metadata);
-    const filters = this.record(intent.filters);
+    const jobMetadata = this.record(job.metadata);
+    const slots = this.record(jobMetadata.slots);
+    const requestMetadata = this.record(request.metadata);
+    const metadata = {
+      ...this.record(intent?.metadata),
+      ...requestMetadata,
+      ...slots,
+      ...jobMetadata,
+    };
+    const filters = this.record(intent?.filters);
     return this.candidatePool.searchSocial({
       ownerUserId: validation.ownerUserId,
       taskId: this.taskIdFromJob(job),
       socialRequestId: request.id,
-      city: request.city || intent.city,
+      city:
+        request.city ||
+        cleanDisplayText(slots.city, '') ||
+        cleanDisplayText(intent?.city, ''),
       activityType:
         request.activityType ||
-        cleanDisplayText(intent.requestType, '') ||
+        cleanDisplayText(slots.activityType, '') ||
+        cleanDisplayText(intent?.requestType, '') ||
         cleanDisplayText(metadata.activityType, ''),
       interestTags: this.stringList(request.interestTags).length
         ? this.stringList(request.interestTags)
-        : this.stringList(intent.interestTags),
+        : this.stringList(intent?.interestTags).length
+          ? this.stringList(intent?.interestTags)
+          : [cleanDisplayText(slots.activityType, '')].filter(Boolean),
       candidatePreference: cleanDisplayText(
         metadata.candidatePreference ?? filters.candidatePreference,
         '',
@@ -327,18 +345,22 @@ export class SocialAgentMatchingJobProcessorService {
         'public_discoverable_profiles_and_user_consented_public_tags_only',
       ),
       timePreference: cleanDisplayText(
-        intent.timePreference ?? metadata.timePreference,
+        intent?.timePreference ?? metadata.timePreference,
         '',
       ),
       locationPreference: cleanDisplayText(
-        intent.locationPreference || intent.loc || metadata.locationPreference,
+        intent?.locationPreference ||
+          intent?.loc ||
+          metadata.locationPreference ||
+          metadata.locationText,
         '',
       ),
       rawText:
         request.rawText ||
-        intent.socialGoal ||
-        intent.description ||
-        intent.title,
+        intent?.socialGoal ||
+        intent?.description ||
+        intent?.title ||
+        cleanDisplayText(jobMetadata.message, ''),
       acceptsStrangers:
         typeof metadata.acceptsStrangers === 'boolean'
           ? metadata.acceptsStrangers
@@ -356,8 +378,8 @@ export class SocialAgentMatchingJobProcessorService {
     try {
       this.featureFlags?.assertEnabled('automatic_candidate_search', {
         userId: validation.ownerUserId,
-        city: validation.socialRequest.city || validation.publicIntent.city,
-        riskLevel: validation.publicIntent.riskLevel,
+        city: validation.socialRequest.city || validation.publicIntent?.city,
+        riskLevel: validation.publicIntent?.riskLevel,
       });
     } catch (error) {
       throw new FinalMatchingJobError(
@@ -372,21 +394,25 @@ export class SocialAgentMatchingJobProcessorService {
     validation: JobValidationResult,
   ): Promise<CandidateIndexHints> {
     if (!this.candidateSearchIndex) return emptyCandidateIndexHints();
-    await this.candidateSearchIndex.upsertFromPublicIntent(
-      validation.publicIntent.id,
-    );
-    const query = {
+    if (!validation.privateMatchMode && validation.publicIntent) {
+      await this.candidateSearchIndex.upsertFromPublicIntent(
+        validation.publicIntent.id,
+      );
+    }
+    const query: CandidateSearchIndexQuery = {
       ownerUserId: validation.ownerUserId,
-      city: validation.socialRequest.city || validation.publicIntent.city,
+      city: validation.socialRequest.city || validation.publicIntent?.city,
       activityTypes: [
         validation.socialRequest.activityType,
-        validation.publicIntent.requestType,
-      ],
+        validation.publicIntent?.requestType,
+      ].filter((value): value is string => Boolean(value)),
       interestTags: this.stringList(validation.socialRequest.interestTags)
         .length
         ? this.stringList(validation.socialRequest.interestTags)
-        : this.stringList(validation.publicIntent.interestTags),
-      timeBuckets: [validation.publicIntent.timePreference],
+        : this.stringList(validation.publicIntent?.interestTags),
+      timeBuckets: validation.publicIntent?.timePreference
+        ? [validation.publicIntent.timePreference]
+        : [],
       limit: 80,
     };
     let rows = await this.candidateSearchIndex.search(query);
@@ -399,6 +425,42 @@ export class SocialAgentMatchingJobProcessorService {
   }
 
   private async validateJob(job: MatchingJob): Promise<JobValidationResult> {
+    if (this.isPrivateMatchingJob(job)) {
+      const linkedSocialRequestId = this.number(job.linkedSocialRequestId);
+      if (!linkedSocialRequestId) {
+        throw new FinalMatchingJobError(
+          'matching_job_private_missing_linked_request',
+        );
+      }
+      const socialRequest = await this.userSocialRequestRepo.findOne({
+        where: { id: linkedSocialRequestId },
+      });
+      if (!socialRequest) {
+        throw new BadRequestException('matching_job_social_request_missing');
+      }
+      const ownerUserId = this.number(job.ownerUserId) ?? socialRequest.userId;
+      if (socialRequest.userId !== ownerUserId) {
+        throw new FinalMatchingJobError(
+          'matching_job_social_request_owner_mismatch',
+        );
+      }
+      if (job.ownerUserId !== null && job.ownerUserId !== ownerUserId) {
+        throw new FinalMatchingJobError('matching_job_owner_mismatch');
+      }
+      if (socialRequest.status === UserSocialRequestStatus.Cancelled) {
+        throw new CancelMatchingJobError(
+          'matching_job_private_request_cancelled',
+        );
+      }
+      return {
+        ownerUserId,
+        publicIntent: null,
+        socialRequest,
+        sourceVersion: job.sourceVersion,
+        privateMatchMode: true,
+      };
+    }
+
     const intent = await this.publicIntentRepo.findOne({
       where: { id: job.publicIntentId },
     });
@@ -465,6 +527,7 @@ export class SocialAgentMatchingJobProcessorService {
       publicIntent: intent,
       socialRequest,
       sourceVersion,
+      privateMatchMode: false,
     };
   }
 
@@ -485,14 +548,16 @@ export class SocialAgentMatchingJobProcessorService {
         input.job.id,
         input.job.leaseOwner,
       );
-      const intent = await manager
-        .getRepository(PublicSocialIntent)
-        .createQueryBuilder('intent')
-        .setLock('pessimistic_write')
-        .where('intent.id = :publicIntentId', {
-          publicIntentId: lockedJob.publicIntentId,
-        })
-        .getOne();
+      const intent = this.isPrivateMatchingJob(lockedJob)
+        ? null
+        : await manager
+            .getRepository(PublicSocialIntent)
+            .createQueryBuilder('intent')
+            .setLock('pessimistic_write')
+            .where('intent.id = :publicIntentId', {
+              publicIntentId: lockedJob.publicIntentId,
+            })
+            .getOne();
       const linkedSocialRequestId =
         this.number(intent?.linkedSocialRequestId) ??
         this.number(lockedJob.linkedSocialRequestId);
@@ -511,7 +576,9 @@ export class SocialAgentMatchingJobProcessorService {
         intent,
         socialRequest,
       });
-      await this.assertDiscoverQueryCanReadIntent(intent!.id, manager);
+      if (!validation.privateMatchMode && intent) {
+        await this.assertDiscoverQueryCanReadIntent(intent.id, manager);
+      }
 
       const candidateRows = input.searchResult.candidates;
       const taskId = this.taskIdFromJob(lockedJob);
@@ -641,35 +708,37 @@ export class SocialAgentMatchingJobProcessorService {
           })
         : null;
 
-      validation.publicIntent.candidateUserIds = candidates
-        .map((candidate) => candidate.candidateUserId ?? candidate.userId)
-        .filter((value): value is number => typeof value === 'number');
-      validation.publicIntent.matchedCount = candidateCount;
-      validation.publicIntent.status =
-        candidateCount > 0
-          ? SocialRequestStatus.Matched
-          : SocialRequestStatus.Searching;
-      validation.publicIntent.metadata = {
-        ...(validation.publicIntent.metadata ?? {}),
-        matchingJobId: lockedJob.id,
-        matchingJobStatus: status,
-        candidateCount,
-        matchedCount: candidateCount,
-        matchingFallback:
-          candidateCount === 0
-            ? sanitizeForDisplay(input.matchingFallback)
-            : undefined,
-        noCandidatesFinal,
-        candidateSnapshotId: snapshot?.id ?? undefined,
-        candidateSearchIndex: {
-          used: input.indexHints.used,
-          sourceCount: input.indexHints.sourceCount,
-        },
-        matchedAt: completedAt.toISOString(),
-      };
-      await manager
-        .getRepository(PublicSocialIntent)
-        .save(validation.publicIntent);
+      if (!validation.privateMatchMode && validation.publicIntent) {
+        validation.publicIntent.candidateUserIds = candidates
+          .map((candidate) => candidate.candidateUserId ?? candidate.userId)
+          .filter((value): value is number => typeof value === 'number');
+        validation.publicIntent.matchedCount = candidateCount;
+        validation.publicIntent.status =
+          candidateCount > 0
+            ? SocialRequestStatus.Matched
+            : SocialRequestStatus.Searching;
+        validation.publicIntent.metadata = {
+          ...(validation.publicIntent.metadata ?? {}),
+          matchingJobId: lockedJob.id,
+          matchingJobStatus: status,
+          candidateCount,
+          matchedCount: candidateCount,
+          matchingFallback:
+            candidateCount === 0
+              ? sanitizeForDisplay(input.matchingFallback)
+              : undefined,
+          noCandidatesFinal,
+          candidateSnapshotId: snapshot?.id ?? undefined,
+          candidateSearchIndex: {
+            used: input.indexHints.used,
+            sourceCount: input.indexHints.sourceCount,
+          },
+          matchedAt: completedAt.toISOString(),
+        };
+        await manager
+          .getRepository(PublicSocialIntent)
+          .save(validation.publicIntent);
+      }
 
       const updated = await this.queryRows<MatchingJob>(
         manager,
@@ -704,7 +773,7 @@ export class SocialAgentMatchingJobProcessorService {
         job: finalized,
         ownerUserId: validation.ownerUserId,
         taskId,
-        publicIntentId: validation.publicIntent.id,
+        publicIntentId: lockedJob.publicIntentId,
         socialRequestId: validation.socialRequest.id,
         candidates,
         candidateCount,
@@ -847,7 +916,7 @@ export class SocialAgentMatchingJobProcessorService {
               ? 'no_candidates_final'
               : 'no_candidates',
         socialRequestId: input.validation.socialRequest.id,
-        publicIntentId: input.validation.publicIntent.id,
+        publicIntentId: input.job.publicIntentId,
         matchingJobId: input.job.id,
         matchingJobStatus: input.job.status,
         candidateCount,
@@ -999,26 +1068,31 @@ export class SocialAgentMatchingJobProcessorService {
     );
     const request = input.validation.socialRequest;
     const intent = input.validation.publicIntent;
-    const discoverHref = `/discover?publicIntentId=${encodeURIComponent(intent.id)}`;
-    const publicIntentHref = `/public-intent/${encodeURIComponent(intent.id)}`;
+    const publicIntentId = intent?.id ?? input.validation.sourceVersion;
+    const discoverHref = intent
+      ? `/discover?publicIntentId=${encodeURIComponent(intent.id)}`
+      : null;
+    const publicIntentHref = intent
+      ? `/public-intent/${encodeURIComponent(intent.id)}`
+      : null;
     return {
       ...existing,
       agentTaskId: input.task.id,
       socialRequestId: request.id,
-      publicIntentId: intent.id,
+      publicIntentId,
       discoverHref,
       publicIntentHref,
-      title: request.title || intent.title,
-      description: request.description || intent.description,
-      city: request.city || intent.city,
-      activityType: request.activityType || intent.requestType,
+      title: request.title || intent?.title,
+      description: request.description || intent?.description,
+      city: request.city || intent?.city,
+      activityType: request.activityType || intent?.requestType,
       interestTags: this.stringList(request.interestTags).length
         ? this.stringList(request.interestTags)
-        : this.stringList(intent.interestTags),
-      rawText: request.rawText || intent.socialGoal || intent.description,
-      publishStatus: 'published',
-      visibility: 'public',
-      autoPublished: true,
+        : this.stringList(intent?.interestTags),
+      rawText: request.rawText || intent?.socialGoal || intent?.description,
+      publishStatus: intent ? 'published' : 'private_matching',
+      visibility: intent ? 'public' : 'private',
+      autoPublished: Boolean(intent),
       matchingJobId:
         this.number(input.chatRun.matchingJobId) ??
         this.number(input.socialAgentChat.matchingJobId),
@@ -1101,6 +1175,32 @@ export class SocialAgentMatchingJobProcessorService {
     socialRequest: UserSocialRequest | null;
   }): JobValidationResult {
     const { job, intent, socialRequest } = input;
+    if (this.isPrivateMatchingJob(job)) {
+      if (!socialRequest) {
+        throw new BadRequestException('matching_job_social_request_missing');
+      }
+      const ownerUserId = this.number(job.ownerUserId) ?? socialRequest.userId;
+      if (socialRequest.userId !== ownerUserId) {
+        throw new FinalMatchingJobError(
+          'matching_job_social_request_owner_mismatch',
+        );
+      }
+      if (job.ownerUserId !== null && job.ownerUserId !== ownerUserId) {
+        throw new FinalMatchingJobError('matching_job_owner_mismatch');
+      }
+      if (socialRequest.status === UserSocialRequestStatus.Cancelled) {
+        throw new CancelMatchingJobError(
+          'matching_job_private_request_cancelled',
+        );
+      }
+      return {
+        ownerUserId,
+        publicIntent: null,
+        socialRequest,
+        sourceVersion: job.sourceVersion,
+        privateMatchMode: true,
+      };
+    }
     if (!intent) {
       throw new BadRequestException('matching_job_public_intent_missing');
     }
@@ -1155,7 +1255,13 @@ export class SocialAgentMatchingJobProcessorService {
     if (sourceVersion !== job.sourceVersion) {
       throw new FinalMatchingJobError('matching_job_source_version_mismatch');
     }
-    return { ownerUserId, publicIntent: intent, socialRequest, sourceVersion };
+    return {
+      ownerUserId,
+      publicIntent: intent,
+      socialRequest,
+      sourceVersion,
+      privateMatchMode: false,
+    };
   }
 
   private emitMatchingResult(result: FinalizedMatchingJob): void {
@@ -1249,6 +1355,15 @@ export class SocialAgentMatchingJobProcessorService {
     if (metadataVersion) return metadataVersion.slice(0, 128);
     if (intent.updatedAt instanceof Date) return intent.updatedAt.toISOString();
     return '';
+  }
+
+  private isPrivateMatchingJob(job: MatchingJob): boolean {
+    const metadata = this.record(job.metadata);
+    return (
+      metadata.privateMatchMode === true ||
+      metadata.publicDiscoverPublishSkipped === true ||
+      job.publicIntentId.startsWith('private:')
+    );
   }
 
   private taskIdFromJob(job: MatchingJob): number | null {

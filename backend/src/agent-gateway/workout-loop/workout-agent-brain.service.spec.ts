@@ -90,6 +90,26 @@ describe('WorkoutAgentBrainService', () => {
         confidence: 0.72,
         needsConfirmation: true,
         confirmationQuestion: '我查到多个太古里，这次是在成都太古里吗？',
+        candidates: [
+          {
+            name: '成都远洋太古里',
+            address: '成都市锦江区中纱帽街',
+            city: '成都',
+            district: '锦江区',
+            level: 'poi',
+            source: 'amap',
+            confidence: 0.72,
+          },
+          {
+            name: '三里屯太古里',
+            address: '北京市朝阳区三里屯路',
+            city: '北京',
+            district: '朝阳区',
+            level: 'poi',
+            source: 'amap',
+            confidence: 0.68,
+          },
+        ],
       }),
     };
     const brain = new WorkoutAgentBrainService(undefined, geoResolver as never);
@@ -108,6 +128,10 @@ describe('WorkoutAgentBrainService', () => {
     expect(decision).toMatchObject({
       action: 'ASK_LOCATION_CONFIRMATION',
       clarificationQuestion: '我查到多个太古里，这次是在成都太古里吗？',
+      geoCandidates: expect.arrayContaining([
+        expect.objectContaining({ name: '成都远洋太古里', source: 'amap' }),
+        expect.objectContaining({ name: '三里屯太古里', source: 'amap' }),
+      ]),
       yesPatch: expect.objectContaining({
         city: '成都',
         district: '锦江区',

@@ -920,6 +920,7 @@ export class FitMeetAlphaAgentSdkService {
         schemaType === 'meet_loop.timeline' ||
         schemaType === 'loop.choice' ||
         schemaType === 'clarification.binary' ||
+        schemaType === 'clarification.geo_candidates' ||
         schemaType === 'workout.intake' ||
         schemaType === 'workout.draft' ||
         schemaType === 'friend.intake' ||

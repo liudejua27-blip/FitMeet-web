@@ -30,6 +30,13 @@ export class ClarificationCardActionService {
         payload: record(input.body.payload),
       });
     }
+    if (action === 'clarification.select') {
+      return this.workoutLoop.applySelectedSlots({
+        ownerUserId: input.ownerUserId,
+        taskId: input.taskId,
+        payload: record(input.body.payload),
+      });
+    }
     if (action === 'clarification.no') {
       return this.workoutLoop.openIntakeFromFallback({
         ownerUserId: input.ownerUserId,

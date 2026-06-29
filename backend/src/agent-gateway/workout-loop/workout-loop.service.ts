@@ -13,14 +13,20 @@ import {
   UserSocialRequestStatus,
 } from '../../social-requests/social-request.entity';
 import { buildClarificationBinaryCard } from '../clarification/clarification-binary-card.presenter';
+import { buildClarificationGeoCandidatesCard } from '../clarification/clarification-geo-candidates-card.presenter';
 import { AgentTask, AgentTaskStatus } from '../entities/agent-task.entity';
 import type { FitMeetAlphaCard } from '../fitmeet-alpha-agent.types';
 import { GeoResolverService } from '../geo/geo-resolver.service';
+import type { GeoCandidate } from '../geo/geo-resolver.types';
 import { FitMeetLoopRouterService } from '../loop-router/fitmeet-loop-router.service';
 import type { SocialAgentCardActionBody } from '../social-agent-action.types';
 import { SocialAgentDraftPublicationService } from '../social-agent-draft-publication.service';
 import { SocialAgentMessageLogService } from '../social-agent-message-log.service';
 import type { SocialAgentIntentRouteResult } from '../social-agent-chat.types';
+import { MatchingJobService } from '../matching-job.service';
+import type { MatchingJob } from '../entities/matching-job.entity';
+import { AgentLoopService } from '../agent-loop.service';
+import type { AgentLoopBrainRuntime } from '../agent-loop.types';
 import type { WorkoutUnderstandingResult } from './workout-understanding.service';
 import { WorkoutUnderstandingService } from './workout-understanding.service';
 import {
@@ -63,6 +69,10 @@ export class WorkoutLoopService {
     private readonly understanding?: WorkoutUnderstandingService,
     @Optional()
     private readonly brain?: WorkoutAgentBrainService,
+    @Optional()
+    private readonly matchingJobs?: MatchingJobService,
+    @Optional()
+    private readonly agentLoop?: AgentLoopService,
   ) {}
 
   async tryHandleEntrance(input: {
@@ -87,7 +97,8 @@ export class WorkoutLoopService {
     }
 
     if (this.brain) {
-      const decision = await this.brain.decideEntrance({
+      const decision = await this.decideWithAgentLoop({
+        mode: 'entrance',
         task: input.task,
         message: input.message,
         loopIntent,
@@ -133,7 +144,8 @@ export class WorkoutLoopService {
   }> {
     if (this.brain) {
       const loopIntent = this.loopRouter.classify(input.message);
-      const decision = await this.brain.decideEntrance({
+      const decision = await this.decideWithAgentLoop({
+        mode: 'entrance',
         task: input.task,
         message: input.message,
         loopIntent,
@@ -172,7 +184,8 @@ export class WorkoutLoopService {
     result: SocialAgentIntentRouteResult;
   }> {
     if (this.brain) {
-      const decision = await this.brain.decideContinuation({
+      const decision = await this.decideWithAgentLoop({
+        mode: 'continuation',
         task: input.task,
         message: input.message,
         loopIntent: this.loopRouter.classify(input.message),
@@ -248,6 +261,38 @@ export class WorkoutLoopService {
       slots,
       assistantMessage:
         '已按你的确认更新约练需求。确认下面信息后，我再生成约练卡。',
+    });
+  }
+
+  async applySelectedSlots(input: {
+    ownerUserId: number;
+    taskId: number;
+    payload: Record<string, unknown>;
+  }): Promise<SocialAgentIntentRouteResult> {
+    const task = await this.assertTaskOwner(input.ownerUserId, input.taskId);
+    const selectedPatch = this.firstRecord(
+      input.payload.selectedPatch,
+      input.payload.selectedCandidate,
+    );
+    const slots = this.applyGeoToSlots(
+      {
+        ...this.readWorkoutSlots(task),
+        ...this.slotsFromPayload(selectedPatch),
+        slotMeta: {
+          ...(this.readWorkoutSlots(task).slotMeta ?? {}),
+          locationText: { source: 'user_confirmed', confidence: 1 },
+          city: { source: 'user_confirmed', confidence: 1 },
+          district: { source: 'user_confirmed', confidence: 1 },
+          poiName: { source: 'user_confirmed', confidence: 1 },
+        },
+      },
+      this.text(selectedPatch.locationText ?? selectedPatch.city),
+    );
+    return this.intakeResultForSlots({
+      task,
+      slots,
+      assistantMessage:
+        '已按你选择的地点更新约练需求。确认下面信息后，我再生成约练卡。',
     });
   }
 
@@ -379,8 +424,8 @@ export class WorkoutLoopService {
       this.understanding?.slotsFromUnderstanding(understanding) ?? {};
     slots = this.applyGeoToSlots(
       this.normalizeSlots({
-        ...this.compactSlots(understandingSlots),
         ...this.compactSlots(ruleSlots),
+        ...this.compactSlots(understandingSlots),
         ...this.compactSlots(input.prefilledSlots ?? {}),
       }),
       input.message,
@@ -464,6 +509,31 @@ export class WorkoutLoopService {
       lat: geo.lat ?? slots.lat,
       lng: geo.lng ?? slots.lng,
       geoResolution: geo,
+      slotMeta: {
+        ...(slots.slotMeta ?? {}),
+        ...(geo.locationText
+          ? {
+              locationText: {
+                source: 'geo' as const,
+                confidence: geo.confidence,
+              },
+            }
+          : {}),
+        ...(geo.city
+          ? { city: { source: 'geo' as const, confidence: geo.confidence } }
+          : {}),
+        ...(geo.district
+          ? {
+              district: {
+                source: 'geo' as const,
+                confidence: geo.confidence,
+              },
+            }
+          : {}),
+        ...(geo.poiName
+          ? { poiName: { source: 'geo' as const, confidence: geo.confidence } }
+          : {}),
+      },
     });
   }
 
@@ -502,7 +572,8 @@ export class WorkoutLoopService {
         .join(' '),
     );
     if (this.brain) {
-      const decision = await this.brain.decideIntakeSubmit({
+      const decision = await this.decideWithAgentLoop({
+        mode: 'intake_submit',
         task,
         message: [
           payloadSlots.city,
@@ -548,26 +619,42 @@ export class WorkoutLoopService {
     }
     if (input.decision.action === 'ASK_LOCATION_CONFIRMATION') {
       this.rememberWorkoutSlots(input.task, input.decision.slots, 'clarifying');
+      const geoCandidates = (input.decision.geoCandidates ?? []).filter(
+        (candidate) => candidate.name || candidate.city || candidate.district,
+      );
+      const card =
+        geoCandidates.length > 1
+          ? buildClarificationGeoCandidatesCard({
+              taskId: input.task.id,
+              questionKey: 'workout_location',
+              title: '选择约练地点',
+              body:
+                input.decision.clarificationQuestion ??
+                '我查到几个可能的地点，请选择这次约练的地点。',
+              inferredIntent: 'workout',
+              inferredSlots: input.decision.slots as Record<string, unknown>,
+              candidates: geoCandidates,
+              noFallback: 'workout_intake',
+            })
+          : buildClarificationBinaryCard({
+              taskId: input.task.id,
+              questionKey: 'workout_location',
+              title: '确认约练地点',
+              body:
+                input.decision.clarificationQuestion ??
+                '我需要先确认地点，再继续生成约练卡。',
+              inferredIntent: 'workout',
+              inferredSlots: input.decision.slots as Record<string, unknown>,
+              yesPatch: input.decision.yesPatch ?? {},
+              noFallback: 'workout_intake',
+              confidence: input.decision.geoResolution?.confidence,
+            });
       return this.resultWithCards({
         task: input.task,
         assistantMessage:
           input.decision.clarificationQuestion ??
           '我需要先确认地点，再继续生成约练卡。',
-        cards: [
-          buildClarificationBinaryCard({
-            taskId: input.task.id,
-            questionKey: 'workout_location',
-            title: '确认约练地点',
-            body:
-              input.decision.clarificationQuestion ??
-              '我需要先确认地点，再继续生成约练卡。',
-            inferredIntent: 'workout',
-            inferredSlots: input.decision.slots as Record<string, unknown>,
-            yesPatch: input.decision.yesPatch ?? {},
-            noFallback: 'workout_intake',
-            confidence: input.decision.geoResolution?.confidence,
-          }),
-        ],
+        cards: [card],
         action: 'clarify',
       });
     }
@@ -576,6 +663,130 @@ export class WorkoutLoopService {
       slots: input.decision.slots,
       assistantMessage: input.assistantMessage,
     });
+  }
+
+  private async decideWithAgentLoop(
+    input:
+      | {
+          mode: 'entrance' | 'continuation';
+          task: AgentTask;
+          message: string;
+          loopIntent: ReturnType<FitMeetLoopRouterService['classify']>;
+          prefilledSlots?: WorkoutSlots;
+          understanding?: WorkoutUnderstandingResult | null;
+        }
+      | {
+          mode: 'intake_submit';
+          task: AgentTask;
+          message: string;
+          slots: WorkoutSlots;
+        },
+  ): Promise<WorkoutAgentDecision> {
+    if (!this.brain) {
+      throw new BadRequestException('Workout agent brain unavailable');
+    }
+    if (!this.agentLoop) {
+      return this.directBrainDecision(input);
+    }
+    let decision: WorkoutAgentDecision | null = null;
+    const toolName = `workout_agent.${input.mode}`;
+    const runtime: AgentLoopBrainRuntime = {
+      decide: ({ observations }) => {
+        if (observations.length === 0) {
+          return {
+            reason: `select_${toolName}`,
+            tool: {
+              agent: 'Agent Brain',
+              toolName,
+              input: {
+                mode: input.mode,
+                message: input.message,
+                taskId: input.task.id,
+              },
+            },
+          };
+        }
+        return {
+          done: true,
+          reason: `completed_${toolName}`,
+          finalObservation: {
+            toolName,
+            status: 'completed',
+            decision: decision ? this.decisionObservation(decision) : null,
+          },
+        };
+      },
+    };
+    await this.agentLoop.execute({
+      taskId: input.task.id,
+      goal: 'Workout agent decides the next safe card-driven loop step.',
+      agent: 'Agent Brain',
+      plan: { reason: 'WorkoutAgentBrain dynamic runtime', tools: [] },
+      brain: runtime,
+      maxToolCalls: 2,
+      runner: async () => {
+        decision = await this.directBrainDecision(input);
+        return {
+          toolName,
+          status: 'observed',
+          decision: this.decisionObservation(decision),
+        };
+      },
+    });
+    return decision ?? this.directBrainDecision(input);
+  }
+
+  private directBrainDecision(
+    input:
+      | {
+          mode: 'entrance' | 'continuation';
+          task: AgentTask;
+          message: string;
+          loopIntent: ReturnType<FitMeetLoopRouterService['classify']>;
+          prefilledSlots?: WorkoutSlots;
+          understanding?: WorkoutUnderstandingResult | null;
+        }
+      | {
+          mode: 'intake_submit';
+          task: AgentTask;
+          message: string;
+          slots: WorkoutSlots;
+        },
+  ): Promise<WorkoutAgentDecision> {
+    if (!this.brain) {
+      throw new BadRequestException('Workout agent brain unavailable');
+    }
+    if (input.mode === 'intake_submit') {
+      return this.brain.decideIntakeSubmit({
+        task: input.task,
+        message: input.message,
+        slots: input.slots,
+      });
+    }
+    if (input.mode === 'continuation') {
+      return this.brain.decideContinuation({
+        task: input.task,
+        message: input.message,
+        loopIntent: input.loopIntent,
+      });
+    }
+    return this.brain.decideEntrance({
+      task: input.task,
+      message: input.message,
+      loopIntent: input.loopIntent,
+      prefilledSlots: input.prefilledSlots,
+      understanding: input.understanding,
+    });
+  }
+
+  private decisionObservation(decision: WorkoutAgentDecision) {
+    return {
+      action: decision.action,
+      reason: decision.reason,
+      missing: decision.missing,
+      geoSource: decision.geoResolution?.source ?? null,
+      geoCandidateCount: decision.geoCandidates?.length ?? 0,
+    };
   }
 
   private async cancelDraft(input: {
@@ -618,16 +829,31 @@ export class WorkoutLoopService {
     const socialRequestId = this.number(
       payload.socialRequestId ?? socialRequestDraft.socialRequestId,
     );
+    const privateMatchingJob = await this.enqueuePrivateMatchingJob({
+      task: input.task,
+      slots: input.slots,
+      socialRequestId,
+      idempotencyKey:
+        input.body.idempotencyKey ??
+        this.workoutPrivateMatchIdempotencyKey(input.task.id, input.slots),
+    });
     this.rememberWorkoutSlots(input.task, input.slots, 'matching_queued', {
       privateMatchMode: true,
       publicDiscoverPublishSkipped: true,
       socialRequestId,
+      waitingFor: 'matching_job',
+      matchingJobId: privateMatchingJob?.id ?? null,
+      matchingJobStatus: privateMatchingJob?.status ?? null,
+      publicIntentId: privateMatchingJob?.publicIntentId ?? null,
+      sourceVersion: privateMatchingJob?.sourceVersion ?? null,
       ...(Object.keys(socialRequestDraft).length > 0
         ? { socialRequestDraft }
         : {}),
     });
-    input.task.status = AgentTaskStatus.AwaitingFeedback;
-    input.task.statusReason = 'workout_loop_matching_queued';
+    input.task.status = AgentTaskStatus.WaitingResult;
+    input.task.statusReason = privateMatchingJob
+      ? 'workout_private_matching_queued'
+      : 'workout_loop_matching_queued';
     await this.taskRepo.save(input.task);
 
     const idempotencyKey =
@@ -680,6 +906,10 @@ export class WorkoutLoopService {
         slots: input.slots,
         taskId: input.task.id,
         socialRequestId,
+        matchingJobId: privateMatchingJob?.id ?? null,
+        matchingJobStatus: privateMatchingJob?.status ?? null,
+        publicIntentId: privateMatchingJob?.publicIntentId ?? null,
+        sourceVersion: privateMatchingJob?.sourceVersion ?? null,
         privateMatchMode: true,
         publicDiscoverPublishSkipped: true,
         message: this.workoutPrivateMatchMessage(input.slots),
@@ -696,6 +926,49 @@ export class WorkoutLoopService {
       result,
     );
     return result;
+  }
+
+  private async enqueuePrivateMatchingJob(input: {
+    task: AgentTask;
+    slots: WorkoutSlots;
+    socialRequestId: number | null;
+    idempotencyKey: string;
+  }): Promise<MatchingJob | null> {
+    if (!this.matchingJobs || !input.socialRequestId) return null;
+    const sourceVersion = this.privateMatchSourceVersion(input.slots);
+    const publicIntentId = `private:${input.task.id}:${input.socialRequestId}`;
+    const { job } = await this.matchingJobs.enqueue({
+      ownerUserId: input.task.ownerUserId,
+      linkedSocialRequestId: input.socialRequestId,
+      publicIntentId,
+      sourceVersion,
+      idempotencyKey: input.idempotencyKey,
+      metadata: {
+        taskId: input.task.id,
+        socialRequestId: input.socialRequestId,
+        source: 'workout_private_match',
+        visibility: 'private',
+        privateMatchMode: true,
+        publicDiscoverPublishSkipped: true,
+        workoutLoopStage: 'matching_queued',
+        slots: input.slots,
+      },
+    });
+    return job;
+  }
+
+  private privateMatchSourceVersion(slots: WorkoutSlots): string {
+    const parts = [
+      slots.activityType,
+      slots.timePreference,
+      slots.locationText,
+      slots.city,
+      slots.radiusKm,
+      slots.candidatePreference,
+    ]
+      .map((value) => this.text(value))
+      .filter(Boolean);
+    return `workout-private:${parts.join('|') || 'current'}`.slice(0, 128);
   }
 
   private workoutPrivateMatchMessage(slots: WorkoutSlots): string {
@@ -966,6 +1239,7 @@ export class WorkoutLoopService {
       lat: this.coordinate(record.lat) ?? undefined,
       lng: this.coordinate(record.lng) ?? undefined,
       geoResolution,
+      slotMeta: this.normalizeSlotMeta(record.slotMeta),
       radiusKm: this.number(record.radiusKm) ?? undefined,
       intensity: this.text(record.intensity) || undefined,
       candidatePreference: this.text(record.candidatePreference) || undefined,
@@ -1051,6 +1325,7 @@ export class WorkoutLoopService {
       confidence: this.coordinate(record.confidence) ?? 0,
       needsConfirmation: record.needsConfirmation === true,
       confirmationQuestion: this.text(record.confirmationQuestion) || undefined,
+      candidates: this.geoCandidates(record.candidates),
     };
   }
 
@@ -1065,10 +1340,108 @@ export class WorkoutLoopService {
       source === 'client_geo' ||
       source === 'llm_inferred' ||
       source === 'user_confirmed' ||
+      source === 'amap' ||
+      source === 'cache' ||
       source === 'unknown'
     ) {
       return source;
     }
     return 'unknown';
+  }
+
+  private normalizeSlotMeta(value: unknown): WorkoutSlots['slotMeta'] {
+    const record = this.record(value);
+    const result: NonNullable<WorkoutSlots['slotMeta']> = {};
+    for (const [key, raw] of Object.entries(record)) {
+      const item = this.record(raw);
+      const source = this.text(item.source);
+      const confidence = this.coordinate(item.confidence) ?? 0;
+      if (
+        [
+          'activityType',
+          'timePreference',
+          'locationText',
+          'city',
+          'district',
+          'poiName',
+          'radiusKm',
+          'intensity',
+          'candidatePreference',
+        ].includes(key) &&
+        [
+          'user',
+          'user_confirmed',
+          'rule',
+          'llm',
+          'geo',
+          'memory',
+          'default',
+        ].includes(source)
+      ) {
+        result[key as keyof NonNullable<WorkoutSlots['slotMeta']>] = {
+          source: source as never,
+          confidence,
+        };
+      }
+    }
+    return Object.keys(result).length > 0 ? result : undefined;
+  }
+
+  private geoCandidates(value: unknown): GeoCandidate[] | undefined {
+    if (!Array.isArray(value)) return undefined;
+    const candidates = value
+      .map((item) => this.record(item))
+      .map((candidate) => ({
+        name: this.text(candidate.name),
+        address: this.text(candidate.address),
+        province: this.text(candidate.province) || undefined,
+        city: this.text(candidate.city) || undefined,
+        district: this.text(candidate.district) || undefined,
+        adcode: this.text(candidate.adcode) || undefined,
+        lat: this.coordinate(candidate.lat) ?? undefined,
+        lng: this.coordinate(candidate.lng) ?? undefined,
+        level: this.geoCandidateLevel(candidate.level),
+        source: this.geoCandidateSource(candidate.source),
+        confidence: this.coordinate(candidate.confidence) ?? 0,
+      }))
+      .filter((candidate) => candidate.name || candidate.city);
+    return candidates.length > 0 ? candidates : undefined;
+  }
+
+  private geoCandidateLevel(value: unknown): GeoCandidate['level'] {
+    const level = this.text(value);
+    if (
+      level === 'poi' ||
+      level === 'district' ||
+      level === 'street' ||
+      level === 'address' ||
+      level === 'city'
+    ) {
+      return level;
+    }
+    return 'unknown';
+  }
+
+  private geoCandidateSource(value: unknown): GeoCandidate['source'] {
+    const source = this.text(value);
+    if (
+      source === 'amap' ||
+      source === 'baidu' ||
+      source === 'tencent' ||
+      source === 'llm' ||
+      source === 'cache' ||
+      source === 'dictionary'
+    ) {
+      return source;
+    }
+    return 'amap';
+  }
+
+  private firstRecord(...values: unknown[]): Record<string, unknown> {
+    for (const value of values) {
+      const record = this.record(value);
+      if (Object.keys(record).length > 0) return record;
+    }
+    return {};
   }
 }

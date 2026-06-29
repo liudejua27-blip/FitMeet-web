@@ -262,6 +262,7 @@ export class GeoResolverService {
       query,
       fallback,
       selected,
+      candidates: result.candidates.slice(0, 5),
       needsConfirmation: result.needsConfirmation,
       ambiguityReason: result.ambiguityReason ?? null,
     });
@@ -291,6 +292,7 @@ export class GeoResolverService {
     query: string;
     fallback: GeoResolution;
     selected: GeoCandidate;
+    candidates: GeoCandidate[];
     needsConfirmation: boolean;
     ambiguityReason: string | null;
   }): GeoResolution {
@@ -310,6 +312,7 @@ export class GeoResolverService {
       source: 'amap',
       confidence: input.selected.confidence,
       needsConfirmation: input.needsConfirmation,
+      candidates: input.candidates,
       confirmationQuestion: input.needsConfirmation
         ? this.confirmationQuestion({
             candidate: input.selected,

@@ -2153,6 +2153,7 @@ export class SocialAgentChatController {
     const deterministicCardSchemaTypes = new Set([
       'loop.choice',
       'clarification.binary',
+      'clarification.geo_candidates',
       'workout.intake',
       'workout.draft',
       'social_match.candidate',
