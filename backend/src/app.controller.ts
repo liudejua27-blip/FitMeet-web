@@ -5,6 +5,7 @@ import { DataSource } from 'typeorm';
 import { AppService } from './app.service';
 import { RedisService } from './redis/redis.service';
 import { fitMeetCoreOpenApi } from './openapi/fitmeet-core.openapi';
+import { AgentLoopRuntimeHealthService } from './agent-gateway/agent-loop-runtime-health.service';
 
 @Controller()
 export class AppController {
@@ -13,6 +14,7 @@ export class AppController {
     private readonly dataSource: DataSource,
     @InjectConnection() private readonly mongoConnection: Connection,
     private readonly redisService: RedisService,
+    private readonly agentLoopRuntimeHealth: AgentLoopRuntimeHealthService,
   ) {}
 
   @Get()
@@ -37,8 +39,14 @@ export class AppController {
       reminderTables: await this.checkReminderTables(),
       mongo: await this.checkMongo(),
       redis: await this.checkRedis(),
+      agentLoopRuntime: this.agentLoopRuntimeHealth.snapshot(),
     };
-    const ready = Object.values(checks).every((check) => check.status === 'ok');
+    const ready = [
+      checks.postgres,
+      checks.reminderTables,
+      checks.mongo,
+      checks.redis,
+    ].every((check) => check.status === 'ok');
 
     if (!ready) {
       throw new ServiceUnavailableException({

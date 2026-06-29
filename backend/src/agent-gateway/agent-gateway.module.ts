@@ -246,6 +246,7 @@ import { SocialActivity } from '../activities/entities/activity.entity';
 import { RealtimeModule } from '../realtime/realtime.module';
 import { AdminRbacModule } from '../admin-rbac/admin-rbac.module';
 import { FeatureFlagService } from '../common/feature-flag.service';
+import { AgentLoopRuntimeHealthService } from './agent-loop-runtime-health.service';
 import { AgentEntryOrchestratorService } from './agent-entry/agent-entry-orchestrator.service';
 import { LegacyAgentAdapterService } from './legacy-agent/legacy-agent-adapter.service';
 import { FriendLoopService } from './friend-loop/friend-loop.service';
@@ -351,6 +352,7 @@ import { WorkoutUnderstandingService } from './workout-loop/workout-understandin
     PublicIntentPrivacyGuardService,
     SocialIntentRateLimitService,
     SocialAgentDomainClassifierService,
+    AgentLoopRuntimeHealthService,
     AgentEntryOrchestratorService,
     LegacyAgentAdapterService,
     FriendLoopService,
@@ -534,6 +536,7 @@ import { WorkoutUnderstandingService } from './workout-loop/workout-understandin
     PublicIntentPrivacyGuardService,
     SocialIntentRateLimitService,
     SocialAgentDomainClassifierService,
+    AgentLoopRuntimeHealthService,
     FitMeetLoopRouterService,
     ClarificationCardActionService,
     AmapChinaGeoProviderService,
