@@ -155,6 +155,48 @@ describe('WorkoutLoopService', () => {
     });
   });
 
+  it('creates a workout draft when the user directly asks to publish a workout card', async () => {
+    const { draftPublication, service, task } = makeService();
+
+    const result = await service.tryHandleEntrance({
+      ownerUserId: 7,
+      task,
+      message:
+        '我想发布约练，我明天在北京大学有一场篮球赛，想找个朋友一块，最好是男生，明天下午3点',
+    });
+
+    expect(draftPublication.stagePrivateDraftForPublish).toHaveBeenCalledWith(
+      7,
+      101,
+      expect.objectContaining({
+        activityType: '篮球',
+        city: '北京',
+        title: expect.stringContaining('北京大学篮球约练'),
+        metadata: expect.objectContaining({
+          loop: 'workout',
+          timePreference: '明天下午3点',
+          locationText: '北京大学',
+          candidatePreference: '男生',
+        }),
+      }),
+    );
+    expect(result?.result).toMatchObject({
+      action: 'await_confirmation',
+      cards: [
+        expect.objectContaining({
+          schemaType: 'workout.draft',
+          data: expect.objectContaining({
+            activityType: '篮球',
+            timePreference: '明天下午3点',
+            locationText: '北京大学',
+            city: '北京',
+            candidatePreference: '男生',
+          }),
+        }),
+      ],
+    });
+  });
+
   it('turns intake submit payload into a staged draft', async () => {
     const { service } = makeService();
 

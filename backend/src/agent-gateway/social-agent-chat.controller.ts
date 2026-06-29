@@ -1214,6 +1214,11 @@ export class SocialAgentChatController {
         );
       }
       this.writeApprovalRequiredEvents(write, userFacing.pendingConfirmations);
+      write('result', {
+        type: 'result',
+        lifecycle,
+        result: userFacing,
+      });
       const resultV2 = socialCodexEvents.createWriter({
         write,
         userId: req.user.id,
@@ -1224,22 +1229,18 @@ export class SocialAgentChatController {
         ),
         runId,
       });
-      await socialCodexEvents.writeResultEvents(resultV2, userFacing);
-      await socialCodexEvents.writeContextEvents(
-        resultV2,
-        req.user.id,
-        streamResult.taskId ?? result.taskId,
+      await this.writePostResultSocialCodexEvents({
+        socialCodexEvents,
+        writer: resultV2,
+        userId: req.user.id,
+        taskId: streamResult.taskId ?? result.taskId,
         runId,
-        this.eventThreadId(
+        threadId: this.eventThreadId(
           streamResult.taskId ?? result.taskId,
           body.clientContext?.threadId,
         ),
-      );
-      await socialCodexEvents.writeRunCompleted(resultV2, lifecycle);
-      write('result', {
-        type: 'result',
+        userFacing,
         lifecycle,
-        result: userFacing,
       });
     } catch (error) {
       await socialCodexEvents.writeRunFailed(v2);
@@ -1418,6 +1419,11 @@ export class SocialAgentChatController {
         replaceLastAssistantTurn: true,
       });
       this.writeApprovalRequiredEvents(write, userFacing.pendingConfirmations);
+      write('result', {
+        type: 'result',
+        lifecycle,
+        result: userFacing,
+      });
       const resultV2 = socialCodexEvents.createWriter({
         write,
         userId: req.user.id,
@@ -1425,19 +1431,15 @@ export class SocialAgentChatController {
         threadId: actionThreadId,
         runId,
       });
-      await socialCodexEvents.writeResultEvents(resultV2, userFacing);
-      await socialCodexEvents.writeContextEvents(
-        resultV2,
-        req.user.id,
-        result.taskId ?? taskId,
+      await this.writePostResultSocialCodexEvents({
+        socialCodexEvents,
+        writer: resultV2,
+        userId: req.user.id,
+        taskId: result.taskId ?? taskId,
         runId,
-        actionThreadId,
-      );
-      await socialCodexEvents.writeRunCompleted(resultV2, lifecycle);
-      write('result', {
-        type: 'result',
+        threadId: actionThreadId,
+        userFacing,
         lifecycle,
-        result: userFacing,
       });
     } catch (error) {
       await socialCodexEvents.writeRunFailed(v2);
@@ -2184,6 +2186,40 @@ export class SocialAgentChatController {
       input.messageId ?? null,
       'llm',
     );
+  }
+
+  private async writePostResultSocialCodexEvents(input: {
+    socialCodexEvents: SocialCodexEventPipelineService;
+    writer: SocialCodexEventWriter;
+    userId: number;
+    taskId: number | null | undefined;
+    runId: string;
+    threadId?: string | number | null;
+    userFacing: ReturnType<
+      UserFacingResponseSanitizerService['toUserFacingAgentResponse']
+    >;
+    lifecycle: string;
+  }): Promise<void> {
+    try {
+      await input.socialCodexEvents.writeResultEvents(
+        input.writer,
+        input.userFacing,
+      );
+      await input.socialCodexEvents.writeContextEvents(
+        input.writer,
+        input.userId,
+        input.taskId ?? null,
+        input.runId,
+        input.threadId,
+      );
+      await input.socialCodexEvents.writeRunCompleted(
+        input.writer,
+        input.lifecycle,
+      );
+    } catch {
+      // The legacy result event above is the user-facing source of truth. V2
+      // process/event persistence must not hide cards that were already built.
+    }
   }
 
   private async hydrateFinalResponseContext(input: {

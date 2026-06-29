@@ -16,6 +16,7 @@ describe('FitMeetLoopRouterService', () => {
       '约个球',
       '附近有人一起练吗',
       '想找朋友一起健身',
+      '我想发布约练，我明天在北京大学有一场篮球赛，想找个朋友一块，最好是男生，明天下午3点',
     ]) {
       expect(service.classify(message)).toMatchObject({
         intent: 'workout',

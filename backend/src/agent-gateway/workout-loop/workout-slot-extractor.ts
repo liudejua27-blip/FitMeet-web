@@ -60,11 +60,27 @@ function extractActivity(message: string): string | undefined {
 }
 
 function extractTime(message: string): string | undefined {
-  const explicit = message.match(
-    /(今天|今晚|明天|后天|本周末|下周末|周末)(上午|中午|下午|晚上|早上)?|(上午|中午|下午|晚上|早上)|(\d{1,2}\s*[点:：]\s*\d{0,2})/,
-  );
-  const raw = explicit?.[0]?.replace(/\s+/g, '');
-  if (raw) return raw;
+  const explicit = Array.from(
+    message.matchAll(
+      /(?:(今天|今晚|明天|后天|本周末|下周末|周末)\s*(上午|中午|下午|晚上|早上)?\s*(\d{1,2}\s*[点:：]\s*\d{0,2})?|(?:上午|中午|下午|晚上|早上)\s*(\d{1,2}\s*[点:：]\s*\d{0,2})?|(\d{1,2}\s*[点:：]\s*\d{0,2}))/g,
+    ),
+  )
+    .map((match) => match[0]?.replace(/\s+/g, ''))
+    .filter((value): value is string => Boolean(value));
+  const scored = explicit
+    .map((value) => ({
+      value,
+      score:
+        (/(今天|今晚|明天|后天|本周末|下周末|周末)/.test(value) ? 2 : 0) +
+        (/(上午|中午|下午|晚上|早上)/.test(value) ? 2 : 0) +
+        (/(\d{1,2})[点:：]/.test(value) ? 3 : 0),
+    }))
+    .filter((item) => item.score > 0)
+    .sort(
+      (left, right) =>
+        right.score - left.score || right.value.length - left.value.length,
+    );
+  if (scored[0]?.value) return scored[0].value;
   const weekday = message.match(
     /(周一|周二|周三|周四|周五|周六|周日|星期[一二三四五六日天])/,
   );
@@ -72,10 +88,16 @@ function extractTime(message: string): string | undefined {
 }
 
 function extractPlace(message: string): string | undefined {
-  const near = message.match(
-    /([\u4e00-\u9fa5A-Za-z0-9·•-]{2,24}(?:大学|学院|公园|广场|体育馆|健身房|球馆|操场|商场|校区|中心|海边|河边|附近))/,
-  );
-  if (near?.[1]) return cleanPlaceText(near[1]);
+  const suffixPlacePattern =
+    /([\u4e00-\u9fa5A-Za-z0-9·•-]{2,32}?(?:(?:大学|学院|公园|广场|体育馆|健身房|球馆|操场|商场|校区|中心|海边|河边)(?:附近)?|附近))/g;
+  const candidates = Array.from(message.matchAll(suffixPlacePattern))
+    .map((match) => cleanPlaceText(match[1] ?? ''))
+    .filter(Boolean)
+    .sort(
+      (left, right) =>
+        placeScore(right) - placeScore(left) || left.length - right.length,
+    );
+  if (candidates[0]) return candidates[0];
   const around = message.match(
     /(?:在|去|到|地点在|位置在)\s*([\u4e00-\u9fa5A-Za-z0-9·•-]{2,24})/,
   );
@@ -84,6 +106,7 @@ function extractPlace(message: string): string | undefined {
 
 function cleanPlaceText(value: string): string {
   return value
+    .replace(/^.*(?:在|去|到|地点在|位置在)(?=[\u4e00-\u9fa5A-Za-z0-9·•-])/, '')
     .replace(
       /^(今天|今晚|明天|后天|周末|本周末|下周末|上午|中午|下午|晚上|早上)+/,
       '',
@@ -91,6 +114,18 @@ function cleanPlaceText(value: string): string {
     .replace(/^(我想在|想在|我在|在|去|到|地点在|位置在)/, '')
     .replace(/(找个?搭子|找人|一起|健身|跑步|运动|散步|打球).*$/, '')
     .trim();
+}
+
+function placeScore(value: string): number {
+  return (
+    (/(大学|学院|公园|广场|体育馆|健身房|球馆|操场|商场|校区|中心|海边|河边)/.test(
+      value,
+    )
+      ? 3
+      : 0) +
+    (/(附近)$/.test(value) ? 1 : 0) -
+    (/^(我|想|发布|约练|今天|明天|后天)/.test(value) ? 2 : 0)
+  );
 }
 
 function extractCity(message: string): string | undefined {
@@ -127,8 +162,15 @@ function extractIntensity(message: string): string | undefined {
 }
 
 function extractCandidatePreference(message: string): string | undefined {
+  const explicit = message.match(
+    /(最好|希望|想找|优先).{0,16}(男生|女生|男性|女性|同校|同学|朋友|新手|高手|轻松一点|水平相近)/,
+  );
+  if (explicit?.[2]) return explicit[2].trim();
   const match = message.match(
     /(希望|想找|最好|优先)(.{1,40})(?:一起|陪我|跑步|健身|运动|散步|打球|$)/,
   );
-  return match?.[2]?.trim();
+  return match?.[2]
+    ?.replace(/^[个一位些\s，,。；;]+/, '')
+    .replace(/(今天|今晚|明天|后天|上午|中午|下午|晚上|早上).*/, '')
+    .trim();
 }

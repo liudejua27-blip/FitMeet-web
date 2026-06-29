@@ -38,6 +38,24 @@ describe('workout slot extraction', () => {
     expect(validateWorkoutSlots(slots)).toEqual({ valid: true, missing: [] });
   });
 
+  it('extracts direct publish workout card wording from the production failure case', () => {
+    const slots = extractWorkoutSlots({
+      message:
+        '我想发布约练，我明天在北京大学有一场篮球赛，想找个朋友一块，最好是男生，明天下午3点',
+    });
+
+    expect(slots).toMatchObject({
+      activityType: '篮球',
+      timePreference: '明天下午3点',
+      locationText: '北京大学',
+      city: '北京',
+      candidatePreference: '男生',
+      safetyBoundary: defaultWorkoutSafetyBoundary(),
+      visibilityPreference: 'public',
+    });
+    expect(validateWorkoutSlots(slots)).toEqual({ valid: true, missing: [] });
+  });
+
   it('merges previous slots and reports missing required fields', () => {
     const slots = extractWorkoutSlots({
       message: '今晚可以',
