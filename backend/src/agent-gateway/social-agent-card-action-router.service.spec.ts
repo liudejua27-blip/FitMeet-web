@@ -83,6 +83,13 @@ function makeHarness(options: { runRunner?: boolean } = {}) {
   const metrics = {
     recordDeterministicAction: jest.fn(),
   };
+  const workoutLoop = {
+    startWorkoutIntake: jest.fn(),
+    performWorkoutAction: jest.fn(),
+  };
+  const clarificationActions = {
+    perform: jest.fn(),
+  };
   const service = new SocialAgentCardActionRouterService(
     candidateActions as never,
     meetLoop as never,
@@ -90,6 +97,12 @@ function makeHarness(options: { runRunner?: boolean } = {}) {
     agentLoop as never,
     draftPublication as never,
     metrics as never,
+    undefined as never,
+    undefined as never,
+    undefined as never,
+    undefined as never,
+    workoutLoop as never,
+    clarificationActions as never,
   );
   const handleMessage = jest.fn().mockResolvedValue(
     routeResult({
@@ -105,11 +118,157 @@ function makeHarness(options: { runRunner?: boolean } = {}) {
     meetLoop,
     metrics,
     draftPublication,
+    workoutLoop,
+    clarificationActions,
     service,
   };
 }
 
 describe('SocialAgentCardActionRouterService', () => {
+  it('dispatches loop choice workout directly to WorkoutLoop without re-entering chat LLM', async () => {
+    const { handleMessage, metrics, service, workoutLoop } = makeHarness();
+    workoutLoop.startWorkoutIntake.mockResolvedValue(
+      routeResult({
+        action: 'clarify',
+        assistantMessage: '好的，我们先进入约练流程。',
+        cards: [
+          {
+            id: 'workout_intake:101:missing',
+            type: 'workout_intake',
+            schemaVersion: 'fitmeet.tool-ui.v1',
+            schemaType: 'workout.intake',
+            title: '填写本次约练需求',
+            data: { taskId: 101 },
+            actions: [],
+          },
+        ],
+      }),
+    );
+
+    const result = await service.perform({
+      ownerUserId: 7,
+      taskId: 101,
+      body: {
+        action: 'loop_choice.workout' as never,
+        payload: { source: 'bootstrap' },
+      },
+      handleMessage,
+    });
+
+    expect(handleMessage).not.toHaveBeenCalled();
+    expect(workoutLoop.startWorkoutIntake).toHaveBeenCalledWith({
+      ownerUserId: 7,
+      taskId: 101,
+      payload: { source: 'bootstrap' },
+    });
+    expect(result.cards?.[0]).toMatchObject({ schemaType: 'workout.intake' });
+    expect(metrics.recordDeterministicAction).toHaveBeenCalledWith(
+      'loop_choice.workout',
+      { estimatedAvoidedLlmCalls: 1 },
+    );
+  });
+
+  it('returns friend and travel loop choices as coming-soon generic cards', async () => {
+    const { handleMessage, service } = makeHarness();
+
+    const result = await service.perform({
+      ownerUserId: 7,
+      taskId: 101,
+      body: {
+        action: 'loop_choice.travel' as never,
+        payload: {},
+      },
+      handleMessage,
+    });
+
+    expect(handleMessage).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      assistantMessage: expect.stringContaining('旅游闭环即将支持'),
+      cards: [
+        expect.objectContaining({
+          schemaType: 'generic.card',
+          data: expect.objectContaining({ selectedLoop: 'travel' }),
+        }),
+      ],
+    });
+  });
+
+  it('delegates clarification card actions to the clarification action service', async () => {
+    const { clarificationActions, handleMessage, service } = makeHarness();
+    clarificationActions.perform.mockResolvedValue(
+      routeResult({
+        action: 'await_confirmation',
+        assistantMessage: '已按你的确认继续。',
+      }),
+    );
+
+    await service.perform({
+      ownerUserId: 7,
+      taskId: 101,
+      body: {
+        action: 'clarification.yes' as never,
+        payload: { yesPatch: { activityType: '跑步' } },
+      },
+      handleMessage,
+    });
+
+    expect(handleMessage).not.toHaveBeenCalled();
+    expect(clarificationActions.perform).toHaveBeenCalledWith({
+      ownerUserId: 7,
+      taskId: 101,
+      body: expect.objectContaining({ action: 'clarification.yes' }),
+    });
+  });
+
+  it('publishes workout drafts through the existing discover publish flow and marks matching queued', async () => {
+    const { draftPublication, handleMessage, service } = makeHarness();
+    draftPublication.publishDraft.mockResolvedValue({
+      success: true,
+      status: 'published',
+      synced: true,
+      socialRequestId: 501,
+      publicIntentId: 'public-intent:workout-501',
+      discoverHref: '/discover?publicIntentId=public-intent%3Aworkout-501',
+      publicIntentHref: '/public-intent/public-intent%3Aworkout-501',
+      sourceVersion: 'source-v1',
+      matchingJob: { id: 9001, status: 'queued' },
+    });
+
+    const result = await service.perform({
+      ownerUserId: 7,
+      taskId: 101,
+      body: {
+        action: 'workout_draft.publish' as never,
+        payload: {
+          confirmedPublish: true,
+          socialRequestId: 501,
+          socialRequestDraft: {
+            title: '今晚青岛大学跑步约练',
+            activityType: '跑步',
+            city: '青岛',
+          },
+        },
+      },
+      handleMessage,
+    });
+
+    expect(handleMessage).not.toHaveBeenCalled();
+    expect(draftPublication.publishDraft).toHaveBeenCalledWith(
+      7,
+      101,
+      expect.objectContaining({
+        socialRequestId: 501,
+        title: '今晚青岛大学跑步约练',
+        visibility: expect.any(String),
+      }),
+    );
+    expect(result.publicLoop).toMatchObject({
+      stage: 'matching_queued',
+      publicIntentId: 'public-intent:workout-501',
+    });
+    expect(result.assistantMessage).toContain('进入约练匹配队列');
+  });
+
   it('keeps low-risk candidate card actions approval-free while still dispatching through AgentLoop', async () => {
     const { candidateActions, executeCalls, handleMessage, metrics, service } =
       makeHarness();

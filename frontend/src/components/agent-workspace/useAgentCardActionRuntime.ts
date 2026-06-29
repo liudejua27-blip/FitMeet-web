@@ -216,6 +216,7 @@ export function useAgentCardActionRuntime({
         action === 'candidate.connect' ||
         action === 'opener.confirm_send' ||
         action === 'publish_to_discover' ||
+        action === 'workout_draft.publish' ||
         action === 'activity.confirm_create' ||
         action === 'public_intent_application.accept'
           ? 'approval'
@@ -386,6 +387,18 @@ function isExecutableToolUISchemaAction(
     value === 'slot_completion.use_default_safety' ||
     value === 'slot_completion.custom_safety' ||
     value === 'slot_completion.cancel' ||
+    value === 'loop_choice.workout' ||
+    value === 'loop_choice.friend' ||
+    value === 'loop_choice.travel' ||
+    value === 'clarification.yes' ||
+    value === 'clarification.no' ||
+    value === 'workout_intake.submit' ||
+    value === 'workout_intake.use_defaults' ||
+    value === 'workout_intake.cancel' ||
+    value === 'workout_draft.publish' ||
+    value === 'workout_draft.private_match' ||
+    value === 'workout_draft.edit' ||
+    value === 'workout_draft.cancel' ||
     value === 'public_intent_application.accept' ||
     value === 'public_intent_application.reject' ||
     value === 'public_intent_application.view_profile' ||
@@ -476,11 +489,27 @@ function slotCompletionMessageForAction(
   return '';
 }
 
+const WORKOUT_ACTIONS_APPEND_FEEDBACK = new Set<FitMeetAgentCardExecutableAction>([
+  'loop_choice.workout',
+  'loop_choice.friend',
+  'loop_choice.travel',
+  'clarification.yes',
+  'clarification.no',
+  'workout_intake.submit',
+  'workout_intake.use_defaults',
+  'workout_intake.cancel',
+  'workout_draft.publish',
+  'workout_draft.private_match',
+  'workout_draft.edit',
+  'workout_draft.cancel',
+]);
+
 function shouldAppendActionResultMessage(
   action: FitMeetAgentCardExecutableAction,
   payload: Record<string, unknown> | undefined,
 ) {
   const confirmsExistingApproval = hasApprovalId(payload) || isSafetyApprovalCardPayload(payload);
+  if (WORKOUT_ACTIONS_APPEND_FEEDBACK.has(action)) return true;
   if (action === 'candidate.more_like_this' && isPrivateCandidateContinuationPayload(payload)) {
     return true;
   }
@@ -518,6 +547,10 @@ function shouldRenderCardActionResultInline(
     action === 'opener.confirm_send' ||
     action === 'opener.regenerate' ||
     action === 'publish_to_discover' ||
+    action === 'workout_draft.publish' ||
+    action === 'workout_draft.private_match' ||
+    action === 'workout_draft.edit' ||
+    action === 'workout_draft.cancel' ||
     action === 'activity.confirm_create' ||
     action === 'public_intent_application.reject' ||
     action === 'public_intent_application.view_profile' ||
@@ -572,6 +605,8 @@ function idempotencyKeyForCardAction(
     stringFromUnknown(payload?.targetUserId) ||
     stringFromUnknown(payload?.applicationId) ||
     stringFromUnknown(payload?.publicIntentApplicationId) ||
+    stringFromUnknown(payload?.socialRequestId) ||
+    stringFromUnknown(payload?.questionKey) ||
     stringFromUnknown(payload?.publicIntentId) ||
     stringFromUnknown(payload?.activityId) ||
     stringFromUnknown(payload?.cardId) ||
@@ -612,6 +647,18 @@ const CARD_ACTION_ASSISTANT_MESSAGES: Partial<Record<FitMeetAgentCardExecutableA
   'public_intent_application.reject': '已暂不接受这次报名。',
   'public_intent_application.view_profile': '已打开申请人的公开资料。',
   'public_intent_application.open_conversation': '已进入消息页继续沟通。',
+  'loop_choice.workout': '已进入约练闭环，我会帮你整理本次约练卡。',
+  'loop_choice.friend': '交友闭环即将支持。当前可以先使用约练闭环。',
+  'loop_choice.travel': '旅游闭环即将支持。当前可以先使用约练闭环。',
+  'clarification.yes': '已按这个理解继续生成约练卡。',
+  'clarification.no': '已切换为填写卡，你可以自己补充本次约练需求。',
+  'workout_intake.submit': '已根据本次填写生成约练卡，确认前不会公开。',
+  'workout_intake.use_defaults': '已使用默认安全设置继续生成约练卡。',
+  'workout_intake.cancel': '已取消本次约练卡，不会发布或匹配。',
+  'workout_draft.publish': '已发布到发现页，并进入约练匹配队列。',
+  'workout_draft.private_match': '已保存为不公开约练卡，不会出现在发现页。',
+  'workout_draft.edit': '可以继续修改本次约练需求。',
+  'workout_draft.cancel': '已取消这次约练卡，不会发布或匹配。',
 };
 
 function assistantMessageForCardAction(

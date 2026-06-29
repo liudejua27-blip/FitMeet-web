@@ -141,7 +141,7 @@ export function ProfileCompletionCard({ card }: { card: SchemaDrivenAssistantCar
       draft: null,
       proposal: null,
       completion: null,
-      message: '本次回答不会保存到个人信息。需要开始匹配时，请再明确告诉 Agent。',
+      message: '本次先跳过资料补全。你仍然可以继续创建本次约练卡；资料不会自动进入匹配池。',
     });
   }
 
@@ -167,7 +167,7 @@ export function ProfileCompletionCard({ card }: { card: SchemaDrivenAssistantCar
 
       <div className="grid gap-4 p-5">
         <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm leading-6 text-slate-600">
-          先补当前匹配最需要的信息。所有问题都可以跳过；保存前会展示预览，不会自动开始匹配或发布卡片。
+          资料还不完整，我可以帮你补充。你也可以先创建本次约练卡。所有问题都可以跳过；保存前会展示预览，不会自动开始匹配或发布卡片。
         </div>
 
         <div className="grid gap-4">
@@ -252,7 +252,7 @@ export function ProfileCompletionCard({ card }: { card: SchemaDrivenAssistantCar
             ) : (
               <ChevronRight className="h-4 w-4" aria-hidden="true" />
             )}
-            生成更新预览
+            快速补充资料
           </button>
           <button
             type="button"
@@ -272,7 +272,7 @@ export function ProfileCompletionCard({ card }: { card: SchemaDrivenAssistantCar
             onClick={useOnce}
             className="rounded-2xl border border-slate-200 px-4 py-3 text-sm font-bold text-slate-600 transition hover:border-slate-300 hover:bg-slate-50"
           >
-            本次使用，不保存
+            本次先跳过
           </button>
         </div>
       </div>

@@ -270,7 +270,7 @@ describe('assistant-ui tool fallback rendering', () => {
               schemaVersion: 'fitmeet.tool-ui.v1',
               schemaType: 'profile.completion',
               title: '让 Agent 帮你补充个人信息',
-              body: '回答后先生成更新预览。',
+              body: '资料还不完整，我可以帮你补充。你也可以先创建本次约练卡。',
               data: {
                 schemaName: 'ProfileCompletionCard',
                 schemaVersion: 'fitmeet.tool-ui.v1',
@@ -301,8 +301,8 @@ describe('assistant-ui tool fallback rendering', () => {
     expect(card).toHaveTextContent('让 Agent 帮你补充个人信息');
     expect(card).toHaveTextContent('你这次最想达成什么');
     expect(card).toHaveTextContent('有哪些必要的安全边界');
-    expect(within(card).getByRole('button', { name: '生成更新预览' })).toBeDisabled();
-    expect(within(card).getByRole('button', { name: '本次使用，不保存' })).toBeInTheDocument();
+    expect(within(card).getByRole('button', { name: '快速补充资料' })).toBeDisabled();
+    expect(within(card).getByRole('button', { name: '本次先跳过' })).toBeInTheDocument();
   });
 
   it('saves profile completion without implicit matching consent', async () => {
@@ -370,7 +370,7 @@ describe('assistant-ui tool fallback rendering', () => {
               schemaVersion: 'fitmeet.tool-ui.v1',
               schemaType: 'profile.completion',
               title: '让 Agent 帮你补充个人信息',
-              body: '回答后先生成更新预览。',
+              body: '资料还不完整，我可以帮你补充。你也可以先创建本次约练卡。',
               data: {
                 schemaName: 'ProfileCompletionCard',
                 schemaVersion: 'fitmeet.tool-ui.v1',
@@ -393,7 +393,7 @@ describe('assistant-ui tool fallback rendering', () => {
 
     const card = await screen.findByTestId('profile-completion-card');
     fireEvent.click(within(card).getByRole('button', { name: '青岛' }));
-    fireEvent.click(within(card).getByRole('button', { name: '生成更新预览' }));
+    fireEvent.click(within(card).getByRole('button', { name: '快速补充资料' }));
 
     await waitFor(() => expect(aiDraftSpy).toHaveBeenCalled());
     fireEvent.click(within(card).getByRole('button', { name: '确认保存' }));
@@ -468,7 +468,7 @@ describe('assistant-ui tool fallback rendering', () => {
               schemaVersion: 'fitmeet.tool-ui.v1',
               schemaType: 'profile.completion',
               title: '让 Agent 帮你补充个人信息',
-              body: '回答后先生成更新预览。',
+              body: '资料还不完整，我可以帮你补充。你也可以先创建本次约练卡。',
               data: {
                 schemaName: 'ProfileCompletionCard',
                 schemaVersion: 'fitmeet.tool-ui.v1',
@@ -491,7 +491,7 @@ describe('assistant-ui tool fallback rendering', () => {
 
     const card = await screen.findByTestId('profile-completion-card');
     fireEvent.click(within(card).getByRole('button', { name: '学校或公司附近' }));
-    fireEvent.click(within(card).getByRole('button', { name: '生成更新预览' }));
+    fireEvent.click(within(card).getByRole('button', { name: '快速补充资料' }));
     await waitFor(() => expect(socialProfileApi.aiDraft).toHaveBeenCalled());
     fireEvent.click(within(card).getByRole('button', { name: '确认保存' }));
 

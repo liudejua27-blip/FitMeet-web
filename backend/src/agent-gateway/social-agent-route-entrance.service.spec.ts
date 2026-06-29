@@ -57,9 +57,16 @@ function makeEarlyResult(
 }
 
 function makeHarness(
-  options: { earlyResult?: SocialAgentIntentRouteResult } = {},
+  options: {
+    earlyResult?: SocialAgentIntentRouteResult;
+    workoutResult?: {
+      task: AgentTask;
+      result: SocialAgentIntentRouteResult;
+    } | null;
+    task?: AgentTask;
+  } = {},
 ) {
-  const task = makeTask();
+  const task = options.task ?? makeTask();
   const messageLog = {
     recordUserMessage: jest.fn().mockResolvedValue(undefined),
   };
@@ -72,12 +79,25 @@ function makeHarness(
       result: options.earlyResult ?? null,
     }),
   };
+  const workoutLoop = {
+    tryHandleEntrance: jest
+      .fn()
+      .mockResolvedValue(options.workoutResult ?? null),
+  };
   const service = new SocialAgentRouteEntranceService(
     messageLog as never,
     taskLifecycle as never,
     mainAgentTurn as never,
+    workoutLoop as never,
   );
-  return { mainAgentTurn, messageLog, service, task, taskLifecycle };
+  return {
+    mainAgentTurn,
+    messageLog,
+    service,
+    task,
+    taskLifecycle,
+    workoutLoop,
+  };
 }
 
 describe('SocialAgentRouteEntranceService', () => {
@@ -170,5 +190,53 @@ describe('SocialAgentRouteEntranceService', () => {
       task,
       earlyResult,
     });
+  });
+
+  it('returns WorkoutLoop fast path results after recording the user message without entering Main Agent routing', async () => {
+    const task = makeTask();
+    const workoutResult = {
+      task,
+      result: makeEarlyResult({
+        action: 'await_confirmation',
+        assistantMessage: '我已经帮你整理成一张约练卡。',
+        cards: [
+          {
+            id: 'workout_draft:101:501',
+            type: 'workout_draft',
+            schemaVersion: 'fitmeet.tool-ui.v1',
+            schemaType: 'workout.draft',
+            title: '今晚跑步约练',
+            data: { socialRequestId: 501 },
+            actions: [],
+          },
+        ],
+      }),
+    };
+    const { mainAgentTurn, messageLog, service, workoutLoop } = makeHarness({
+      task,
+      workoutResult,
+    });
+
+    await expect(
+      service.enter({
+        ownerUserId: 7,
+        body: { message: '今晚青岛大学附近跑步' },
+      }),
+    ).resolves.toMatchObject({
+      message: '今晚青岛大学附近跑步',
+      task,
+      earlyResult: workoutResult.result,
+    });
+
+    expect(messageLog.recordUserMessage).toHaveBeenCalledWith(
+      task,
+      '今晚青岛大学附近跑步',
+    );
+    expect(workoutLoop.tryHandleEntrance).toHaveBeenCalledWith({
+      ownerUserId: 7,
+      task,
+      message: '今晚青岛大学附近跑步',
+    });
+    expect(mainAgentTurn.handleRouteTurn).not.toHaveBeenCalled();
   });
 });

@@ -83,6 +83,20 @@ const LazyPublicIntentApplicationCard = lazy(() =>
 const LazySafetyResultCard = lazy(() =>
   import('./tool-safety-card').then((module) => ({ default: module.SafetyResultCard })),
 );
+const LazyLoopChoiceCard = lazy(() =>
+  import('./tool-loop-choice-card').then((module) => ({ default: module.LoopChoiceCard })),
+);
+const LazyClarificationBinaryCard = lazy(() =>
+  import('./tool-clarification-binary-card').then((module) => ({
+    default: module.ClarificationBinaryCard,
+  })),
+);
+const LazyWorkoutIntakeCard = lazy(() =>
+  import('./tool-workout-intake-card').then((module) => ({ default: module.WorkoutIntakeCard })),
+);
+const LazyWorkoutDraftCard = lazy(() =>
+  import('./tool-workout-draft-card').then((module) => ({ default: module.WorkoutDraftCard })),
+);
 
 const ASSISTANT_CARD_RENDERERS: Record<ToolUISchemaType, ToolUICardRenderer> = {
   'social_match.candidate': CandidateResultCard,
@@ -97,6 +111,10 @@ const ASSISTANT_CARD_RENDERERS: Record<ToolUISchemaType, ToolUICardRenderer> = {
   'meet_loop.timeline': MeetLoopResultCard,
   'public_intent.application': PublicIntentApplicationResultCard,
   'safety.approval': SafetyResultCard,
+  'loop.choice': LoopChoiceResultCard,
+  'clarification.binary': ClarificationBinaryResultCard,
+  'workout.intake': WorkoutIntakeResultCard,
+  'workout.draft': WorkoutDraftResultCard,
   'generic.card': GenericResultCard,
 };
 
@@ -348,6 +366,38 @@ function SafetyResultCard({ card }: { card: SchemaDrivenAssistantCard }) {
   return (
     <Suspense fallback={<GenericResultCard card={card} />}>
       <LazySafetyResultCard card={card} />
+    </Suspense>
+  );
+}
+
+function LoopChoiceResultCard({ card }: { card: SchemaDrivenAssistantCard }) {
+  return (
+    <Suspense fallback={<GenericResultCard card={card} />}>
+      <LazyLoopChoiceCard card={card} />
+    </Suspense>
+  );
+}
+
+function ClarificationBinaryResultCard({ card }: { card: SchemaDrivenAssistantCard }) {
+  return (
+    <Suspense fallback={<GenericResultCard card={card} />}>
+      <LazyClarificationBinaryCard card={card} />
+    </Suspense>
+  );
+}
+
+function WorkoutIntakeResultCard({ card }: { card: SchemaDrivenAssistantCard }) {
+  return (
+    <Suspense fallback={<GenericResultCard card={card} />}>
+      <LazyWorkoutIntakeCard card={card} />
+    </Suspense>
+  );
+}
+
+function WorkoutDraftResultCard({ card }: { card: SchemaDrivenAssistantCard }) {
+  return (
+    <Suspense fallback={<GenericResultCard card={card} />}>
+      <LazyWorkoutDraftCard card={card} />
     </Suspense>
   );
 }

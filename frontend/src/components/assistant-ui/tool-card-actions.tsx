@@ -944,6 +944,9 @@ function isPrimaryVisualCardAction(card: SchemaDrivenAssistantCard, action: Visi
   if (card.schemaType === 'social_match.activity') {
     return action.schemaAction === 'publish_to_discover';
   }
+  if (card.schemaType === 'workout.draft') {
+    return action.schemaAction === 'workout_draft.publish';
+  }
   if (card.schemaType === 'social_match.candidate') {
     return (
       action.schemaAction === 'opener.confirm_send' || action.schemaAction === 'candidate.connect'
@@ -1214,6 +1217,17 @@ const LOW_RISK_VISIBLE_SCHEMA_ACTIONS = new Set<ToolUISchemaAction>([
   'public_intent_application.reject',
   'public_intent_application.view_profile',
   'public_intent_application.open_conversation',
+  'loop_choice.workout',
+  'loop_choice.friend',
+  'loop_choice.travel',
+  'clarification.yes',
+  'clarification.no',
+  'workout_intake.submit',
+  'workout_intake.use_defaults',
+  'workout_intake.cancel',
+  'workout_draft.private_match',
+  'workout_draft.edit',
+  'workout_draft.cancel',
 ]);
 
 const LOW_RISK_VISIBLE_RAW_ACTIONS = new Set([
@@ -1260,6 +1274,7 @@ const HIGH_RISK_VISIBLE_SCHEMA_ACTIONS = new Set<ToolUISchemaAction>([
   'candidate.connect',
   'opener.confirm_send',
   'publish_to_discover',
+  'workout_draft.publish',
   'activity.confirm_create',
   'public_intent_application.accept',
 ]);
@@ -1274,6 +1289,7 @@ const HIGH_RISK_VISIBLE_RAW_ACTIONS = new Set([
   'opener.confirm_send',
   'publish_social_request',
   'publish_to_discover',
+  'workout_draft.publish',
   'create_activity',
   'activity.confirm_create',
   'public_intent_application.accept',
@@ -1338,6 +1354,13 @@ function sortVisibleCardActions(
             'activity.check_in',
             'activity.complete',
           ]
+        : schemaType === 'workout.draft'
+          ? [
+              'workout_draft.publish',
+              'workout_draft.private_match',
+              'workout_draft.edit',
+              'workout_draft.cancel',
+            ]
         : schemaType === 'social_match.empty' ||
             schemaType === 'social_match.no_candidates' ||
             schemaType === 'social_match.privacy_guard' ||
@@ -1529,6 +1552,7 @@ function inlineApprovalConfirmActionFromCard(
       schemaAction === 'opener.confirm_send' ||
       schemaAction === 'candidate.connect' ||
       schemaAction === 'publish_to_discover' ||
+      schemaAction === 'workout_draft.publish' ||
       schemaAction === 'activity.confirm_create' ||
       /send|invite|connect|publish|create/i.test(action ?? '')
     );
@@ -1583,6 +1607,10 @@ function inlineOutcomeFromActionResponse(
     action.schemaAction !== 'candidate.more_like_this' &&
     action.schemaAction !== 'candidate.view_detail' &&
     action.schemaAction !== 'publish_to_discover' &&
+    action.schemaAction !== 'workout_draft.publish' &&
+    action.schemaAction !== 'workout_draft.private_match' &&
+    action.schemaAction !== 'workout_draft.edit' &&
+    action.schemaAction !== 'workout_draft.cancel' &&
     action.schemaAction !== 'activity.view_detail' &&
     action.schemaAction !== 'activity.modify_time' &&
     action.schemaAction !== 'activity.modify_location' &&
@@ -1603,7 +1631,11 @@ function inlineOutcomeFromActionResponse(
     body,
     actionKey,
     href: inlineOutcomeHrefFromResponse(response, action.schemaAction),
-    hrefLabel: action.schemaAction === 'publish_to_discover' ? '查看发现详情' : null,
+    hrefLabel:
+      action.schemaAction === 'publish_to_discover' ||
+      action.schemaAction === 'workout_draft.publish'
+        ? '查看发现详情'
+        : null,
   };
 }
 
@@ -1638,6 +1670,18 @@ function inlineOutcomeStableBody(schemaAction: ToolUISchemaAction | null | undef
   if (schemaAction === 'publish_to_discover') {
     return '这张约练卡已发布到发现页，公开可发现用户可以看到。';
   }
+  if (schemaAction === 'workout_draft.publish') {
+    return '这张约练卡已发布到发现页，并进入约练匹配队列。';
+  }
+  if (schemaAction === 'workout_draft.private_match') {
+    return '已保存为不公开约练卡，不会出现在发现页。';
+  }
+  if (schemaAction === 'workout_draft.edit') {
+    return '可以继续修改本次约练需求。';
+  }
+  if (schemaAction === 'workout_draft.cancel') {
+    return '已取消这次约练卡，不会发布或匹配。';
+  }
   return null;
 }
 
@@ -1649,6 +1693,10 @@ function inlineOutcomeTitle(schemaAction: ToolUISchemaAction | null | undefined)
   if (schemaAction === 'candidate.skip') return '已跳过';
   if (schemaAction === 'candidate.more_like_this') return '继续找类似机会';
   if (schemaAction === 'publish_to_discover') return '已发布到发现';
+  if (schemaAction === 'workout_draft.publish') return '已发布到发现';
+  if (schemaAction === 'workout_draft.private_match') return '已保存草稿';
+  if (schemaAction === 'workout_draft.edit') return '继续修改';
+  if (schemaAction === 'workout_draft.cancel') return '已取消';
   if (isPublishDismissSchemaAction(schemaAction)) return '已取消发布';
   if (schemaAction === 'activity.modify_time' || schemaAction === 'activity.modify_location') {
     return '已准备修改';
@@ -1688,6 +1736,18 @@ function inlineOutcomeFallbackBody(schemaAction: ToolUISchemaAction | null | und
   if (schemaAction === 'publish_to_discover') {
     return '这张约练卡已发布到发现页，公开可发现用户可以看到。';
   }
+  if (schemaAction === 'workout_draft.publish') {
+    return '这张约练卡已发布到发现页，并进入约练匹配队列。';
+  }
+  if (schemaAction === 'workout_draft.private_match') {
+    return '已保存为不公开约练卡，不会出现在发现页。';
+  }
+  if (schemaAction === 'workout_draft.edit') {
+    return '可以继续修改本次约练需求。';
+  }
+  if (schemaAction === 'workout_draft.cancel') {
+    return '已取消这次约练卡，不会发布或匹配。';
+  }
   if (schemaAction === 'activity.modify_time') {
     return '可以继续告诉我新的时间，我会按新的安排更新这张约练卡。';
   }
@@ -1705,7 +1765,11 @@ function localInlineApprovalForCardAction(
   action: VisibleCardAction,
 ): InlineCardApproval | null {
   const payload = payloadForCardAction(card, action);
-  if (action.schemaAction === 'publish_to_discover') {
+  if (
+    action.schemaAction === 'publish_to_discover' ||
+    action.schemaAction === 'workout_draft.publish'
+  ) {
+    const schemaAction = action.schemaAction;
     return {
       approvalId: null,
       title: '确认发布到发现',
@@ -1715,11 +1779,13 @@ function localInlineApprovalForCardAction(
       confirmLabel: '确认发布',
       confirmBusyLabel: '正在发布',
       confirmAction: {
-        action: 'publish_to_discover',
-        schemaAction: 'publish_to_discover',
+        action: schemaAction,
+        schemaAction,
         payload: {
           ...payload,
           confirmedPublish: true,
+          approved: true,
+          confirmed: true,
         },
       },
     };
@@ -1784,7 +1850,9 @@ function inlineOutcomeFromApprovalResponse(
     };
   }
   if (!response?.assistantMessage) return null;
-  const publishedHref = inlineOutcomeHrefFromResponse(response, 'publish_to_discover');
+  const publishedHref =
+    inlineOutcomeHrefFromResponse(response, 'publish_to_discover') ??
+    inlineOutcomeHrefFromResponse(response, 'workout_draft.publish');
   if (publishedHref && /publish|social_request|发现|发布/i.test(approval.actionKey)) {
     return {
       title: '已发布到发现',
@@ -1807,7 +1875,11 @@ function inlineOutcomeHrefFromResponse(
   response: UserFacingAgentResponse | void,
   schemaAction: ToolUISchemaAction | null | undefined,
 ) {
-  if (schemaAction !== 'publish_to_discover' && schemaAction !== 'activity.view_detail') {
+  if (
+    schemaAction !== 'publish_to_discover' &&
+    schemaAction !== 'workout_draft.publish' &&
+    schemaAction !== 'activity.view_detail'
+  ) {
     return null;
   }
   for (const card of response?.cards ?? []) {
@@ -1982,6 +2054,9 @@ function confirmationMatchesActionKey(
   }
   if (actionKey === 'publish_to_discover') {
     return /publish|social_request|发现|发布/.test(actionText);
+  }
+  if (actionKey === 'workout_draft.publish') {
+    return /publish|social_request|workout|发现|发布|约练/.test(actionText);
   }
   if (actionKey === 'activity.confirm_create') {
     return /activity|meet|create|活动|约练|创建/.test(actionText);
