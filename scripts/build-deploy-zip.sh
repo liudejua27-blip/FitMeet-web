@@ -158,9 +158,9 @@ require_path "scripts/stage-agent-release-bucket.sh"
 require_path "frontend/scripts/qa-agent-chat-production.mjs"
 require_path "frontend/scripts/qa-agent-public-loop-staging.mjs"
 require_path "frontend/src/test/socialAgentApiReplay.test.ts"
-require_path "docs/agent-release-e2e-matrix.md"
-require_path "docs/staging-validation-runbook.md"
-require_path "docs/social-codex-runtime.md"
+require_path "docs/agent/release-gates.md"
+require_path "docs/deployment/staging-validation-runbook.md"
+require_path "docs/agent/runtime.md"
 require_path "docs/agent-skills/README.md"
 require_path "docs/agent-skills/social-meetup-workflow.md"
 require_path "docs/agent-skills/tool-contract.md"
@@ -389,7 +389,7 @@ require_file_contains "scripts/verify-agent-release.sh" "agentWorkspaceRuntime.t
 require_file_contains "scripts/verify-agent-release.sh" "AgentWorkspacePage.test.tsx"
 require_file_contains "scripts/verify-agent-release.sh" "socialAgentApiReplay.test.ts"
 require_file_contains "scripts/verify-agent-release.sh" "toolProcessModel.test.ts"
-require_path "docs/deployment-vercel-railway.md"
+require_path "docs/deployment/cloud-vercel-railway.md"
 
 step "Stage sanitized deploy tree"
 mkdir -p "${STAGE_DIR}"
@@ -556,8 +556,8 @@ require_entry "scripts/domain-readiness-check.sh" '^FitMeet-web/scripts/domain-r
 require_entry "scripts/launch-status.sh" '^FitMeet-web/scripts/launch-status\.sh$'
 require_entry "scripts/vercel-prebuilt-deploy.sh" '^FitMeet-web/scripts/vercel-prebuilt-deploy\.sh$'
 require_entry "scripts/lib/toolchain.sh" '^FitMeet-web/scripts/lib/toolchain\.sh$'
-require_entry "docs/agent-release-e2e-matrix.md" '^FitMeet-web/docs/agent-release-e2e-matrix\.md$'
-require_entry "Social Codex runtime docs" '^FitMeet-web/docs/social-codex-runtime\.md$'
+require_entry "docs/agent/release-gates.md" '^FitMeet-web/docs/agent/release-gates\.md$'
+require_entry "Social Codex runtime docs" '^FitMeet-web/docs/agent/runtime\.md$'
 require_entry "Agent skills README" '^FitMeet-web/docs/agent-skills/README\.md$'
 require_entry "Agent social meetup workflow skill" '^FitMeet-web/docs/agent-skills/social-meetup-workflow\.md$'
 require_entry "Agent skill tool contract" '^FitMeet-web/docs/agent-skills/tool-contract\.md$'
@@ -573,7 +573,7 @@ require_entry "Agent safety approval skill" '^FitMeet-web/docs/agent-skills/safe
 require_entry "Agent invitation skill" '^FitMeet-web/docs/agent-skills/invitation\.md$'
 require_entry "Agent meet loop skill" '^FitMeet-web/docs/agent-skills/meet-loop\.md$'
 require_entry "Agent Life Graph memory skill" '^FitMeet-web/docs/agent-skills/life-graph-memory\.md$'
-require_entry "docs/deployment-vercel-railway.md" '^FitMeet-web/docs/deployment-vercel-railway\.md$'
+require_entry "docs/deployment/cloud-vercel-railway.md" '^FitMeet-web/docs/deployment/cloud-vercel-railway\.md$'
 require_entry "release metadata" '^FitMeet-web/release\.json$'
 
 for entry in "${entries[@]}"; do

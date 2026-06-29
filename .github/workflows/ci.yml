@@ -17,6 +17,22 @@ permissions:
   contents: read
 
 jobs:
+  docs-governance:
+    name: Docs Governance
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Docs governance
+        run: node scripts/check-docs-governance.mjs
+
   backend-p0:
     name: Backend P0
     runs-on: ubuntu-latest
@@ -82,7 +98,7 @@ jobs:
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
         with:
-          version: 10.23.0
+          version: 10.30.3
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -172,7 +188,7 @@ jobs:
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
         with:
-          version: 10.23.0
+          version: 10.30.3
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -186,6 +202,9 @@ jobs:
 
       - name: Backend migrations
         run: pnpm run migration:run
+
+      - name: Backend contract e2e
+        run: pnpm run test:e2e:contract
 
       - name: Backend integration e2e
         run: pnpm run test:e2e:integration
@@ -206,7 +225,7 @@ jobs:
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
         with:
-          version: 10.23.0
+          version: 10.30.3
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -223,6 +242,12 @@ jobs:
 
       - name: Frontend typecheck
         run: pnpm exec tsc -b
+
+      - name: Frontend Discover entrypoint audit
+        run: pnpm check:discover-entrypoints
+
+      - name: Frontend route boundary test
+        run: pnpm exec vitest run src/test/routeBoundaries.test.ts
 
       - name: Frontend full test
         run: pnpm test

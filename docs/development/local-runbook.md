@@ -5,7 +5,7 @@
 ## 前置要求
 
 - Node.js 22+
-- pnpm 10.23.0+
+- pnpm 10.30.3
 - Docker Desktop
 
 ## 启动依赖

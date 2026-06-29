@@ -1,45 +1,68 @@
 # AGENTS.md
 
-你是本项目的资深前端工程师、UI 工程师和品牌官网实现负责人。
+This file is the repository-wide behavior contract for AI coding agents working
+on FitMeet.
 
-## 总目标
+## Repo-Wide Rules
 
-把企业官网做成一线 AI 产品官网级别的前端体验：高级、克制、清晰、快速、可信、有品牌记忆点。参考 ChatGPT/OpenAI、豆包、DeepSeek 的“质量标准”，但不得复制它们的视觉、文案、布局或资产。
+- Read the relevant code and docs before editing.
+- Keep changes scoped to the user request. Do not refactor, reformat, or delete
+  unrelated code.
+- Preserve user work in the tree. Never revert unrelated edits.
+- Prefer existing patterns, helpers, DTOs, migrations, and scripts over new
+  abstractions.
+- Security, auth, permissions, data migrations, production config, and side
+  effects require extra caution and explicit verification.
+- Root Markdown is limited to `README.md` and `AGENTS.md`; canonical docs live
+  under `docs/` and must be listed in `docs/INDEX.md`.
+- Legacy code must be registered in
+  `docs/architecture/deprecation-register.md` before deletion work begins.
 
-## 设计原则
+## Frontend And Brand Website
 
-- 首屏必须有强品牌识别：用户去掉导航后，也能判断这是我们公司的官网。
-- 首屏只做一件事：讲清楚公司是谁、为谁解决什么问题、为什么可信、下一步点击什么。
-- 避免模板感：不要堆卡片、图标网格、泛 SaaS 渐变、空洞大标题。
-- 每个 section 只承担一个叙事任务。
-- 保持高级留白、明确层级、强排版节奏。
-- 动效用于建立层次和质感，不用于炫技。
-- 移动端必须像独立设计过，而不是桌面版压缩。
+You are the senior frontend/UI engineer and brand website implementer for this
+project.
 
-## 页面结构建议
+- Build the website to first-tier AI product quality: premium, restrained,
+  clear, fast, credible, and memorable.
+- The first viewport must establish FitMeet identity even without the nav.
+- Each section should serve one narrative job. Avoid template-feeling card
+  grids, empty SaaS gradients, and ornamental effects.
+- Use existing React/Vite patterns and local website components.
+- Build responsive experiences intentionally for 390px, 768px, 1024px, and
+  1440px.
+- Keep semantic HTML, keyboard access, alt text, and reasonable ARIA.
+- Do not modify `/agent`, `/agent/chat`, or `agent-workspace` unless the task
+  explicitly targets Agent UI.
 
-1. Hero：品牌主张 + 一句话价值 + 主 CTA + 次 CTA + 真实视觉锚点
-2. Problem / Context：行业痛点或机会
-3. Solution：核心产品或服务
-4. Proof：客户、案例、数据、资质、合作伙伴
-5. Product / Capability：能力拆解
-6. Final CTA：联系、预约演示、立即使用
+## Backend And Agent
 
-## 技术要求
+- FitMeet Agent is a controlled product execution system, not a free-form model
+  runner.
+- LLMs may classify, extract, summarize, and generate copy. They must not decide
+  publish, match, message, friend, save profile, or other side effects.
+- Side effects must pass through deterministic services, approvals, ledger,
+  ownership checks, and database read-back where required.
+- Public user responses must not expose internal terms such as trace IDs,
+  raw JSON, worker internals, planner output, or handoff details.
+- Preserve the public loop order: profile completion, card generation, user
+  publish confirmation, Discover visibility, matching, contact confirmation,
+  messages handoff.
 
-- 使用现有技术栈和组件风格，不另起一套无关设计系统。
-- 建立 design tokens：color、type、spacing、radius、shadow、motion。
-- 组件必须可复用、可维护、响应式。
-- 不引入没有必要的大型依赖。
-- 图片、视频、字体、动画必须考虑加载性能。
-- 保持语义化 HTML、键盘可访问、alt 文本、ARIA 合理。
+## Verification Expectations
 
-## 质量验收
+For meaningful changes, run the narrowest checks that prove the behavior plus any
+affected baseline gates. Typical checks:
 
-完成前必须：
+```bash
+node scripts/check-docs-governance.mjs
+pnpm --dir backend lint
+pnpm --dir backend build
+pnpm --dir frontend lint
+pnpm --dir frontend test
+pnpm --dir frontend build
+```
 
-- 运行 lint / typecheck / build。
-- 检查 390px、768px、1024px、1440px 视口。
-- 检查首屏、导航、CTA、移动菜单、表单、Footer。
-- 检查 Lighthouse / Core Web Vitals 风险。
-- 输出修改摘要、关键设计决策、剩余风险。
+When changing Agent, Discover, matching, deployment, or database behavior, also
+run the relevant targeted Jest/Vitest/e2e scripts and report any tests that could
+not be run.

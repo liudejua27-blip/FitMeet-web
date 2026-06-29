@@ -76,6 +76,7 @@ const allowedPageFiles = new Set([
   'SafetyAdminPage.tsx',
   'UserProfilePage.tsx',
   'discoverMeetPresenter.ts',
+  'website',
 ]);
 for (const page of pages) {
   if (!allowedPageFiles.has(page)) {

@@ -253,7 +253,7 @@ require_file 'deploy/env.production.railway.example'
 require_file 'scripts/domain-readiness-check.sh'
 require_file 'scripts/vercel-prebuilt-deploy.sh'
 require_file 'scripts/verify-production.sh'
-require_file 'docs/deployment-vercel-railway.md'
+require_file 'docs/deployment/cloud-vercel-railway.md'
 
 parse_json 'vercel.json'
 parse_json 'backend/railway.json'
@@ -263,8 +263,8 @@ contains 'deploy/env.production.vercel.example' 'VITE_WS_BASE_URL=https://api.so
 contains 'deploy/env.production.railway.example' 'BASE_URL=https://api.socialworld.world'
 contains 'deploy/env.production.railway.example' 'FRONTEND_BASE_URL=https://socialworld.world'
 contains 'deploy/env.production.railway.example' 'ALLOWED_ORIGINS=https://socialworld.world,https://www.socialworld.world'
-contains 'docs/deployment-vercel-railway.md' "${VERCEL_PROJECT_SLUG}"
-contains 'docs/deployment-vercel-railway.md' "${VERCEL_TEAM_SLUG}"
+contains 'docs/deployment/cloud-vercel-railway.md' "${VERCEL_PROJECT_SLUG}"
+contains 'docs/deployment/cloud-vercel-railway.md' "${VERCEL_TEAM_SLUG}"
 
 check_vercel_cli
 check_vercel_deploy_identity
