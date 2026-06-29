@@ -3,6 +3,10 @@ import { Injectable, Optional } from '@nestjs/common';
 import type { AgentTask } from '../entities/agent-task.entity';
 import { GeoResolverService } from '../geo/geo-resolver.service';
 import type { GeoCandidate, GeoResolution } from '../geo/geo-resolver.types';
+import type {
+  LoopAgentDecisionAction,
+  LoopAgentDecisionBase,
+} from '../loop-agent/loop-agent.types';
 import type { FitMeetLoopRouterResult } from '../loop-router/fitmeet-loop-router.types';
 import type {
   SocialAgentMatchingFallback,
@@ -21,16 +25,18 @@ import {
 } from './workout-understanding.service';
 
 export type WorkoutAgentDecisionAction =
-  | 'ASK_INTAKE'
-  | 'ASK_LOCATION_CONFIRMATION'
-  | 'CREATE_WORKOUT_DRAFT'
-  | 'HANDOFF_LEGACY';
+  | Extract<
+      LoopAgentDecisionAction,
+      'ASK_INTAKE' | 'ASK_LOCATION_CONFIRMATION' | 'HANDOFF_LEGACY'
+    >
+  | 'CREATE_WORKOUT_DRAFT';
 
-export type WorkoutAgentDecision = {
-  action: WorkoutAgentDecisionAction;
-  reason: string;
-  slots: WorkoutSlots;
-  missing: WorkoutSlotValidation['missing'];
+export type WorkoutAgentDecision = LoopAgentDecisionBase<
+  'workout',
+  WorkoutAgentDecisionAction,
+  WorkoutSlots,
+  WorkoutSlotValidation['missing'][number]
+> & {
   understanding: WorkoutUnderstandingResult | null;
   geoResolution?: GeoResolution | null;
   geoCandidates?: GeoCandidate[];

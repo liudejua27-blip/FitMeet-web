@@ -1,4 +1,11 @@
-export type TravelLoopStage =
+import type {
+  LoopSlotValidation,
+  LoopSlots,
+  LoopStage,
+} from '../loop-agent/loop-agent.types';
+
+export type TravelLoopStage = Extract<
+  LoopStage,
   | 'intake'
   | 'draft_ready'
   | 'matching_queued'
@@ -7,9 +14,10 @@ export type TravelLoopStage =
   | 'message_confirming'
   | 'messages_handoff'
   | 'cancelled'
-  | 'done';
+  | 'done'
+>;
 
-export type TravelSlots = {
+export type TravelSlots = LoopSlots & {
   destination?: string;
   departureTime?: string;
   duration?: string;
@@ -21,7 +29,6 @@ export type TravelSlots = {
   accommodationPreference?: string;
   foodPreference?: string;
   candidatePreference?: string;
-  safetyBoundary?: string;
   visibilityPreference?: 'private';
 };
 
@@ -31,7 +38,4 @@ export type TravelRequiredSlot =
   | 'budgetRange'
   | 'transportMode';
 
-export type TravelSlotValidation = {
-  valid: boolean;
-  missing: TravelRequiredSlot[];
-};
+export type TravelSlotValidation = LoopSlotValidation<TravelRequiredSlot>;

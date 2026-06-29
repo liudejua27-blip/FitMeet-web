@@ -1,4 +1,11 @@
-export type FriendLoopStage =
+import type {
+  LoopSlotValidation,
+  LoopSlots,
+  LoopStage,
+} from '../loop-agent/loop-agent.types';
+
+export type FriendLoopStage = Extract<
+  LoopStage,
   | 'intake'
   | 'draft_ready'
   | 'matching_queued'
@@ -7,22 +14,19 @@ export type FriendLoopStage =
   | 'message_confirming'
   | 'messages_handoff'
   | 'cancelled'
-  | 'done';
+  | 'done'
+>;
 
-export type FriendSlots = {
+export type FriendSlots = LoopSlots & {
   friendGoal?: string;
   city?: string;
   topicTags?: string[];
   scenePreference?: string;
   timePreference?: string;
   candidatePreference?: string;
-  safetyBoundary?: string;
   visibilityPreference?: 'private';
 };
 
 export type FriendRequiredSlot = 'friendGoal' | 'city';
 
-export type FriendSlotValidation = {
-  valid: boolean;
-  missing: FriendRequiredSlot[];
-};
+export type FriendSlotValidation = LoopSlotValidation<FriendRequiredSlot>;

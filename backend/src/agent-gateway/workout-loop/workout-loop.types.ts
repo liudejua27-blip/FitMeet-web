@@ -1,4 +1,13 @@
-export type WorkoutLoopStage =
+import type {
+  LoopSlotMeta,
+  LoopSlotSource,
+  LoopSlotValidation,
+  LoopSlots,
+  LoopStage,
+} from '../loop-agent/loop-agent.types';
+
+export type WorkoutLoopStage = Extract<
+  LoopStage,
   | 'intake'
   | 'clarifying'
   | 'draft_ready'
@@ -11,9 +20,21 @@ export type WorkoutLoopStage =
   | 'opener_ready'
   | 'message_confirming'
   | 'messages_handoff'
-  | 'done';
+  | 'done'
+>;
 
-export type WorkoutSlots = {
+export type WorkoutSlotMetaKey =
+  | 'activityType'
+  | 'timePreference'
+  | 'locationText'
+  | 'city'
+  | 'district'
+  | 'poiName'
+  | 'radiusKm'
+  | 'intensity'
+  | 'candidatePreference';
+
+export type WorkoutSlots = LoopSlots & {
   activityType?: string;
   timePreference?: string;
   locationText?: string;
@@ -59,34 +80,11 @@ export type WorkoutSlots = {
     }>;
   };
   slotMeta?: Partial<
-    Record<
-      | 'activityType'
-      | 'timePreference'
-      | 'locationText'
-      | 'city'
-      | 'district'
-      | 'poiName'
-      | 'radiusKm'
-      | 'intensity'
-      | 'candidatePreference',
-      {
-        source:
-          | 'user'
-          | 'user_confirmed'
-          | 'rule'
-          | 'llm'
-          | 'geo'
-          | 'memory'
-          | 'default';
-        confidence: number;
-      }
-    >
+    Record<WorkoutSlotMetaKey, LoopSlotMeta & { source: LoopSlotSource }>
   >;
   radiusKm?: number;
   intensity?: string;
   candidatePreference?: string;
-  safetyBoundary?: string;
-  visibilityPreference?: 'public' | 'private';
 };
 
 export type WorkoutRequiredSlot =
@@ -95,7 +93,4 @@ export type WorkoutRequiredSlot =
   | 'locationText'
   | 'city';
 
-export type WorkoutSlotValidation = {
-  valid: boolean;
-  missing: WorkoutRequiredSlot[];
-};
+export type WorkoutSlotValidation = LoopSlotValidation<WorkoutRequiredSlot>;
