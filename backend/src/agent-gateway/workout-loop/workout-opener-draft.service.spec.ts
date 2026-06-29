@@ -26,6 +26,41 @@ function makeTask(): AgentTask {
   } as unknown as AgentTask;
 }
 
+function makeFriendTask(): AgentTask {
+  return {
+    ...makeTask(),
+    goal: '交友',
+    memory: {
+      friendLoop: {
+        stage: 'candidates_ready',
+        slots: {
+          friendGoal: '认识同城朋友',
+          city: '上海',
+          topicTags: ['咖啡', '展览'],
+        },
+      },
+    },
+  } as unknown as AgentTask;
+}
+
+function makeTravelTask(): AgentTask {
+  return {
+    ...makeTask(),
+    goal: '旅行搭子',
+    memory: {
+      travelLoop: {
+        stage: 'candidates_ready',
+        slots: {
+          destination: '成都',
+          departureTime: '五一',
+          budgetRange: '3000以内',
+          transportMode: '高铁',
+        },
+      },
+    },
+  } as unknown as AgentTask;
+}
+
 describe('WorkoutOpenerDraftService', () => {
   it('falls back when the JSON model runtime is unavailable', async () => {
     const service = new WorkoutOpenerDraftService();
@@ -67,6 +102,76 @@ describe('WorkoutOpenerDraftService', () => {
         taskId: 101,
       }),
     );
+  });
+
+  it('uses a friend-specific opener purpose and prompt for friend loop tasks', async () => {
+    const toolJson = {
+      callJson: jest.fn().mockResolvedValue({
+        message: '看到你也喜欢展览，可以先站内轻松聊聊周末安排吗？',
+      }),
+    };
+    const service = new WorkoutOpenerDraftService(toolJson as never);
+
+    await expect(
+      service.draft({
+        task: makeFriendTask(),
+        candidate: {
+          displayName: '小周',
+          metadata: { loop: 'friend' },
+          matchReasons: ['都喜欢展览'],
+        },
+        payload: {},
+        fallbackDraft: '',
+      }),
+    ).resolves.toBe('看到你也喜欢展览，可以先站内轻松聊聊周末安排吗？');
+
+    expect(toolJson.callJson).toHaveBeenCalledWith(
+      expect.objectContaining({
+        purpose: 'friend_opener_draft',
+        taskId: 101,
+      }),
+    );
+    const prompt = JSON.parse(toolJson.callJson.mock.calls[0][0].prompt);
+    expect(prompt).toMatchObject({
+      loopKind: 'friend',
+      loopContext: expect.objectContaining({
+        stage: 'candidates_ready',
+      }),
+    });
+    expect(prompt.instruction).toContain('friend-making');
+    expect(prompt.constraints).toEqual(
+      expect.arrayContaining([
+        '围绕共同兴趣、同城或聊天节奏开场',
+        '不要直接提身材、颜值、性暗示或关系压力',
+      ]),
+    );
+  });
+
+  it('uses travel-specific safe defaults and rejects unsafe travel openers', async () => {
+    const toolJson = {
+      callJson: jest.fn().mockResolvedValue({
+        message: '加我微信，直接发酒店地址给你',
+      }),
+    };
+    const service = new WorkoutOpenerDraftService(toolJson as never);
+
+    await expect(
+      service.draft({
+        task: makeTravelTask(),
+        candidate: { displayName: '阿宁' },
+        payload: {},
+        fallbackDraft: '',
+      }),
+    ).resolves.toBe('你好，看到你也在找旅行搭子，可以先站内聊聊时间和路线吗？');
+    expect(toolJson.callJson).toHaveBeenCalledWith(
+      expect.objectContaining({
+        purpose: 'travel_opener_draft',
+        taskId: 101,
+      }),
+    );
+    const prompt = JSON.parse(toolJson.callJson.mock.calls[0][0].prompt);
+    expect(prompt).toMatchObject({ loopKind: 'travel' });
+    expect(prompt.instruction).toContain('travel companion');
   });
 
   it('falls back when DeepSeek returns contact information or precise location', async () => {
