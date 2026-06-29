@@ -13,6 +13,8 @@ import {
   UserSocialRequestStatus,
 } from '../../social-requests/social-request.entity';
 import { buildClarificationGeoCandidatesCard } from '../clarification/clarification-geo-candidates-card.presenter';
+import { AgentLoopService } from '../agent-loop.service';
+import type { AgentLoopBrainRuntime } from '../agent-loop.types';
 import { AgentTask, AgentTaskStatus } from '../entities/agent-task.entity';
 import type { MatchingJob } from '../entities/matching-job.entity';
 import type { GeoResolution } from '../geo/geo-resolver.types';
@@ -26,8 +28,15 @@ import {
   buildFriendDraftCard,
   buildFriendIntakeCard,
 } from './friend-card.presenter';
-import { FriendAgentBrainService } from './friend-agent-brain.service';
-import type { FriendLoopStage, FriendSlots } from './friend-loop.types';
+import {
+  FriendAgentBrainService,
+  type FriendAgentDecision,
+} from './friend-agent-brain.service';
+import type {
+  FriendLoopStage,
+  FriendSlotValidation,
+  FriendSlots,
+} from './friend-loop.types';
 import {
   defaultFriendSafetyBoundary,
   extractFriendSlots,
@@ -57,6 +66,8 @@ export class FriendLoopService {
     private readonly friendBrain?: FriendAgentBrainService,
     @Optional()
     private readonly geoResolver?: GeoResolverService,
+    @Optional()
+    private readonly agentLoop?: AgentLoopService,
   ) {}
 
   async tryHandleEntrance(input: {
@@ -68,7 +79,8 @@ export class FriendLoopService {
       message: input.message,
       previousSlots: this.readFriendSlots(input.task),
     });
-    const decision = await this.friendBrain?.decideEntrance({
+    const decision = await this.decideWithAgentLoop({
+      mode: 'entrance',
       task: input.task,
       message: input.message,
       slots,
@@ -97,7 +109,8 @@ export class FriendLoopService {
       message: input.message,
       previousSlots: this.readFriendSlots(input.task),
     });
-    const decision = await this.friendBrain?.decideEntrance({
+    const decision = await this.decideWithAgentLoop({
+      mode: 'continuation',
       task: input.task,
       message: input.message,
       slots,
@@ -263,7 +276,10 @@ export class FriendLoopService {
     });
     if (prepared.result) return prepared.result;
     const validation = validateFriendSlots(prepared.slots);
-    const decision = this.friendBrain?.decideIntakeSubmit({
+    const decision = await this.decideWithAgentLoop({
+      mode: 'intake_submit',
+      task,
+      message: this.text(slots.locationText ?? slots.city),
       slots: prepared.slots,
       validation,
     });
@@ -282,6 +298,116 @@ export class FriendLoopService {
       slots: decision?.slots ?? prepared.slots,
       assistantMessage: '已收到交友需求，我正在生成交友卡。',
     });
+  }
+
+  private async decideWithAgentLoop(
+    input:
+      | {
+          mode: 'entrance' | 'continuation';
+          task: AgentTask;
+          message: string;
+          slots: FriendSlots;
+        }
+      | {
+          mode: 'intake_submit';
+          task: AgentTask;
+          message: string;
+          slots: FriendSlots;
+          validation: FriendSlotValidation;
+        },
+  ): Promise<FriendAgentDecision | null> {
+    if (!this.friendBrain) return null;
+    if (!this.agentLoop) return this.directBrainDecision(input);
+
+    let decision: FriendAgentDecision | null = null;
+    const toolName = `friend_agent.${input.mode}`;
+    const runtime: AgentLoopBrainRuntime = {
+      decide: ({ observations }) => {
+        if (observations.length === 0) {
+          return {
+            reason: `select_${toolName}`,
+            tool: {
+              agent: 'Agent Brain',
+              toolName,
+              input: {
+                mode: input.mode,
+                message: input.message,
+                taskId: input.task.id,
+              },
+            },
+          };
+        }
+        return {
+          done: true,
+          reason: `completed_${toolName}`,
+          finalObservation: {
+            toolName,
+            status: 'completed',
+            decision: this.decisionObservation(decision),
+          },
+        };
+      },
+    };
+
+    await this.agentLoop.execute({
+      taskId: input.task.id,
+      goal: 'Friend agent decides the next safe card-driven loop step.',
+      agent: 'Agent Brain',
+      plan: { reason: 'FriendAgentBrain dynamic runtime', tools: [] },
+      brain: runtime,
+      maxToolCalls: 2,
+      runner: async () => {
+        decision = await this.directBrainDecision(input);
+        return {
+          toolName,
+          status: 'observed',
+          decision: this.decisionObservation(decision),
+        };
+      },
+    });
+
+    return decision ?? this.directBrainDecision(input);
+  }
+
+  private directBrainDecision(
+    input:
+      | {
+          mode: 'entrance' | 'continuation';
+          task: AgentTask;
+          message: string;
+          slots: FriendSlots;
+        }
+      | {
+          mode: 'intake_submit';
+          task: AgentTask;
+          message: string;
+          slots: FriendSlots;
+          validation: FriendSlotValidation;
+        },
+  ): Promise<FriendAgentDecision> | FriendAgentDecision {
+    if (!this.friendBrain) {
+      throw new BadRequestException('Friend agent brain unavailable');
+    }
+    if (input.mode === 'intake_submit') {
+      return this.friendBrain.decideIntakeSubmit({
+        slots: input.slots,
+        validation: input.validation,
+      });
+    }
+    return this.friendBrain.decideEntrance({
+      task: input.task,
+      message: input.message,
+      slots: input.slots,
+    });
+  }
+
+  private decisionObservation(decision: FriendAgentDecision | null) {
+    return {
+      action: decision?.action ?? null,
+      reason: decision?.reason ?? null,
+      missing: decision?.missing ?? [],
+      loopKind: decision?.loopKind ?? 'friend',
+    };
   }
 
   private async intakeResultForSlots(input: {
