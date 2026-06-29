@@ -1188,7 +1188,7 @@ export class SocialAgentMatchingJobProcessorService {
       candidateSnapshotId: result.candidateSnapshotId,
       publicLoopStage:
         result.candidateCount > 0
-          ? 'candidates_recommended'
+          ? 'candidates_ready'
           : result.noCandidatesFinal
             ? 'no_candidates_final'
             : 'no_candidates',

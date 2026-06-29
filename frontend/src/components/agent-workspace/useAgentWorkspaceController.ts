@@ -775,6 +775,7 @@ function shouldPollMatchingSnapshot(
 ) {
   if (!response) return false;
   if (response.publicLoop?.stage === 'dismissed') return false;
+  if (response.publicLoop?.stage === 'candidates_ready') return false;
   if (response.publicLoop?.stage === 'candidates_recommended') return false;
   if (response.publicLoop?.stage === 'no_candidates') return false;
   if (response.publicLoop?.stage === 'no_candidates_final') return false;

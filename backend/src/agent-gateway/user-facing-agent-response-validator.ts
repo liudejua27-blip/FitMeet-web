@@ -33,7 +33,8 @@ export function validateUserFacingAgentResponse(
     throw new Error('user_facing_response_claims_matched_without_candidates');
   }
   if (
-    response.publicLoop?.stage === 'candidates_recommended' &&
+    (response.publicLoop?.stage === 'candidates_ready' ||
+      response.publicLoop?.stage === 'candidates_recommended') &&
     !hasVerifiedPublicIntent(response.publicLoop)
   ) {
     throw new Error('user_facing_response_candidates_before_discover_verified');

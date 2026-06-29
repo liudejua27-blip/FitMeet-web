@@ -210,6 +210,13 @@ describe('SocialAgentChatController final response routing', () => {
         },
       })),
     };
+    const task = { id: 101, ownerUserId: 7 };
+    const messageLog = {
+      recordAssistantMessage: jest.fn().mockResolvedValue(undefined),
+    };
+    const taskLifecycle = {
+      assertTaskOwner: jest.fn().mockResolvedValue(task),
+    };
     const controller = new SocialAgentChatController(
       chat as unknown as SocialAgentChatService,
       {} as unknown as SocialAgentCandidateCommandService,
@@ -220,6 +227,17 @@ describe('SocialAgentChatController final response routing', () => {
       undefined,
       undefined,
       finalResponses as never,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      messageLog as never,
+      taskLifecycle as never,
     );
     const response = {
       status: jest.fn(),
@@ -245,6 +263,20 @@ describe('SocialAgentChatController final response routing', () => {
     expect(serialized).toContain('"schemaType":"workout.draft"');
     expect(serialized).toContain(
       '"assistantMessageSource":"deterministic_route"',
+    );
+    expect(taskLifecycle.assertTaskOwner).toHaveBeenCalledWith(101, 7);
+    expect(messageLog.recordAssistantMessage).toHaveBeenCalledWith(
+      task,
+      '我已经整理好这次约练卡，发布前需要你确认。',
+      expect.objectContaining({
+        taskId: 101,
+        assistantMessage: '我已经整理好这次约练卡，发布前需要你确认。',
+        assistantMessageSource: 'deterministic_route',
+        cards: expect.arrayContaining([
+          expect.objectContaining({ schemaType: 'workout.draft' }),
+        ]),
+      }),
+      { replaceLastAssistantTurn: true },
     );
     expect(serialized).not.toContain('LLM 改写回复');
   });
@@ -1522,7 +1554,7 @@ describe('SocialAgentChatController user-facing stream', () => {
         assistantStreamed: true,
         assistantMessageSource: 'llm',
       }),
-      {},
+      { replaceLastAssistantTurn: false },
     );
   });
 

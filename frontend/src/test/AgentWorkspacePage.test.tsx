@@ -2977,7 +2977,7 @@ describe('AgentWorkspacePage', () => {
       assistantMessage: '已找到 2 个适合这次约练的候选。',
       workflow: mockWorkflow('agent-task:101', 'CANDIDATES_READY'),
       publicLoop: {
-        stage: 'candidates_recommended',
+        stage: 'candidates_ready',
         publicIntentId: 'public-intent:workout-501',
         discoverHref: '/discover?publicIntentId=public-intent%3Aworkout-501',
         publicIntentHref: '/public-intent/public-intent%3Aworkout-501',

@@ -71,6 +71,7 @@ export type UserFacingAgentPublicLoopStage =
   | 'safety_checking'
   | 'no_candidates'
   | 'no_candidates_final'
+  | 'candidates_ready'
   | 'candidates_recommended'
   | 'contact_confirmation_required'
   | 'messages_handoff'
