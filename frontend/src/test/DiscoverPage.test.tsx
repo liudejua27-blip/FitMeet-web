@@ -84,6 +84,41 @@ describe('DiscoverPage public intent readback', () => {
     expect(target).not.toHaveTextContent('公开社交意图');
     await waitFor(() => expect(Element.prototype.scrollIntoView).toHaveBeenCalled());
   });
+
+  it('loads the focused public intent even when it is missing from the first discover batches', async () => {
+    dataServiceMock.getPublicSocialIntents.mockImplementation(
+      ({
+        publicIntentId,
+      }: {
+        publicIntentId?: string;
+        status?: string;
+      } = {}) =>
+        Promise.resolve(publicIntentId === 'social_request_401' ? [publishedIntent()] : []),
+    );
+
+    const { container } = render(
+      <MemoryRouter initialEntries={['/discover?publicIntentId=social_request_401']}>
+        <DiscoverPage />
+      </MemoryRouter>,
+    );
+
+    const target = await waitFor(() => {
+      const element = container.querySelector<HTMLAnchorElement>(
+        '[data-public-intent-id="social_request_401"]',
+      );
+      expect(element).not.toBeNull();
+      return element;
+    });
+
+    const cards = Array.from(container.querySelectorAll<HTMLAnchorElement>('.match-card-link'));
+    expect(cards[0]).toBe(target);
+    expect(dataServiceMock.getPublicSocialIntents).toHaveBeenCalledWith({
+      page: 1,
+      limit: 1,
+      publicIntentId: 'social_request_401',
+    });
+    await waitFor(() => expect(Element.prototype.scrollIntoView).toHaveBeenCalled());
+  });
 });
 
 function publishedIntent(): PublicSocialIntent {
