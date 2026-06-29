@@ -72,6 +72,8 @@ type StagedSocialRequestDraft = {
   draft: CreateSocialRequestDto & { socialRequestId: number };
 };
 
+type PublishLoopKind = 'workout' | 'friend' | 'travel';
+
 const SOCIAL_REQUEST_ADVISORY_LOCK_NAMESPACE = 1_782_160_006;
 
 @Injectable()
@@ -1193,7 +1195,7 @@ export class SocialAgentDraftPublicationService {
       socialAgentChat.socialRequestDraft,
     );
     const publishedAt = new Date().toISOString();
-    const workoutLoopPatch = this.workoutLoopPublishMemoryPatch({
+    const loopPatch = this.loopPublishMemoryPatch({
       memory,
       draft,
       socialRequestId: expectedSocialRequestId,
@@ -1205,8 +1207,8 @@ export class SocialAgentDraftPublicationService {
       sourceVersion,
       updatedAt: publishedAt,
     });
-    const isWorkoutLoopPublish =
-      Object.keys(this.record(workoutLoopPatch.workoutLoop)).length > 0;
+    const loopKind = this.publishedLoopKind(loopPatch);
+    const isLoopPublish = Boolean(loopKind);
     task.memory = {
       ...memory,
       socialAgentChat: {
@@ -1237,15 +1239,15 @@ export class SocialAgentDraftPublicationService {
         sourceVersion,
         updatedAt: publishedAt,
       },
-      ...workoutLoopPatch,
+      ...loopPatch,
     };
-    task.status = isWorkoutLoopPublish
+    task.status = isLoopPublish
       ? AgentTaskStatus.WaitingResult
       : AgentTaskStatus.Succeeded;
-    task.statusReason = isWorkoutLoopPublish
-      ? 'workout_matching_queued'
+    task.statusReason = loopKind
+      ? `${loopKind}_matching_queued`
       : 'social_request_published_and_synced';
-    task.completedAt = isWorkoutLoopPublish ? null : new Date();
+    task.completedAt = isLoopPublish ? null : new Date();
     task.result = {
       ...result,
       chatRun: {
@@ -1875,7 +1877,7 @@ export class SocialAgentDraftPublicationService {
     return this.isRecord(value) ? value : {};
   }
 
-  private workoutLoopPublishMemoryPatch(input: {
+  private loopPublishMemoryPatch(input: {
     memory: Record<string, unknown>;
     draft: CreateSocialRequestDto & { socialRequestId?: number | null };
     socialRequestId: number;
@@ -1887,15 +1889,16 @@ export class SocialAgentDraftPublicationService {
     sourceVersion: string;
     updatedAt: string;
   }): Record<string, unknown> {
-    const workoutLoop = this.record(input.memory.workoutLoop);
-    const draftMetadata = this.record(input.draft.metadata);
-    const isWorkoutLoop =
-      Object.keys(workoutLoop).length > 0 ||
-      this.text(draftMetadata.loop) === 'workout';
-    if (!isWorkoutLoop) return {};
+    const loopKind = this.loopKindForPublish(input.memory, input.draft);
+    if (!loopKind) return {};
+    const memoryKey = this.loopMemoryKey(loopKind);
+    const loopMemory = this.record(input.memory[memoryKey]);
+    const stageKey = this.loopStageKey(loopKind);
+    const stagePatch = stageKey ? { [stageKey]: 'matching_queued' } : {};
     return {
-      workoutLoop: {
-        ...workoutLoop,
+      [memoryKey]: {
+        ...loopMemory,
+        ...stagePatch,
         stage: 'matching_queued',
         socialRequestId: input.socialRequestId,
         publicIntentId: input.publicIntentId,
@@ -1908,6 +1911,52 @@ export class SocialAgentDraftPublicationService {
         updatedAt: input.updatedAt,
       },
     };
+  }
+
+  private loopKindForPublish(
+    memory: Record<string, unknown>,
+    draft: CreateSocialRequestDto & { socialRequestId?: number | null },
+  ): PublishLoopKind | null {
+    const draftMetadata = this.record(draft.metadata);
+    const metadataLoop = this.text(draftMetadata.loop);
+    if (this.isPublishLoopKind(metadataLoop)) return metadataLoop;
+    if (Object.keys(this.record(memory.workoutLoop)).length > 0) {
+      return 'workout';
+    }
+    if (Object.keys(this.record(memory.friendLoop)).length > 0) {
+      return 'friend';
+    }
+    if (Object.keys(this.record(memory.travelLoop)).length > 0) {
+      return 'travel';
+    }
+    return null;
+  }
+
+  private publishedLoopKind(
+    patch: Record<string, unknown>,
+  ): PublishLoopKind | null {
+    if (Object.keys(this.record(patch.workoutLoop)).length > 0)
+      return 'workout';
+    if (Object.keys(this.record(patch.friendLoop)).length > 0) return 'friend';
+    if (Object.keys(this.record(patch.travelLoop)).length > 0) return 'travel';
+    return null;
+  }
+
+  private isPublishLoopKind(value: string): value is PublishLoopKind {
+    return value === 'workout' || value === 'friend' || value === 'travel';
+  }
+
+  private loopMemoryKey(kind: PublishLoopKind) {
+    if (kind === 'friend') return 'friendLoop';
+    if (kind === 'travel') return 'travelLoop';
+    return 'workoutLoop';
+  }
+
+  private loopStageKey(kind: PublishLoopKind) {
+    if (kind === 'friend') return 'friendLoopStage';
+    if (kind === 'travel') return 'travelLoopStage';
+    if (kind === 'workout') return 'workoutLoopStage';
+    return null;
   }
 
   private firstNonEmptyRecord(...values: unknown[]): Record<string, unknown> {
