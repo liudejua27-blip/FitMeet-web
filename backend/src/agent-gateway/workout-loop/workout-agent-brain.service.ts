@@ -4,12 +4,17 @@ import type { AgentTask } from '../entities/agent-task.entity';
 import { GeoResolverService } from '../geo/geo-resolver.service';
 import type { GeoCandidate, GeoResolution } from '../geo/geo-resolver.types';
 import type { FitMeetLoopRouterResult } from '../loop-router/fitmeet-loop-router.types';
+import type {
+  SocialAgentMatchingFallback,
+  SocialAgentRelaxationStrategyId,
+} from '../social-agent-match-relaxation.types';
 import type { WorkoutSlots, WorkoutSlotValidation } from './workout-loop.types';
 import {
   defaultWorkoutSafetyBoundary,
   extractWorkoutSlots,
   validateWorkoutSlotsForDraft,
 } from './workout-slot-extractor';
+import { mergeWorkoutSlotsBySource } from './workout-slot-merge';
 import {
   WorkoutUnderstandingService,
   type WorkoutUnderstandingResult,
@@ -31,6 +36,13 @@ export type WorkoutAgentDecision = {
   geoCandidates?: GeoCandidate[];
   clarificationQuestion?: string | null;
   yesPatch?: Record<string, unknown>;
+};
+
+export type WorkoutNoCandidatesDecision = {
+  action: 'RECOMMEND_MATCH_RELAXATION';
+  reason: string;
+  recommendedStrategyId: SocialAgentRelaxationStrategyId;
+  observedCandidateCounts: Record<SocialAgentRelaxationStrategyId, number>;
 };
 
 @Injectable()
@@ -97,6 +109,33 @@ export class WorkoutAgentBrainService {
     };
   }
 
+  decideNoCandidatesRecovery(input: {
+    fallback: SocialAgentMatchingFallback;
+    noCandidatesFinal?: boolean;
+  }): WorkoutNoCandidatesDecision {
+    const strategies = input.fallback.strategies;
+    const [best] = [...strategies].sort((left, right) => {
+      if (right.candidateCount !== left.candidateCount) {
+        return right.candidateCount - left.candidateCount;
+      }
+      return (
+        this.relaxationPriority(left.id) - this.relaxationPriority(right.id)
+      );
+    });
+    const recommendedStrategyId =
+      best?.id ?? input.fallback.recommendedStrategyId;
+    return {
+      action: 'RECOMMEND_MATCH_RELAXATION',
+      reason: input.noCandidatesFinal
+        ? 'matching_no_candidates_final_modify_card'
+        : `matching_no_candidates_recommend_${recommendedStrategyId}`,
+      recommendedStrategyId,
+      observedCandidateCounts: Object.fromEntries(
+        strategies.map((strategy) => [strategy.id, strategy.candidateCount]),
+      ) as Record<SocialAgentRelaxationStrategyId, number>,
+    };
+  }
+
   private async decideFromMessage(input: {
     task: AgentTask;
     message: string;
@@ -107,13 +146,22 @@ export class WorkoutAgentBrainService {
     allowDraft: boolean;
     reasonPrefix: string;
   }): Promise<WorkoutAgentDecision> {
-    const ruleSlots = input.prefilledSlots
+    const memorySlots = this.readWorkoutSlots(input.task);
+    const ruleSlots = extractWorkoutSlots({
+      message: input.message,
+      previousSlots: memorySlots,
+    });
+    const prefilledSlots = input.prefilledSlots
       ? this.normalizeSlots(input.prefilledSlots)
-      : extractWorkoutSlots({
-          message: input.message,
-          previousSlots: this.readWorkoutSlots(input.task),
-        });
-    let slots = await this.resolveGeo(ruleSlots, input.message);
+      : undefined;
+    let slots = await this.resolveGeo(
+      this.mergeSlots({
+        memorySlots,
+        ruleSlots,
+        prefilledSlots,
+      }),
+      input.message,
+    );
     let understanding = input.understanding ?? null;
     if (
       !understanding &&
@@ -130,10 +178,12 @@ export class WorkoutAgentBrainService {
     const llmSlots =
       this.understanding?.slotsFromUnderstanding(understanding) ?? {};
     slots = await this.resolveGeo(
-      this.normalizeSlots({
-        ...this.compactSlots(ruleSlots),
-        ...this.compactSlots(llmSlots),
-        ...this.compactSlots(input.prefilledSlots ?? {}),
+      this.mergeSlots({
+        memorySlots,
+        ruleSlots,
+        llmSlots,
+        prefilledSlots,
+        llmConfidence: understanding?.confidence,
       }),
       input.message,
     );
@@ -271,6 +321,39 @@ export class WorkoutAgentBrainService {
     };
   }
 
+  private mergeSlots(input: {
+    memorySlots?: WorkoutSlots;
+    ruleSlots?: WorkoutSlots;
+    llmSlots?: Partial<WorkoutSlots>;
+    prefilledSlots?: WorkoutSlots;
+    llmConfidence?: number;
+  }): WorkoutSlots {
+    return this.normalizeSlots(
+      mergeWorkoutSlotsBySource([
+        {
+          slots: this.compactSlots(input.memorySlots ?? {}),
+          fallbackSource: 'memory',
+          fallbackConfidence: 0.5,
+        },
+        {
+          slots: this.compactSlots(input.ruleSlots ?? {}),
+          fallbackSource: 'rule',
+          fallbackConfidence: 0.68,
+        },
+        {
+          slots: this.compactSlots(input.llmSlots ?? {}),
+          fallbackSource: 'llm',
+          fallbackConfidence: input.llmConfidence ?? 0.78,
+        },
+        {
+          slots: this.compactSlots(input.prefilledSlots ?? {}),
+          fallbackSource: 'llm',
+          fallbackConfidence: input.llmConfidence ?? 0.78,
+        },
+      ]),
+    );
+  }
+
   private compactSlots(slots: Partial<WorkoutSlots>): Partial<WorkoutSlots> {
     return Object.fromEntries(
       Object.entries(slots).filter(([, value]) => value !== undefined),
@@ -295,5 +378,13 @@ export class WorkoutAgentBrainService {
       !Array.isArray(workoutLoop.slots)
       ? (workoutLoop.slots as WorkoutSlots)
       : {};
+  }
+
+  private relaxationPriority(
+    strategy: SocialAgentRelaxationStrategyId,
+  ): number {
+    if (strategy === 'expand_distance') return 1;
+    if (strategy === 'expand_time') return 2;
+    return 3;
   }
 }

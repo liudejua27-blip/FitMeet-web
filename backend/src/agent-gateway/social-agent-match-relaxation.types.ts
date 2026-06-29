@@ -23,4 +23,10 @@ export type SocialAgentMatchingFallback = {
   originalConstraints: Record<string, unknown>;
   strategies: SocialAgentRelaxationStrategy[];
   recommendedStrategyId: SocialAgentRelaxationStrategyId;
+  agentDecision?: {
+    source: 'workout_agent_brain';
+    reason: string;
+    recommendedStrategyId: SocialAgentRelaxationStrategyId;
+    observedCandidateCounts: Record<SocialAgentRelaxationStrategyId, number>;
+  };
 };

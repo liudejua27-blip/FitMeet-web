@@ -31,6 +31,7 @@ export function buildClarificationGeoCandidatesCard(input: {
         payload: {
           taskId: input.taskId,
           questionKey: input.questionKey,
+          inferredSlots: input.inferredSlots ?? {},
           selectedIndex: index,
           selectedCandidate: candidate,
           selectedPatch,

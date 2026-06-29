@@ -274,12 +274,16 @@ export class WorkoutLoopService {
       input.payload.selectedPatch,
       input.payload.selectedCandidate,
     );
+    const inferredSlots = this.slotsFromPayload(input.payload.inferredSlots);
+    const rememberedSlots = this.readWorkoutSlots(task);
     const slots = this.applyGeoToSlots(
       {
-        ...this.readWorkoutSlots(task),
-        ...this.slotsFromPayload(selectedPatch),
+        ...this.compactSlots(inferredSlots),
+        ...this.compactSlots(rememberedSlots),
+        ...this.compactSlots(this.slotsFromPayload(selectedPatch)),
         slotMeta: {
-          ...(this.readWorkoutSlots(task).slotMeta ?? {}),
+          ...(inferredSlots.slotMeta ?? {}),
+          ...(rememberedSlots.slotMeta ?? {}),
           locationText: { source: 'user_confirmed', confidence: 1 },
           city: { source: 'user_confirmed', confidence: 1 },
           district: { source: 'user_confirmed', confidence: 1 },
@@ -500,6 +504,8 @@ export class WorkoutLoopService {
       poiName: slots.poiName,
       userConfirmed: slots.geoResolution?.source === 'user_confirmed',
     });
+    const geoSlotSource =
+      geo.source === 'user_confirmed' ? 'user_confirmed' : 'geo';
     return this.normalizeSlots({
       ...slots,
       locationText: geo.locationText ?? slots.locationText,
@@ -514,24 +520,24 @@ export class WorkoutLoopService {
         ...(geo.locationText
           ? {
               locationText: {
-                source: 'geo' as const,
+                source: geoSlotSource,
                 confidence: geo.confidence,
               },
             }
           : {}),
         ...(geo.city
-          ? { city: { source: 'geo' as const, confidence: geo.confidence } }
+          ? { city: { source: geoSlotSource, confidence: geo.confidence } }
           : {}),
         ...(geo.district
           ? {
               district: {
-                source: 'geo' as const,
+                source: geoSlotSource,
                 confidence: geo.confidence,
               },
             }
           : {}),
         ...(geo.poiName
-          ? { poiName: { source: 'geo' as const, confidence: geo.confidence } }
+          ? { poiName: { source: geoSlotSource, confidence: geo.confidence } }
           : {}),
       },
     });

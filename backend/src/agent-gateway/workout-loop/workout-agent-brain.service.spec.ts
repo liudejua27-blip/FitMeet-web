@@ -143,6 +143,108 @@ describe('WorkoutAgentBrainService', () => {
     });
   });
 
+  it('prefers higher-priority LLM slots over lower-confidence rule extraction', async () => {
+    const understanding = {
+      shouldCall: jest.fn().mockReturnValue(true),
+      understand: jest.fn().mockResolvedValue({
+        intent: 'workout',
+        confidence: 0.92,
+      }),
+      slotsFromUnderstanding: jest.fn().mockReturnValue({
+        locationText: '市北那边',
+        city: '青岛',
+        slotMeta: {
+          locationText: { source: 'llm', confidence: 0.92 },
+          city: { source: 'llm', confidence: 0.92 },
+        },
+      }),
+    };
+    const brain = new WorkoutAgentBrainService(understanding as never);
+
+    const decision = await brain.decideEntrance({
+      task: makeTask(),
+      message: '今晚在学校附近跑步，找个搭子',
+      loopIntent: router.classify('今晚在学校附近跑步，找个搭子'),
+    });
+
+    expect(decision).toMatchObject({
+      action: 'ASK_INTAKE',
+      slots: {
+        activityType: '跑步',
+        timePreference: '今晚',
+        locationText: '市北那边',
+        city: '青岛',
+        slotMeta: {
+          locationText: { source: 'llm', confidence: 0.92 },
+          city: { source: 'llm', confidence: 0.92 },
+        },
+      },
+    });
+  });
+
+  it('keeps user-confirmed geo above later low-confidence LLM guesses', async () => {
+    const understanding = {
+      shouldCall: jest.fn().mockReturnValue(true),
+      understand: jest.fn().mockResolvedValue({
+        intent: 'workout',
+        confidence: 0.6,
+      }),
+      slotsFromUnderstanding: jest.fn().mockReturnValue({
+        city: '北京',
+        locationText: '三里屯太古里',
+        slotMeta: {
+          city: { source: 'llm', confidence: 0.6 },
+          locationText: { source: 'llm', confidence: 0.6 },
+        },
+      }),
+    };
+    const task = makeTask({
+      memory: {
+        workoutLoop: {
+          slots: {
+            activityType: '健身',
+            timePreference: '明晚',
+            city: '成都',
+            locationText: '成都锦江区成都远洋太古里',
+            geoResolution: {
+              rawText: '成都远洋太古里',
+              locationText: '成都锦江区成都远洋太古里',
+              city: '成都',
+              district: '锦江区',
+              poiName: '成都远洋太古里',
+              source: 'user_confirmed',
+              confidence: 1,
+              needsConfirmation: false,
+            },
+            slotMeta: {
+              city: { source: 'user_confirmed', confidence: 1 },
+              locationText: { source: 'user_confirmed', confidence: 1 },
+            },
+          },
+        },
+      },
+    });
+    const brain = new WorkoutAgentBrainService(understanding as never);
+
+    const decision = await brain.decideContinuation({
+      task,
+      message: '还是太古里吧',
+      loopIntent: router.classify('还是太古里吧'),
+    });
+
+    expect(decision.slots).toMatchObject({
+      city: '成都',
+      locationText: '成都锦江区成都远洋太古里',
+      geoResolution: expect.objectContaining({
+        source: 'user_confirmed',
+      }),
+      slotMeta: {
+        city: { source: 'user_confirmed', confidence: 1 },
+        locationText: { source: 'user_confirmed', confidence: 1 },
+      },
+    });
+  });
+
   it('only creates a draft decision after intake submit validates required slots', async () => {
     const brain = new WorkoutAgentBrainService();
 
@@ -160,6 +262,56 @@ describe('WorkoutAgentBrainService', () => {
     ).resolves.toMatchObject({
       action: 'CREATE_WORKOUT_DRAFT',
       missing: [],
+    });
+  });
+
+  it('recommends a no-candidate recovery strategy from observed fallback counts', () => {
+    const brain = new WorkoutAgentBrainService();
+
+    expect(
+      brain.decideNoCandidatesRecovery({
+        fallback: {
+          version: 'fitmeet.matching-fallback.v1',
+          generatedAt: '2026-06-30T00:00:00.000Z',
+          originalConstraints: { city: '青岛' },
+          recommendedStrategyId: 'expand_distance',
+          strategies: [
+            {
+              id: 'expand_distance',
+              label: '扩大距离',
+              changedConstraints: { radiusKm: 15 },
+              candidateCount: 1,
+              previewText: '扩大距离',
+              action: 'matching.relax_distance',
+            },
+            {
+              id: 'expand_time',
+              label: '放宽时间',
+              changedConstraints: { timePreference: '最近 7 天' },
+              candidateCount: 4,
+              previewText: '放宽时间',
+              action: 'matching.relax_time',
+            },
+            {
+              id: 'relax_tags',
+              label: '减少偏好限制',
+              changedConstraints: { interestTags: ['羽毛球'] },
+              candidateCount: 2,
+              previewText: '减少偏好限制',
+              action: 'matching.relax_tags',
+            },
+          ],
+        },
+      }),
+    ).toEqual({
+      action: 'RECOMMEND_MATCH_RELAXATION',
+      reason: 'matching_no_candidates_recommend_expand_time',
+      recommendedStrategyId: 'expand_time',
+      observedCandidateCounts: {
+        expand_distance: 1,
+        expand_time: 4,
+        relax_tags: 2,
+      },
     });
   });
 });

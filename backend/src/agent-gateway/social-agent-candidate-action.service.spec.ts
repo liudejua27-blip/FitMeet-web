@@ -28,6 +28,7 @@ function makeTask(overrides: Partial<AgentTask> = {}): AgentTask {
 function makeHarness(
   initialTask = makeTask(),
   workoutOpenerDrafts?: { draft: jest.Mock },
+  agentLoop?: { execute: jest.Mock },
 ) {
   const savedEvents: Array<Record<string, unknown>> = [];
   let task = initialTask;
@@ -148,8 +149,10 @@ function makeHarness(
     undefined,
     loopStateEvents as never,
     workoutOpenerDrafts as never,
+    agentLoop as never,
   );
   return {
+    agentLoop,
     approvals,
     eventRepo,
     executor,
@@ -421,6 +424,108 @@ describe('SocialAgentCandidateActionService', () => {
     expect(task.result).toMatchObject({
       cardActionDraft: expect.objectContaining({
         message: '看到你也喜欢轻松跑，今晚可以先站内聊聊节奏吗？',
+      }),
+    });
+  });
+
+  it('routes workout opener drafting through AgentLoop brain runtime when available', async () => {
+    const task = makeTask({
+      memory: {
+        workoutLoop: {
+          stage: 'candidates_ready',
+          socialRequestId: 301,
+          publicIntentId: 'public-intent:workout-501',
+          candidateCount: 1,
+        },
+      },
+    });
+    const workoutOpenerDrafts = {
+      draft: jest
+        .fn()
+        .mockResolvedValue('看到你也想夜跑，可以先站内聊聊节奏吗？'),
+    };
+    const agentLoop = {
+      execute: jest.fn(async (input: Record<string, unknown>) => {
+        const brain = input.brain as {
+          decide: (decisionInput: Record<string, unknown>) => Promise<{
+            tool?: {
+              agent: string;
+              toolName: string;
+              input: Record<string, unknown>;
+            };
+            done?: boolean;
+            finalObservation?: Record<string, unknown>;
+          }>;
+        };
+        const observations: Record<string, unknown>[] = [];
+        const firstDecision = await brain.decide({
+          loop: {},
+          observations,
+          remainingToolCalls: 2,
+        });
+        const runner = input.runner as (
+          runnerInput: Record<string, unknown>,
+        ) => Promise<Record<string, unknown>>;
+        observations.push(
+          await runner({
+            runId: 'run-1',
+            traceId: 'trace-1',
+            taskId: task.id,
+            agent: firstDecision.tool?.agent,
+            toolName: firstDecision.tool?.toolName,
+            input: firstDecision.tool?.input ?? {},
+            attempt: 1,
+          }),
+        );
+        const finalDecision = await brain.decide({
+          loop: {},
+          observations,
+          remainingToolCalls: 1,
+        });
+        if (finalDecision.finalObservation) {
+          observations.push(finalDecision.finalObservation);
+        }
+        return {
+          loop: {},
+          observations,
+          answerBoundary: {
+            fromObservationsOnly: true,
+            requiresApproval: false,
+            canContinue: true,
+            status: 'ready',
+          },
+        };
+      }),
+    };
+    const { service } = makeHarness(task, workoutOpenerDrafts, agentLoop);
+
+    const result = await service.createOpenerDraftFromCardAction(7, 101, {
+      action: 'candidate.generate_opener',
+      payload: {
+        taskId: 101,
+        targetUserId: 22,
+        candidate: {
+          userId: 22,
+          candidateRecordId: 501,
+          displayName: '小林',
+          suggestedMessage: '今晚先在青岛大学操场轻松跑一段吗？',
+        },
+      },
+    });
+
+    expect(agentLoop.execute).toHaveBeenCalledWith(
+      expect.objectContaining({
+        taskId: 101,
+        goal: 'Workout agent drafts a safe opener before user send approval.',
+        brain: expect.any(Object),
+        maxToolCalls: 2,
+      }),
+    );
+    expect(workoutOpenerDrafts.draft).toHaveBeenCalledTimes(1);
+    expect(result.cards?.[0]).toMatchObject({
+      body: '看到你也想夜跑，可以先站内聊聊节奏吗？',
+      data: expect.objectContaining({
+        suggestedOpener: '看到你也想夜跑，可以先站内聊聊节奏吗？',
       }),
     });
   });

@@ -15,6 +15,8 @@ import {
   sanitizeForDisplay,
 } from '../common/display-text.util';
 import { FeatureFlagService } from '../common/feature-flag.service';
+import type { AgentLoopBrainRuntime } from './agent-loop.types';
+import { AgentLoopService } from './agent-loop.service';
 import { AgentApprovalService } from './agent-approval.service';
 import {
   AgentApprovalRequest,
@@ -127,6 +129,8 @@ export class SocialAgentCandidateActionService {
     private readonly loopStateEvents?: SocialAgentLoopStateTransitionEventService,
     @Optional()
     private readonly workoutOpenerDrafts?: WorkoutOpenerDraftService,
+    @Optional()
+    private readonly agentLoop?: AgentLoopService,
   ) {}
 
   async createActionApproval(input: {
@@ -218,13 +222,13 @@ export class SocialAgentCandidateActionService {
           candidate.suggestedMessage,
         '',
       ).trim() || this.candidateMessageDraft(task);
-    const draft =
-      (await this.workoutOpenerDrafts?.draft({
-        task,
-        candidate,
-        payload,
-        fallbackDraft,
-      })) ?? fallbackDraft;
+    const draft = await this.generateWorkoutOpenerDraft({
+      task,
+      candidate,
+      payload,
+      fallbackDraft,
+      targetUserId,
+    });
 
     const openerDraft = this.buildOpenerDraftPreviewState({
       action: schemaAction,
@@ -310,6 +314,86 @@ export class SocialAgentCandidateActionService {
       result,
     );
     return result;
+  }
+
+  private async generateWorkoutOpenerDraft(input: {
+    task: AgentTask;
+    candidate: Record<string, unknown>;
+    payload: Record<string, unknown>;
+    fallbackDraft: string;
+    targetUserId?: number | null;
+  }): Promise<string> {
+    if (!this.agentLoop) {
+      return (
+        (await this.workoutOpenerDrafts?.draft({
+          task: input.task,
+          candidate: input.candidate,
+          payload: input.payload,
+          fallbackDraft: input.fallbackDraft,
+        })) ?? input.fallbackDraft
+      );
+    }
+
+    let draft = input.fallbackDraft;
+    const toolName = 'workout_agent.generate_opener';
+    const runtime: AgentLoopBrainRuntime = {
+      decide: ({ observations }) => {
+        if (observations.length === 0) {
+          return {
+            reason: 'select_workout_opener_draft',
+            critique:
+              'Generate only a safe draft opener; sending remains behind approval.',
+            tool: {
+              agent: 'Agent Brain',
+              toolName,
+              input: {
+                taskId: input.task.id,
+                targetUserId: input.targetUserId ?? null,
+                candidateRecordId:
+                  this.number(input.payload.candidateRecordId) ??
+                  this.number(input.candidate.candidateRecordId),
+              },
+            },
+          };
+        }
+        return {
+          done: true,
+          reason: 'workout_opener_draft_ready',
+          finalObservation: {
+            toolName,
+            status: 'completed',
+            draftReady: true,
+            draftLength: Array.from(draft).length,
+          },
+        };
+      },
+    };
+
+    await this.agentLoop.execute({
+      taskId: input.task.id,
+      goal: 'Workout agent drafts a safe opener before user send approval.',
+      agent: 'Agent Brain',
+      plan: { reason: 'Workout opener brain runtime', tools: [] },
+      brain: runtime,
+      maxToolCalls: 2,
+      runner: async () => {
+        draft =
+          (await this.workoutOpenerDrafts?.draft({
+            task: input.task,
+            candidate: input.candidate,
+            payload: input.payload,
+            fallbackDraft: input.fallbackDraft,
+          })) ?? input.fallbackDraft;
+        return {
+          toolName,
+          status: 'observed',
+          draftReady: true,
+          draftLength: Array.from(draft).length,
+        };
+      },
+    });
+
+    return draft;
   }
 
   async confirmOpenerSendFromCardAction(
