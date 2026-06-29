@@ -25,7 +25,10 @@ function makeTask(overrides: Partial<AgentTask> = {}): AgentTask {
   } as AgentTask;
 }
 
-function makeHarness(initialTask = makeTask()) {
+function makeHarness(
+  initialTask = makeTask(),
+  workoutOpenerDrafts?: { draft: jest.Mock },
+) {
   const savedEvents: Array<Record<string, unknown>> = [];
   let task = initialTask;
   const taskRepo = {
@@ -144,6 +147,7 @@ function makeHarness(initialTask = makeTask()) {
     undefined,
     undefined,
     loopStateEvents as never,
+    workoutOpenerDrafts as never,
   );
   return {
     approvals,
@@ -155,6 +159,7 @@ function makeHarness(initialTask = makeTask()) {
     savedEvents,
     service,
     taskRepo,
+    workoutOpenerDrafts,
     get task() {
       return task;
     },
@@ -362,6 +367,62 @@ describe('SocialAgentCandidateActionService', () => {
         }),
       ]),
     );
+  });
+
+  it('uses the workout opener draft service before falling back to the template draft', async () => {
+    const task = makeTask({
+      memory: {
+        workoutLoop: {
+          stage: 'candidates_ready',
+          socialRequestId: 301,
+          publicIntentId: 'public-intent:workout-501',
+          candidateCount: 1,
+        },
+      },
+    });
+    const workoutOpenerDrafts = {
+      draft: jest
+        .fn()
+        .mockResolvedValue('看到你也喜欢轻松跑，今晚可以先站内聊聊节奏吗？'),
+    };
+    const { service } = makeHarness(task, workoutOpenerDrafts);
+
+    const result = await service.createOpenerDraftFromCardAction(7, 101, {
+      action: 'candidate.generate_opener',
+      payload: {
+        taskId: 101,
+        targetUserId: 22,
+        candidate: {
+          userId: 22,
+          candidateRecordId: 501,
+          displayName: '小林',
+          suggestedMessage: '今晚先在青岛大学操场轻松跑一段吗？',
+        },
+      },
+    });
+
+    expect(workoutOpenerDrafts.draft).toHaveBeenCalledWith({
+      task,
+      candidate: expect.objectContaining({
+        displayName: '小林',
+      }),
+      payload: expect.objectContaining({
+        taskId: 101,
+        targetUserId: 22,
+      }),
+      fallbackDraft: '今晚先在青岛大学操场轻松跑一段吗？',
+    });
+    expect(result.cards?.[0]).toMatchObject({
+      body: '看到你也喜欢轻松跑，今晚可以先站内聊聊节奏吗？',
+      data: expect.objectContaining({
+        suggestedOpener: '看到你也喜欢轻松跑，今晚可以先站内聊聊节奏吗？',
+      }),
+    });
+    expect(task.result).toMatchObject({
+      cardActionDraft: expect.objectContaining({
+        message: '看到你也喜欢轻松跑，今晚可以先站内聊聊节奏吗？',
+      }),
+    });
   });
 
   it('creates a send approval when the user clicks send on a low-risk opener draft', async () => {

@@ -574,7 +574,7 @@ describe('tool-card-actions runtime identity', () => {
       actions: [
         {
           id: 'private_match',
-          label: '不公开，先保存',
+          label: '不公开，继续私密匹配',
           action: 'workout_draft.private_match',
           schemaAction: 'workout_draft.private_match',
           requiresConfirmation: false,

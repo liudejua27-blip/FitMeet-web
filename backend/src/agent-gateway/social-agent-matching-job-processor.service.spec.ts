@@ -148,6 +148,16 @@ describe('SocialAgentMatchingJobProcessorService', () => {
             candidateSnapshotId: 501,
           }),
         ]),
+        cards: expect.arrayContaining([
+          expect.objectContaining({
+            schemaType: 'social_match.candidate',
+            actions: expect.arrayContaining([
+              expect.objectContaining({
+                schemaAction: 'candidate.generate_opener',
+              }),
+            ]),
+          }),
+        ]),
       }),
     );
   });

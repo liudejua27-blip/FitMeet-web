@@ -2,6 +2,7 @@ import { Injectable, Optional } from '@nestjs/common';
 
 import type {
   AgentLoopExecutionResult,
+  AgentLoopBrainRuntime,
   AgentLoopPhase,
   AgentLoopRun,
   AgentLoopStep,
@@ -30,6 +31,7 @@ type AgentLoopExecuteInput = {
     reason?: string | null;
     tools: AgentLoopToolPlan[];
   };
+  brain?: AgentLoopBrainRuntime | null;
   runner: AgentLoopToolRunner;
   maxToolCalls?: number | null;
   maxRetries?: number | null;
@@ -54,6 +56,8 @@ export class AgentLoopService {
   async execute(
     input: AgentLoopExecuteInput,
   ): Promise<AgentLoopExecutionResult> {
+    const brain = input.brain;
+    if (brain) return this.executeBrainDriven({ ...input, brain });
     const startedAt = Date.now();
     const maxToolCalls = this.positiveInt(input.maxToolCalls, 6);
     const maxRetries = this.positiveInt(input.maxRetries, 1);
@@ -216,6 +220,222 @@ export class AgentLoopService {
         nextPhase: 'tool',
       });
       this.emit(input, loop, this.latestStep(loop));
+    }
+
+    loop = this.complete(loop);
+    this.observability?.recordAgentRun({
+      traceId: loop.traceId,
+      runId: loop.runId,
+      taskId: loop.taskId,
+      status: requiresApproval
+        ? 'approval_required'
+        : loop.status === 'failed' || sawToolFailure
+          ? 'failed'
+          : 'completed',
+      latencyMs: Date.now() - startedAt,
+      failureReason:
+        loop.status === 'failed' || sawToolFailure
+          ? this.safeText(loop.finalObservation?.error) || 'unknown'
+          : null,
+    });
+    this.emit(input, loop, this.latestStep(loop));
+    return {
+      loop,
+      observations,
+      answerBoundary: {
+        fromObservationsOnly: true,
+        requiresApproval,
+        canContinue:
+          !requiresApproval && !sawToolFailure && loop.status === 'completed',
+        status: requiresApproval
+          ? 'approval_required'
+          : sawToolFailure
+            ? 'tool_failed'
+            : 'ready',
+        userSafeMessage: requiresApproval
+          ? '这个动作需要你确认后我才能继续执行；我还没有发送消息、加好友或发布活动。'
+          : sawToolFailure
+            ? '刚才调用工具时失败了，我没有继续执行可能产生影响的动作。你可以让我重试，或换一种说法继续。'
+            : null,
+      },
+    };
+  }
+
+  private async executeBrainDriven(
+    input: AgentLoopExecuteInput & { brain: AgentLoopBrainRuntime },
+  ): Promise<AgentLoopExecutionResult> {
+    const startedAt = Date.now();
+    const maxToolCalls = this.positiveInt(input.maxToolCalls, 6);
+    const maxRetries = this.positiveInt(input.maxRetries, 1);
+    const timeoutMs = this.positiveInt(input.timeoutMs, 20_000);
+    let loop = this.start({
+      taskId: input.taskId ?? null,
+      goal: input.goal,
+      agent: input.agent ?? 'FitMeet Main Agent',
+      traceId: input.traceId ?? null,
+    });
+    this.observability?.recordAgentRun({
+      traceId: loop.traceId,
+      runId: loop.runId,
+      taskId: loop.taskId,
+      status: 'started',
+    });
+    loop = {
+      ...loop,
+      toolBudget: {
+        maxToolCalls,
+        usedToolCalls: 0,
+        maxRetries,
+        timeoutMs,
+      },
+    };
+    loop = this.plan(loop, {
+      agent: 'Agent Brain',
+      plan: {
+        goal: input.goal,
+        reason:
+          input.plan.reason ??
+          'Agent Brain will choose tools after each observation.',
+        tools: [],
+      },
+      critique: 'Agent Brain controls the next tool decision dynamically.',
+      nextPhase: 'tool',
+    });
+    this.emit(input, loop, this.latestStep(loop));
+
+    const observations: Array<Record<string, unknown>> = [];
+    let requiresApproval = false;
+    let sawToolFailure = false;
+
+    for (let turn = 0; turn < maxToolCalls; turn += 1) {
+      this.assertNotAborted(input.signal);
+      const decision = await input.brain.decide({
+        loop,
+        observations,
+        remainingToolCalls: maxToolCalls - turn,
+      });
+      if (decision.done || !decision.tool) {
+        if (decision.finalObservation)
+          observations.push(decision.finalObservation);
+        if (decision.finalObservation) {
+          loop = this.append(loop, {
+            phase: 'observe',
+            agent: 'Agent Brain',
+            observation: decision.finalObservation,
+            critique:
+              decision.critique ?? decision.reason ?? 'Brain completed.',
+            status: 'observed',
+            nextPhase: 'answer',
+          });
+          this.emit(input, loop, this.latestStep(loop), 'tool_result');
+        }
+        break;
+      }
+
+      const tool = {
+        ...decision.tool,
+        requiresApproval: this.requiresApproval(decision.tool),
+      };
+      loop = this.replan(loop, {
+        agent: 'Agent Brain',
+        reason: decision.reason ?? `brain_selected_${tool.toolName}`,
+        observation: observations.at(-1) ?? null,
+        nextPhase: 'tool',
+      });
+      this.emit(input, loop, this.latestStep(loop));
+      loop = {
+        ...this.tool(loop, {
+          agent: tool.agent,
+          toolName: tool.toolName,
+          toolInput: tool.input ?? {},
+          critique:
+            decision.critique ??
+            (tool.requiresApproval
+              ? 'Mandatory approval gate applies before any social side effect.'
+              : 'Brain selected this tool after observing current state.'),
+          nextPhase: 'observe',
+        }),
+        toolBudget: {
+          ...(loop.toolBudget ?? {
+            maxToolCalls,
+            usedToolCalls: 0,
+            maxRetries,
+            timeoutMs,
+          }),
+          usedToolCalls: (loop.toolBudget?.usedToolCalls ?? 0) + 1,
+        },
+      };
+      this.emit(input, loop, this.latestStep(loop), 'tool_call');
+
+      if (tool.requiresApproval) {
+        const observation = {
+          toolName: tool.toolName,
+          requiresConfirmation: true,
+          approvalRequired: true,
+          status: 'blocked',
+        };
+        requiresApproval = true;
+        observations.push(observation);
+        this.observability?.recordApprovalBlocked({
+          traceId: loop.traceId,
+          runId: loop.runId,
+          toolName: tool.toolName,
+        });
+        this.observability?.recordToolCall({
+          traceId: loop.traceId,
+          runId: loop.runId,
+          toolName: tool.toolName,
+          status: 'blocked',
+          failureReason: 'approval_required',
+        });
+        loop = this.append(loop, {
+          phase: 'observe',
+          agent: tool.agent,
+          toolName: tool.toolName,
+          observation,
+          critique: 'Approval gate blocked execution before side effects.',
+          status: 'blocked',
+          nextPhase: 'answer',
+        });
+        this.emit(input, loop, this.latestStep(loop), 'approval_required');
+        break;
+      }
+
+      const toolStartedAt = Date.now();
+      const toolResult = await this.runWithRetry({
+        input,
+        tool,
+        maxRetries,
+        timeoutMs,
+        loop,
+      });
+      const latencyMs = Date.now() - toolStartedAt;
+      observations.push(toolResult.observation);
+      this.observability?.recordToolCall({
+        traceId: loop.traceId,
+        runId: loop.runId,
+        toolName: tool.toolName,
+        status: toolResult.status,
+        latencyMs,
+        failureReason: toolResult.error,
+      });
+      loop = this.append(loop, {
+        phase: 'observe',
+        agent: tool.agent,
+        toolName: tool.toolName,
+        observation: toolResult.observation,
+        critique:
+          toolResult.error ?? this.defaultCritique(toolResult.observation),
+        status: toolResult.status,
+        latencyMs,
+        error: toolResult.error,
+        nextPhase: toolResult.status === 'observed' ? 'replan' : 'answer',
+      });
+      this.emit(input, loop, this.latestStep(loop), 'tool_result');
+      if (toolResult.status !== 'observed') {
+        sawToolFailure = true;
+        break;
+      }
     }
 
     loop = this.complete(loop);

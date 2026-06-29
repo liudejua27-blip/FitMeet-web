@@ -6,7 +6,7 @@ import type { AgentTask } from '../entities/agent-task.entity';
 import type { FitMeetLoopRouterResult } from '../loop-router/fitmeet-loop-router.types';
 import { SocialAgentToolJsonModelService } from '../social-agent-tool-json-model.service';
 import type { WorkoutSlots } from './workout-loop.types';
-import { validateWorkoutSlotsForPublish } from './workout-slot-extractor';
+import { validateWorkoutSlotsForDraft } from './workout-slot-extractor';
 
 const WorkoutUnderstandingSchema = z.object({
   intent: z
@@ -88,7 +88,9 @@ export class WorkoutUnderstandingService {
     loopIntent: FitMeetLoopRouterResult;
   }): boolean {
     if (input.loopIntent.disposition === 'needs_arbitration') return true;
-    return !validateWorkoutSlotsForPublish(input.slots).valid;
+    if (!validateWorkoutSlotsForDraft(input.slots).valid) return true;
+    if (input.slots.geoResolution?.needsConfirmation) return true;
+    return Boolean(input.slots.locationText && !input.slots.city);
   }
 
   private prompt(input: {
@@ -133,7 +135,7 @@ export class WorkoutUnderstandingService {
   }
 
   private fallback(ruleSlots: WorkoutSlots): WorkoutUnderstandingResult {
-    const validation = validateWorkoutSlotsForPublish(ruleSlots);
+    const validation = validateWorkoutSlotsForDraft(ruleSlots);
     return {
       intent: 'uncertain',
       confidence: 0,

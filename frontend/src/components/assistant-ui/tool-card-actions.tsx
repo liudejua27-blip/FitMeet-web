@@ -1674,7 +1674,7 @@ function inlineOutcomeStableBody(schemaAction: ToolUISchemaAction | null | undef
     return '这张约练卡已发布到发现页，并进入约练匹配队列。';
   }
   if (schemaAction === 'workout_draft.private_match') {
-    return '已保存为不公开约练卡，不会出现在发现页。';
+    return '已保存为不公开约练卡，正在当前对话里继续私密匹配。';
   }
   if (schemaAction === 'workout_draft.edit') {
     return '可以继续修改本次约练需求。';
@@ -1694,7 +1694,7 @@ function inlineOutcomeTitle(schemaAction: ToolUISchemaAction | null | undefined)
   if (schemaAction === 'candidate.more_like_this') return '继续找类似机会';
   if (schemaAction === 'publish_to_discover') return '已发布到发现';
   if (schemaAction === 'workout_draft.publish') return '已发布到发现';
-  if (schemaAction === 'workout_draft.private_match') return '已保存草稿';
+  if (schemaAction === 'workout_draft.private_match') return '已进入私密匹配';
   if (schemaAction === 'workout_draft.edit') return '继续修改';
   if (schemaAction === 'workout_draft.cancel') return '已取消';
   if (isPublishDismissSchemaAction(schemaAction)) return '已取消发布';
@@ -1740,7 +1740,7 @@ function inlineOutcomeFallbackBody(schemaAction: ToolUISchemaAction | null | und
     return '这张约练卡已发布到发现页，并进入约练匹配队列。';
   }
   if (schemaAction === 'workout_draft.private_match') {
-    return '已保存为不公开约练卡，不会出现在发现页。';
+    return '已保存为不公开约练卡，正在当前对话里继续私密匹配。';
   }
   if (schemaAction === 'workout_draft.edit') {
     return '可以继续修改本次约练需求。';

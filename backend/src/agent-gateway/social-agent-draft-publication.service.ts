@@ -1193,6 +1193,20 @@ export class SocialAgentDraftPublicationService {
       socialAgentChat.socialRequestDraft,
     );
     const publishedAt = new Date().toISOString();
+    const workoutLoopPatch = this.workoutLoopPublishMemoryPatch({
+      memory,
+      draft,
+      socialRequestId: expectedSocialRequestId,
+      publicIntentId,
+      discoverHref,
+      publicIntentHref,
+      matchingJobId: matchingJob.id,
+      matchingJobStatus: matchingJob.status,
+      sourceVersion,
+      updatedAt: publishedAt,
+    });
+    const isWorkoutLoopPublish =
+      Object.keys(this.record(workoutLoopPatch.workoutLoop)).length > 0;
     task.memory = {
       ...memory,
       socialAgentChat: {
@@ -1223,22 +1237,15 @@ export class SocialAgentDraftPublicationService {
         sourceVersion,
         updatedAt: publishedAt,
       },
-      ...this.workoutLoopPublishMemoryPatch({
-        memory,
-        draft,
-        socialRequestId: expectedSocialRequestId,
-        publicIntentId,
-        discoverHref,
-        publicIntentHref,
-        matchingJobId: matchingJob.id,
-        matchingJobStatus: matchingJob.status,
-        sourceVersion,
-        updatedAt: publishedAt,
-      }),
+      ...workoutLoopPatch,
     };
-    task.status = AgentTaskStatus.Succeeded;
-    task.statusReason = 'social_request_published_and_synced';
-    task.completedAt = new Date();
+    task.status = isWorkoutLoopPublish
+      ? AgentTaskStatus.WaitingResult
+      : AgentTaskStatus.Succeeded;
+    task.statusReason = isWorkoutLoopPublish
+      ? 'workout_matching_queued'
+      : 'social_request_published_and_synced';
+    task.completedAt = isWorkoutLoopPublish ? null : new Date();
     task.result = {
       ...result,
       chatRun: {
@@ -1896,6 +1903,7 @@ export class SocialAgentDraftPublicationService {
         publicIntentHref: input.publicIntentHref,
         matchingJobId: input.matchingJobId,
         matchingJobStatus: input.matchingJobStatus,
+        waitingFor: 'matching_job',
         sourceVersion: input.sourceVersion,
         updatedAt: input.updatedAt,
       },

@@ -140,7 +140,7 @@ export function WorkoutIntakeCard({ card }: { card: SchemaDrivenAssistantCard })
             发布前确认
           </Toggle>
           <Toggle selected={form.visibilityPreference === 'private'} onClick={() => setForm((prev) => ({ ...prev, visibilityPreference: 'private' }))}>
-            不公开，先保存
+            不公开，继续私密匹配
           </Toggle>
         </div>
 

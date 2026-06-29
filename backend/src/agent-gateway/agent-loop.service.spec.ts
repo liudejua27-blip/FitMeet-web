@@ -103,6 +103,71 @@ describe('AgentLoopService', () => {
     );
   });
 
+  it('lets a brain choose the next tool after each observation', async () => {
+    const service = new AgentLoopService();
+    const runner = jest
+      .fn()
+      .mockResolvedValueOnce({ slots: { activityType: '跑步' } })
+      .mockResolvedValueOnce({
+        geo: { city: '广州', poiName: '华南师范大学' },
+      });
+    const brain = {
+      decide: jest.fn(({ observations }) => {
+        if (observations.length === 0) {
+          return {
+            reason: 'need_workout_slots',
+            tool: {
+              agent: 'Agent Brain' as const,
+              toolName: 'understand_workout_intent',
+              input: { message: '明晚华师大羽毛球' },
+            },
+          };
+        }
+        if (observations.length === 1) {
+          return {
+            reason: 'need_location_resolution',
+            tool: {
+              agent: 'Agent Brain' as const,
+              toolName: 'resolve_china_location',
+              input: { query: '华师大' },
+            },
+          };
+        }
+        return {
+          done: true,
+          finalObservation: { decision: 'ASK_INTAKE' },
+        };
+      }),
+    };
+
+    const result = await service.execute({
+      taskId: 101,
+      goal: '明晚华师大羽毛球',
+      plan: { reason: 'dynamic workout agent', tools: [] },
+      brain,
+      runner,
+      maxToolCalls: 4,
+      maxRetries: 0,
+    });
+
+    expect(runner).toHaveBeenCalledTimes(2);
+    expect(brain.decide).toHaveBeenCalledTimes(3);
+    expect(result.observations).toEqual([
+      { slots: { activityType: '跑步' } },
+      { geo: { city: '广州', poiName: '华南师范大学' } },
+      { decision: 'ASK_INTAKE' },
+    ]);
+    expect(
+      result.loop.steps.map((step) => step.toolName).filter(Boolean),
+    ).toEqual([
+      'understand_workout_intent',
+      'understand_workout_intent',
+      'resolve_china_location',
+      'resolve_china_location',
+    ]);
+    expect(result.answerBoundary.status).toBe('ready');
+  });
+
   it('does not approval-block low-risk worker turns that mention confirmation boundaries', async () => {
     const observability = new AgentObservabilityService();
     const service = new AgentLoopService(observability);

@@ -34,11 +34,7 @@ describe('WorkoutUnderstandingService', () => {
     ).resolves.toMatchObject({
       intent: 'uncertain',
       confidence: 0,
-      missing: expect.arrayContaining([
-        'timePreference',
-        'locationText',
-        'city',
-      ]),
+      missing: expect.arrayContaining(['timePreference', 'locationText']),
       source: 'fallback',
     });
   });
@@ -78,7 +74,7 @@ describe('WorkoutUnderstandingService', () => {
     });
   });
 
-  it('only calls the model for arbitration candidates or incomplete publish slots', () => {
+  it('calls the model for arbitration candidates, incomplete draft slots, or uncertain locations', () => {
     const service = new WorkoutUnderstandingService();
 
     expect(
@@ -99,6 +95,37 @@ describe('WorkoutUnderstandingService', () => {
       service.shouldCall({
         slots: { activityType: '健身' },
         loopIntent: router.classify('想找个健身伙伴'),
+      }),
+    ).toBe(true);
+
+    expect(
+      service.shouldCall({
+        slots: {
+          activityType: '跑步',
+          timePreference: '下班后',
+          locationText: '市北那边',
+        },
+        loopIntent: router.classify('下班后市北那边动一动'),
+      }),
+    ).toBe(true);
+
+    expect(
+      service.shouldCall({
+        slots: {
+          activityType: '健身',
+          timePreference: '明晚',
+          locationText: '陆家嘴',
+          city: '上海',
+          geoResolution: {
+            rawText: '陆家嘴',
+            locationText: '陆家嘴',
+            city: '上海',
+            source: 'poi_dictionary',
+            confidence: 0.8,
+            needsConfirmation: true,
+          },
+        },
+        loopIntent: router.classify('明晚陆家嘴健身'),
       }),
     ).toBe(true);
   });

@@ -250,8 +250,11 @@ import { AgentEntryOrchestratorService } from './agent-entry/agent-entry-orchest
 import { LegacyAgentAdapterService } from './legacy-agent/legacy-agent-adapter.service';
 import { ProfileLoopService } from './profile-loop/profile-loop.service';
 import { GeoResolverService } from './geo/geo-resolver.service';
+import { AmapChinaGeoProviderService } from './geo/amap-china-geo-provider.service';
 import { WorkoutEntryArbitrationService } from './workout-loop/workout-entry-arbitration.service';
 import { WorkoutLoopService } from './workout-loop/workout-loop.service';
+import { WorkoutAgentBrainService } from './workout-loop/workout-agent-brain.service';
+import { WorkoutOpenerDraftService } from './workout-loop/workout-opener-draft.service';
 import { WorkoutUnderstandingService } from './workout-loop/workout-understanding.service';
 
 @Module({
@@ -352,9 +355,12 @@ import { WorkoutUnderstandingService } from './workout-loop/workout-understandin
     FitMeetLoopRouterService,
     ClarificationCardActionService,
     ProfileLoopService,
+    AmapChinaGeoProviderService,
     GeoResolverService,
     WorkoutEntryArbitrationService,
+    WorkoutAgentBrainService,
     WorkoutLoopService,
+    WorkoutOpenerDraftService,
     WorkoutUnderstandingService,
     FeatureFlagService,
     AgentApprovalDispatcherService,
@@ -528,9 +534,12 @@ import { WorkoutUnderstandingService } from './workout-loop/workout-understandin
     SocialAgentDomainClassifierService,
     FitMeetLoopRouterService,
     ClarificationCardActionService,
+    AmapChinaGeoProviderService,
     GeoResolverService,
     WorkoutEntryArbitrationService,
+    WorkoutAgentBrainService,
     WorkoutLoopService,
+    WorkoutOpenerDraftService,
     WorkoutUnderstandingService,
     FeatureFlagService,
     AgentApprovalDispatcherService,
