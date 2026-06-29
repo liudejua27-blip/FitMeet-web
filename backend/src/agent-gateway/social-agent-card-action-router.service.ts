@@ -42,7 +42,10 @@ import {
 import { buildWorkoutIntakeCard } from './workout-loop/workout-card.presenter';
 import { WorkoutLoopService } from './workout-loop/workout-loop.service';
 import type { WorkoutSlots } from './workout-loop/workout-loop.types';
-import { validateWorkoutSlotsForPublish } from './workout-loop/workout-slot-extractor';
+import {
+  extractWorkoutSlots,
+  validateWorkoutSlotsForPublish,
+} from './workout-loop/workout-slot-extractor';
 
 type HandleMessage = (
   body: SocialAgentRouteMessageBody,
@@ -1523,6 +1526,23 @@ export class SocialAgentCardActionRouterService {
       ...this.record(draft.metadata),
       ...this.record(payload.metadata),
     };
+    const draftText = [
+      draft.title,
+      draft.description,
+      draft.summary,
+      draft.body,
+      draft.rawText,
+      draft.activityType,
+      draft.city,
+      metadata.locationText,
+      metadata.timePreference,
+    ]
+      .map((value) => this.text(value))
+      .filter(Boolean)
+      .join(' ');
+    const inferredSlots = draftText
+      ? extractWorkoutSlots({ message: draftText })
+      : {};
     return {
       activityType:
         this.text(
@@ -1530,13 +1550,15 @@ export class SocialAgentCardActionRouterService {
             draft.activityType ??
             draft.requestType ??
             draft.type ??
-            metadata.activityType,
+            metadata.activityType ??
+            inferredSlots.activityType,
         ) || undefined,
       timePreference:
         this.text(
           slots.timePreference ??
             draft.timePreference ??
-            metadata.timePreference,
+            metadata.timePreference ??
+            inferredSlots.timePreference,
         ) || undefined,
       locationText:
         this.text(
@@ -1545,9 +1567,13 @@ export class SocialAgentCardActionRouterService {
             draft.locationText ??
             draft.locationName ??
             draft.locationPreference ??
-            metadata.locationText,
+            metadata.locationText ??
+            inferredSlots.locationText,
         ) || undefined,
-      city: this.text(slots.city ?? draft.city ?? metadata.city) || undefined,
+      city:
+        this.text(
+          slots.city ?? draft.city ?? metadata.city ?? inferredSlots.city,
+        ) || undefined,
       district:
         this.text(slots.district ?? draft.district ?? metadata.district) ||
         undefined,
