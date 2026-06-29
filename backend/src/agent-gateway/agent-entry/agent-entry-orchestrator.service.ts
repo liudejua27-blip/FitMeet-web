@@ -2,8 +2,16 @@ import { Injectable, Logger, Optional } from '@nestjs/common';
 
 import { LegacyAgentAdapterService } from '../legacy-agent/legacy-agent-adapter.service';
 import { FitMeetLoopRouterService } from '../loop-router/fitmeet-loop-router.service';
+import {
+  friendLoopOwnsTask,
+  readFriendLoopStage,
+} from '../friend-loop/friend-loop-owner';
 import { FriendLoopService } from '../friend-loop/friend-loop.service';
 import { ProfileLoopService } from '../profile-loop/profile-loop.service';
+import {
+  readTravelLoopStage,
+  travelLoopOwnsTask,
+} from '../travel-loop/travel-loop-owner';
 import { TravelLoopService } from '../travel-loop/travel-loop.service';
 import { WorkoutEntryArbitrationService } from '../workout-loop/workout-entry-arbitration.service';
 import { WorkoutLoopService } from '../workout-loop/workout-loop.service';
@@ -33,6 +41,8 @@ export class AgentEntryOrchestratorService {
 
   async handle(input: AgentEntryInput): Promise<AgentEntryResult> {
     const workoutStage = readWorkoutLoopStage(input.task);
+    const friendStage = readFriendLoopStage(input.task);
+    const travelStage = readTravelLoopStage(input.task);
     if (workoutLoopOwnsTask(input.task, input.message)) {
       const workout = await this.workoutLoop.continueEntrance({
         ownerUserId: input.ownerUserId,
@@ -50,6 +60,46 @@ export class AgentEntryOrchestratorService {
         source: 'workout_loop_owner',
         task: workout.task,
         result: workout.result,
+      };
+    }
+
+    if (this.friendLoop && friendLoopOwnsTask(input.task, input.message)) {
+      const friend = await this.friendLoop.continueEntrance({
+        ownerUserId: input.ownerUserId,
+        task: input.task,
+        message: input.message,
+      });
+      this.logRoute(input, {
+        source: 'friend_loop_owner',
+        loopIntent: 'friend',
+        workoutStage,
+        cards: this.cardSchemaTypes(friend.result.cards),
+        legacyBlocked: true,
+      });
+      return {
+        source: 'friend_loop_owner',
+        task: friend.task,
+        result: friend.result,
+      };
+    }
+
+    if (this.travelLoop && travelLoopOwnsTask(input.task, input.message)) {
+      const travel = await this.travelLoop.continueEntrance({
+        ownerUserId: input.ownerUserId,
+        task: input.task,
+        message: input.message,
+      });
+      this.logRoute(input, {
+        source: 'travel_loop_owner',
+        loopIntent: 'travel',
+        workoutStage,
+        cards: this.cardSchemaTypes(travel.result.cards),
+        legacyBlocked: true,
+      });
+      return {
+        source: 'travel_loop_owner',
+        task: travel.task,
+        result: travel.result,
       };
     }
 
@@ -93,7 +143,7 @@ export class AgentEntryOrchestratorService {
       this.logRoute(input, {
         source: 'friend_loop_intent',
         loopIntent: loopIntent.intent,
-        workoutStage,
+        workoutStage: workoutStage ?? friendStage,
         cards: this.cardSchemaTypes(friend.result.cards),
         legacyBlocked: true,
       });
@@ -117,7 +167,7 @@ export class AgentEntryOrchestratorService {
       this.logRoute(input, {
         source: 'travel_loop_intent',
         loopIntent: loopIntent.intent,
-        workoutStage,
+        workoutStage: workoutStage ?? travelStage,
         cards: this.cardSchemaTypes(travel.result.cards),
         legacyBlocked: true,
       });

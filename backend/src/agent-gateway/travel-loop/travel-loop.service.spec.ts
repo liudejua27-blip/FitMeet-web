@@ -4,7 +4,9 @@ import {
   AgentTaskStatus,
 } from '../entities/agent-task.entity';
 import { MatchingJobStatus } from '../entities/matching-job.entity';
+import { TravelAgentBrainService } from './travel-agent-brain.service';
 import { TravelLoopService } from './travel-loop.service';
+import { TravelUnderstandingService } from './travel-understanding.service';
 
 function makeTask(overrides: Partial<AgentTask> = {}): AgentTask {
   return {
@@ -137,6 +139,126 @@ describe('TravelLoopService', () => {
     expect((task.memory as Record<string, unknown>).travelLoop).toMatchObject({
       stage: 'intake',
     });
+  });
+
+  it('uses travel understanding to normalize aliases and fill optional slots', async () => {
+    const toolJson = {
+      callJson: jest.fn().mockResolvedValue({
+        intent: 'travel',
+        confidence: 0.9,
+        destination: '成都',
+        departureTime: '周末',
+        duration: '两天一晚',
+        budgetRange: '1000元',
+        transportMode: '高铁',
+        tags: ['美食', '拍照'],
+        photoPreference: '会拍照优先',
+        foodPreference: '川菜和本地小吃',
+        candidatePreference: '不赶路',
+        missing: [],
+        assumptions: [],
+        needsClarification: false,
+      }),
+    };
+    const travelBrain = new TravelAgentBrainService(
+      new TravelUnderstandingService(toolJson as never),
+    );
+    const { draftPublication, service } = makeService(
+      makeTask(),
+      travelBrain as never,
+    );
+
+    const result = await service.tryHandleEntrance({
+      ownerUserId: 7,
+      task: makeTask(),
+      message: '周末去蓉城玩，高铁，预算1000，找会拍照的搭子',
+    });
+
+    expect(toolJson.callJson).toHaveBeenCalledWith(
+      expect.objectContaining({ purpose: 'travel_understanding' }),
+    );
+    expect(result.result.cards?.[0]).toMatchObject({
+      schemaType: 'travel.intake',
+      data: expect.objectContaining({
+        destination: '成都',
+        departureTime: '周末',
+        duration: '两天一晚',
+        budgetRange: '1000元',
+        transportMode: '高铁',
+        tags: expect.arrayContaining(['美食', '拍照']),
+        photoPreference: '会拍照优先',
+        foodPreference: '川菜和本地小吃',
+        candidatePreference: '不赶路',
+      }),
+    });
+    expect(draftPublication.stagePrivateDraftForPublish).not.toHaveBeenCalled();
+  });
+
+  it('updates an active travel loop from natural-language follow-up slots', async () => {
+    const task = makeTask({
+      memory: {
+        travelLoop: {
+          stage: 'intake',
+          slots: {
+            destination: '成都',
+            departureTime: '周末',
+          },
+        },
+      },
+    });
+    const { draftPublication, service } = makeService(task);
+
+    const result = await service.continueEntrance({
+      ownerUserId: 7,
+      task,
+      message: '预算改成1500元，高铁，找会拍照的',
+    });
+
+    expect(result.result.cards?.[0]).toMatchObject({
+      schemaType: 'travel.intake',
+      data: expect.objectContaining({
+        destination: '成都',
+        departureTime: '周末',
+        budgetRange: '1500元',
+        transportMode: '高铁',
+        photoPreference: '会拍照优先',
+        missingFields: [],
+      }),
+    });
+    expect((task.memory as Record<string, unknown>).travelLoop).toMatchObject({
+      stage: 'intake',
+      slots: expect.objectContaining({
+        budgetRange: '1500元',
+        transportMode: '高铁',
+      }),
+    });
+    expect(draftPublication.stagePrivateDraftForPublish).not.toHaveBeenCalled();
+  });
+
+  it('keeps travel understanding fallback conservative when model runtime is unavailable', async () => {
+    const travelBrain = new TravelAgentBrainService(
+      new TravelUnderstandingService(),
+    );
+    const { draftPublication, service } = makeService(
+      makeTask(),
+      travelBrain as never,
+    );
+
+    const result = await service.tryHandleEntrance({
+      ownerUserId: 7,
+      task: makeTask(),
+      message: '周末去蓉城玩',
+    });
+
+    expect(result.result.cards?.[0]).toMatchObject({
+      schemaType: 'travel.intake',
+      data: expect.objectContaining({
+        destination: '蓉城',
+        departureTime: '周末',
+        missingFields: expect.arrayContaining(['budgetRange', 'transportMode']),
+      }),
+    });
+    expect(draftPublication.stagePrivateDraftForPublish).not.toHaveBeenCalled();
   });
 
   it('keeps intake when required travel slots are missing', async () => {

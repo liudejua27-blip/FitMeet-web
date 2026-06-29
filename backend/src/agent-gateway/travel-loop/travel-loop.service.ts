@@ -63,12 +63,39 @@ export class TravelLoopService {
       message: input.message,
       previousSlots: this.readTravelSlots(input.task),
     });
-    const decision = this.travelBrain?.decideEntrance({ slots });
+    const decision = await this.travelBrain?.decideEntrance({
+      task: input.task,
+      message: input.message,
+      slots,
+    });
     const result = await this.intakeResultForSlots({
       task: input.task,
       slots: decision?.slots ?? slots,
       assistantMessage:
         '可以，我先帮你整理结伴旅行需求。确认下面信息后，我再生成寻伴旅行卡。',
+    });
+    return { task: input.task, result };
+  }
+
+  async continueEntrance(input: {
+    ownerUserId: number;
+    task: AgentTask;
+    message: string;
+  }): Promise<{ task: AgentTask; result: SocialAgentIntentRouteResult }> {
+    const slots = extractTravelSlots({
+      message: input.message,
+      previousSlots: this.readTravelSlots(input.task),
+    });
+    const decision = await this.travelBrain?.decideEntrance({
+      task: input.task,
+      message: input.message,
+      slots,
+    });
+    const result = await this.intakeResultForSlots({
+      task: input.task,
+      slots: decision?.slots ?? slots,
+      assistantMessage:
+        '已根据你补充的信息更新旅行寻伴需求。确认下面信息后，我再生成旅行寻伴卡。',
     });
     return { task: input.task, result };
   }
