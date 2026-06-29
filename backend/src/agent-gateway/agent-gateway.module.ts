@@ -250,8 +250,10 @@ import { AgentLoopRuntimeHealthService } from './agent-loop-runtime-health.servi
 import { AgentEntryOrchestratorService } from './agent-entry/agent-entry-orchestrator.service';
 import { LegacyAgentAdapterService } from './legacy-agent/legacy-agent-adapter.service';
 import { FriendLoopService } from './friend-loop/friend-loop.service';
+import { FriendAgentBrainService } from './friend-loop/friend-agent-brain.service';
 import { ProfileLoopService } from './profile-loop/profile-loop.service';
 import { TravelLoopService } from './travel-loop/travel-loop.service';
+import { TravelAgentBrainService } from './travel-loop/travel-agent-brain.service';
 import { GeoResolverService } from './geo/geo-resolver.service';
 import { AmapChinaGeoProviderService } from './geo/amap-china-geo-provider.service';
 import { WorkoutEntryArbitrationService } from './workout-loop/workout-entry-arbitration.service';
@@ -356,7 +358,9 @@ import { WorkoutUnderstandingService } from './workout-loop/workout-understandin
     AgentLoopRuntimeHealthService,
     AgentEntryOrchestratorService,
     LegacyAgentAdapterService,
+    FriendAgentBrainService,
     FriendLoopService,
+    TravelAgentBrainService,
     TravelLoopService,
     FitMeetLoopRouterService,
     ClarificationCardActionService,
@@ -541,6 +545,9 @@ import { WorkoutUnderstandingService } from './workout-loop/workout-understandin
     AgentLoopRuntimeHealthService,
     FitMeetLoopRouterService,
     ClarificationCardActionService,
+    FriendAgentBrainService,
+    FriendLoopService,
+    TravelAgentBrainService,
     TravelLoopService,
     AmapChinaGeoProviderService,
     GeoResolverService,

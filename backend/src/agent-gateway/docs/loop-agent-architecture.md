@@ -119,11 +119,12 @@ or shared loop tool.
 ## Friend And Travel Loops
 
 Friend and Travel now follow the card-driven loop template instead of returning
-coming-soon placeholders. They have dedicated loop services, intake cards,
-draft cards, private matching jobs, and route/action wiring. They are lighter
-than Workout because they do not yet have a dedicated LLM brain or nationwide
-geo-confirmation flow, but they should keep using the shared loop contract and
-the same durable matching, realtime, opener, and approval boundaries.
+coming-soon placeholders. They have lightweight loop brains, dedicated loop
+services, intake cards, draft cards, private matching jobs, and route/action
+wiring. They are lighter than Workout because they do not yet have dedicated
+LLM understanding or nationwide geo-confirmation, but they should keep using the
+shared loop contract and the same durable matching, realtime, opener, and
+approval boundaries.
 
 ## Next Loop Template
 

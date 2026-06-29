@@ -19,7 +19,13 @@ function makeTask(overrides: Partial<AgentTask> = {}): AgentTask {
   } as AgentTask;
 }
 
-function makeService(task = makeTask()) {
+function makeService(
+  task = makeTask(),
+  friendBrain?: {
+    decideEntrance?: jest.Mock;
+    decideIntakeSubmit?: jest.Mock;
+  },
+) {
   const taskRepo = {
     findOne: jest.fn().mockResolvedValue(task),
     save: jest.fn(async (entity) => entity),
@@ -53,6 +59,7 @@ function makeService(task = makeTask()) {
     messageLog as never,
     draftPublication as never,
     matchingJobs as never,
+    friendBrain as never,
   );
   return {
     draftPublication,
@@ -65,6 +72,43 @@ function makeService(task = makeTask()) {
 }
 
 describe('FriendLoopService', () => {
+  it('routes friend entrance through FriendAgentBrain when available', async () => {
+    const friendBrain = {
+      decideEntrance: jest.fn().mockImplementation(({ slots }) => ({
+        loopKind: 'friend',
+        action: 'ASK_INTAKE',
+        reason: 'test_friend_brain_entrance',
+        slots: {
+          ...slots,
+          scenePreference: '先站内聊聊',
+        },
+        missing: [],
+      })),
+    };
+    const { service, task } = makeService(makeTask(), friendBrain);
+
+    const result = await service.tryHandleEntrance({
+      ownerUserId: 7,
+      task,
+      message: '想认识青岛同城朋友，咖啡聊天，周末有空',
+    });
+
+    expect(friendBrain.decideEntrance).toHaveBeenCalledWith(
+      expect.objectContaining({
+        slots: expect.objectContaining({
+          friendGoal: '认识新朋友',
+          city: '青岛',
+        }),
+      }),
+    );
+    expect(result.result.cards?.[0]).toMatchObject({
+      schemaType: 'friend.intake',
+      data: expect.objectContaining({
+        scenePreference: '先站内聊聊',
+      }),
+    });
+  });
+
   it('returns a prefilled friend intake card from natural language', async () => {
     const { draftPublication, service, task } = makeService();
 
@@ -154,6 +198,57 @@ describe('FriendLoopService', () => {
         metadata: expect.objectContaining({
           loop: 'friend',
           friendLoopStage: 'draft_ready',
+        }),
+      }),
+    );
+  });
+
+  it('routes friend intake submit through FriendAgentBrain before drafting', async () => {
+    const friendBrain = {
+      decideIntakeSubmit: jest.fn().mockImplementation(({ slots }) => ({
+        loopKind: 'friend',
+        action: 'CREATE_DRAFT',
+        reason: 'test_friend_brain_ready',
+        slots: {
+          ...slots,
+          candidatePreference: '同城、节奏舒服',
+        },
+        missing: [],
+      })),
+    };
+    const { draftPublication, service } = makeService(makeTask(), friendBrain);
+
+    const result = await service.performFriendAction({
+      ownerUserId: 7,
+      taskId: 101,
+      body: {
+        action: 'friend_intake.submit' as never,
+        payload: {
+          slots: {
+            friendGoal: '认识新朋友',
+            city: '青岛',
+          },
+        },
+      },
+    });
+
+    expect(friendBrain.decideIntakeSubmit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        validation: { valid: true, missing: [] },
+      }),
+    );
+    expect(result.cards?.[0]).toMatchObject({
+      schemaType: 'friend.draft',
+      data: expect.objectContaining({
+        candidatePreference: '同城、节奏舒服',
+      }),
+    });
+    expect(draftPublication.stagePrivateDraftForPublish).toHaveBeenCalledWith(
+      7,
+      101,
+      expect.objectContaining({
+        metadata: expect.objectContaining({
+          candidatePreference: '同城、节奏舒服',
         }),
       }),
     );
