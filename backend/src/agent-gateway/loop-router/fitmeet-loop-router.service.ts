@@ -4,11 +4,12 @@ import type {
   FitMeetLoopIntent,
   FitMeetLoopRouterResult,
 } from './fitmeet-loop-router.types';
+import { classifyWorkoutIntent } from '../workout-loop/workout-intent-classifier';
 
 const WORKOUT_EXPLICIT =
-  /(约练|运动搭子|跑步搭子|健身搭子|羽毛球搭子|篮球搭子|一起跑步|一起运动|找人跑步|找人健身|附近跑步|周末运动)/i;
+  /(约练|约跑|约球|约.{0,4}(球|打球|羽毛球|篮球|网球)|运动搭子|训练搭子|跑步搭子|健身搭子|羽毛球搭子|篮球搭子|网球搭子|瑜伽搭子|游泳搭子|一起.{0,12}(跑步|运动|训练|健身|撸铁|羽毛球|篮球|网球|瑜伽|游泳|散步|徒步|骑行)|找.{0,16}(跑步|运动|训练|健身|撸铁|羽毛球|篮球|网球|瑜伽|游泳|散步|徒步|骑行)|(?:跑步|运动|训练|健身|撸铁|羽毛球|篮球|网球|瑜伽|游泳|散步|徒步|骑行).{0,8}(搭子|伙伴)|附近.{0,16}(跑步|运动|训练|健身|撸铁|搭子|伙伴)|有人.{0,16}(一起|陪).{0,16}(跑步|运动|训练|健身|撸铁|打球|练))/i;
 const WORKOUT_ACTIVITY =
-  /(跑步|慢跑|健身|撸铁|羽毛球|篮球|散步|徒步|骑行|瑜伽|游泳|运动)/i;
+  /(跑步|慢跑|健身|撸铁|羽毛球|篮球|网球|散步|徒步|骑行|瑜伽|游泳|训练|运动)/i;
 const WORKOUT_CONTEXT =
   /(今天|今晚|明天|周末|上午|中午|下午|晚上|附近|大学|公园|体育馆|健身房|球馆|操场|青岛|北京|上海|杭州|深圳|广州)/i;
 
@@ -26,6 +27,17 @@ export class FitMeetLoopRouterService {
 
     if (PROFILE.test(text)) return result('profile', 0.9, 'profile_keyword');
     if (TRAVEL.test(text)) return result('travel', 0.88, 'travel_keyword');
+
+    const workoutIntent = classifyWorkoutIntent(text);
+    if (workoutIntent === 'workout') {
+      const confidence = WORKOUT_CONTEXT.test(text)
+        ? 0.95
+        : WORKOUT_EXPLICIT.test(text)
+          ? 0.86
+          : 0.78;
+      return result('workout', confidence, 'workout_fast_path_keyword');
+    }
+
     if (FRIEND.test(text)) return result('friend', 0.86, 'friend_keyword');
 
     if (WORKOUT_EXPLICIT.test(text)) {

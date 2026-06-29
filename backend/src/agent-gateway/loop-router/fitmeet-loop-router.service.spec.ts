@@ -10,6 +10,20 @@ describe('FitMeetLoopRouterService', () => {
     });
   });
 
+  it('routes real-world workout wording even when slots are incomplete', () => {
+    for (const message of [
+      '想找个健身伙伴',
+      '约个球',
+      '附近有人一起练吗',
+      '想找朋友一起健身',
+    ]) {
+      expect(service.classify(message)).toMatchObject({
+        intent: 'workout',
+        reason: expect.stringContaining('workout'),
+      });
+    }
+  });
+
   it('keeps friend and travel as explicit placeholder loop intents', () => {
     expect(service.classify('想认识同城朋友')).toMatchObject({
       intent: 'friend',

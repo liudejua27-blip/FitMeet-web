@@ -903,6 +903,10 @@ function isAssistantVisibleResultCard(card: FitMeetAlphaCard) {
     card.schemaType === 'profile.completion' ||
     card.schemaType === 'meet_loop.timeline' ||
     card.schemaType === 'life_graph.diff' ||
+    card.schemaType === 'loop.choice' ||
+    card.schemaType === 'clarification.binary' ||
+    card.schemaType === 'workout.intake' ||
+    card.schemaType === 'workout.draft' ||
     card.schemaType === 'safety.approval'
   );
 }
