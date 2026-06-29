@@ -3,8 +3,10 @@ import {
   AgentTaskPermissionMode,
   AgentTaskStatus,
 } from '../entities/agent-task.entity';
+import { MatchingJobStatus } from '../entities/matching-job.entity';
 import { GeoResolverService } from '../geo/geo-resolver.service';
 import { FitMeetLoopRouterService } from '../loop-router/fitmeet-loop-router.service';
+import { WorkoutAgentBrainService } from './workout-agent-brain.service';
 import { WorkoutLoopService } from './workout-loop.service';
 
 function makeTask(overrides: Partial<AgentTask> = {}): AgentTask {
@@ -28,10 +30,14 @@ function makeService(
     slotsFromUnderstanding: jest.Mock;
   },
   brain?: {
-    decideEntrance?: jest.Mock;
-    decideContinuation?: jest.Mock;
-    decideIntakeSubmit?: jest.Mock;
+    decideEntrance?: (...args: never[]) => unknown;
+    decideContinuation?: (...args: never[]) => unknown;
+    decideIntakeSubmit?: (...args: never[]) => unknown;
   },
+  options: {
+    geoResolver?: unknown;
+    matchingJobs?: { enqueue: jest.Mock };
+  } = {},
 ) {
   const taskRepo = {
     findOne: jest.fn().mockResolvedValue(task),
@@ -58,9 +64,10 @@ function makeService(
     new FitMeetLoopRouterService(),
     messageLog as never,
     draftPublication as never,
-    new GeoResolverService(),
+    (options.geoResolver ?? new GeoResolverService()) as never,
     understanding as never,
     brain as never,
+    options.matchingJobs as never,
   );
   return { draftPublication, messageLog, service, task, taskRepo };
 }
@@ -640,5 +647,198 @@ describe('WorkoutLoopService', () => {
       expect.stringContaining('不公开约练卡'),
       expect.objectContaining({ shouldQueueRun: true }),
     );
+  });
+
+  it('runs Huashida workout through AMap intake, draft, and durable private matching', async () => {
+    const understanding = {
+      shouldCall: jest.fn().mockReturnValue(true),
+      understand: jest.fn().mockResolvedValue({
+        intent: 'workout',
+        confidence: 0.92,
+        locationMention: {
+          rawText: '华师大附近',
+          normalizedText: '华师大',
+          cityHint: '广州',
+          districtHint: '天河区',
+          poiHint: '华南师范大学',
+          relation: 'near',
+          needsGeoResolution: true,
+        },
+      }),
+      slotsFromUnderstanding: jest.fn().mockReturnValue({
+        activityType: '羽毛球',
+        timePreference: '明晚',
+        locationText: '华师大附近',
+        city: '广州',
+        district: '天河区',
+        poiName: '华南师范大学',
+        candidatePreference: '水平差不多的搭子',
+        slotMeta: {
+          activityType: { source: 'llm', confidence: 0.9 },
+          timePreference: { source: 'llm', confidence: 0.88 },
+          locationText: { source: 'llm', confidence: 0.86 },
+          city: { source: 'llm', confidence: 0.82 },
+        },
+      }),
+    };
+    const geoResolution = {
+      rawText: '华师大',
+      locationText: '广州天河区华南师范大学附近',
+      city: '广州',
+      district: '天河区',
+      poiName: '华南师范大学',
+      source: 'amap',
+      confidence: 0.91,
+      needsConfirmation: false,
+      candidates: [
+        {
+          name: '华南师范大学',
+          address: '广州市天河区中山大道西',
+          city: '广州',
+          district: '天河区',
+          level: 'poi',
+          source: 'amap',
+          confidence: 0.91,
+        },
+      ],
+    };
+    const geoResolver = {
+      resolve: jest.fn().mockReturnValue(geoResolution),
+      resolveAsync: jest.fn().mockResolvedValue(geoResolution),
+    };
+    const matchingJobs = {
+      enqueue: jest.fn().mockResolvedValue({
+        job: {
+          id: 9001,
+          status: MatchingJobStatus.Queued,
+          publicIntentId: 'private:101:501',
+          sourceVersion:
+            'workout-private:羽毛球|明晚|广州天河区华南师范大学附近|广州',
+        },
+      }),
+    };
+    const task = makeTask({ goal: '明晚华师大羽毛球' });
+    const brain = new WorkoutAgentBrainService(
+      understanding as never,
+      geoResolver as never,
+    );
+    const { draftPublication, service } = makeService(
+      task,
+      understanding,
+      brain,
+      { geoResolver, matchingJobs },
+    );
+
+    const entrance = await service.tryHandleEntrance({
+      ownerUserId: 7,
+      task,
+      message: '明晚华师大附近打羽毛球，找水平差不多的搭子',
+      bypassRouter: true,
+    });
+
+    expect(understanding.understand).toHaveBeenCalled();
+    expect(geoResolver.resolveAsync).toHaveBeenCalled();
+    const intakeCard = entrance?.result.cards?.[0];
+    expect(intakeCard).toMatchObject({
+      schemaType: 'workout.intake',
+      data: expect.objectContaining({
+        activityType: '羽毛球',
+        timePreference: '明晚',
+        city: '广州',
+        district: '天河区',
+        poiName: '华南师范大学',
+        geoResolution: expect.objectContaining({
+          source: 'amap',
+          needsConfirmation: false,
+        }),
+      }),
+    });
+    expect(draftPublication.stagePrivateDraftForPublish).not.toHaveBeenCalled();
+
+    const draftResult = await service.performWorkoutAction({
+      ownerUserId: 7,
+      taskId: 101,
+      body: {
+        action: 'workout_intake.submit' as never,
+        payload: {
+          slots: intakeCard?.data,
+        },
+      },
+    });
+
+    expect(draftResult.cards?.[0]).toMatchObject({
+      schemaType: 'workout.draft',
+      data: expect.objectContaining({
+        socialRequestId: 501,
+        activityType: '羽毛球',
+        city: '广州',
+      }),
+    });
+    expect(draftPublication.stagePrivateDraftForPublish).toHaveBeenCalledWith(
+      7,
+      101,
+      expect.objectContaining({
+        activityType: '羽毛球',
+        city: '广州',
+        metadata: expect.objectContaining({
+          city: '广州',
+          locationText: '广州天河区华南师范大学附近',
+          geoResolution: expect.objectContaining({ source: 'amap' }),
+        }),
+      }),
+    );
+
+    const draftCard = draftResult.cards?.[0];
+    const privateMatchAction = draftCard?.actions.find(
+      (action) => action.action === 'workout_draft.private_match',
+    );
+    const privateMatchResult = await service.performWorkoutAction({
+      ownerUserId: 7,
+      taskId: 101,
+      body: {
+        action: 'workout_draft.private_match' as never,
+        payload: privateMatchAction?.payload,
+      },
+    });
+
+    expect(matchingJobs.enqueue).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ownerUserId: 7,
+        linkedSocialRequestId: 501,
+        publicIntentId: 'private:101:501',
+        metadata: expect.objectContaining({
+          source: 'workout_private_match',
+          visibility: 'private',
+          privateMatchMode: true,
+          publicDiscoverPublishSkipped: true,
+          slots: expect.objectContaining({
+            activityType: '羽毛球',
+            city: '广州',
+          }),
+        }),
+      }),
+    );
+    expect(privateMatchResult).toMatchObject({
+      action: 'queue_search',
+      shouldSearch: true,
+      shouldQueueRun: true,
+      structuredIntent: expect.objectContaining({
+        mode: 'private_candidate_search',
+        matchingJobId: 9001,
+        matchingJobStatus: MatchingJobStatus.Queued,
+        publicIntentId: 'private:101:501',
+        privateMatchMode: true,
+        publicDiscoverPublishSkipped: true,
+      }),
+    });
+    expect((task.memory as Record<string, unknown>).workoutLoop).toMatchObject({
+      stage: 'matching_queued',
+      waitingFor: 'matching_job',
+      matchingJobId: 9001,
+      matchingJobStatus: MatchingJobStatus.Queued,
+      publicIntentId: 'private:101:501',
+      privateMatchMode: true,
+      publicDiscoverPublishSkipped: true,
+    });
   });
 });

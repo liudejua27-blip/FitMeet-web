@@ -6,6 +6,12 @@ import {
 } from './social-agent-memory.util';
 import { withSocialAgentOpportunityGuard } from './social-agent-opportunity-production-guard';
 
+/**
+ * @deprecated Legacy opportunity draft memory.
+ *
+ * New loop memory should live under the loop-specific task memory namespace,
+ * such as `task.memory.workoutLoop`.
+ */
 export type SocialAgentOpportunityDraftClarification = {
   status: 'collecting_slots';
   missing: string[];

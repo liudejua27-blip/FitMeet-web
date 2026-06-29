@@ -44,6 +44,13 @@ type LifeGraphFieldRecord = {
   revoked?: boolean;
 };
 
+/**
+ * @deprecated Legacy blocking profile gate.
+ *
+ * New loop agents should treat profile completion as a non-blocking nudge. Do
+ * not use this service to block Workout/Friend/Travel intake, draft, publish,
+ * or matching.
+ */
 @Injectable()
 export class SocialAgentProfileGateService {
   constructor(

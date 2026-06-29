@@ -10,6 +10,12 @@ import {
   transitionSocialAgentState,
 } from './social-agent-memory.util';
 
+/**
+ * @deprecated Legacy opportunity-slot clarification.
+ *
+ * Workout/Friend/Travel should use loop-specific slot extraction, understanding,
+ * and intake cards instead of this shared legacy clarification path.
+ */
 export type SocialAgentOpportunityClarificationField =
   | 'city'
   | 'location'

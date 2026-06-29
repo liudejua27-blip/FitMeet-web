@@ -63,6 +63,15 @@ const validEnv = {
   AGENT_OBSERVABILITY_ALERT_WEBHOOK_URL: '',
   AGENT_OBSERVABILITY_ALERT_WEBHOOK_TOKEN: '',
   AGENT_OBSERVABILITY_ALERT_COOLDOWN_MS: '300000',
+  FITMEET_AMAP_WEB_SERVICE_KEY: 'amap-web-service-key',
+  AMAP_WEB_SERVICE_KEY: 'amap-web-service-key',
+  FITMEET_FEATURE_AGENT_PUBLISH_ENABLED: 'true',
+  FITMEET_FEATURE_DISCOVER_PUBLIC_INTENT_ENABLED: 'true',
+  FITMEET_FEATURE_MATCHING_WORKER_ENABLED: 'true',
+  FITMEET_FEATURE_AUTOMATIC_CANDIDATE_SEARCH_ENABLED: 'true',
+  FITMEET_FEATURE_MESSAGE_SEND_ENABLED: 'true',
+  FITMEET_PROCESS_ROLE: 'worker-matching',
+  ENABLE_SCHEDULER: 'true',
 };
 
 describe('production-env-readiness', () => {
@@ -572,6 +581,50 @@ describe('production-env-readiness', () => {
         expect.objectContaining({
           key: 'AGENT_OBSERVABILITY_ALERT_COOLDOWN_MS',
         }),
+      ]),
+    );
+  });
+
+  it('warns when workout loop production dependencies are disabled or missing', () => {
+    const report = buildProductionEnvReport({
+      ...validEnv,
+      FITMEET_AMAP_WEB_SERVICE_KEY: '',
+      AMAP_WEB_SERVICE_KEY: '',
+      FITMEET_FEATURE_AGENT_PUBLISH_ENABLED: 'false',
+      FITMEET_FEATURE_DISCOVER_PUBLIC_INTENT_ENABLED: 'off',
+      FITMEET_FEATURE_MATCHING_WORKER_ENABLED: '0',
+      FITMEET_FEATURE_AUTOMATIC_CANDIDATE_SEARCH_ENABLED: 'no',
+      FITMEET_FEATURE_MESSAGE_SEND_ENABLED: 'false',
+      FITMEET_SOCIAL_LOOP_KILL_SWITCH: 'true',
+      FITMEET_AGENT_KILL_SWITCH: 'yes',
+      FITMEET_PROCESS_ROLE: 'api',
+      ENABLE_SCHEDULER: 'false',
+    });
+
+    expect(report.ok).toBe(true);
+    expect(report.errors).toEqual([]);
+    expect(report.warnings).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ key: 'FITMEET_AMAP_WEB_SERVICE_KEY' }),
+        expect.objectContaining({
+          key: 'FITMEET_FEATURE_AGENT_PUBLISH_ENABLED',
+        }),
+        expect.objectContaining({
+          key: 'FITMEET_FEATURE_DISCOVER_PUBLIC_INTENT_ENABLED',
+        }),
+        expect.objectContaining({
+          key: 'FITMEET_FEATURE_MATCHING_WORKER_ENABLED',
+        }),
+        expect.objectContaining({
+          key: 'FITMEET_FEATURE_AUTOMATIC_CANDIDATE_SEARCH_ENABLED',
+        }),
+        expect.objectContaining({
+          key: 'FITMEET_FEATURE_MESSAGE_SEND_ENABLED',
+        }),
+        expect.objectContaining({ key: 'FITMEET_SOCIAL_LOOP_KILL_SWITCH' }),
+        expect.objectContaining({ key: 'FITMEET_AGENT_KILL_SWITCH' }),
+        expect.objectContaining({ key: 'FITMEET_PROCESS_ROLE' }),
+        expect.objectContaining({ key: 'ENABLE_SCHEDULER' }),
       ]),
     );
   });
