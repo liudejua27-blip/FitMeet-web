@@ -261,6 +261,9 @@ describe('SocialAgentChatController final response routing', () => {
     expect(finalResponses.generate).not.toHaveBeenCalled();
     expect(serialized).toContain('event: result');
     expect(serialized).toContain('"schemaType":"workout.draft"');
+    expect(serialized.indexOf('event: result')).toBeLessThan(
+      serialized.indexOf('"type":"run.completed"'),
+    );
     expect(serialized).toContain(
       '"assistantMessageSource":"deterministic_route"',
     );

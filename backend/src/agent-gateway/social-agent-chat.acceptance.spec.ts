@@ -65,6 +65,7 @@ import { SocialAgentRouteActionTurnService } from './social-agent-route-action-t
 import { SocialAgentRouteDecisionService } from './social-agent-route-decision.service';
 import { FitMeetAlphaAgentSdkService } from './fitmeet-alpha-agent-sdk.service';
 import { SocialAgentWorkflowRouterService } from './social-agent-workflow-router.service';
+import type { AgentEntryInput } from './agent-entry/agent-entry.types';
 
 function makeTask(overrides: Partial<AgentTask> = {}): AgentTask {
   return {
@@ -816,7 +817,23 @@ function makeHarness(options: Record<string, unknown> = {}) {
       new SocialAgentRouteEntranceService(
         messageLog as never,
         taskLifecycle as never,
-        mainAgentTurn as never,
+        {
+          handle: jest.fn(async (entry: AgentEntryInput) => {
+            const fallback = await mainAgentTurn.handleRouteTurn({
+              ownerUserId: entry.ownerUserId,
+              task: entry.task,
+              message: entry.message,
+              hasCandidates: entry.body.hasCandidates === true,
+              startedAt: entry.startedAt,
+              signal: entry.signal,
+            });
+            return {
+              source: 'legacy_fallback',
+              task: fallback.task,
+              result: fallback.result,
+            };
+          }),
+        } as never,
       ),
       routeDecisions as never,
       new SocialAgentRouteAgentLoopRunnerService(

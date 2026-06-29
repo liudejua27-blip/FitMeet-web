@@ -697,6 +697,7 @@ export class SocialCodexEventPipelineService {
       threadId?: string | number | null;
     },
   ): Promise<boolean> {
+    if (this.isDirectWorkoutCardCreationIntent(input.text)) return false;
     if (this.hasExplicitSocialExecutionIntent(input.text)) return true;
     const taskId =
       this.positiveNumber(input.taskId) ?? this.positiveNumber(input.threadId);
@@ -715,6 +716,15 @@ export class SocialCodexEventPipelineService {
         Boolean(
           this.recordValue((slots as Record<string, unknown>)[key])?.value,
         ),
+    );
+  }
+
+  private isDirectWorkoutCardCreationIntent(text: unknown): boolean {
+    const normalized =
+      typeof text === 'string' ? text.trim().toLowerCase() : '';
+    if (!normalized) return false;
+    return /(发布|发|创建|生成|填写|做|新建).{0,10}(约练|约练卡|运动卡|搭子卡)|约练卡|发布约练/.test(
+      normalized,
     );
   }
 

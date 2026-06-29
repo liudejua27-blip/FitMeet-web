@@ -3,6 +3,7 @@ import {
   AgentTaskPermissionMode,
   AgentTaskStatus,
 } from '../entities/agent-task.entity';
+import { GeoResolverService } from '../geo/geo-resolver.service';
 import { FitMeetLoopRouterService } from '../loop-router/fitmeet-loop-router.service';
 import { WorkoutLoopService } from './workout-loop.service';
 
@@ -44,6 +45,7 @@ function makeService(task = makeTask()) {
     new FitMeetLoopRouterService(),
     messageLog as never,
     draftPublication as never,
+    new GeoResolverService(),
   );
   return { draftPublication, messageLog, service, task, taskRepo };
 }
@@ -67,7 +69,7 @@ describe('WorkoutLoopService', () => {
     const result = await service.tryHandleEntrance({
       ownerUserId: 7,
       task,
-      message: '帮我找跑步搭子',
+      message: '帮我创建约练卡，跑步',
     });
 
     expect(result?.result).toMatchObject({
@@ -153,6 +155,168 @@ describe('WorkoutLoopService', () => {
         }),
       ],
     });
+  });
+
+  it('creates a workout draft when the user directly asks to publish a workout card', async () => {
+    const { draftPublication, service, task } = makeService();
+
+    const result = await service.tryHandleEntrance({
+      ownerUserId: 7,
+      task,
+      message:
+        '我想发布约练，我明天在北京大学有一场篮球赛，想找个朋友一块，最好是男生，明天下午3点',
+    });
+
+    expect(draftPublication.stagePrivateDraftForPublish).toHaveBeenCalledWith(
+      7,
+      101,
+      expect.objectContaining({
+        activityType: '篮球',
+        city: '北京',
+        title: expect.stringContaining('北京大学篮球约练'),
+        metadata: expect.objectContaining({
+          loop: 'workout',
+          timePreference: '明天下午3点',
+          locationText: '北京大学',
+          candidatePreference: '男生',
+        }),
+      }),
+    );
+    expect(result?.result).toMatchObject({
+      action: 'await_confirmation',
+      cards: [
+        expect.objectContaining({
+          schemaType: 'workout.draft',
+          data: expect.objectContaining({
+            activityType: '篮球',
+            timePreference: '明天下午3点',
+            locationText: '北京大学',
+            city: '北京',
+            candidatePreference: '男生',
+          }),
+        }),
+      ],
+    });
+  });
+
+  it('continues an owned workout intake across short follow-up slot messages', async () => {
+    const { draftPublication, service, task } = makeService(
+      makeTask({
+        memory: {
+          workoutLoop: {
+            stage: 'intake',
+            slots: {},
+          },
+        },
+      }),
+    );
+
+    const timeOnly = await service.continueEntrance({
+      ownerUserId: 7,
+      task,
+      message: '明天晚上',
+    });
+
+    expect(timeOnly.result).toMatchObject({
+      action: 'clarify',
+      cards: [
+        expect.objectContaining({
+          schemaType: 'workout.intake',
+          data: expect.objectContaining({
+            missingFields: expect.arrayContaining([
+              'activityType',
+              'locationText',
+            ]),
+          }),
+        }),
+      ],
+    });
+    expect(draftPublication.stagePrivateDraftForPublish).not.toHaveBeenCalled();
+
+    const draft = await service.continueEntrance({
+      ownerUserId: 7,
+      task,
+      message: '青岛大学附近健身',
+    });
+
+    expect(draftPublication.stagePrivateDraftForPublish).toHaveBeenCalledWith(
+      7,
+      101,
+      expect.objectContaining({
+        activityType: '健身',
+        city: '青岛',
+        timePreference: '明天晚上',
+        locationName: expect.stringContaining('青岛大学'),
+      }),
+    );
+    expect(draft.result).toMatchObject({
+      action: 'await_confirmation',
+      cards: [
+        expect.objectContaining({
+          schemaType: 'workout.draft',
+          data: expect.objectContaining({
+            activityType: '健身',
+            timePreference: '明天晚上',
+            locationText: expect.stringContaining('青岛大学'),
+          }),
+        }),
+      ],
+    });
+  });
+
+  it('asks for geo confirmation for inferred POI city instead of defaulting to Qingdao', async () => {
+    const { draftPublication, service, task } = makeService();
+
+    const result = await service.tryHandleEntrance({
+      ownerUserId: 7,
+      task,
+      message: '明晚陆家嘴健身',
+      bypassRouter: true,
+    });
+
+    expect(result?.result).toMatchObject({
+      action: 'clarify',
+      cards: [
+        expect.objectContaining({
+          schemaType: 'clarification.binary',
+          data: expect.objectContaining({
+            inferredSlots: expect.objectContaining({
+              city: '上海',
+              locationText: expect.stringContaining('陆家嘴'),
+              geoResolution: expect.objectContaining({
+                source: 'poi_dictionary',
+                needsConfirmation: true,
+              }),
+            }),
+          }),
+        }),
+      ],
+    });
+    expect(draftPublication.stagePrivateDraftForPublish).not.toHaveBeenCalled();
+  });
+
+  it('returns intake for generic nearby places without inventing a city', async () => {
+    const { draftPublication, service, task } = makeService();
+
+    const result = await service.tryHandleEntrance({
+      ownerUserId: 7,
+      task,
+      message: '我想发布约练卡，明晚学校附近跑步',
+    });
+
+    expect(result?.result).toMatchObject({
+      action: 'clarify',
+      cards: [
+        expect.objectContaining({
+          schemaType: 'workout.intake',
+          data: expect.objectContaining({
+            city: null,
+            missingFields: expect.arrayContaining(['city']),
+          }),
+        }),
+      ],
+    });
+    expect(draftPublication.stagePrivateDraftForPublish).not.toHaveBeenCalled();
   });
 
   it('turns intake submit payload into a staged draft', async () => {
