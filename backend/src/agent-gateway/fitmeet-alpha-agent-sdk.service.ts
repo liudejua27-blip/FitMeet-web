@@ -931,6 +931,7 @@ export class FitMeetAlphaAgentSdkService {
         schemaType === 'workout.intake' ||
         schemaType === 'workout.draft' ||
         schemaType === 'friend.intake' ||
+        schemaType === 'friend.draft' ||
         schemaType === 'travel.intake' ||
         schemaType === 'travel.companion_draft'
       );

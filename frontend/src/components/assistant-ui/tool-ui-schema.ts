@@ -19,6 +19,7 @@ export type ToolUISchemaType =
   | 'workout.intake'
   | 'workout.draft'
   | 'friend.intake'
+  | 'friend.draft'
   | 'travel.intake'
   | 'travel.companion_draft'
   | 'generic.card';
@@ -38,6 +39,8 @@ export type ToolUIProductComponent =
   | 'ClarificationGeoCandidatesCard'
   | 'WorkoutIntakeCard'
   | 'WorkoutDraftCard'
+  | 'FriendIntakeCard'
+  | 'FriendDraftCard'
   | 'GenericCard';
 
 export type ToolUISchemaAction =
@@ -93,6 +96,12 @@ export type ToolUISchemaAction =
   | 'workout_draft.private_match'
   | 'workout_draft.edit'
   | 'workout_draft.cancel'
+  | 'friend_intake.submit'
+  | 'friend_intake.use_defaults'
+  | 'friend_intake.cancel'
+  | 'friend_draft.private_match'
+  | 'friend_draft.edit'
+  | 'friend_draft.cancel'
   | 'public_intent_application.accept'
   | 'public_intent_application.reject'
   | 'public_intent_application.view_profile'
@@ -135,6 +144,7 @@ export type ToolUICardCollectionSummary = {
   workoutIntakeCount: number;
   workoutDraftCount: number;
   friendIntakeCount: number;
+  friendDraftCount: number;
   travelIntakeCount: number;
   travelCompanionDraftCount: number;
   genericCount: number;
@@ -906,11 +916,9 @@ export function productComponentForSchemaType(
   if (schemaType === 'clarification.geo_candidates') return 'ClarificationGeoCandidatesCard';
   if (schemaType === 'workout.intake') return 'WorkoutIntakeCard';
   if (schemaType === 'workout.draft') return 'WorkoutDraftCard';
-  if (
-    schemaType === 'friend.intake' ||
-    schemaType === 'travel.intake' ||
-    schemaType === 'travel.companion_draft'
-  ) {
+  if (schemaType === 'friend.intake') return 'FriendIntakeCard';
+  if (schemaType === 'friend.draft') return 'FriendDraftCard';
+  if (schemaType === 'travel.intake' || schemaType === 'travel.companion_draft') {
     return 'GenericCard';
   }
   return 'GenericCard';
@@ -951,6 +959,7 @@ export function summarizeToolUICardCollection(
   const workoutIntakeCount = cards.filter((card) => card.schemaType === 'workout.intake').length;
   const workoutDraftCount = cards.filter((card) => card.schemaType === 'workout.draft').length;
   const friendIntakeCount = cards.filter((card) => card.schemaType === 'friend.intake').length;
+  const friendDraftCount = cards.filter((card) => card.schemaType === 'friend.draft').length;
   const travelIntakeCount = cards.filter((card) => card.schemaType === 'travel.intake').length;
   const travelCompanionDraftCount = cards.filter(
     (card) => card.schemaType === 'travel.companion_draft',
@@ -966,6 +975,7 @@ export function summarizeToolUICardCollection(
     workoutIntakeCount +
     workoutDraftCount +
     friendIntakeCount +
+    friendDraftCount +
     travelIntakeCount +
     travelCompanionDraftCount;
   const components = Array.from(
@@ -982,7 +992,8 @@ export function summarizeToolUICardCollection(
     clarificationCount > 0 ? `${clarificationCount} 张确认卡` : null,
     workoutIntakeCount > 0 ? `${workoutIntakeCount} 张约练填写卡` : null,
     workoutDraftCount > 0 ? `${workoutDraftCount} 张约练草稿` : null,
-    friendIntakeCount > 0 ? `${friendIntakeCount} 张交友占位卡` : null,
+    friendIntakeCount > 0 ? `${friendIntakeCount} 张交友填写卡` : null,
+    friendDraftCount > 0 ? `${friendDraftCount} 张交友草稿` : null,
     travelIntakeCount > 0 ? `${travelIntakeCount} 张旅游填写占位卡` : null,
     travelCompanionDraftCount > 0 ? `${travelCompanionDraftCount} 张旅游搭子占位卡` : null,
     lifeGraphDiffCount > 0 ? `${lifeGraphDiffCount} 条画像建议` : null,
@@ -998,8 +1009,10 @@ export function summarizeToolUICardCollection(
     workoutDraftCount > 0
   ) {
     detail = '约练闭环按选择、确认、填写和发布确认展示；资料补全不会阻断本次约练卡。';
-  } else if (friendIntakeCount > 0 || travelIntakeCount > 0 || travelCompanionDraftCount > 0) {
-    detail = '交友和旅游闭环已预留卡片协议，当前先以占位卡提示即将支持。';
+  } else if (friendIntakeCount > 0 || friendDraftCount > 0) {
+    detail = '交友闭环按填写、草稿和私密匹配确认展示；不会自动联系任何人。';
+  } else if (travelIntakeCount > 0 || travelCompanionDraftCount > 0) {
+    detail = '旅游闭环已预留卡片协议，当前先以占位卡提示即将支持。';
   } else if (opportunityCount > 0) {
     detail = '候选、约练和真实动作都按结构化卡片展示；涉及连接、发送或公开时会先确认。';
   } else if (emptyCount > 0) {
@@ -1032,6 +1045,7 @@ export function summarizeToolUICardCollection(
     workoutIntakeCount,
     workoutDraftCount,
     friendIntakeCount,
+    friendDraftCount,
     travelIntakeCount,
     travelCompanionDraftCount,
     genericCount,
@@ -1079,7 +1093,8 @@ export function schemaDefaultTitle(schemaType: ToolUISchemaType) {
   if (schemaType === 'clarification.binary') return '确认一下';
   if (schemaType === 'workout.intake') return '填写本次约练需求';
   if (schemaType === 'workout.draft') return '约练卡草稿';
-  if (schemaType === 'friend.intake') return '交友闭环即将支持';
+  if (schemaType === 'friend.intake') return '填写本次交友需求';
+  if (schemaType === 'friend.draft') return '交友卡草稿';
   if (schemaType === 'travel.intake') return '旅游闭环即将支持';
   if (schemaType === 'travel.companion_draft') return '旅游搭子草稿即将支持';
   return '整理结果';
@@ -1106,6 +1121,7 @@ export function toolUISchemaTypeFromUnknown(value: unknown): ToolUISchemaType | 
     text === 'workout.intake' ||
     text === 'workout.draft' ||
     text === 'friend.intake' ||
+    text === 'friend.draft' ||
     text === 'travel.intake' ||
     text === 'travel.companion_draft' ||
     text === 'generic.card'
@@ -1170,6 +1186,12 @@ export function toolUISchemaActionFromUnknown(value: unknown): ToolUISchemaActio
     text === 'workout_draft.private_match' ||
     text === 'workout_draft.edit' ||
     text === 'workout_draft.cancel' ||
+    text === 'friend_intake.submit' ||
+    text === 'friend_intake.use_defaults' ||
+    text === 'friend_intake.cancel' ||
+    text === 'friend_draft.private_match' ||
+    text === 'friend_draft.edit' ||
+    text === 'friend_draft.cancel' ||
     text === 'public_intent_application.accept' ||
     text === 'public_intent_application.reject' ||
     text === 'public_intent_application.view_profile' ||
@@ -1260,6 +1282,8 @@ export function schemaTypeFromLegacyCardType(type: string): ToolUISchemaType {
   }
   if (type === 'public_intent_application_card') return 'public_intent.application';
   if (type === 'opener_approval' || type === 'safety_boundary') return 'safety.approval';
+  if (type === 'friend_intake') return 'friend.intake';
+  if (type === 'friend_draft') return 'friend.draft';
   return 'generic.card';
 }
 
@@ -1384,8 +1408,7 @@ export function normalizePublicIntentApplicationView(
   const application = isRecord(card.data.application) ? card.data.application : {};
   const applicant = isRecord(card.data.applicant) ? card.data.applicant : {};
   const publicIntent = isRecord(card.data.publicIntent) ? card.data.publicIntent : {};
-  const status =
-    publicString(card.data.status) ?? publicString(application.status) ?? 'pending';
+  const status = publicString(card.data.status) ?? publicString(application.status) ?? 'pending';
   const applicantUserId = firstPublicPrimitive(
     card.data.applicantUserId,
     application.applicantUserId,

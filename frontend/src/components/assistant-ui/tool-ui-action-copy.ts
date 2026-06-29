@@ -59,6 +59,12 @@ export const TOOL_UI_SCHEMA_ACTIONS = [
   'workout_draft.private_match',
   'workout_draft.edit',
   'workout_draft.cancel',
+  'friend_intake.submit',
+  'friend_intake.use_defaults',
+  'friend_intake.cancel',
+  'friend_draft.private_match',
+  'friend_draft.edit',
+  'friend_draft.cancel',
   'public_intent_application.accept',
   'public_intent_application.reject',
   'public_intent_application.view_profile',
@@ -267,9 +273,9 @@ export const TOOL_UI_CARD_ACTION_COPY: Record<ToolUISchemaAction, ToolUICardActi
     result: '已进入约练闭环，我会帮你整理本次约练卡。',
   },
   'loop_choice.friend': {
-    busy: '正在记录选择',
-    done: '已记录选择',
-    result: '交友闭环即将支持。当前可以先使用约练闭环。',
+    busy: '正在进入交友闭环',
+    done: '已进入交友闭环',
+    result: '已进入交友闭环，我会帮你整理本次交友卡。',
   },
   'loop_choice.travel': {
     busy: '正在记录选择',
@@ -325,6 +331,36 @@ export const TOOL_UI_CARD_ACTION_COPY: Record<ToolUISchemaAction, ToolUICardActi
     busy: '正在取消',
     done: '已取消',
     result: '已取消这次约练卡，不会发布或匹配。',
+  },
+  'friend_intake.submit': {
+    busy: '正在生成交友卡',
+    done: '已生成交友卡',
+    result: '已根据本次填写生成交友卡，确认前不会匹配。',
+  },
+  'friend_intake.use_defaults': {
+    busy: '正在套用默认安全设置',
+    done: '已套用默认设置',
+    result: '已使用默认安全设置继续生成交友卡。',
+  },
+  'friend_intake.cancel': {
+    busy: '正在取消',
+    done: '已取消',
+    result: '已取消本次交友卡，不会匹配或联系任何人。',
+  },
+  'friend_draft.private_match': {
+    busy: '正在进入私密匹配',
+    done: '已进入私密匹配',
+    result: '已保存为不公开交友卡，正在当前对话里继续私密匹配。',
+  },
+  'friend_draft.edit': {
+    busy: '正在打开修改',
+    done: '已打开修改',
+    result: '可以继续修改本次交友需求。',
+  },
+  'friend_draft.cancel': {
+    busy: '正在取消',
+    done: '已取消',
+    result: '已取消这次交友卡，不会匹配或联系任何人。',
   },
   'public_intent_application.accept': {
     busy: '正在接受报名',

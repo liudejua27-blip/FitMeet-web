@@ -78,7 +78,7 @@ export class FitMeetLoopRouterService {
     }
 
     if (FRIEND.test(text))
-      return result('friend', 0.86, 'friend_keyword', 'handoff_legacy');
+      return result('friend', 0.86, 'friend_keyword', 'accept_loop');
 
     if (workoutIntent === 'workout' || WORKOUT_EXPLICIT.test(text)) {
       return result(

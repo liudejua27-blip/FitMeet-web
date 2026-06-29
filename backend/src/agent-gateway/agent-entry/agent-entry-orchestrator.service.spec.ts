@@ -70,14 +70,25 @@ function makeHarness() {
   const workoutArbitration = {
     arbitrate: jest.fn(),
   };
+  const friendLoop = {
+    tryHandleEntrance: jest.fn(),
+  };
   const service = new AgentEntryOrchestratorService(
     new FitMeetLoopRouterService(),
     workoutLoop as never,
     legacy as never,
     profileLoop as never,
     workoutArbitration as never,
+    friendLoop as never,
   );
-  return { legacy, profileLoop, service, workoutArbitration, workoutLoop };
+  return {
+    friendLoop,
+    legacy,
+    profileLoop,
+    service,
+    workoutArbitration,
+    workoutLoop,
+  };
 }
 
 describe('AgentEntryOrchestratorService', () => {
@@ -277,6 +288,43 @@ describe('AgentEntryOrchestratorService', () => {
       ownerUserId: 7,
       task,
       message: '帮我完善资料',
+    });
+    expect(legacy.handleFallback).not.toHaveBeenCalled();
+  });
+
+  it('routes friend intent to FriendLoop before legacy fallback', async () => {
+    const task = makeTask();
+    const { friendLoop, legacy, service } = makeHarness();
+    friendLoop.tryHandleEntrance.mockResolvedValue({
+      task,
+      result: makeResult({
+        cards: [
+          {
+            id: 'friend_intake:101',
+            type: 'friend_intake',
+            schemaVersion: 'fitmeet.tool-ui.v1',
+            schemaType: 'friend.intake',
+            title: '填写本次交友需求',
+            data: {},
+            actions: [],
+          },
+        ],
+      }),
+    });
+
+    const result = await service.handle({
+      ownerUserId: 7,
+      task,
+      body: { message: '想认识青岛同城朋友，咖啡聊天' },
+      message: '想认识青岛同城朋友，咖啡聊天',
+      startedAt: 123,
+    });
+
+    expect(result.source).toBe('friend_loop_intent');
+    expect(friendLoop.tryHandleEntrance).toHaveBeenCalledWith({
+      ownerUserId: 7,
+      task,
+      message: '想认识青岛同城朋友，咖啡聊天',
     });
     expect(legacy.handleFallback).not.toHaveBeenCalled();
   });

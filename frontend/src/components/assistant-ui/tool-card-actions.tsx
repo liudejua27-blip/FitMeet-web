@@ -827,9 +827,7 @@ function compactVisualActions(actions: Array<VisibleCardAction | null | undefine
   return result;
 }
 
-function isPublishDismissSchemaAction(
-  schemaAction: ToolUISchemaAction | null | undefined,
-) {
+function isPublishDismissSchemaAction(schemaAction: ToolUISchemaAction | null | undefined) {
   return (
     schemaAction === 'activity.skip_publish' ||
     schemaAction === 'social_intent.decline_publish' ||
@@ -837,9 +835,7 @@ function isPublishDismissSchemaAction(
   );
 }
 
-function isCandidateFeedbackSchemaAction(
-  schemaAction: ToolUISchemaAction | null | undefined,
-) {
+function isCandidateFeedbackSchemaAction(schemaAction: ToolUISchemaAction | null | undefined) {
   return (
     schemaAction === 'candidate.feedback.good_fit' ||
     schemaAction === 'candidate.feedback.bad_fit' ||
@@ -982,7 +978,11 @@ function firstSafePublicIntentHref(...values: unknown[]): string | null {
   for (const value of values) {
     const href = firstSafeInternalHref(value);
     if (!href) continue;
-    if (href.startsWith('/public-intent/') || href === '/discover' || href.startsWith('/discover?')) {
+    if (
+      href.startsWith('/public-intent/') ||
+      href === '/discover' ||
+      href.startsWith('/discover?')
+    ) {
       return href;
     }
   }
@@ -1100,7 +1100,9 @@ function canonicalVisibleActionKey(
     if (/^(candidate\.feedback\.time_mismatch|candidate_feedback_time_mismatch)$/.test(rawAction)) {
       return 'candidate.feedback.time_mismatch';
     }
-    if (/^(candidate\.feedback\.style_mismatch|candidate_feedback_style_mismatch)$/.test(rawAction)) {
+    if (
+      /^(candidate\.feedback\.style_mismatch|candidate_feedback_style_mismatch)$/.test(rawAction)
+    ) {
       return 'candidate.feedback.style_mismatch';
     }
     if (/^(generate_opener|draft_opener|candidate\.generate_opener)$/.test(rawAction)) {
@@ -1228,6 +1230,12 @@ const LOW_RISK_VISIBLE_SCHEMA_ACTIONS = new Set<ToolUISchemaAction>([
   'workout_draft.private_match',
   'workout_draft.edit',
   'workout_draft.cancel',
+  'friend_intake.submit',
+  'friend_intake.use_defaults',
+  'friend_intake.cancel',
+  'friend_draft.private_match',
+  'friend_draft.edit',
+  'friend_draft.cancel',
 ]);
 
 const LOW_RISK_VISIBLE_RAW_ACTIONS = new Set([
@@ -1361,37 +1369,39 @@ function sortVisibleCardActions(
               'workout_draft.edit',
               'workout_draft.cancel',
             ]
-        : schemaType === 'social_match.empty' ||
-            schemaType === 'social_match.no_candidates' ||
-            schemaType === 'social_match.privacy_guard' ||
-            schemaType === 'social_match.rate_limited'
-          ? [
-              'matching.relax_distance',
-              'matching.relax_time',
-              'matching.relax_tags',
-              'candidate.more_like_this',
-              'activity.modify_time',
-              'social_intent.decline_publish',
-              'activity.skip_publish',
-            ]
-          : schemaType === 'meet_loop.timeline'
-            ? [
-                'activity.check_in',
-                'activity.complete',
-                'review.submit',
-                'life_graph.accept_update',
-                'meet_loop.resume',
-                'meet_loop.reschedule',
-                'activity.upload_proof',
-              ]
-            : schemaType === 'public_intent.application'
+          : schemaType === 'friend.draft'
+            ? ['friend_draft.private_match', 'friend_draft.edit', 'friend_draft.cancel']
+            : schemaType === 'social_match.empty' ||
+                schemaType === 'social_match.no_candidates' ||
+                schemaType === 'social_match.privacy_guard' ||
+                schemaType === 'social_match.rate_limited'
               ? [
-                  'public_intent_application.accept',
-                  'public_intent_application.reject',
-                  'public_intent_application.view_profile',
-                  'public_intent_application.open_conversation',
+                  'matching.relax_distance',
+                  'matching.relax_time',
+                  'matching.relax_tags',
+                  'candidate.more_like_this',
+                  'activity.modify_time',
+                  'social_intent.decline_publish',
+                  'activity.skip_publish',
                 ]
-            : [];
+              : schemaType === 'meet_loop.timeline'
+                ? [
+                    'activity.check_in',
+                    'activity.complete',
+                    'review.submit',
+                    'life_graph.accept_update',
+                    'meet_loop.resume',
+                    'meet_loop.reschedule',
+                    'activity.upload_proof',
+                  ]
+                : schemaType === 'public_intent.application'
+                  ? [
+                      'public_intent_application.accept',
+                      'public_intent_application.reject',
+                      'public_intent_application.view_profile',
+                      'public_intent_application.open_conversation',
+                    ]
+                  : [];
   if (preferredOrder.length === 0) return actions;
   const rank = new Map(preferredOrder.map((item, index) => [item, index]));
   return actions
@@ -1682,6 +1692,15 @@ function inlineOutcomeStableBody(schemaAction: ToolUISchemaAction | null | undef
   if (schemaAction === 'workout_draft.cancel') {
     return '已取消这次约练卡，不会发布或匹配。';
   }
+  if (schemaAction === 'friend_draft.private_match') {
+    return '已保存为不公开交友卡，正在当前对话里继续私密匹配。';
+  }
+  if (schemaAction === 'friend_draft.edit') {
+    return '可以继续修改本次交友需求。';
+  }
+  if (schemaAction === 'friend_draft.cancel') {
+    return '已取消这次交友卡，不会匹配或联系任何人。';
+  }
   return null;
 }
 
@@ -1697,6 +1716,9 @@ function inlineOutcomeTitle(schemaAction: ToolUISchemaAction | null | undefined)
   if (schemaAction === 'workout_draft.private_match') return '已进入私密匹配';
   if (schemaAction === 'workout_draft.edit') return '继续修改';
   if (schemaAction === 'workout_draft.cancel') return '已取消';
+  if (schemaAction === 'friend_draft.private_match') return '已进入私密匹配';
+  if (schemaAction === 'friend_draft.edit') return '继续修改';
+  if (schemaAction === 'friend_draft.cancel') return '已取消';
   if (isPublishDismissSchemaAction(schemaAction)) return '已取消发布';
   if (schemaAction === 'activity.modify_time' || schemaAction === 'activity.modify_location') {
     return '已准备修改';
@@ -1795,8 +1817,7 @@ function localInlineApprovalForCardAction(
     return {
       approvalId: null,
       title: '确认接受报名',
-      summary:
-        '确认后会接受对方加入约练，并可能创建站内会话；不会公开手机号、微信或精确位置。',
+      summary: '确认后会接受对方加入约练，并可能创建站内会话；不会公开手机号、微信或精确位置。',
       riskLevel: 'medium',
       actionKey: cardActionKey(action),
       confirmLabel: '确认接受',
@@ -2692,9 +2713,7 @@ function cardActionNavigationHref(
       applicant.userId,
       applicant.id,
     );
-    return applicantUserId === null
-      ? null
-      : `/user/${encodeURIComponent(String(applicantUserId))}`;
+    return applicantUserId === null ? null : `/user/${encodeURIComponent(String(applicantUserId))}`;
   }
   if (action.schemaAction === 'public_intent_application.open_conversation') {
     const application = recordFromUnknown(card.data.application);

@@ -25,6 +25,7 @@ import { SocialIntentRateLimitService } from './social-intent-rate-limit.service
 import { SocialAgentMatchRelaxationActionService } from './social-agent-match-relaxation-action.service';
 import { SocialAgentApplicationActionService } from './social-agent-application-action.service';
 import { ClarificationCardActionService } from './clarification/clarification-card-action.service';
+import { FriendLoopService } from './friend-loop/friend-loop.service';
 import { buildWorkoutIntakeCard } from './workout-loop/workout-card.presenter';
 import { WorkoutLoopService } from './workout-loop/workout-loop.service';
 import type { WorkoutSlots } from './workout-loop/workout-loop.types';
@@ -59,6 +60,8 @@ export class SocialAgentCardActionRouterService {
     private readonly workoutLoop?: WorkoutLoopService,
     @Optional()
     private readonly clarificationActions?: ClarificationCardActionService,
+    @Optional()
+    private readonly friendLoop?: FriendLoopService,
   ) {}
 
   async perform(input: {
@@ -254,6 +257,17 @@ export class SocialAgentCardActionRouterService {
       });
     }
 
+    if (this.isFriendAction(action)) {
+      if (!this.friendLoop) {
+        throw new BadRequestException('Friend loop runtime is unavailable');
+      }
+      return this.friendLoop.performFriendAction({
+        ownerUserId,
+        taskId,
+        body: normalizedBody,
+      });
+    }
+
     if (
       action === 'candidate.view_detail' ||
       action === 'candidate.more_like_this' ||
@@ -405,6 +419,17 @@ export class SocialAgentCardActionRouterService {
       action === 'workout_draft.private_match' ||
       action === 'workout_draft.edit' ||
       action === 'workout_draft.cancel'
+    );
+  }
+
+  private isFriendAction(action: string) {
+    return (
+      action === 'friend_intake.submit' ||
+      action === 'friend_intake.use_defaults' ||
+      action === 'friend_intake.cancel' ||
+      action === 'friend_draft.private_match' ||
+      action === 'friend_draft.edit' ||
+      action === 'friend_draft.cancel'
     );
   }
 
@@ -588,6 +613,12 @@ export class SocialAgentCardActionRouterService {
       'workout_draft.private_match',
       'workout_draft.edit',
       'workout_draft.cancel',
+      'friend_intake.submit',
+      'friend_intake.use_defaults',
+      'friend_intake.cancel',
+      'friend_draft.private_match',
+      'friend_draft.edit',
+      'friend_draft.cancel',
       'candidate.generate_opener',
       'opener.regenerate',
       'opener.reject',
@@ -756,7 +787,8 @@ export class SocialAgentCardActionRouterService {
     if (
       action.startsWith('loop_choice.') ||
       action.startsWith('clarification.') ||
-      action.startsWith('workout_')
+      action.startsWith('workout_') ||
+      action.startsWith('friend_')
     ) {
       return 'FitMeet Main Agent' as const;
     }
@@ -792,6 +824,16 @@ export class SocialAgentCardActionRouterService {
         throw new BadRequestException('Workout loop runtime is unavailable');
       }
       return this.workoutLoop.startWorkoutIntake({
+        ownerUserId,
+        taskId,
+        payload: this.record(body.payload),
+      });
+    }
+    if (action === 'loop_choice.friend') {
+      if (!this.friendLoop) {
+        throw new BadRequestException('Friend loop runtime is unavailable');
+      }
+      return this.friendLoop.startFriendIntake({
         ownerUserId,
         taskId,
         payload: this.record(body.payload),
