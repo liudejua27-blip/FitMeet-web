@@ -35,7 +35,10 @@ jobs:
 
   dependency-review:
     name: Dependency Review
-    if: github.event_name == 'pull_request'
+    # actions/dependency-review-action requires GitHub Dependency graph support.
+    # Keep this opt-in so repositories without that feature still pass the
+    # baseline while pnpm audit, CodeQL, and Gitleaks remain hard gates.
+    if: github.event_name == 'pull_request' && vars.ENABLE_GITHUB_DEPENDENCY_REVIEW == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
