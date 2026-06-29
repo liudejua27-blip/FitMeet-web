@@ -1,6 +1,10 @@
 import { Link } from 'react-router-dom';
 import { SiteLink } from '../../components/navigation/SiteLink';
-import { enterpriseLoopCopy, safetyItems } from '../../components/website/content/website-content';
+import {
+  enterpriseLoopCopy,
+  safetyItems,
+  socialWorldPrimitives,
+} from '../../components/website/content/website-content';
 import { AgentConversionBand } from '../../components/website/sections/AgentConversionBand';
 import { FinalCTA } from '../../components/website/sections/FinalCTA';
 import { WebsiteHero } from '../../components/website/sections/WebsiteHero';
@@ -13,21 +17,55 @@ export function HomeWebsitePage() {
 
       <WebsiteSection
         label="Context"
-        title="从问题流、信息流，升级为需求流社交。"
-        body="传统社交让用户不停刷人和内容；FitMeet 让用户先表达当前需求，再由 Agent 把需求转换成可匹配、可发布、可确认的社交场景。"
+        title="Social World 不是更多信息流，而是更清楚的社交路径。"
+        body="传统社交让用户不停刷人和内容；FitMeet 让用户先表达当前需求，再由 Agent 把需求转换成可匹配、可发布、可确认的真实场景。"
       >
-        <figure className="fm-demand-wallpaper">
-          <img
-            src="/images/fitmeet/generated/social-world-demand-wallpaper-1920.jpg"
-            alt="FitMeet 需求流社交城市夜景与连接网络"
-            width="1672"
-            height="941"
-            loading="lazy"
-            decoding="async"
-          />
-          <figcaption>真实连接从具体场景开始：一起做什么、在哪里见、边界是否清楚。</figcaption>
-        </figure>
-        <div className="fm-context-brief">
+        <div className="fm-startup-signal-board" aria-label="FitMeet Social World 产品信号">
+          <div className="fm-startup-signal-board__copy">
+            <span>Social World OS</span>
+            <h3>把“想认识人”拆成可完成、可确认、可恢复的产品步骤。</h3>
+            <p>
+              用户不再靠刷卡碰运气。FitMeet 先确认需求，再同步发现页，随后把匹配、私信、加好友和约练推进到同一个上下文里。
+            </p>
+          </div>
+          <div className="fm-startup-product-stack" aria-label="Social World 工作流">
+            <article>
+              <span>01</span>
+              <strong>Say</strong>
+              <p>说出想找谁、做什么、何时方便。</p>
+            </article>
+            <article>
+              <span>02</span>
+              <strong>Confirm</strong>
+              <p>生成卡片后再确认公开。</p>
+            </article>
+            <article>
+              <span>03</span>
+              <strong>Meet</strong>
+              <p>候选和消息继续承接。</p>
+            </article>
+          </div>
+        </div>
+        <div className="fm-social-primitives" aria-label="FitMeet Social World primitives">
+          <div className="fm-social-primitives__intro">
+            <span>Product primitives</span>
+            <h3>不是泛聊天机器人，而是一套社交执行系统。</h3>
+            <p>
+              每一次连接都被拆成更小、更确定的动作。用户知道当前在哪一步，也知道下一步会发生什么。
+            </p>
+          </div>
+          <div className="fm-social-primitives__rail">
+            {socialWorldPrimitives.map(([name, title, body], index) => (
+              <article key={name}>
+                <span>{String(index + 1).padStart(2, '0')}</span>
+                <strong>{name}</strong>
+                <h4>{title}</h4>
+                <p>{body}</p>
+              </article>
+            ))}
+          </div>
+        </div>
+        <div className="fm-context-brief fm-context-brief--compact">
           <article>
             <span>Before</span>
             <h3>刷更多人，仍然不知道该和谁开始。</h3>
@@ -49,7 +87,7 @@ export function HomeWebsitePage() {
 
       <WebsiteSection
         label="Matching Loop"
-        title="核心不是刷更多人，而是把需求推进到下一步。"
+        title="让社交更简单：不是刷更多人，而是推进下一步。"
         tone="deep"
       >
         <ol className="fm-flow-steps">
@@ -84,7 +122,7 @@ export function HomeWebsitePage() {
 
       <FinalCTA
         label="FitMeet App"
-        title="从一个明确需求开始，认识真正聊得来的人。"
+        title="进入 Social World，从一个明确需求开始。"
         body="先让 Agent 生成需求卡，确认后进入发现页，再围绕同频用户开始邀请、私信或加好友。"
         primary={{ label: '进入发现', to: '/discover', siteLink: true }}
         secondary={{ label: '打开 App', to: '/download' }}

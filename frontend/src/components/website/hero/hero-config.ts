@@ -7,69 +7,69 @@ export type EnterpriseHeroConfig = {
   layout?: 'split' | 'center';
   proofItems: string[];
   title: string;
-  visual?: 'home' | 'features' | 'safety' | 'download';
+  visual?: 'home' | 'features' | 'safety' | 'download' | 'about';
 };
 
 export const websiteHeroConfig = {
   home: {
-    eyebrow: 'Demand Flow Social',
-    title: '说出需求，匹配合适的人',
+    eyebrow: 'FitMeet AI Social App',
+    title: 'Social World',
     description:
-      '从刷信息流，变成让 Agent 理解你想认识什么样的人，再把约练、交友和搭子需求变成可确认的真实连接。',
+      '让社交更简单：FitMeet 把“我想认识谁、一起做什么、什么时候方便”变成一张可确认的社交卡片，再把发现、匹配和消息连接起来。',
     actions: [
-      { label: '让 Agent 帮我匹配', to: '/agent', variant: 'primary' },
-      { label: '查看发现页', to: '/discover' },
+      { label: '开始体验', to: '/agent', variant: 'primary' },
+      { label: '查看发现', to: '/discover' },
     ],
-    proofItems: ['需求先行', '兴趣匹配', '确认后发布'],
+    proofItems: ['需求卡片', '确认发布', '消息承接'],
     visual: 'home',
   },
   features: {
-    eyebrow: 'Product System',
-    title: 'FitMeet 怎样把需求变成匹配。',
+    eyebrow: 'Social World Primitives',
+    title: '产品能力。',
     description:
-      '用户不需要先刷大量陌生人。先说目标，Agent 再把兴趣、爱好、时间、地点和安全边界整理成可发布、可匹配、可继续沟通的需求卡。',
+      '让社交更简单，不是把聊天做得更热闹，而是把需求、卡片、发现、匹配和消息做成一条可执行路径。',
     actions: [
       { label: '进入发现', to: '/discover', variant: 'primary' },
       { label: '体验 Agent', to: '/agent' },
     ],
-    proofItems: ['需求卡片', '匹配理由', '可控动作'],
+    proofItems: ['卡片生成', '候选解释', '独立确认'],
     visual: 'features',
   },
   safety: {
-    eyebrow: 'Safety Center',
-    title: '安全感出现在每个关键动作旁边。',
+    eyebrow: 'Social World Safety',
+    title: '安全边界。',
     description:
-      '真实世界社交的安全，不是一个设置页，而是一整套默认机制：隐私、确认、审计、撤回、举报和数据删除。',
+      'Social World 需要可信的默认机制：隐私、确认、审计、撤回、举报和数据删除，先保护人，再推进连接。',
     actions: [
       { label: '体验免登录 Demo', to: '/demo', variant: 'primary' },
       { label: '预约 App Beta', to: '/download#waitlist' },
     ],
-    proofItems: ['隐私默认隐藏', '动作必须确认', '记录可以回看'],
+    proofItems: ['隐私默认隐藏', '关键动作确认', '可撤回可追踪'],
     visual: 'safety',
   },
   download: {
     eyebrow: 'FitMeet App',
-    title: '下载 Social World App。',
+    title: '把 Social World 带在身边。',
     description:
-      '移动端承载完整需求闭环：Agent 发起需求、确认发布、发现页匹配、消息推进、个人信息和安全边界管理。',
+      '让社交更简单的完整闭环在 App 里继续：Agent 发起需求、确认发布、发现页匹配、消息推进、个人信息和安全边界管理。',
     actions: [
       { label: '预约 Beta', to: '#waitlist', variant: 'primary' },
       { label: '先体验 Agent', to: '/agent' },
     ],
-    proofItems: ['iOS Beta', 'Android Beta', 'Web 发现页'],
+    proofItems: ['iOS Beta', 'Android Beta', 'Web 体验'],
     visual: 'download',
   },
   about: {
     eyebrow: 'About FitMeet',
-    title: '我们在做一个更真实的 Social World。',
+    title: 'Social World，回到真实生活。',
     description:
-      'FitMeet 希望让社交从刷信息流回到真实生活：用户表达需求，Agent 帮助匹配，确认后再进入发现和消息。',
+      'FitMeet 的理念是 Social World：让社交更简单，让用户从刷信息流回到真实生活中的需求、确认、发现和消息。',
     actions: [
       { label: '联系合作', to: '#contact', variant: 'primary' },
       { label: '下载 App', to: '/download' },
     ],
     proofItems: ['需求先行', '安全可信', 'Agent 可控'],
-    layout: 'center',
+    visual: 'about',
   },
   demo: {
     eyebrow: '30 秒 Demo',

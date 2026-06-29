@@ -6,14 +6,7 @@ export function ProductSurfaceGrid() {
       {productSurfaces.map((surface) => (
         <figure key={surface.title} className="fm-product-surface-card">
           <picture>
-            <img
-              src={surface.image}
-              alt={surface.alt}
-              width="1200"
-              height="675"
-              loading="lazy"
-              decoding="async"
-            />
+            <img src={surface.image} alt={surface.alt} loading="lazy" decoding="async" />
           </picture>
           <figcaption>
             <span>{surface.label}</span>

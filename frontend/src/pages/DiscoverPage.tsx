@@ -43,14 +43,14 @@ type LiveItem = {
 };
 
 const sportFilters: SportFilter[] = [
-  { id: 'all', label: '全部运动', icon: '⊕' },
-  { id: 'gym', label: '健身', icon: '🏋️' },
-  { id: 'run', label: '跑步', icon: '🏃' },
-  { id: 'swimming', label: '游泳', icon: '🌊' },
-  { id: 'yoga', label: '瑜伽', icon: '🧘' },
-  { id: 'basketball', label: '篮球', icon: '🏀' },
-  { id: 'badminton', label: '羽毛球', icon: '🏸' },
-  { id: 'cycling', label: '骑行', icon: '🚴' },
+  { id: 'all', label: '全部运动', icon: 'All' },
+  { id: 'gym', label: '健身', icon: 'Gym' },
+  { id: 'run', label: '跑步', icon: 'Run' },
+  { id: 'swimming', label: '游泳', icon: 'Swim' },
+  { id: 'yoga', label: '瑜伽', icon: 'Yoga' },
+  { id: 'basketball', label: '篮球', icon: 'Ball' },
+  { id: 'badminton', label: '羽毛球', icon: 'Bdn' },
+  { id: 'cycling', label: '骑行', icon: 'Ride' },
 ];
 
 export const DiscoverPage = () => {
@@ -386,22 +386,22 @@ export const DiscoverPage = () => {
   );
 
   return (
-    <div className="fitmeet-website fm-site fm-enterprise-site discover-page">
+    <div className="fitmeet-website fm-site fm-enterprise-site fm-social-world-template discover-page">
       <DiscoverSiteNav />
       <main>
         <section className="discover-hero match-hall-hero">
           <div className="match-hall-hero__copy">
             <div className="match-hall-location">
               <span />
-              青岛市 · 实时更新
+              Social World · 实时更新
               <button type="button" onClick={handleUseLocation} disabled={isLocating}>
                 {isLocating ? '定位中' : '切换'}
               </button>
             </div>
             <h1>
-              发现附近<span>真实需求卡片</span>
+              Social World 里的<span>真实需求</span>
             </h1>
-            <p>这里展示用户确认后公开的约练、交友和搭子需求。每张卡都能继续看详情、发起邀请或进入站内沟通。</p>
+            <p>发现页展示用户确认后公开的约练、交友和搭子需求。每张卡都能看详情、发起邀请或进入站内沟通，让社交更简单。</p>
             <div className="discover-hero__actions">
               <Link to="/agent" className="fm-button fm-button--primary">
                 让 Agent 帮我找
@@ -712,8 +712,8 @@ function DiscoverScenePreview({
       </div>
       <picture className="discover-cinematic-preview__media" data-cinematic-media>
         <img
-          src="/images/fitmeet/cinematic/social-world-dark-phones.png"
-          alt="FitMeet 发现页深色手机产品阵列"
+          src="/images/fitmeet/website/social-world-phone-discover-v3.jpg"
+          alt="FitMeet 发现页黑金 App 产品预览"
           width="1600"
           height="900"
           loading="lazy"
