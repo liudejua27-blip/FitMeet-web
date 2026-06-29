@@ -540,6 +540,59 @@ describe('SocialAgentCardActionRouterService', () => {
     expect(result.assistantMessage).toContain('进入交友匹配队列');
   });
 
+  it('infers missing friend publish slots from staged draft text before blocking publish', async () => {
+    const { draftPublication, handleMessage, service } = makeHarness();
+    draftPublication.publishDraft.mockResolvedValue({
+      success: true,
+      status: 'published',
+      synced: true,
+      socialRequestId: 701,
+      publicIntentId: 'public-intent:friend-701',
+      discoverHref: '/discover?publicIntentId=public-intent%3Afriend-701',
+      publicIntentHref: '/public-intent/public-intent%3Afriend-701',
+      sourceVersion: 'friend-source-v1',
+      matchingJob: { id: 9701, status: 'queued' },
+    });
+
+    const result = await service.perform({
+      ownerUserId: 7,
+      taskId: 101,
+      body: {
+        action: 'friend_draft.publish',
+        payload: {
+          confirmedPublish: true,
+          socialRequestId: 701,
+          socialRequestDraft: {
+            socialRequestId: 701,
+            title: '上海认识新朋友咖啡搭子',
+            description: '想找同城朋友，周末咖啡或低压力聊天。',
+            activityType: '交友',
+            metadata: { loop: 'friend', source: 'friend_loop_mvp' },
+          },
+        },
+      },
+      handleMessage,
+    });
+
+    expect(handleMessage).not.toHaveBeenCalled();
+    expect(draftPublication.publishDraft).toHaveBeenCalledWith(
+      7,
+      101,
+      expect.objectContaining({
+        socialRequestId: 701,
+        title: '上海认识新朋友咖啡搭子',
+        city: '上海',
+        activityType: '交友',
+        visibility: 'public',
+        status: 'matching',
+      }),
+    );
+    expect(result.publicLoop).toMatchObject({
+      stage: 'matching_queued',
+      publicIntentId: 'public-intent:friend-701',
+    });
+  });
+
   it('does not publish friend drafts with an empty city or default them to Qingdao', async () => {
     const { draftPublication, handleMessage, service } = makeHarness();
 
@@ -643,6 +696,59 @@ describe('SocialAgentCardActionRouterService', () => {
       publicIntentId: 'public-intent:travel-801',
     });
     expect(result.assistantMessage).toContain('进入旅行寻伴匹配队列');
+  });
+
+  it('infers missing travel publish slots and city from staged draft text before blocking publish', async () => {
+    const { draftPublication, handleMessage, service } = makeHarness();
+    draftPublication.publishDraft.mockResolvedValue({
+      success: true,
+      status: 'published',
+      synced: true,
+      socialRequestId: 801,
+      publicIntentId: 'public-intent:travel-801',
+      discoverHref: '/discover?publicIntentId=public-intent%3Atravel-801',
+      publicIntentHref: '/public-intent/public-intent%3Atravel-801',
+      sourceVersion: 'travel-source-v1',
+      matchingJob: { id: 9801, status: 'queued' },
+    });
+
+    const result = await service.perform({
+      ownerUserId: 7,
+      taskId: 101,
+      body: {
+        action: 'travel_draft.publish',
+        payload: {
+          confirmedPublish: true,
+          socialRequestId: 801,
+          socialRequestDraft: {
+            socialRequestId: 801,
+            title: '周末成都高铁旅行寻伴',
+            description: '周末去成都，预算人均1000元，想找美食搭子。',
+            activityType: '结伴旅行',
+            metadata: { loop: 'travel', source: 'travel_loop_mvp' },
+          },
+        },
+      },
+      handleMessage,
+    });
+
+    expect(handleMessage).not.toHaveBeenCalled();
+    expect(draftPublication.publishDraft).toHaveBeenCalledWith(
+      7,
+      101,
+      expect.objectContaining({
+        socialRequestId: 801,
+        title: '周末成都高铁旅行寻伴',
+        city: '成都',
+        activityType: '结伴旅行',
+        visibility: 'public',
+        status: 'matching',
+      }),
+    );
+    expect(result.publicLoop).toMatchObject({
+      stage: 'matching_queued',
+      publicIntentId: 'public-intent:travel-801',
+    });
   });
 
   it('does not publish travel drafts with an empty city or default them to Qingdao', async () => {
