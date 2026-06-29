@@ -11,19 +11,14 @@ export function DownloadWebsitePage() {
       <WebsiteHero name="download" />
       <WebsiteSection label="Download" title="把 Social World 的五个入口放进同一套 App 体验。">
         <div className="fm-download-stage" aria-label="FitMeet App Beta 展示">
-          <div className="fm-download-stage__screens" aria-label="FitMeet App 四个核心页面">
-            {[
-              ['Agent', '/images/fitmeet/website/social-world-phone-agent-v3.jpg', 'FitMeet Agent 对话和约练卡页面'],
-              ['发现', '/images/fitmeet/website/social-world-phone-discover-v3.jpg', 'FitMeet 发现页推荐匹配页面'],
-              ['消息', '/images/fitmeet/website/social-world-phone-messages-v3.jpg', 'FitMeet 消息页和邀请页面'],
-              ['我的', '/images/fitmeet/website/social-world-phone-profile-v3.jpg', 'FitMeet 个人中心隐私设置页面'],
-            ].map(([label, src, alt]) => (
-              <figure key={label}>
-                <img src={src} alt={alt} loading="eager" decoding="async" />
-                <figcaption>{label}</figcaption>
-              </figure>
-            ))}
-          </div>
+          <figure className="fm-download-stage__poster">
+            <img
+              src="/images/fitmeet/website/social-world-download-app-v1.jpg"
+              alt="FitMeet App 黑金宣传视觉，展示 Agent、发现、消息和个人中心"
+              loading="eager"
+              decoding="async"
+            />
+          </figure>
           <div>
             <span>Beta preview</span>
             <h3>一套 App，承接从需求到消息的完整闭环。</h3>

@@ -6,21 +6,23 @@ export type EnterpriseHeroConfig = {
   eyebrow: string;
   layout?: 'split' | 'center';
   proofItems: string[];
+  subtitle?: string;
   title: string;
   visual?: 'home' | 'features' | 'safety' | 'download' | 'about';
 };
 
 export const websiteHeroConfig = {
   home: {
-    eyebrow: 'FitMeet AI Social App',
+    eyebrow: '',
     title: 'Social World',
+    subtitle: '让社交更简单',
     description:
-      '让社交更简单：FitMeet 把“我想认识谁、一起做什么、什么时候方便”变成一张可确认的社交卡片，再把发现、匹配和消息连接起来。',
+      '只需说出需求，FitMeet Agent 为你生成约练卡片，确认后进入发现页，匹配合适的人，再用消息把真实连接继续推进。',
     actions: [
-      { label: '开始体验', to: '/agent', variant: 'primary' },
-      { label: '查看发现', to: '/discover' },
+      { label: '让 Agent 帮我匹配', to: '/agent', variant: 'primary' },
+      { label: '查看发现页', to: '/discover' },
     ],
-    proofItems: ['需求卡片', '确认发布', '消息承接'],
+    proofItems: ['说出需求', '生成卡片', '确认发布', '发现连接'],
     visual: 'home',
   },
   features: {

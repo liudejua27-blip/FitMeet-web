@@ -15,6 +15,7 @@ export function WebsiteHero({ name }: { name: keyof typeof websiteHeroConfig }) 
       layout={layout}
       pageName={name}
       proofItems={config.proofItems}
+      subtitle={'subtitle' in config ? config.subtitle : undefined}
       title={config.title}
       visual={visual ? <EnterpriseHeroVisual variant={visual} /> : undefined}
     />

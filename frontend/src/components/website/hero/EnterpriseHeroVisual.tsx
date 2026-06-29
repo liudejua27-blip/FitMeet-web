@@ -47,10 +47,10 @@ const visualKickers: Record<EnterpriseHeroVisualVariant, string> = {
 };
 
 const visualImages: Record<EnterpriseHeroVisualVariant, string> = {
-  home: '/images/fitmeet/website/social-world-hero-clean-v3.jpg',
-  features: '/images/fitmeet/website/social-world-product-suite-v4.jpg',
-  safety: '/images/fitmeet/website/social-world-product-suite-v4.jpg',
-  download: '/images/fitmeet/website/social-world-hero-clean-v3.jpg',
+  home: '/images/fitmeet/website/social-world-direction-one-product.jpg',
+  features: '/images/fitmeet/website/social-world-features-system-v1.jpg',
+  safety: '/images/fitmeet/website/social-world-safety-system-v1.jpg',
+  download: '/images/fitmeet/website/social-world-download-app-v1.jpg',
   about: '/images/fitmeet/website/social-world-about-earth-v3.jpg',
 };
 
