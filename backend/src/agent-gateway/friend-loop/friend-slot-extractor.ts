@@ -112,6 +112,7 @@ export function normalizeFriendSlots(
     timePreference: cleanDisplayText(value.timePreference, '') || undefined,
     candidatePreference:
       cleanDisplayText(value.candidatePreference, '') || undefined,
+    slotMeta: value.slotMeta,
     safetyBoundary:
       cleanDisplayText(value.safetyBoundary, '') ||
       defaultFriendSafetyBoundary(),

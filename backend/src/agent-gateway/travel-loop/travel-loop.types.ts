@@ -1,4 +1,5 @@
 import type {
+  LoopSlotMeta,
   LoopSlotValidation,
   LoopSlots,
   LoopStage,
@@ -36,6 +37,25 @@ export type TravelSlots = LoopSlots & {
   accommodationPreference?: string;
   foodPreference?: string;
   candidatePreference?: string;
+  slotMeta?: Partial<
+    Record<
+      | 'destination'
+      | 'city'
+      | 'district'
+      | 'poiName'
+      | 'departureTime'
+      | 'duration'
+      | 'budgetRange'
+      | 'transportMode'
+      | 'tags'
+      | 'genderPreference'
+      | 'photoPreference'
+      | 'accommodationPreference'
+      | 'foodPreference'
+      | 'candidatePreference',
+      LoopSlotMeta
+    >
+  >;
   visibilityPreference?: 'private';
 };
 
