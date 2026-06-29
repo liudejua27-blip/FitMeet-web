@@ -316,9 +316,9 @@ export class FriendLoopService {
       entities: {
         city: input.slots.city ?? '',
         activityType: '交友',
-        targetGender: '',
+        targetGender: input.slots.genderPreference ?? '',
         timePreference: input.slots.timePreference ?? '',
-        locationPreference: input.slots.city ?? '',
+        locationPreference: input.slots.locationText ?? input.slots.city ?? '',
       },
       shouldSearch: true,
       shouldReplan: false,
@@ -413,10 +413,16 @@ export class FriendLoopService {
     const city = sanitizeCity(slots.city) ?? '';
     const goal = slots.friendGoal ?? '认识新朋友';
     const tags = slots.topicTags?.length ? slots.topicTags : [goal];
+    const location = slots.locationText ?? city;
     const title = `${city || '同城'}${goal}`;
     const description = [
-      `想在${city || '同城'}${goal}。`,
+      `想在${location || '同城'}${goal}。`,
       tags.length ? `兴趣话题：${tags.join('、')}。` : '',
+      slots.genderPreference ? `性别偏好：${slots.genderPreference}。` : '',
+      slots.bodyPreference ? `身材偏好：${slots.bodyPreference}。` : '',
+      slots.appearancePreference
+        ? `外观偏好：${slots.appearancePreference}。`
+        : '',
       slots.scenePreference ? `偏好场景：${slots.scenePreference}。` : '',
       slots.timePreference ? `时间偏好：${slots.timePreference}。` : '',
       slots.candidatePreference
@@ -444,8 +450,8 @@ export class FriendLoopService {
       agentAllowed: true,
       requireUserConfirmation: true,
       timePreference: slots.timePreference,
-      locationName: city,
-      locationPreference: city,
+      locationName: location,
+      locationPreference: location,
       safetyBoundary: slots.safetyBoundary ?? defaultFriendSafetyBoundary(),
       metadata: {
         agentTaskId: taskId,
@@ -454,7 +460,11 @@ export class FriendLoopService {
         friendLoopStage: 'draft_ready',
         friendGoal: goal,
         city: city || null,
+        locationText: slots.locationText ?? null,
         topicTags: tags,
+        genderPreference: slots.genderPreference ?? null,
+        bodyPreference: slots.bodyPreference ?? null,
+        appearancePreference: slots.appearancePreference ?? null,
         scenePreference: slots.scenePreference ?? null,
         timePreference: slots.timePreference ?? null,
         candidatePreference: slots.candidatePreference ?? null,
@@ -468,7 +478,11 @@ export class FriendLoopService {
     const parts = [
       slots.friendGoal,
       slots.city,
+      slots.locationText,
       ...(slots.topicTags ?? []),
+      slots.genderPreference,
+      slots.bodyPreference,
+      slots.appearancePreference,
       slots.scenePreference,
       slots.timePreference,
       slots.candidatePreference,
@@ -481,8 +495,12 @@ export class FriendLoopService {
   private friendPrivateMatchMessage(slots: FriendSlots): string {
     const details = [
       slots.city,
+      slots.locationText,
       slots.friendGoal,
       ...(slots.topicTags ?? []),
+      slots.genderPreference,
+      slots.bodyPreference,
+      slots.appearancePreference,
       slots.scenePreference,
       slots.timePreference,
       slots.candidatePreference,
@@ -503,7 +521,15 @@ export class FriendLoopService {
     slots: FriendSlots,
   ): string {
     const stableTarget =
-      [slots.friendGoal, slots.city, ...(slots.topicTags ?? [])]
+      [
+        slots.friendGoal,
+        slots.city,
+        slots.locationText,
+        ...(slots.topicTags ?? []),
+        slots.genderPreference,
+        slots.bodyPreference,
+        slots.appearancePreference,
+      ]
         .map((value) => this.text(value))
         .filter(Boolean)
         .join(':') || 'current-friend';
@@ -529,9 +555,9 @@ export class FriendLoopService {
       entities: {
         city: slots.city ?? '',
         activityType: '交友',
-        targetGender: '',
+        targetGender: slots.genderPreference ?? '',
         timePreference: slots.timePreference ?? '',
-        locationPreference: slots.city ?? '',
+        locationPreference: slots.locationText ?? slots.city ?? '',
       },
       shouldSearch: false,
       shouldReplan: false,

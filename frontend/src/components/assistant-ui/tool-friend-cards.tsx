@@ -16,7 +16,11 @@ import type { SchemaDrivenAssistantCard, ToolUISchemaAction } from './tool-ui-sc
 type FriendFormState = {
   friendGoal: string;
   city: string;
+  locationText: string;
   topicTags: string;
+  genderPreference: string;
+  bodyPreference: string;
+  appearancePreference: string;
   scenePreference: string;
   timePreference: string;
   candidatePreference: string;
@@ -30,7 +34,11 @@ export function FriendIntakeCard({ card }: { card: SchemaDrivenAssistantCard }) 
   const [form, setForm] = useState<FriendFormState>(() => ({
     friendGoal: stringValue(card.data.friendGoal),
     city: stringValue(card.data.city),
+    locationText: stringValue(card.data.locationText),
     topicTags: listValue(card.data.topicTags).join('、'),
+    genderPreference: stringValue(card.data.genderPreference),
+    bodyPreference: stringValue(card.data.bodyPreference),
+    appearancePreference: stringValue(card.data.appearancePreference),
     scenePreference: stringValue(card.data.scenePreference),
     timePreference: stringValue(card.data.timePreference),
     candidatePreference: stringValue(card.data.candidatePreference),
@@ -119,11 +127,39 @@ export function FriendIntakeCard({ card }: { card: SchemaDrivenAssistantCard }) 
             onChange={(value) => setForm((prev) => ({ ...prev, city: value }))}
           />
           <Field
+            icon={MapPin}
+            label="地点范围"
+            value={form.locationText}
+            placeholder="市南区 / 学校附近 / 公司附近"
+            onChange={(value) => setForm((prev) => ({ ...prev, locationText: value }))}
+          />
+          <Field
             icon={Tags}
             label="兴趣话题"
             value={form.topicTags}
             placeholder="咖啡、电影、摄影"
             onChange={(value) => setForm((prev) => ({ ...prev, topicTags: value }))}
+          />
+          <Field
+            icon={UsersRound}
+            label="性别偏好"
+            value={form.genderPreference}
+            placeholder="不限性别 / 女生优先 / 男生优先"
+            onChange={(value) => setForm((prev) => ({ ...prev, genderPreference: value }))}
+          />
+          <Field
+            icon={UsersRound}
+            label="身材偏好"
+            value={form.bodyPreference}
+            placeholder="身材不限 / 爱运动 / 健康体型"
+            onChange={(value) => setForm((prev) => ({ ...prev, bodyPreference: value }))}
+          />
+          <Field
+            icon={UsersRound}
+            label="外观偏好"
+            value={form.appearancePreference}
+            placeholder="外貌不限 / 清爽 / 照片真实"
+            onChange={(value) => setForm((prev) => ({ ...prev, appearancePreference: value }))}
           />
           <Field
             icon={MessageCircle}
@@ -265,7 +301,14 @@ export function FriendDraftCard({ card }: { card: SchemaDrivenAssistantCard }) {
         <dl className="grid gap-3 sm:grid-cols-2">
           <SummaryItem label="目标" value={stringValue(card.data.friendGoal) || '认识新朋友'} />
           <SummaryItem label="城市" value={stringValue(card.data.city) || '同城'} />
+          <SummaryItem label="地点范围" value={stringValue(card.data.locationText) || '同城'} />
           <SummaryItem label="兴趣话题" value={tags.length ? tags.join('、') : '不限'} />
+          <SummaryItem label="性别偏好" value={stringValue(card.data.genderPreference) || '不限'} />
+          <SummaryItem label="身材偏好" value={stringValue(card.data.bodyPreference) || '不限'} />
+          <SummaryItem
+            label="外观偏好"
+            value={stringValue(card.data.appearancePreference) || '不限'}
+          />
           <SummaryItem
             label="场景"
             value={stringValue(card.data.scenePreference) || '先站内聊天'}
@@ -406,7 +449,11 @@ function payloadSlots(form: FriendFormState) {
   return {
     friendGoal: form.friendGoal.trim(),
     city: form.city.trim(),
+    locationText: form.locationText.trim(),
     topicTags: splitTags(form.topicTags),
+    genderPreference: form.genderPreference.trim(),
+    bodyPreference: form.bodyPreference.trim(),
+    appearancePreference: form.appearancePreference.trim(),
     scenePreference: form.scenePreference.trim(),
     timePreference: form.timePreference.trim(),
     candidatePreference: form.candidatePreference.trim(),
@@ -445,5 +492,10 @@ function normalizeMissing(value: unknown) {
 function missingLabel(key: string) {
   if (key === 'friendGoal') return '交友目标';
   if (key === 'city') return '城市';
+  if (key === 'locationText') return '地点范围';
+  if (key === 'topicTags') return '兴趣话题';
+  if (key === 'genderPreference') return '性别偏好';
+  if (key === 'bodyPreference') return '身材偏好';
+  if (key === 'appearancePreference') return '外观偏好';
   return key;
 }

@@ -1009,18 +1009,22 @@ export class SocialAgentCardActionRouterService {
     if (publishKind === 'friend') {
       const slots = this.friendSlotsFromPublishPayload(payload);
       const validation = validateFriendSlots(slots);
-      if (!validation.valid) {
+      const city = this.text(slots.city);
+      const missing = city
+        ? validation.missing
+        : ([...validation.missing, 'city'] as string[]);
+      if (missing.length > 0) {
         return this.simpleRouteResult({
           taskId,
           assistantMessage:
-            '发布到发现前需要补充交友目标和城市，避免生成错误城市的交友卡。',
+            '发布到发现前需要补充交友目标、地点、爱好偏好和可公开展示的城市，避免生成错误城市的交友卡。',
           cards: [
             buildFriendIntakeCard({
               taskId,
               slots,
-              missing: validation.missing,
+              missing,
               title: '补充交友发布信息',
-              body: '请补充本次交友卡的目标和城市；不会使用默认城市代替。',
+              body: '请补充目标、地点/城市、爱好话题、性别偏好、身材偏好和外观偏好；不会使用默认城市代替。',
             }),
           ],
           publicLoop: {
@@ -1637,9 +1641,13 @@ export class SocialAgentCardActionRouterService {
     const draftText = this.publishDraftText(draft, metadata, [
       metadata.friendGoal,
       metadata.city,
+      metadata.locationText,
       metadata.scenePreference,
       metadata.timePreference,
       metadata.candidatePreference,
+      metadata.genderPreference,
+      metadata.bodyPreference,
+      metadata.appearancePreference,
     ]);
     const inferredSlots = draftText
       ? extractFriendSlots({ message: draftText })
@@ -1661,10 +1669,40 @@ export class SocialAgentCardActionRouterService {
         this.text(slots.city ?? draft.city ?? metadata.city) ||
         inferredSlots.city ||
         undefined,
+      locationText:
+        this.text(
+          slots.locationText ??
+            draft.locationText ??
+            draft.locationName ??
+            draft.locationPreference ??
+            metadata.locationText ??
+            inferredSlots.locationText,
+        ) || undefined,
       topicTags:
         explicitTopicTags.length > 0
           ? explicitTopicTags
           : (inferredSlots.topicTags ?? []),
+      genderPreference:
+        this.text(
+          slots.genderPreference ??
+            draft.genderPreference ??
+            metadata.genderPreference ??
+            inferredSlots.genderPreference,
+        ) || undefined,
+      bodyPreference:
+        this.text(
+          slots.bodyPreference ??
+            draft.bodyPreference ??
+            metadata.bodyPreference ??
+            inferredSlots.bodyPreference,
+        ) || undefined,
+      appearancePreference:
+        this.text(
+          slots.appearancePreference ??
+            draft.appearancePreference ??
+            metadata.appearancePreference ??
+            inferredSlots.appearancePreference,
+        ) || undefined,
       scenePreference:
         this.text(
           slots.scenePreference ??

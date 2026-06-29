@@ -505,7 +505,11 @@ describe('SocialAgentCardActionRouterService', () => {
           slots: {
             friendGoal: '认识新朋友',
             city: '上海',
+            locationText: '上海市区',
             topicTags: ['咖啡'],
+            genderPreference: '不限性别',
+            bodyPreference: '身材不限',
+            appearancePreference: '外貌不限，看聊得来',
           },
           socialRequestDraft: {
             socialRequestId: 701,
@@ -565,7 +569,8 @@ describe('SocialAgentCardActionRouterService', () => {
           socialRequestDraft: {
             socialRequestId: 701,
             title: '上海认识新朋友咖啡搭子',
-            description: '想找同城朋友，周末咖啡或低压力聊天。',
+            description:
+              '想找同城朋友，周末咖啡或低压力聊天，不限性别，身材不限，外貌不限，看聊得来。',
             activityType: '交友',
             metadata: { loop: 'friend', source: 'friend_loop_mvp' },
           },
