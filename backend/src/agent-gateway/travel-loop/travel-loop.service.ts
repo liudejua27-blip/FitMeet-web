@@ -14,6 +14,9 @@ import {
 } from '../../social-requests/social-request.entity';
 import { AgentTask, AgentTaskStatus } from '../entities/agent-task.entity';
 import type { MatchingJob } from '../entities/matching-job.entity';
+import { buildClarificationGeoCandidatesCard } from '../clarification/clarification-geo-candidates-card.presenter';
+import type { GeoResolution } from '../geo/geo-resolver.types';
+import { GeoResolverService } from '../geo/geo-resolver.service';
 import { MatchingJobService } from '../matching-job.service';
 import type { SocialAgentCardActionBody } from '../social-agent-action.types';
 import type { SocialAgentIntentRouteResult } from '../social-agent-chat.types';
@@ -52,6 +55,8 @@ export class TravelLoopService {
     private readonly matchingJobs?: MatchingJobService,
     @Optional()
     private readonly travelBrain?: TravelAgentBrainService,
+    @Optional()
+    private readonly geoResolver?: GeoResolverService,
   ) {}
 
   async tryHandleEntrance(input: {
@@ -68,9 +73,15 @@ export class TravelLoopService {
       message: input.message,
       slots,
     });
+    const prepared = await this.prepareTravelSlots({
+      task: input.task,
+      message: input.message,
+      slots: decision?.slots ?? slots,
+    });
+    if (prepared.result) return { task: input.task, result: prepared.result };
     const result = await this.intakeResultForSlots({
       task: input.task,
-      slots: decision?.slots ?? slots,
+      slots: prepared.slots,
       assistantMessage:
         '可以，我先帮你整理结伴旅行需求。确认下面信息后，我再生成寻伴旅行卡。',
     });
@@ -91,9 +102,15 @@ export class TravelLoopService {
       message: input.message,
       slots,
     });
+    const prepared = await this.prepareTravelSlots({
+      task: input.task,
+      message: input.message,
+      slots: decision?.slots ?? slots,
+    });
+    if (prepared.result) return { task: input.task, result: prepared.result };
     const result = await this.intakeResultForSlots({
       task: input.task,
-      slots: decision?.slots ?? slots,
+      slots: prepared.slots,
       assistantMessage:
         '已根据你补充的信息更新旅行寻伴需求。确认下面信息后，我再生成旅行寻伴卡。',
     });
@@ -110,11 +127,69 @@ export class TravelLoopService {
       ...this.readTravelSlots(task),
       ...this.slotsFromPayload(input.payload ?? {}),
     });
+    const prepared = await this.prepareTravelSlots({
+      task,
+      message: this.text(slots.destination ?? slots.city),
+      slots,
+    });
+    if (prepared.result) return prepared.result;
+    return this.intakeResultForSlots({
+      task,
+      slots: prepared.slots,
+      assistantMessage:
+        '好的，我们先进入旅游闭环。我会帮你整理成一张旅行寻伴卡。',
+    });
+  }
+
+  async applySelectedSlots(input: {
+    ownerUserId: number;
+    taskId: number;
+    payload: Record<string, unknown>;
+  }): Promise<SocialAgentIntentRouteResult> {
+    const task = await this.assertTaskOwner(input.ownerUserId, input.taskId);
+    const selectedPatch = this.travelSelectedPatch(
+      this.firstRecord(
+        input.payload.selectedPatch,
+        input.payload.selectedCandidate,
+      ),
+    );
+    const selectedGeo = this.geoResolutionFromPayload(
+      selectedPatch.geoResolution,
+    );
+    const slots = normalizeTravelSlots({
+      ...this.slotsFromPayload(input.payload.inferredSlots),
+      ...this.readTravelSlots(task),
+      ...selectedPatch,
+      ...(selectedGeo ? { geoResolution: selectedGeo } : {}),
+    });
     return this.intakeResultForSlots({
       task,
       slots,
       assistantMessage:
-        '好的，我们先进入旅游闭环。我会帮你整理成一张旅行寻伴卡。',
+        '已按你选择的目的地更新旅行寻伴需求。确认下面信息后，我再生成旅行寻伴卡。',
+    });
+  }
+
+  async openIntakeFromFallback(input: {
+    ownerUserId: number;
+    taskId: number;
+    payload: Record<string, unknown>;
+  }): Promise<SocialAgentIntentRouteResult> {
+    const task = await this.assertTaskOwner(input.ownerUserId, input.taskId);
+    const fallback = this.text(input.payload.noFallback);
+    if (fallback && fallback !== 'travel_intake') {
+      return this.resultWithCards({
+        task,
+        assistantMessage:
+          '好的，这次先不按旅行寻伴理解。你可以直接告诉我下一步想做什么。',
+        cards: [],
+        action: 'reply',
+      });
+    }
+    return this.intakeResultForSlots({
+      task,
+      slots: this.readTravelSlots(task),
+      assistantMessage: '好的，我会换成填写卡，让你自己选择目的地。',
     });
   }
 
@@ -188,9 +263,15 @@ export class TravelLoopService {
       ...this.readTravelSlots(task),
       ...this.slotsFromPayload(input.body.payload),
     });
-    const validation = validateTravelSlots(slots);
-    const decision = this.travelBrain?.decideIntakeSubmit({
+    const prepared = await this.prepareTravelSlots({
+      task,
+      message: this.text(slots.destination ?? slots.city),
       slots,
+    });
+    if (prepared.result) return prepared.result;
+    const validation = validateTravelSlots(prepared.slots);
+    const decision = this.travelBrain?.decideIntakeSubmit({
+      slots: prepared.slots,
       validation,
     });
     const action =
@@ -198,7 +279,7 @@ export class TravelLoopService {
     if (action === 'ASK_INTAKE') {
       return this.intakeResultForSlots({
         task,
-        slots: decision?.slots ?? slots,
+        slots: decision?.slots ?? prepared.slots,
         assistantMessage:
           '还需要补齐目的地、出发时间、预算和交通方式，才能生成旅行寻伴卡。',
       });
@@ -206,7 +287,7 @@ export class TravelLoopService {
     return this.createDraftResult({
       ownerUserId: input.ownerUserId,
       task,
-      slots: decision?.slots ?? slots,
+      slots: decision?.slots ?? prepared.slots,
       assistantMessage: '已收到旅行需求，我正在生成寻伴旅行卡。',
     });
   }
@@ -229,6 +310,84 @@ export class TravelLoopService {
         }),
       ],
       action: 'clarify',
+    });
+  }
+
+  private async prepareTravelSlots(input: {
+    task: AgentTask;
+    message: string;
+    slots: TravelSlots;
+  }): Promise<{
+    slots: TravelSlots;
+    result?: SocialAgentIntentRouteResult;
+  }> {
+    const slots = await this.resolveTravelGeo(input);
+    const geo = slots.geoResolution;
+    if (
+      geo?.needsConfirmation &&
+      Array.isArray(geo.candidates) &&
+      geo.candidates.length > 1
+    ) {
+      const assistantMessage =
+        geo.confirmationQuestion ??
+        '我查到几个可能的旅行目的地，请选择这次旅行要去的位置。';
+      this.rememberTravelSlots(input.task, slots, 'intake');
+      return {
+        slots,
+        result: await this.resultWithCards({
+          task: input.task,
+          assistantMessage,
+          cards: [
+            buildClarificationGeoCandidatesCard({
+              taskId: input.task.id,
+              questionKey: 'travel_destination',
+              title: '选择旅行目的地',
+              body: assistantMessage,
+              inferredIntent: 'travel',
+              inferredSlots: slots as Record<string, unknown>,
+              candidates: geo.candidates,
+              noFallback: 'travel_intake',
+            }),
+          ],
+          action: 'clarify',
+        }),
+      };
+    }
+    return { slots };
+  }
+
+  private async resolveTravelGeo(input: {
+    message: string;
+    slots: TravelSlots;
+  }): Promise<TravelSlots> {
+    if (!this.geoResolver) return input.slots;
+    if (
+      input.slots.geoResolution?.source &&
+      input.slots.geoResolution.source !== 'unknown'
+    ) {
+      return input.slots;
+    }
+    const query = this.text(
+      input.slots.destination ?? input.slots.city ?? input.message,
+    );
+    if (!query) return input.slots;
+    const geo = await this.geoResolver.resolveAsync({
+      message: input.message || query,
+      locationText: input.slots.destination,
+      city: input.slots.city,
+      district: input.slots.district,
+      poiName: input.slots.poiName,
+    });
+    if (!geo || geo.source === 'unknown') return input.slots;
+    return normalizeTravelSlots({
+      ...input.slots,
+      destination: geo.locationText ?? input.slots.destination,
+      city: geo.city ?? input.slots.city,
+      district: geo.district ?? input.slots.district,
+      poiName: geo.poiName ?? input.slots.poiName,
+      lat: geo.lat ?? input.slots.lat,
+      lng: geo.lng ?? input.slots.lng,
+      geoResolution: geo,
     });
   }
 
@@ -472,6 +631,10 @@ export class TravelLoopService {
         foodPreference: slots.foodPreference ?? null,
         candidatePreference: slots.candidatePreference ?? null,
         city: slots.city ?? null,
+        district: slots.district ?? null,
+        poiName: slots.poiName ?? null,
+        lat: slots.lat ?? null,
+        lng: slots.lng ?? null,
         geoResolution: slots.geoResolution ?? null,
         safetyBoundary: slots.safetyBoundary ?? defaultTravelSafetyBoundary(),
         visibilityPreference: 'private',
@@ -487,6 +650,8 @@ export class TravelLoopService {
       slots.budgetRange,
       slots.transportMode,
       slots.city,
+      slots.district,
+      slots.poiName,
       ...(slots.tags ?? []),
       slots.candidatePreference,
     ]
@@ -502,6 +667,9 @@ export class TravelLoopService {
       slots.duration,
       slots.budgetRange,
       slots.transportMode,
+      slots.city,
+      slots.district,
+      slots.poiName,
       ...(slots.tags ?? []),
       slots.candidatePreference,
     ]
@@ -639,23 +807,87 @@ export class TravelLoopService {
   private slotsFromPayload(value: unknown): TravelSlots {
     const payload = this.record(value);
     const slots = this.record(payload.slots);
-    const geoResolution = this.record(
-      payload.geoResolution ?? slots.geoResolution,
-    );
+    const destination =
+      this.text(
+        payload.destination ??
+          slots.destination ??
+          payload.locationText ??
+          slots.locationText,
+      ) || undefined;
     return normalizeTravelSlots({
       ...payload,
       ...slots,
-      ...(geoResolution.rawText
-        ? { geoResolution: geoResolution as TravelSlots['geoResolution'] }
-        : {}),
+      destination,
       tags: this.stringList(payload.tags ?? slots.tags),
+      geoResolution: this.geoResolutionFromPayload(
+        payload.geoResolution ?? slots.geoResolution,
+      ),
     });
+  }
+
+  private travelSelectedPatch(
+    value: Record<string, unknown>,
+  ): Record<string, unknown> {
+    const destination =
+      this.text(value.destination ?? value.locationText ?? value.name) ||
+      undefined;
+    return {
+      ...value,
+      ...(destination ? { destination } : {}),
+    };
+  }
+
+  private geoResolutionFromPayload(value: unknown): GeoResolution | undefined {
+    if (!this.isRecord(value)) return undefined;
+    const rawText = this.text(value.rawText);
+    if (!rawText) return undefined;
+    const confidence = Number(value.confidence);
+    const source = this.text(value.source);
+    return {
+      rawText,
+      locationText: this.text(value.locationText) || undefined,
+      city: sanitizeCity(value.city) ?? undefined,
+      district: this.text(value.district) || undefined,
+      poiName: this.text(value.poiName) || undefined,
+      province: this.text(value.province) || undefined,
+      lat: typeof value.lat === 'number' ? value.lat : undefined,
+      lng: typeof value.lng === 'number' ? value.lng : undefined,
+      source:
+        source === 'amap' ||
+        source === 'cache' ||
+        source === 'explicit_city' ||
+        source === 'poi_dictionary' ||
+        source === 'profile_city' ||
+        source === 'client_geo' ||
+        source === 'llm_inferred' ||
+        source === 'user_confirmed'
+          ? source
+          : 'unknown',
+      confidence: Number.isFinite(confidence) ? confidence : 0,
+      needsConfirmation: value.needsConfirmation === true,
+      confirmationQuestion: this.text(value.confirmationQuestion) || undefined,
+      candidates: Array.isArray(value.candidates)
+        ? (value.candidates as GeoResolution['candidates'])
+        : undefined,
+    };
+  }
+
+  private firstRecord(...values: unknown[]): Record<string, unknown> {
+    return (
+      values.find((value): value is Record<string, unknown> =>
+        this.isRecord(value),
+      ) ?? {}
+    );
   }
 
   private record(value: unknown): Record<string, unknown> {
     return typeof value === 'object' && value !== null && !Array.isArray(value)
       ? (value as Record<string, unknown>)
       : {};
+  }
+
+  private isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === 'object' && value !== null && !Array.isArray(value);
   }
 
   private text(value: unknown): string {
