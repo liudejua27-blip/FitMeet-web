@@ -241,6 +241,137 @@ describe('SocialAgentMatchingJobProcessorService', () => {
     );
   });
 
+  it('uses WorkoutAgentBrain through AgentLoop to recommend no-candidate recovery', async () => {
+    const workoutBrain = {
+      decideNoCandidatesRecovery: jest.fn().mockReturnValue({
+        action: 'RECOMMEND_MATCH_RELAXATION',
+        reason: 'matching_no_candidates_recommend_expand_time',
+        recommendedStrategyId: 'expand_time',
+        observedCandidateCounts: {
+          expand_distance: 2,
+          expand_time: 1,
+          relax_tags: 0,
+        },
+      }),
+    };
+    const agentLoop = {
+      execute: jest.fn(async (input: Record<string, unknown>) => {
+        const brain = input.brain as {
+          decide: (decisionInput: Record<string, unknown>) => Promise<{
+            tool?: {
+              agent: string;
+              toolName: string;
+              input: Record<string, unknown>;
+            };
+            finalObservation?: Record<string, unknown>;
+          }>;
+        };
+        const observations: Record<string, unknown>[] = [];
+        const firstDecision = await brain.decide({
+          loop: {},
+          observations,
+          remainingToolCalls: 2,
+        });
+        const runner = input.runner as (
+          runnerInput: Record<string, unknown>,
+        ) => Promise<Record<string, unknown>>;
+        observations.push(
+          await runner({
+            runId: 'run-1',
+            traceId: 'trace-1',
+            taskId: 101,
+            agent: firstDecision.tool?.agent,
+            toolName: firstDecision.tool?.toolName,
+            input: firstDecision.tool?.input ?? {},
+            attempt: 1,
+          }),
+        );
+        const finalDecision = await brain.decide({
+          loop: {},
+          observations,
+          remainingToolCalls: 1,
+        });
+        if (finalDecision.finalObservation) {
+          observations.push(finalDecision.finalObservation);
+        }
+        return {
+          loop: {},
+          observations,
+          answerBoundary: {
+            fromObservationsOnly: true,
+            requiresApproval: false,
+            canContinue: true,
+            status: 'ready',
+          },
+        };
+      }),
+    };
+    const harness = makeHarness({
+      candidates: [],
+      socialRequest: {
+        metadata: { loop: 'workout' },
+      },
+      workoutBrain,
+      agentLoop,
+    });
+
+    await expect(harness.service.processClaimedJob(makeJob())).resolves.toBe(
+      MatchingJobStatus.NoCandidates,
+    );
+
+    expect(agentLoop.execute).toHaveBeenCalledWith(
+      expect.objectContaining({
+        taskId: 101,
+        goal: 'Workout agent recommends a safe matching recovery option.',
+        brain: expect.any(Object),
+        maxToolCalls: 2,
+      }),
+    );
+    expect(workoutBrain.decideNoCandidatesRecovery).toHaveBeenCalledWith({
+      fallback: expect.objectContaining({
+        recommendedStrategyId: 'expand_distance',
+      }),
+      noCandidatesFinal: false,
+    });
+    expect(harness.taskRepo.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        result: expect.objectContaining({
+          chatRun: expect.objectContaining({
+            matchingFallback: expect.objectContaining({
+              recommendedStrategyId: 'expand_time',
+              agentDecision: expect.objectContaining({
+                source: 'workout_agent_brain',
+                recommendedStrategyId: 'expand_time',
+              }),
+            }),
+          }),
+        }),
+      }),
+    );
+    expect(harness.realtime.emitAgentEvent).toHaveBeenCalledWith(
+      7,
+      'agent:candidates',
+      expect.objectContaining({
+        matchingFallback: expect.objectContaining({
+          recommendedStrategyId: 'expand_time',
+          agentDecision: expect.objectContaining({
+            source: 'workout_agent_brain',
+          }),
+        }),
+        cards: expect.arrayContaining([
+          expect.objectContaining({
+            schemaType: 'social_match.no_candidates',
+            data: expect.objectContaining({
+              matchingFallback: expect.objectContaining({
+                recommendedStrategyId: 'expand_time',
+              }),
+            }),
+          }),
+        ]),
+      }),
+    );
+  });
+
   it('marks a recovery child search with zero candidates as final no_candidates', async () => {
     const recoveryJob = {
       parentJobId: 44,
@@ -469,6 +600,8 @@ function makeHarness(
     jobOverrides?: Record<string, unknown>;
     socialRequest?: Record<string, unknown>;
     taskMemory?: Record<string, unknown>;
+    workoutBrain?: { decideNoCandidatesRecovery: jest.Mock };
+    agentLoop?: { execute: jest.Mock };
   } = {},
 ) {
   const publicIntent = options.publicIntent ?? makePublicIntent();
@@ -693,6 +826,8 @@ function makeHarness(
       candidateAudit as never,
       undefined as never,
       loopStateEvents as never,
+      options.workoutBrain as never,
+      options.agentLoop as never,
     ),
     candidateSearchIndex,
     candidateAudit,

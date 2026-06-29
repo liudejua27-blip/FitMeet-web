@@ -66,6 +66,57 @@ describe('WorkoutEntryArbitrationService', () => {
     });
   });
 
+  it('keeps high-confidence LLM arbitration slots over weaker rule recall', async () => {
+    const understanding: WorkoutUnderstandingResult = {
+      intent: 'workout',
+      confidence: 0.93,
+      activityType: '跑步',
+      timePreference: '今晚',
+      locationMention: {
+        rawText: '市北那边',
+        normalizedText: '市北那边',
+        cityHint: '青岛',
+        relation: 'near',
+        needsGeoResolution: true,
+      },
+      missing: [],
+      assumptions: [],
+      needsClarification: false,
+    };
+    const model = {
+      understand: jest.fn().mockResolvedValue(understanding),
+      slotsFromUnderstanding: jest.fn().mockReturnValue({
+        activityType: '跑步',
+        timePreference: '今晚',
+        locationText: '市北那边',
+        city: '青岛',
+        slotMeta: {
+          locationText: { source: 'llm', confidence: 0.93 },
+          city: { source: 'llm', confidence: 0.93 },
+        },
+      }),
+    };
+    const service = new WorkoutEntryArbitrationService(model as never);
+
+    await expect(
+      service.arbitrate({
+        task: makeTask(),
+        message: '今晚学校附近跑步，找个搭子',
+        loopIntent: router.classify('今晚学校附近跑步，找个搭子'),
+      }),
+    ).resolves.toMatchObject({
+      verdict: 'accept_workout_loop',
+      slots: {
+        locationText: '市北那边',
+        city: '青岛',
+        slotMeta: {
+          locationText: { source: 'llm', confidence: 0.93 },
+          city: { source: 'llm', confidence: 0.93 },
+        },
+      },
+    });
+  });
+
   it('asks clarification for rule-recalled POI workout without LLM', async () => {
     const service = new WorkoutEntryArbitrationService(
       undefined,

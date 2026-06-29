@@ -4,6 +4,7 @@ import type { AgentTask } from '../entities/agent-task.entity';
 import { GeoResolverService } from '../geo/geo-resolver.service';
 import type { FitMeetLoopRouterResult } from '../loop-router/fitmeet-loop-router.types';
 import type { WorkoutSlots } from './workout-loop.types';
+import { mergeWorkoutSlotsBySource } from './workout-slot-merge';
 import { extractWorkoutSlots } from './workout-slot-extractor';
 import {
   WorkoutUnderstandingService,
@@ -37,10 +38,11 @@ export class WorkoutEntryArbitrationService {
     loopIntent: FitMeetLoopRouterResult;
     signal?: AbortSignal | null;
   }): Promise<WorkoutEntryArbitrationResult> {
+    const memorySlots = this.readWorkoutSlots(input.task);
     const ruleSlots = this.withGeo(
       extractWorkoutSlots({
         message: input.message,
-        previousSlots: this.readWorkoutSlots(input.task),
+        previousSlots: memorySlots,
       }),
       input.message,
     );
@@ -55,10 +57,12 @@ export class WorkoutEntryArbitrationService {
       : null;
     const llmSlots = this.understanding?.slotsFromUnderstanding(understanding);
     const slots = this.withGeo(
-      {
-        ...ruleSlots,
-        ...this.compactSlots(llmSlots ?? {}),
-      },
+      this.mergeSlots({
+        memorySlots,
+        ruleSlots,
+        llmSlots,
+        llmConfidence: understanding?.confidence,
+      }),
       input.message,
     );
 
@@ -127,16 +131,51 @@ export class WorkoutEntryArbitrationService {
       poiName: slots.poiName,
       userConfirmed: slots.geoResolution?.source === 'user_confirmed',
     });
-    return {
-      ...slots,
-      locationText: geo.locationText ?? slots.locationText,
-      city: geo.city ?? slots.city,
-      district: geo.district ?? slots.district,
-      poiName: geo.poiName ?? slots.poiName,
-      lat: geo.lat ?? slots.lat,
-      lng: geo.lng ?? slots.lng,
-      geoResolution: geo,
-    };
+    return mergeWorkoutSlotsBySource([
+      {
+        slots,
+        fallbackSource: 'memory',
+        fallbackConfidence: 0.5,
+      },
+      {
+        slots: {
+          locationText: geo.locationText,
+          city: geo.city,
+          district: geo.district,
+          poiName: geo.poiName,
+          lat: geo.lat,
+          lng: geo.lng,
+          geoResolution: geo,
+        },
+        fallbackSource: 'geo',
+        fallbackConfidence: geo.confidence,
+      },
+    ]);
+  }
+
+  private mergeSlots(input: {
+    memorySlots?: WorkoutSlots;
+    ruleSlots?: WorkoutSlots;
+    llmSlots?: Partial<WorkoutSlots>;
+    llmConfidence?: number;
+  }): WorkoutSlots {
+    return mergeWorkoutSlotsBySource([
+      {
+        slots: this.compactSlots(input.memorySlots ?? {}),
+        fallbackSource: 'memory',
+        fallbackConfidence: 0.5,
+      },
+      {
+        slots: this.compactSlots(input.ruleSlots ?? {}),
+        fallbackSource: 'rule',
+        fallbackConfidence: 0.68,
+      },
+      {
+        slots: this.compactSlots(input.llmSlots ?? {}),
+        fallbackSource: 'llm',
+        fallbackConfidence: input.llmConfidence ?? 0.78,
+      },
+    ]);
   }
 
   private compactSlots(slots: Partial<WorkoutSlots>): Partial<WorkoutSlots> {

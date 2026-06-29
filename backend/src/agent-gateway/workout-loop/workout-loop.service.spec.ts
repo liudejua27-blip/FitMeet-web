@@ -404,6 +404,176 @@ describe('WorkoutLoopService', () => {
     expect(draftPublication.stagePrivateDraftForPublish).not.toHaveBeenCalled();
   });
 
+  it('continues Taikoo Li geo candidate selection into intake and draft creation', async () => {
+    const brain = {
+      decideEntrance: jest.fn().mockResolvedValue({
+        action: 'ASK_LOCATION_CONFIRMATION',
+        reason: 'entrance_geo_confirmation_required',
+        slots: {
+          activityType: '健身',
+          timePreference: '明晚',
+          locationText: '太古里',
+        },
+        missing: [],
+        understanding: null,
+        geoResolution: {
+          rawText: '太古里',
+          locationText: '成都锦江区太古里',
+          city: '成都',
+          district: '锦江区',
+          poiName: '太古里',
+          source: 'amap',
+          confidence: 0.72,
+          needsConfirmation: true,
+          confirmationQuestion: '我查到多个太古里，这次是在成都太古里吗？',
+          candidates: [
+            {
+              name: '成都远洋太古里',
+              address: '成都市锦江区中纱帽街',
+              city: '成都',
+              district: '锦江区',
+              level: 'poi',
+              source: 'amap',
+              confidence: 0.72,
+            },
+            {
+              name: '三里屯太古里',
+              address: '北京市朝阳区三里屯路',
+              city: '北京',
+              district: '朝阳区',
+              level: 'poi',
+              source: 'amap',
+              confidence: 0.68,
+            },
+          ],
+        },
+        geoCandidates: [
+          {
+            name: '成都远洋太古里',
+            address: '成都市锦江区中纱帽街',
+            city: '成都',
+            district: '锦江区',
+            level: 'poi',
+            source: 'amap',
+            confidence: 0.72,
+          },
+          {
+            name: '三里屯太古里',
+            address: '北京市朝阳区三里屯路',
+            city: '北京',
+            district: '朝阳区',
+            level: 'poi',
+            source: 'amap',
+            confidence: 0.68,
+          },
+        ],
+        clarificationQuestion: '我查到多个太古里，这次是在成都太古里吗？',
+      }),
+      decideIntakeSubmit: jest
+        .fn()
+        .mockImplementation(async (input: { slots: unknown }) => ({
+          action: 'CREATE_WORKOUT_DRAFT',
+          reason: 'intake_submit_valid',
+          slots: input.slots,
+          missing: [],
+        })),
+    };
+    const { draftPublication, service, task } = makeService(
+      makeTask(),
+      undefined,
+      brain,
+    );
+
+    const entrance = await service.tryHandleEntrance({
+      ownerUserId: 7,
+      task,
+      message: '明晚太古里健身',
+      bypassRouter: true,
+    });
+    const geoCard = entrance?.result.cards?.[0];
+    const selectAction = geoCard?.actions.find(
+      (action) => action.action === 'clarification.select',
+    );
+
+    expect(geoCard).toMatchObject({
+      schemaType: 'clarification.geo_candidates',
+    });
+    expect(selectAction?.payload).toMatchObject({
+      selectedPatch: expect.objectContaining({
+        city: '成都',
+        district: '锦江区',
+        poiName: '成都远洋太古里',
+        geoResolution: expect.objectContaining({
+          source: 'user_confirmed',
+          needsConfirmation: false,
+        }),
+      }),
+    });
+
+    const selected = await service.applySelectedSlots({
+      ownerUserId: 7,
+      taskId: 101,
+      payload: selectAction?.payload as Record<string, unknown>,
+    });
+
+    expect(selected.cards?.[0]).toMatchObject({
+      schemaType: 'workout.intake',
+      data: expect.objectContaining({
+        activityType: '健身',
+        timePreference: '明晚',
+        city: '成都',
+        district: '锦江区',
+        poiName: '成都远洋太古里',
+        geoResolution: expect.objectContaining({
+          source: 'user_confirmed',
+          needsConfirmation: false,
+        }),
+      }),
+    });
+    const workoutMemory = (task.memory as { workoutLoop?: { slots?: unknown } })
+      .workoutLoop;
+    expect(workoutMemory?.slots).toMatchObject({
+      slotMeta: expect.objectContaining({
+        city: { source: 'user_confirmed', confidence: 1 },
+        locationText: { source: 'user_confirmed', confidence: 1 },
+      }),
+    });
+
+    const draft = await service.performWorkoutAction({
+      ownerUserId: 7,
+      taskId: 101,
+      body: {
+        action: 'workout_intake.submit' as never,
+        payload: {
+          slots: selected.cards?.[0]?.data,
+        },
+      },
+    });
+
+    expect(draft.cards?.[0]).toMatchObject({
+      schemaType: 'workout.draft',
+      data: expect.objectContaining({
+        activityType: '健身',
+        city: '成都',
+        district: '锦江区',
+        poiName: '成都远洋太古里',
+      }),
+    });
+    expect(draftPublication.stagePrivateDraftForPublish).toHaveBeenCalledWith(
+      7,
+      101,
+      expect.objectContaining({
+        activityType: '健身',
+        city: '成都',
+        metadata: expect.objectContaining({
+          geoResolution: expect.objectContaining({
+            source: 'user_confirmed',
+          }),
+        }),
+      }),
+    );
+  });
+
   it('returns intake for generic nearby places without inventing a city', async () => {
     const { draftPublication, service, task } = makeService();
 

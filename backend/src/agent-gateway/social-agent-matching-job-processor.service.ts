@@ -13,6 +13,8 @@ import {
 } from '../common/display-text.util';
 import { FeatureFlagService } from '../common/feature-flag.service';
 import { RealtimeEventService } from '../realtime/realtime-event.service';
+import type { AgentLoopBrainRuntime } from './agent-loop.types';
+import { AgentLoopService } from './agent-loop.service';
 import {
   SocialRequestVisibility,
   UserSocialRequest,
@@ -53,6 +55,10 @@ import {
   transitionSocialAgentState,
   type SocialAgentTaskMemory,
 } from './social-agent-memory.util';
+import {
+  WorkoutAgentBrainService,
+  type WorkoutNoCandidatesDecision,
+} from './workout-loop/workout-agent-brain.service';
 
 const SOCIAL_REQUEST_ADVISORY_LOCK_NAMESPACE = 1_782_160_006;
 
@@ -149,6 +155,10 @@ export class SocialAgentMatchingJobProcessorService {
     private readonly featureFlags?: FeatureFlagService,
     @Optional()
     private readonly loopStateEvents?: SocialAgentLoopStateTransitionEventService,
+    @Optional()
+    private readonly workoutBrain?: WorkoutAgentBrainService,
+    @Optional()
+    private readonly agentLoop?: AgentLoopService,
   ) {}
 
   async processDueJobs(input: {
@@ -221,11 +231,10 @@ export class SocialAgentMatchingJobProcessorService {
       );
       const matchingFallback =
         searchResult.candidates.length === 0 && validation.publicIntent
-          ? await this.relaxation?.buildFallback({
-              ownerUserId: validation.ownerUserId,
-              query: searchResult.query,
-              socialRequest: validation.socialRequest,
-              publicIntent: validation.publicIntent,
+          ? await this.buildNoCandidatesFallback({
+              job,
+              validation,
+              searchResult,
             })
           : null;
       const finalized = await this.finalizeSearchResult({
@@ -275,6 +284,113 @@ export class SocialAgentMatchingJobProcessorService {
     } finally {
       clearInterval(heartbeat);
     }
+  }
+
+  private async buildNoCandidatesFallback(input: {
+    job: ClaimedMatchingJob;
+    validation: JobValidationResult;
+    searchResult: CandidatePoolSearchResult;
+  }): Promise<SocialAgentMatchingFallback | null> {
+    const fallback =
+      (await this.relaxation?.buildFallback({
+        ownerUserId: input.validation.ownerUserId,
+        query: input.searchResult.query,
+        socialRequest: input.validation.socialRequest,
+        publicIntent: input.validation.publicIntent!,
+      })) ?? null;
+    if (!fallback || !this.workoutBrain) return fallback;
+    try {
+      const decision = await this.decideNoCandidatesRecovery({
+        taskId: this.taskIdFromJob(input.job),
+        fallback,
+        noCandidatesFinal: input.job.parentJobId !== null,
+      });
+      if (!decision) return fallback;
+      return {
+        ...fallback,
+        recommendedStrategyId: decision.recommendedStrategyId,
+        agentDecision: {
+          source: 'workout_agent_brain',
+          reason: decision.reason,
+          recommendedStrategyId: decision.recommendedStrategyId,
+          observedCandidateCounts: decision.observedCandidateCounts,
+        },
+      };
+    } catch (error) {
+      this.logger.warn({
+        event: 'social_agent.matching_no_candidates_brain_failed',
+        matchingJobId: input.job.id,
+        message: error instanceof Error ? error.message : String(error),
+      });
+      return fallback;
+    }
+  }
+
+  private async decideNoCandidatesRecovery(input: {
+    taskId: number | null;
+    fallback: SocialAgentMatchingFallback;
+    noCandidatesFinal: boolean;
+  }): Promise<WorkoutNoCandidatesDecision | null> {
+    if (!this.workoutBrain) return null;
+    if (!this.agentLoop) {
+      return this.workoutBrain.decideNoCandidatesRecovery({
+        fallback: input.fallback,
+        noCandidatesFinal: input.noCandidatesFinal,
+      });
+    }
+
+    let decision: WorkoutNoCandidatesDecision | null = null;
+    const toolName = 'workout_agent.no_candidates_recovery';
+    const runtime: AgentLoopBrainRuntime = {
+      decide: ({ observations }) => {
+        if (observations.length === 0) {
+          return {
+            reason: 'select_no_candidates_recovery_strategy',
+            critique:
+              'Recommend a recovery path only; user still confirms by clicking a card action.',
+            tool: {
+              agent: 'Agent Brain',
+              toolName,
+              input: {
+                taskId: input.taskId,
+                recommendedStrategyId: input.fallback.recommendedStrategyId,
+                noCandidatesFinal: input.noCandidatesFinal,
+              },
+            },
+          };
+        }
+        return {
+          done: true,
+          reason: 'no_candidates_recovery_strategy_ready',
+          finalObservation: {
+            toolName,
+            status: 'completed',
+            decision,
+          },
+        };
+      },
+    };
+
+    await this.agentLoop.execute({
+      taskId: input.taskId,
+      goal: 'Workout agent recommends a safe matching recovery option.',
+      agent: 'Agent Brain',
+      plan: { reason: 'Workout no-candidates brain runtime', tools: [] },
+      brain: runtime,
+      maxToolCalls: 2,
+      runner: () => {
+        decision = this.workoutBrain!.decideNoCandidatesRecovery({
+          fallback: input.fallback,
+          noCandidatesFinal: input.noCandidatesFinal,
+        });
+        return Promise.resolve({
+          toolName,
+          status: 'observed',
+          decision,
+        });
+      },
+    });
+    return decision;
   }
 
   private startLeaseHeartbeat(
