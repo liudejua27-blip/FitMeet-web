@@ -1,4 +1,5 @@
 import { cleanDisplayText } from '../../common/display-text.util';
+import { extractKnownCity, sanitizeCity } from '../../common/city.util';
 import type { TravelSlotValidation, TravelSlots } from './travel-loop.types';
 
 const DESTINATION =
@@ -30,6 +31,8 @@ export function extractTravelSlots(input: {
       cleanDisplayText(previous.destination, '') ||
       extractDestination(text) ||
       undefined,
+    city: cleanDisplayText(previous.city, '') || extractCity(text) || undefined,
+    geoResolution: previous.geoResolution,
     departureTime:
       cleanDisplayText(previous.departureTime, '') ||
       extractDepartureTime(text) ||
@@ -91,6 +94,8 @@ export function normalizeTravelSlots(
 ): TravelSlots {
   return {
     destination: cleanDisplayText(value.destination, '') || undefined,
+    city: sanitizeCity(value.city) || undefined,
+    geoResolution: value.geoResolution,
     departureTime: cleanDisplayText(value.departureTime, '') || undefined,
     duration: cleanDisplayText(value.duration, '') || undefined,
     budgetRange: cleanDisplayText(value.budgetRange, '') || undefined,
@@ -121,6 +126,10 @@ function extractDestination(text: string): string | undefined {
   if (direct?.[1]) return direct[1].replace(/旅游|旅行|出游|玩$/, '');
   const match = text.match(DESTINATION);
   return match?.[1];
+}
+
+function extractCity(text: string): string | undefined {
+  return extractKnownCity(text) || undefined;
 }
 
 function extractDepartureTime(text: string): string | undefined {

@@ -1,6 +1,7 @@
 import { Injectable, Optional } from '@nestjs/common';
 
 import type { AgentTask } from '../entities/agent-task.entity';
+import { GeoResolverService } from '../geo/geo-resolver.service';
 import type {
   LoopAgentDecisionAction,
   LoopAgentDecisionBase,
@@ -29,6 +30,8 @@ export class TravelAgentBrainService {
   constructor(
     @Optional()
     private readonly understanding?: TravelUnderstandingService,
+    @Optional()
+    private readonly geoResolver?: GeoResolverService,
   ) {}
 
   async decideEntrance(input: {
@@ -75,6 +78,16 @@ export class TravelAgentBrainService {
     slots: TravelSlots;
     signal?: AbortSignal | null;
   }): Promise<TravelSlots> {
+    const understoodSlots = await this.understandSlots(input);
+    return this.resolveDestinationGeo(understoodSlots, input.message);
+  }
+
+  private async understandSlots(input: {
+    task?: AgentTask | null;
+    message: string;
+    slots: TravelSlots;
+    signal?: AbortSignal | null;
+  }): Promise<TravelSlots> {
     if (!this.understanding?.shouldCall(input)) return input.slots;
     const understanding = await this.understanding.understand({
       task: input.task ?? null,
@@ -87,5 +100,31 @@ export class TravelAgentBrainService {
       this.understanding.slotsFromUnderstanding(understanding),
       input.message,
     );
+  }
+
+  private async resolveDestinationGeo(
+    slots: TravelSlots,
+    message: string,
+  ): Promise<TravelSlots> {
+    if (!this.geoResolver || !slots.destination) return slots;
+    const geo = await this.geoResolver.resolveAsync({
+      message,
+      locationText: slots.destination,
+      city: slots.city,
+    });
+    const trustedCity =
+      geo.city && !geo.needsConfirmation && geo.confidence >= 0.65
+        ? geo.city
+        : slots.city;
+    const trustedDestination =
+      !geo.needsConfirmation && geo.locationText
+        ? geo.locationText
+        : slots.destination;
+    return {
+      ...slots,
+      destination: trustedDestination,
+      city: trustedCity,
+      geoResolution: geo,
+    };
   }
 }

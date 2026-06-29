@@ -79,6 +79,8 @@ export function buildTravelDraftCard(input: {
       socialRequestId: input.draft.socialRequestId,
       title,
       destination: input.slots.destination ?? '',
+      city: input.slots.city ?? null,
+      geoResolution: input.slots.geoResolution ?? null,
       departureTime: input.slots.departureTime ?? '',
       duration: input.slots.duration ?? null,
       budgetRange: input.slots.budgetRange ?? '',
@@ -133,6 +135,8 @@ export function buildTravelDraftCard(input: {
 function travelIntakeData(slots: TravelSlots, missing: string[]) {
   return {
     destination: slots.destination ?? null,
+    city: slots.city ?? null,
+    geoResolution: slots.geoResolution ?? null,
     departureTime: slots.departureTime ?? null,
     duration: slots.duration ?? null,
     budgetRange: slots.budgetRange ?? null,
