@@ -141,7 +141,7 @@ describe('SocialAgentMatchingJobProcessorService', () => {
         candidateCount: 1,
         candidateSnapshotId: 501,
         matchingJobStatus: MatchingJobStatus.CandidatesReady,
-        publicLoopStage: 'candidates_recommended',
+        publicLoopStage: 'candidates_ready',
         candidates: expect.arrayContaining([
           expect.objectContaining({
             candidateUserId: 8,

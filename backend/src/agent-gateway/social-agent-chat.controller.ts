@@ -1205,9 +1205,12 @@ export class SocialAgentChatController {
         hasAssistantDelta = wroteFallback;
       }
       if (!routeAssistantAlreadyPersistedByRun) {
+        const replaceLastAssistantTurn =
+          this.shouldUseDeterministicRouteReply(streamResult);
         await this.persistFinalRouteAssistantMemory(
           req.user.id,
           streamResult as SocialAgentIntentRouteResult,
+          { replaceLastAssistantTurn },
         );
       }
       this.writeApprovalRequiredEvents(write, userFacing.pendingConfirmations);

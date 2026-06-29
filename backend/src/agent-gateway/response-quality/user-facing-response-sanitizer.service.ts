@@ -363,7 +363,7 @@ export class UserFacingResponseSanitizerService {
     );
     if (publicIntentId && hasCandidateCard) {
       return {
-        stage: 'candidates_recommended',
+        stage: 'candidates_ready',
         publicIntentId,
         discoverHref,
         publicIntentHref,
@@ -462,6 +462,7 @@ export class UserFacingResponseSanitizerService {
           return 'NO_CANDIDATES';
         case 'no_candidates_final':
           return 'NO_CANDIDATES_FINAL';
+        case 'candidates_ready':
         case 'candidates_recommended':
           return 'CANDIDATES_READY';
         case 'contact_confirmation_required':
@@ -517,6 +518,7 @@ export class UserFacingResponseSanitizerService {
       stage !== 'safety_checking' &&
       stage !== 'no_candidates' &&
       stage !== 'no_candidates_final' &&
+      stage !== 'candidates_ready' &&
       stage !== 'candidates_recommended' &&
       stage !== 'contact_confirmation_required' &&
       stage !== 'messages_handoff' &&
