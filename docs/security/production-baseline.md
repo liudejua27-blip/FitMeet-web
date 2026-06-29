@@ -40,6 +40,17 @@ baseline, not a running issue list.
 - Use [../agent/feature-flags.md](../agent/feature-flags.md) for Agent kill
   switches and feature flags.
 
+## Supply Chain Gates
+
+- Dependabot monitors backend, frontend, GitHub Actions, and the backend Docker
+  base image.
+- The `Security Baseline` GitHub Actions workflow runs CodeQL, dependency
+  review for pull requests, Gitleaks secret scanning, and warning-level
+  production dependency audits.
+- Release archives still require local forbidden-file scans and SHA256 output.
+  Artifact signing or attestation is not yet implemented and remains a release
+  hardening item before enterprise-grade production claims.
+
 ## Deprecated Security Notes
 
 Per-incident or one-off security findings should live in incident runbooks or

@@ -98,4 +98,11 @@ Removal prerequisites:
 
 Target cleanup PR: Match candidate scratch-table retirement.
 
+Target cleanup deadline: before public beta traffic exceeds controlled internal QA.
+
+Production rule: `match_candidates` may not be used for public Discover
+matching or production candidate ranking. New matching work must use
+`candidate_search_index` for recall and `social_request_candidates` for
+persisted scored results.
+
 Owner: Backend / Data.

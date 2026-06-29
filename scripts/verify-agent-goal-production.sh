@@ -6,6 +6,7 @@ API_BASE_URL="${API_BASE_URL:-https://www.ourfitmeet.cn/api}"
 EXPECTED_RELEASE_COMMIT="${EXPECTED_RELEASE_COMMIT:-}"
 EXPECTED_RELEASE_BUILT_AT="${EXPECTED_RELEASE_BUILT_AT:-}"
 RUN_AGENT_BROWSER_QA="${RUN_AGENT_BROWSER_QA:-auto}"
+RELEASE_STRICT="${RELEASE_STRICT:-false}"
 TIMEOUT_SECONDS="${TIMEOUT_SECONDS:-20}"
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TMP_DIR="$(mktemp -d)"
@@ -375,11 +376,16 @@ case "${RUN_AGENT_BROWSER_QA}" in
     should_run_browser_qa=true
     ;;
   false)
+    if [[ "${RELEASE_STRICT}" == "1" || "${RELEASE_STRICT}" == "true" || "${RELEASE_STRICT}" == "TRUE" || "${RELEASE_STRICT}" == "yes" || "${RELEASE_STRICT}" == "YES" ]]; then
+      fail "RELEASE_STRICT=1 does not allow RUN_AGENT_BROWSER_QA=false."
+    fi
     should_run_browser_qa=false
     ;;
   auto)
     if [[ -n "${FITMEET_AGENT_BROWSER_QA_EMAIL:-}" && -n "${FITMEET_AGENT_BROWSER_QA_PASSWORD:-}" ]]; then
       should_run_browser_qa=true
+    elif [[ "${RELEASE_STRICT}" == "1" || "${RELEASE_STRICT}" == "true" || "${RELEASE_STRICT}" == "TRUE" || "${RELEASE_STRICT}" == "yes" || "${RELEASE_STRICT}" == "YES" ]]; then
+      fail "RELEASE_STRICT=1 requires FITMEET_AGENT_BROWSER_QA_EMAIL/PASSWORD or RUN_AGENT_BROWSER_QA=true."
     fi
     ;;
   *)

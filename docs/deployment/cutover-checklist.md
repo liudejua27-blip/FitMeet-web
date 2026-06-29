@@ -25,7 +25,7 @@ These must be cleared before claiming production is live:
 - Railway CLI is not installed/authenticated in the current shell; dashboard
   deploy or a logged-in CLI/token is required.
 - Docker Hub access from the current shell times out while fetching
-  `node:20-alpine`; retry on a stable network or pre-pull the image before
+`node:22-alpine`; retry on a stable network or pre-pull the image before
   using local Railway Docker proof.
 - iOS Release API is correct for the Railway topology, but Apple
   `DEVELOPMENT_TEAM`, App Store Connect bundle registration for

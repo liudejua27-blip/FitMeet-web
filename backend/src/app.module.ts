@@ -32,6 +32,14 @@ import { AdminRbacModule } from './admin-rbac/admin-rbac.module';
 const shouldSkipThrottling = () =>
   process.env.FITMEET_DISABLE_THROTTLE === 'true';
 
+const parsePositiveInteger = (
+  value: string | undefined,
+  fallback: number,
+): number => {
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
+};
+
 @Module({
   imports: [
     ConfigModule.forRoot({
@@ -78,8 +86,14 @@ const shouldSkipThrottling = () =>
             'true',
           ssl: dbSsl ? { rejectUnauthorized: false } : undefined,
           extra: {
-            max: 100,
-            min: 10,
+            max: parsePositiveInteger(
+              configService.get<string>('DB_POOL_MAX'),
+              30,
+            ),
+            min: parsePositiveInteger(
+              configService.get<string>('DB_POOL_MIN'),
+              2,
+            ),
             idleTimeoutMillis: 30000,
             connectionTimeoutMillis: 5000,
           },

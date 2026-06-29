@@ -39,6 +39,11 @@ const databaseUrl = process.env.DATABASE_URL;
 const dbSsl =
   process.env.DB_SSL === 'true' || process.env.PGSSLMODE === 'require';
 
+function parsePositiveInteger(value: string | undefined, fallback: number) {
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
+}
+
 export default new DataSource({
   type: 'postgres',
   ...(databaseUrl
@@ -55,4 +60,10 @@ export default new DataSource({
   migrationsTransactionMode: 'each',
   synchronize: false,
   ssl: dbSsl ? { rejectUnauthorized: false } : undefined,
+  extra: {
+    max: parsePositiveInteger(process.env.DB_POOL_MAX, 30),
+    min: parsePositiveInteger(process.env.DB_POOL_MIN, 2),
+    idleTimeoutMillis: 30000,
+    connectionTimeoutMillis: 5000,
+  },
 });

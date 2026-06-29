@@ -41,19 +41,20 @@ services:
     image: redis:7-alpine
     container_name: fitness-redis
     restart: always
-    command: >
-      redis-server
-      --requirepass ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
-      --maxmemory 512mb
-      --maxmemory-policy allkeys-lru
-      --appendonly yes
-      --appendfsync everysec
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
+    command:
+      [
+        "sh",
+        "-c",
+        "redis-server --requirepass \"$${REDIS_PASSWORD}\" --maxmemory 512mb --maxmemory-policy allkeys-lru --appendonly yes --appendfsync everysec",
+      ]
     expose:
       - "6379"
     volumes:
       - redis_data:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:?REDIS_PASSWORD is required}", "ping"]
+      test: ["CMD-SHELL", "REDISCLI_AUTH=\"$${REDIS_PASSWORD}\" redis-cli ping"]
       interval: 10s
       timeout: 3s
       retries: 5
@@ -74,9 +75,10 @@ services:
     volumes:
       - mongo_data:/data/db
       - mongo_config:/data/configdb
+      - ./deploy/mongo-healthcheck.sh:/usr/local/bin/mongo-healthcheck.sh:ro
     command: --wiredTigerCacheSizeGB 1.5
     healthcheck:
-      test: mongosh --username ${MONGO_USERNAME:?MONGO_USERNAME is required} --password ${MONGO_PASSWORD:?MONGO_PASSWORD is required} --authenticationDatabase admin --eval "db.adminCommand('ping')" --quiet
+      test: ["CMD-SHELL", "sh /usr/local/bin/mongo-healthcheck.sh"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -113,7 +115,7 @@ services:
       context: ./backend
       dockerfile: Dockerfile.prod
       args:
-        NODE_IMAGE: ${NODE_IMAGE:-node:20-alpine}
+        NODE_IMAGE: ${NODE_IMAGE:-node:22-alpine}
     container_name: fitness-backend
     restart: always
     environment:
@@ -127,6 +129,8 @@ services:
       DB_PORT: 5432
       DB_MIGRATIONS_RUN: "false"
       DB_SYNCHRONIZE: "false"
+      DB_POOL_MAX: ${DB_POOL_MAX:-30}
+      DB_POOL_MIN: ${DB_POOL_MIN:-2}
       REDIS_HOST: redis
       REDIS_PORT: 6379
       SOCIAL_AGENT_CACHE_BACKEND: ${SOCIAL_AGENT_CACHE_BACKEND:-redis}
@@ -174,7 +178,7 @@ services:
       context: ./backend
       dockerfile: Dockerfile.prod
       args:
-        NODE_IMAGE: ${NODE_IMAGE:-node:20-alpine}
+        NODE_IMAGE: ${NODE_IMAGE:-node:22-alpine}
     container_name: fitness-subagent-worker
     restart: always
     command: ["node", "dist/agent-gateway/subagent-worker.cli.js"]
@@ -188,6 +192,8 @@ services:
       DB_PORT: 5432
       DB_MIGRATIONS_RUN: "false"
       DB_SYNCHRONIZE: "false"
+      DB_POOL_MAX: ${DB_POOL_MAX:-30}
+      DB_POOL_MIN: ${DB_POOL_MIN:-2}
       REDIS_HOST: redis
       REDIS_PORT: 6379
       SOCIAL_AGENT_CACHE_BACKEND: ${SOCIAL_AGENT_CACHE_BACKEND:-redis}
