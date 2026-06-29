@@ -3,9 +3,16 @@ import { z } from 'zod';
 
 import { cleanDisplayText } from '../../common/display-text.util';
 import type { AgentTask } from '../entities/agent-task.entity';
+import type {
+  LoopSlotMeta,
+  LoopSlotSource,
+} from '../loop-agent/loop-agent.types';
 import { SocialAgentToolJsonModelService } from '../social-agent-tool-json-model.service';
 import type { TravelSlots } from './travel-loop.types';
 import { validateTravelSlots } from './travel-slot-extractor';
+
+type TravelSlotMetaKey = keyof NonNullable<TravelSlots['slotMeta']>;
+type TravelTextSlotKey = Exclude<TravelSlotMetaKey, 'tags'>;
 
 const TravelLocationMentionSchema = z
   .object({
@@ -111,6 +118,24 @@ export class TravelUnderstandingService {
       this.text(understanding.district);
     const poiName =
       this.text(locationMention?.poiHint) || this.text(understanding.poiName);
+    const tagList = this.stringList(understanding.tags);
+    const slotMeta = this.slotMetaFromUnderstanding({
+      understanding,
+      destination,
+      city,
+      district,
+      poiName,
+      departureTime: this.text(understanding.departureTime),
+      duration: this.text(understanding.duration),
+      budgetRange: this.text(understanding.budgetRange),
+      transportMode: this.text(understanding.transportMode),
+      tags: tagList,
+      genderPreference: this.text(understanding.genderPreference),
+      photoPreference: this.text(understanding.photoPreference),
+      accommodationPreference: this.text(understanding.accommodationPreference),
+      foodPreference: this.text(understanding.foodPreference),
+      candidatePreference: this.text(understanding.candidatePreference),
+    });
     return {
       destination: destination || undefined,
       city: city || undefined,
@@ -120,7 +145,7 @@ export class TravelUnderstandingService {
       duration: this.text(understanding.duration) || undefined,
       budgetRange: this.text(understanding.budgetRange) || undefined,
       transportMode: this.text(understanding.transportMode) || undefined,
-      tags: this.stringList(understanding.tags),
+      tags: tagList,
       genderPreference: this.text(understanding.genderPreference) || undefined,
       photoPreference: this.text(understanding.photoPreference) || undefined,
       accommodationPreference:
@@ -128,6 +153,7 @@ export class TravelUnderstandingService {
       foodPreference: this.text(understanding.foodPreference) || undefined,
       candidatePreference:
         this.text(understanding.candidatePreference) || undefined,
+      slotMeta,
     };
   }
 
@@ -141,31 +167,88 @@ export class TravelUnderstandingService {
       .filter(Boolean)
       .filter((item, index, array) => array.indexOf(item) === index)
       .slice(0, 8);
+    const slotMeta: NonNullable<TravelSlots['slotMeta']> = {};
+    const destination = this.destination(
+      ruleSlots,
+      llmSlots,
+      message,
+      slotMeta,
+    );
+    const city = this.pickSlot(ruleSlots, llmSlots, 'city', slotMeta);
+    const district = this.pickSlot(ruleSlots, llmSlots, 'district', slotMeta);
+    const poiName = this.pickSlot(ruleSlots, llmSlots, 'poiName', slotMeta);
+    const departureTime = this.pickSlot(
+      ruleSlots,
+      llmSlots,
+      'departureTime',
+      slotMeta,
+    );
+    const duration = this.pickSlot(ruleSlots, llmSlots, 'duration', slotMeta);
+    const budgetRange = this.pickSlot(
+      ruleSlots,
+      llmSlots,
+      'budgetRange',
+      slotMeta,
+    );
+    const transportMode = this.pickSlot(
+      ruleSlots,
+      llmSlots,
+      'transportMode',
+      slotMeta,
+    );
+    const genderPreference = this.pickSlot(
+      ruleSlots,
+      llmSlots,
+      'genderPreference',
+      slotMeta,
+    );
+    const photoPreference = this.pickSlot(
+      ruleSlots,
+      llmSlots,
+      'photoPreference',
+      slotMeta,
+    );
+    const accommodationPreference = this.pickSlot(
+      ruleSlots,
+      llmSlots,
+      'accommodationPreference',
+      slotMeta,
+    );
+    const foodPreference = this.pickSlot(
+      ruleSlots,
+      llmSlots,
+      'foodPreference',
+      slotMeta,
+    );
+    const candidatePreference = this.pickSlot(
+      ruleSlots,
+      llmSlots,
+      'candidatePreference',
+      slotMeta,
+    );
+    if (tags.length > 0) {
+      slotMeta.tags = {
+        source: llmSlots.tags?.length ? 'llm' : 'rule',
+        confidence: llmSlots.tags?.length ? 0.78 : 0.68,
+      };
+    }
     return {
       ...ruleSlots,
-      destination: this.destination(ruleSlots, llmSlots, message),
-      city: llmSlots.city || ruleSlots.city,
-      district: llmSlots.district || ruleSlots.district,
-      poiName: llmSlots.poiName || ruleSlots.poiName,
-      departureTime: ruleSlots.departureTime || llmSlots.departureTime,
-      duration: ruleSlots.duration || llmSlots.duration,
-      budgetRange: ruleSlots.budgetRange || llmSlots.budgetRange,
-      transportMode: ruleSlots.transportMode || llmSlots.transportMode,
+      destination,
+      city,
+      district,
+      poiName,
+      departureTime,
+      duration,
+      budgetRange,
+      transportMode,
       tags,
-      genderPreference:
-        llmSlots.genderPreference || ruleSlots.genderPreference || undefined,
-      photoPreference:
-        llmSlots.photoPreference || ruleSlots.photoPreference || undefined,
-      accommodationPreference:
-        llmSlots.accommodationPreference ||
-        ruleSlots.accommodationPreference ||
-        undefined,
-      foodPreference:
-        llmSlots.foodPreference || ruleSlots.foodPreference || undefined,
-      candidatePreference:
-        llmSlots.candidatePreference ||
-        ruleSlots.candidatePreference ||
-        undefined,
+      genderPreference,
+      photoPreference,
+      accommodationPreference,
+      foodPreference,
+      candidatePreference,
+      slotMeta: Object.keys(slotMeta).length > 0 ? slotMeta : undefined,
     };
   }
 
@@ -173,18 +256,133 @@ export class TravelUnderstandingService {
     ruleSlots: TravelSlots,
     llmSlots: Partial<TravelSlots>,
     message: string,
+    slotMeta?: NonNullable<TravelSlots['slotMeta']>,
   ): string | undefined {
     const ruleDestination = this.text(ruleSlots.destination);
     const llmDestination = this.text(llmSlots.destination);
-    if (!ruleDestination) return llmDestination || undefined;
+    if (!ruleDestination) {
+      if (llmDestination && slotMeta) {
+        slotMeta.destination = this.meta(llmSlots, 'destination', 'llm', 0.78);
+      }
+      return llmDestination || undefined;
+    }
+    const ruleMeta = this.meta(ruleSlots, 'destination', 'rule', 0.68);
+    const llmMeta = this.meta(llmSlots, 'destination', 'llm', 0.78);
     if (
       llmDestination &&
       llmDestination !== ruleDestination &&
-      this.messageContainsDestinationAlias(message, ruleDestination)
+      this.messageContainsDestinationAlias(message, ruleDestination) &&
+      this.rank(llmMeta.source) >= this.rank(ruleMeta.source)
     ) {
+      if (slotMeta) {
+        slotMeta.destination = llmMeta;
+      }
       return llmDestination;
     }
+    if (slotMeta) {
+      slotMeta.destination = ruleMeta;
+    }
     return ruleDestination;
+  }
+
+  private pickSlot(
+    ruleSlots: TravelSlots,
+    llmSlots: Partial<TravelSlots>,
+    key: TravelTextSlotKey,
+    slotMeta: NonNullable<TravelSlots['slotMeta']>,
+  ): string | undefined {
+    const ruleValue = this.text((ruleSlots as Record<string, unknown>)[key]);
+    const llmValue = this.text((llmSlots as Record<string, unknown>)[key]);
+    if (!ruleValue && !llmValue) return undefined;
+    const ruleMeta = this.meta(ruleSlots, key, 'rule', 0.68);
+    const llmMeta = this.meta(llmSlots, key, 'llm', 0.78);
+    const useLlm =
+      Boolean(llmValue) &&
+      (!ruleValue ||
+        this.rank(llmMeta.source) > this.rank(ruleMeta.source) ||
+        (this.rank(llmMeta.source) === this.rank(ruleMeta.source) &&
+          llmMeta.confidence >= ruleMeta.confidence));
+    if (useLlm) {
+      slotMeta[key] = llmMeta;
+      return llmValue;
+    }
+    slotMeta[key] = ruleMeta;
+    return ruleValue;
+  }
+
+  private meta(
+    slots: Partial<TravelSlots>,
+    key: TravelSlotMetaKey,
+    fallbackSource: LoopSlotSource,
+    fallbackConfidence: number,
+  ): LoopSlotMeta {
+    return (
+      slots.slotMeta?.[key] ?? {
+        source: fallbackSource,
+        confidence: fallbackConfidence,
+      }
+    );
+  }
+
+  private rank(source: LoopSlotSource) {
+    switch (source) {
+      case 'default':
+        return 0;
+      case 'memory':
+        return 10;
+      case 'rule':
+        return 20;
+      case 'llm':
+        return 30;
+      case 'geo':
+        return 40;
+      case 'user_confirmed':
+        return 50;
+      case 'user':
+        return 60;
+    }
+  }
+
+  private slotMetaFromUnderstanding(input: {
+    understanding: TravelUnderstandingResult;
+    destination: string;
+    city: string;
+    district: string;
+    poiName: string;
+    departureTime: string;
+    duration: string;
+    budgetRange: string;
+    transportMode: string;
+    tags: string[];
+    genderPreference: string;
+    photoPreference: string;
+    accommodationPreference: string;
+    foodPreference: string;
+    candidatePreference: string;
+  }): TravelSlots['slotMeta'] {
+    const confidence = input.understanding.confidence;
+    const meta: TravelSlots['slotMeta'] = {};
+    for (const key of [
+      'destination',
+      'city',
+      'district',
+      'poiName',
+      'departureTime',
+      'duration',
+      'budgetRange',
+      'transportMode',
+      'genderPreference',
+      'photoPreference',
+      'accommodationPreference',
+      'foodPreference',
+      'candidatePreference',
+    ] as const) {
+      if (input[key]) meta[key] = { source: 'llm', confidence };
+    }
+    if (input.tags.length > 0) {
+      meta.tags = { source: 'llm', confidence };
+    }
+    return Object.keys(meta).length > 0 ? meta : undefined;
   }
 
   private messageContainsDestinationAlias(

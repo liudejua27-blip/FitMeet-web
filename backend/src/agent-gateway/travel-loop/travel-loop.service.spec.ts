@@ -222,7 +222,88 @@ describe('TravelLoopService', () => {
         candidatePreference: '不赶路',
       }),
     });
+    expect(
+      (result.task.memory as Record<string, unknown>).travelLoop,
+    ).toMatchObject({
+      slots: expect.objectContaining({
+        slotMeta: expect.objectContaining({
+          destination: { source: 'llm', confidence: 0.9 },
+          city: { source: 'llm', confidence: 0.9 },
+          district: { source: 'llm', confidence: 0.9 },
+          poiName: { source: 'llm', confidence: 0.9 },
+        }),
+      }),
+    });
     expect(draftPublication.stagePrivateDraftForPublish).not.toHaveBeenCalled();
+  });
+
+  it('keeps user-confirmed travel destination above later LLM guesses', async () => {
+    const toolJson = {
+      callJson: jest.fn().mockResolvedValue({
+        intent: 'travel',
+        confidence: 0.84,
+        locationMention: {
+          rawText: '帝都太古里',
+          normalizedText: '三里屯太古里',
+          cityHint: '北京',
+          districtHint: '朝阳区',
+          poiHint: '三里屯太古里',
+          relation: 'near',
+          needsGeoResolution: true,
+        },
+        departureTime: '周末',
+        budgetRange: '1000元',
+        transportMode: '高铁',
+        missing: [],
+        assumptions: [],
+        needsClarification: false,
+      }),
+    };
+    const travelBrain = new TravelAgentBrainService(
+      new TravelUnderstandingService(toolJson as never),
+    );
+    const task = makeTask({
+      memory: {
+        travelLoop: {
+          stage: 'intake',
+          slots: {
+            destination: '成都锦江区成都远洋太古里',
+            city: '成都',
+            departureTime: '周末',
+            budgetRange: '1000元',
+            transportMode: '高铁',
+            slotMeta: {
+              destination: { source: 'user_confirmed', confidence: 1 },
+              city: { source: 'user_confirmed', confidence: 1 },
+            },
+          },
+        },
+      },
+    });
+    const { service } = makeService(task, travelBrain as never);
+
+    const result = await service.continueEntrance({
+      ownerUserId: 7,
+      task,
+      message: '还是帝都太古里吧',
+    });
+
+    expect(toolJson.callJson).toHaveBeenCalled();
+    expect(result.result.cards?.[0]).toMatchObject({
+      schemaType: 'travel.intake',
+      data: expect.objectContaining({
+        destination: '成都锦江区成都远洋太古里',
+        city: '成都',
+      }),
+    });
+    expect((task.memory as Record<string, unknown>).travelLoop).toMatchObject({
+      slots: expect.objectContaining({
+        slotMeta: expect.objectContaining({
+          destination: { source: 'user_confirmed', confidence: 1 },
+          city: { source: 'user_confirmed', confidence: 1 },
+        }),
+      }),
+    });
   });
 
   it('resolves travel destination through GeoResolver and carries city into the draft', async () => {

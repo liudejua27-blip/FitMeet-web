@@ -4,9 +4,16 @@ import { z } from 'zod';
 import { sanitizeCity } from '../../common/city.util';
 import { cleanDisplayText } from '../../common/display-text.util';
 import type { AgentTask } from '../entities/agent-task.entity';
+import type {
+  LoopSlotMeta,
+  LoopSlotSource,
+} from '../loop-agent/loop-agent.types';
 import { SocialAgentToolJsonModelService } from '../social-agent-tool-json-model.service';
 import type { FriendSlots } from './friend-loop.types';
 import { validateFriendSlots } from './friend-slot-extractor';
+
+type FriendSlotMetaKey = keyof NonNullable<FriendSlots['slotMeta']>;
+type FriendTextSlotKey = Exclude<FriendSlotMetaKey, 'topicTags'>;
 
 const FriendLocationMentionSchema = z
   .object({
@@ -117,6 +124,21 @@ export class FriendUnderstandingService {
       this.text(understanding.district);
     const poiName =
       this.text(locationMention?.poiHint) || this.text(understanding.poiName);
+    const slotMeta = this.slotMetaFromUnderstanding({
+      understanding,
+      friendGoal: this.text(understanding.friendGoal),
+      city,
+      district,
+      poiName,
+      locationText,
+      topicTags: this.stringList(understanding.topicTags),
+      genderPreference: this.text(understanding.genderPreference),
+      bodyPreference: this.text(understanding.bodyPreference),
+      appearancePreference: this.text(understanding.appearancePreference),
+      scenePreference: this.text(understanding.scenePreference),
+      timePreference: this.text(understanding.timePreference),
+      candidatePreference: this.text(understanding.candidatePreference),
+    });
     return {
       friendGoal: this.text(understanding.friendGoal) || undefined,
       city: sanitizeCity(city) ?? undefined,
@@ -132,6 +154,7 @@ export class FriendUnderstandingService {
       timePreference: this.text(understanding.timePreference) || undefined,
       candidatePreference:
         this.text(understanding.candidatePreference) || undefined,
+      slotMeta,
     };
   }
 
@@ -147,42 +170,196 @@ export class FriendUnderstandingService {
       .filter(Boolean)
       .filter((item, index, array) => array.indexOf(item) === index)
       .slice(0, 8);
+    const slotMeta: NonNullable<FriendSlots['slotMeta']> = {};
+    const friendGoal = this.friendGoal(ruleSlots, llmSlots, slotMeta);
+    const city = this.pickSlot(ruleSlots, llmSlots, 'city', slotMeta);
+    const district = this.pickSlot(ruleSlots, llmSlots, 'district', slotMeta);
+    const poiName = this.pickSlot(ruleSlots, llmSlots, 'poiName', slotMeta);
+    const locationText = this.pickSlot(
+      ruleSlots,
+      llmSlots,
+      'locationText',
+      slotMeta,
+    );
+    const genderPreference = this.pickSlot(
+      ruleSlots,
+      llmSlots,
+      'genderPreference',
+      slotMeta,
+    );
+    const bodyPreference = this.pickSlot(
+      ruleSlots,
+      llmSlots,
+      'bodyPreference',
+      slotMeta,
+    );
+    const appearancePreference = this.pickSlot(
+      ruleSlots,
+      llmSlots,
+      'appearancePreference',
+      slotMeta,
+    );
+    const scenePreference = this.pickSlot(
+      ruleSlots,
+      llmSlots,
+      'scenePreference',
+      slotMeta,
+    );
+    const timePreference = this.pickSlot(
+      ruleSlots,
+      llmSlots,
+      'timePreference',
+      slotMeta,
+    );
+    const candidatePreference = this.pickSlot(
+      ruleSlots,
+      llmSlots,
+      'candidatePreference',
+      slotMeta,
+    );
+    if (topicTags.length > 0) {
+      slotMeta.topicTags = {
+        source: llmSlots.topicTags?.length ? 'llm' : 'rule',
+        confidence: llmSlots.topicTags?.length ? 0.78 : 0.68,
+      };
+    }
     return {
       ...ruleSlots,
-      friendGoal: this.friendGoal(ruleSlots, llmSlots),
-      city: llmSlots.city || ruleSlots.city,
-      district: llmSlots.district || ruleSlots.district,
-      poiName: llmSlots.poiName || ruleSlots.poiName,
-      locationText: llmSlots.locationText || ruleSlots.locationText,
+      friendGoal,
+      city,
+      district,
+      poiName,
+      locationText,
       topicTags,
-      genderPreference:
-        llmSlots.genderPreference || ruleSlots.genderPreference || undefined,
-      bodyPreference:
-        llmSlots.bodyPreference || ruleSlots.bodyPreference || undefined,
-      appearancePreference:
-        llmSlots.appearancePreference ||
-        ruleSlots.appearancePreference ||
-        undefined,
-      scenePreference:
-        llmSlots.scenePreference || ruleSlots.scenePreference || undefined,
-      timePreference:
-        ruleSlots.timePreference || llmSlots.timePreference || undefined,
-      candidatePreference:
-        llmSlots.candidatePreference ||
-        ruleSlots.candidatePreference ||
-        undefined,
+      genderPreference,
+      bodyPreference,
+      appearancePreference,
+      scenePreference,
+      timePreference,
+      candidatePreference,
+      slotMeta: Object.keys(slotMeta).length > 0 ? slotMeta : undefined,
     };
   }
 
   private friendGoal(
     ruleSlots: FriendSlots,
     llmSlots: Partial<FriendSlots>,
+    slotMeta?: NonNullable<FriendSlots['slotMeta']>,
   ): string | undefined {
     const ruleGoal = this.text(ruleSlots.friendGoal);
     const llmGoal = this.text(llmSlots.friendGoal);
-    if (!ruleGoal) return llmGoal || undefined;
-    if (llmGoal && ruleGoal === '认识新朋友') return llmGoal;
+    if (!ruleGoal) {
+      if (llmGoal && slotMeta) {
+        slotMeta.friendGoal = this.meta(llmSlots, 'friendGoal', 'llm', 0.78);
+      }
+      return llmGoal || undefined;
+    }
+    if (llmGoal && ruleGoal === '认识新朋友') {
+      if (slotMeta) {
+        slotMeta.friendGoal = this.meta(llmSlots, 'friendGoal', 'llm', 0.78);
+      }
+      return llmGoal;
+    }
+    if (slotMeta) {
+      slotMeta.friendGoal = this.meta(ruleSlots, 'friendGoal', 'rule', 0.68);
+    }
     return ruleGoal;
+  }
+
+  private pickSlot(
+    ruleSlots: FriendSlots,
+    llmSlots: Partial<FriendSlots>,
+    key: FriendTextSlotKey,
+    slotMeta: NonNullable<FriendSlots['slotMeta']>,
+  ): string | undefined {
+    const ruleValue = this.text((ruleSlots as Record<string, unknown>)[key]);
+    const llmValue = this.text((llmSlots as Record<string, unknown>)[key]);
+    if (!ruleValue && !llmValue) return undefined;
+    const ruleMeta = this.meta(ruleSlots, key, 'rule', 0.68);
+    const llmMeta = this.meta(llmSlots, key, 'llm', 0.78);
+    const useLlm =
+      Boolean(llmValue) &&
+      (!ruleValue ||
+        this.rank(llmMeta.source) > this.rank(ruleMeta.source) ||
+        (this.rank(llmMeta.source) === this.rank(ruleMeta.source) &&
+          llmMeta.confidence >= ruleMeta.confidence));
+    if (useLlm) {
+      slotMeta[key] = llmMeta;
+      return llmValue;
+    }
+    slotMeta[key] = ruleMeta;
+    return ruleValue;
+  }
+
+  private meta(
+    slots: Partial<FriendSlots>,
+    key: FriendSlotMetaKey,
+    fallbackSource: LoopSlotSource,
+    fallbackConfidence: number,
+  ): LoopSlotMeta {
+    return (
+      slots.slotMeta?.[key] ?? {
+        source: fallbackSource,
+        confidence: fallbackConfidence,
+      }
+    );
+  }
+
+  private rank(source: LoopSlotSource) {
+    switch (source) {
+      case 'default':
+        return 0;
+      case 'memory':
+        return 10;
+      case 'rule':
+        return 20;
+      case 'llm':
+        return 30;
+      case 'geo':
+        return 40;
+      case 'user_confirmed':
+        return 50;
+      case 'user':
+        return 60;
+    }
+  }
+
+  private slotMetaFromUnderstanding(input: {
+    understanding: FriendUnderstandingResult;
+    friendGoal: string;
+    city: string;
+    district: string;
+    poiName: string;
+    locationText: string;
+    topicTags: string[];
+    genderPreference: string;
+    bodyPreference: string;
+    appearancePreference: string;
+    scenePreference: string;
+    timePreference: string;
+    candidatePreference: string;
+  }): FriendSlots['slotMeta'] {
+    const confidence = input.understanding.confidence;
+    const meta: FriendSlots['slotMeta'] = {};
+    for (const key of [
+      'friendGoal',
+      'city',
+      'district',
+      'poiName',
+      'locationText',
+      'genderPreference',
+      'bodyPreference',
+      'appearancePreference',
+      'scenePreference',
+      'timePreference',
+      'candidatePreference',
+    ] as const) {
+      if (input[key]) meta[key] = { source: 'llm', confidence };
+    }
+    if (input.topicTags.length > 0) {
+      meta.topicTags = { source: 'llm', confidence };
+    }
+    return Object.keys(meta).length > 0 ? meta : undefined;
   }
 
   private prompt(input: {

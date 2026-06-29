@@ -360,7 +360,92 @@ describe('FriendLoopService', () => {
         candidatePreference: '兴趣相近',
       }),
     });
+    expect(
+      (result.task.memory as Record<string, unknown>).friendLoop,
+    ).toMatchObject({
+      slots: expect.objectContaining({
+        slotMeta: expect.objectContaining({
+          locationText: { source: 'llm', confidence: 0.88 },
+          city: { source: 'llm', confidence: 0.88 },
+          district: { source: 'llm', confidence: 0.88 },
+          poiName: { source: 'llm', confidence: 0.88 },
+        }),
+      }),
+    });
     expect(draftPublication.stagePrivateDraftForPublish).not.toHaveBeenCalled();
+  });
+
+  it('keeps user-confirmed friend location above later LLM guesses', async () => {
+    const toolJson = {
+      callJson: jest.fn().mockResolvedValue({
+        intent: 'friend',
+        confidence: 0.86,
+        friendGoal: '认识同城朋友',
+        locationMention: {
+          rawText: '帝都太古里',
+          normalizedText: '三里屯太古里',
+          cityHint: '北京',
+          districtHint: '朝阳区',
+          poiHint: '三里屯太古里',
+          relation: 'near',
+          needsGeoResolution: true,
+        },
+        topicTags: ['咖啡'],
+        genderPreference: '不限性别',
+        bodyPreference: '身材不限',
+        appearancePreference: '外貌不限，看聊得来',
+        missing: [],
+        assumptions: [],
+        needsClarification: false,
+      }),
+    };
+    const friendBrain = new FriendAgentBrainService(
+      new FriendUnderstandingService(toolJson as never),
+    );
+    const task = makeTask({
+      memory: {
+        friendLoop: {
+          stage: 'intake',
+          slots: {
+            friendGoal: '认识同城朋友',
+            city: '成都',
+            locationText: '成都锦江区成都远洋太古里',
+            topicTags: ['咖啡'],
+            genderPreference: '不限性别',
+            bodyPreference: '身材不限',
+            appearancePreference: '外貌不限，看聊得来',
+            slotMeta: {
+              city: { source: 'user_confirmed', confidence: 1 },
+              locationText: { source: 'user_confirmed', confidence: 1 },
+            },
+          },
+        },
+      },
+    });
+    const { service } = makeService(task, friendBrain as never);
+
+    const result = await service.continueEntrance({
+      ownerUserId: 7,
+      task,
+      message: '还是帝都太古里吧',
+    });
+
+    expect(toolJson.callJson).toHaveBeenCalled();
+    expect(result.result.cards?.[0]).toMatchObject({
+      schemaType: 'friend.intake',
+      data: expect.objectContaining({
+        city: '成都',
+        locationText: '成都锦江区成都远洋太古里',
+      }),
+    });
+    expect((task.memory as Record<string, unknown>).friendLoop).toMatchObject({
+      slots: expect.objectContaining({
+        slotMeta: expect.objectContaining({
+          city: { source: 'user_confirmed', confidence: 1 },
+          locationText: { source: 'user_confirmed', confidence: 1 },
+        }),
+      }),
+    });
   });
 
   it('updates an active friend loop from natural-language follow-up slots', async () => {

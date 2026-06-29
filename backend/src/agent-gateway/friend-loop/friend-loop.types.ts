@@ -1,4 +1,5 @@
 import type {
+  LoopSlotMeta,
   LoopSlotValidation,
   LoopSlots,
   LoopStage,
@@ -34,6 +35,23 @@ export type FriendSlots = LoopSlots & {
   scenePreference?: string;
   timePreference?: string;
   candidatePreference?: string;
+  slotMeta?: Partial<
+    Record<
+      | 'friendGoal'
+      | 'city'
+      | 'locationText'
+      | 'district'
+      | 'poiName'
+      | 'topicTags'
+      | 'genderPreference'
+      | 'bodyPreference'
+      | 'appearancePreference'
+      | 'scenePreference'
+      | 'timePreference'
+      | 'candidatePreference',
+      LoopSlotMeta
+    >
+  >;
   visibilityPreference?: 'private';
 };
 
