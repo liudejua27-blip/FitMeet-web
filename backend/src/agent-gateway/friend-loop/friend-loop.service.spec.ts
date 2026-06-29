@@ -186,6 +186,45 @@ describe('FriendLoopService', () => {
     expect(draftPublication.stagePrivateDraftForPublish).not.toHaveBeenCalled();
   });
 
+  it('updates an active friend loop from natural-language follow-up slots', async () => {
+    const task = makeTask({
+      memory: {
+        friendLoop: {
+          stage: 'intake',
+          slots: {
+            friendGoal: '认识新朋友',
+          },
+        },
+      },
+    });
+    const { draftPublication, service } = makeService(task);
+
+    const result = await service.continueEntrance({
+      ownerUserId: 7,
+      task,
+      message: '改成上海，周末咖啡聊天',
+    });
+
+    expect(result.result.cards?.[0]).toMatchObject({
+      schemaType: 'friend.intake',
+      data: expect.objectContaining({
+        friendGoal: '认识新朋友',
+        city: '上海',
+        topicTags: expect.arrayContaining(['咖啡', '聊天']),
+        timePreference: '周末',
+        missingFields: [],
+      }),
+    });
+    expect((task.memory as Record<string, unknown>).friendLoop).toMatchObject({
+      stage: 'intake',
+      slots: expect.objectContaining({
+        city: '上海',
+        timePreference: '周末',
+      }),
+    });
+    expect(draftPublication.stagePrivateDraftForPublish).not.toHaveBeenCalled();
+  });
+
   it('keeps friend understanding fallback conservative when model runtime is unavailable', async () => {
     const friendBrain = new FriendAgentBrainService(
       new FriendUnderstandingService(),

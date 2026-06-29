@@ -194,6 +194,47 @@ describe('TravelLoopService', () => {
     expect(draftPublication.stagePrivateDraftForPublish).not.toHaveBeenCalled();
   });
 
+  it('updates an active travel loop from natural-language follow-up slots', async () => {
+    const task = makeTask({
+      memory: {
+        travelLoop: {
+          stage: 'intake',
+          slots: {
+            destination: '成都',
+            departureTime: '周末',
+          },
+        },
+      },
+    });
+    const { draftPublication, service } = makeService(task);
+
+    const result = await service.continueEntrance({
+      ownerUserId: 7,
+      task,
+      message: '预算改成1500元，高铁，找会拍照的',
+    });
+
+    expect(result.result.cards?.[0]).toMatchObject({
+      schemaType: 'travel.intake',
+      data: expect.objectContaining({
+        destination: '成都',
+        departureTime: '周末',
+        budgetRange: '1500元',
+        transportMode: '高铁',
+        photoPreference: '会拍照优先',
+        missingFields: [],
+      }),
+    });
+    expect((task.memory as Record<string, unknown>).travelLoop).toMatchObject({
+      stage: 'intake',
+      slots: expect.objectContaining({
+        budgetRange: '1500元',
+        transportMode: '高铁',
+      }),
+    });
+    expect(draftPublication.stagePrivateDraftForPublish).not.toHaveBeenCalled();
+  });
+
   it('keeps travel understanding fallback conservative when model runtime is unavailable', async () => {
     const travelBrain = new TravelAgentBrainService(
       new TravelUnderstandingService(),

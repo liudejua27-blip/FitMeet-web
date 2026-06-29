@@ -71,9 +71,11 @@ function makeHarness() {
     arbitrate: jest.fn(),
   };
   const friendLoop = {
+    continueEntrance: jest.fn(),
     tryHandleEntrance: jest.fn(),
   };
   const travelLoop = {
+    continueEntrance: jest.fn(),
     tryHandleEntrance: jest.fn(),
   };
   const service = new AgentEntryOrchestratorService(
@@ -139,6 +141,96 @@ describe('AgentEntryOrchestratorService', () => {
       message: '明天晚上',
     });
     expect(workoutLoop.tryHandleEntrance).not.toHaveBeenCalled();
+    expect(legacy.handleFallback).not.toHaveBeenCalled();
+  });
+
+  it('routes active friend-owned follow-up turns back to FriendLoop', async () => {
+    const task = makeTask({
+      memory: {
+        friendLoop: {
+          stage: 'intake',
+          slots: { friendGoal: '认识新朋友' },
+        },
+      },
+    });
+    const { friendLoop, legacy, service } = makeHarness();
+    friendLoop.continueEntrance.mockResolvedValue({
+      task,
+      result: makeResult({
+        cards: [
+          {
+            id: 'friend_intake:101',
+            type: 'friend_intake',
+            schemaVersion: 'fitmeet.tool-ui.v1',
+            schemaType: 'friend.intake',
+            title: '填写本次交友需求',
+            data: {},
+            actions: [],
+          },
+        ],
+      }),
+    });
+
+    const result = await service.handle({
+      ownerUserId: 7,
+      task,
+      body: { message: '改成上海，周末咖啡' },
+      message: '改成上海，周末咖啡',
+      startedAt: 123,
+    });
+
+    expect(result.source).toBe('friend_loop_owner');
+    expect(friendLoop.continueEntrance).toHaveBeenCalledWith({
+      ownerUserId: 7,
+      task,
+      message: '改成上海，周末咖啡',
+    });
+    expect(friendLoop.tryHandleEntrance).not.toHaveBeenCalled();
+    expect(legacy.handleFallback).not.toHaveBeenCalled();
+  });
+
+  it('routes active travel-owned follow-up turns back to TravelLoop', async () => {
+    const task = makeTask({
+      memory: {
+        travelLoop: {
+          stage: 'intake',
+          slots: { destination: '成都', departureTime: '周末' },
+        },
+      },
+    });
+    const { legacy, service, travelLoop } = makeHarness();
+    travelLoop.continueEntrance.mockResolvedValue({
+      task,
+      result: makeResult({
+        cards: [
+          {
+            id: 'travel_intake:101',
+            type: 'travel_intake',
+            schemaVersion: 'fitmeet.tool-ui.v1',
+            schemaType: 'travel.intake',
+            title: '填写本次旅行寻伴需求',
+            data: {},
+            actions: [],
+          },
+        ],
+      }),
+    });
+
+    const result = await service.handle({
+      ownerUserId: 7,
+      task,
+      body: { message: '预算改成1500元，高铁' },
+      message: '预算改成1500元，高铁',
+      startedAt: 123,
+    });
+
+    expect(result.source).toBe('travel_loop_owner');
+    expect(travelLoop.continueEntrance).toHaveBeenCalledWith({
+      ownerUserId: 7,
+      task,
+      message: '预算改成1500元，高铁',
+    });
+    expect(travelLoop.tryHandleEntrance).not.toHaveBeenCalled();
     expect(legacy.handleFallback).not.toHaveBeenCalled();
   });
 

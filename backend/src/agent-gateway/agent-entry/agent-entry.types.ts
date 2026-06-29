@@ -6,6 +6,8 @@ import type {
 
 export type AgentEntrySource =
   | 'workout_loop_owner'
+  | 'friend_loop_owner'
+  | 'travel_loop_owner'
   | 'workout_loop_intent'
   | 'profile_loop_intent'
   | 'friend_loop_intent'

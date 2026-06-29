@@ -77,6 +77,29 @@ export class FriendLoopService {
     return { task: input.task, result };
   }
 
+  async continueEntrance(input: {
+    ownerUserId: number;
+    task: AgentTask;
+    message: string;
+  }): Promise<{ task: AgentTask; result: SocialAgentIntentRouteResult }> {
+    const slots = extractFriendSlots({
+      message: input.message,
+      previousSlots: this.readFriendSlots(input.task),
+    });
+    const decision = await this.friendBrain?.decideEntrance({
+      task: input.task,
+      message: input.message,
+      slots,
+    });
+    const result = await this.intakeResultForSlots({
+      task: input.task,
+      slots: decision?.slots ?? slots,
+      assistantMessage:
+        '已根据你补充的信息更新交友需求。确认下面信息后，我再生成交友卡。',
+    });
+    return { task: input.task, result };
+  }
+
   async startFriendIntake(input: {
     ownerUserId: number;
     taskId: number;
