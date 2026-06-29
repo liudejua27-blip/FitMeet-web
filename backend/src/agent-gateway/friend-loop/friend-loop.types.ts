@@ -3,6 +3,7 @@ import type {
   LoopSlots,
   LoopStage,
 } from '../loop-agent/loop-agent.types';
+import type { GeoResolution } from '../geo/geo-resolver.types';
 
 export type FriendLoopStage = Extract<
   LoopStage,
@@ -21,6 +22,11 @@ export type FriendSlots = LoopSlots & {
   friendGoal?: string;
   city?: string;
   locationText?: string;
+  district?: string;
+  poiName?: string;
+  lat?: number;
+  lng?: number;
+  geoResolution?: GeoResolution;
   topicTags?: string[];
   genderPreference?: string;
   bodyPreference?: string;

@@ -676,6 +676,7 @@ export class SocialAgentCardActionRouterService {
       'loop_choice.travel',
       'clarification.yes',
       'clarification.no',
+      'clarification.select',
       'workout_intake.submit',
       'workout_intake.use_defaults',
       'workout_intake.cancel',

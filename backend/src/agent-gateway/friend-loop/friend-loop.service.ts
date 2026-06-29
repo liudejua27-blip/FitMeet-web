@@ -12,8 +12,11 @@ import {
   SocialRequestVisibility,
   UserSocialRequestStatus,
 } from '../../social-requests/social-request.entity';
+import { buildClarificationGeoCandidatesCard } from '../clarification/clarification-geo-candidates-card.presenter';
 import { AgentTask, AgentTaskStatus } from '../entities/agent-task.entity';
 import type { MatchingJob } from '../entities/matching-job.entity';
+import type { GeoResolution } from '../geo/geo-resolver.types';
+import { GeoResolverService } from '../geo/geo-resolver.service';
 import type { SocialAgentCardActionBody } from '../social-agent-action.types';
 import type { SocialAgentIntentRouteResult } from '../social-agent-chat.types';
 import { SocialAgentDraftPublicationService } from '../social-agent-draft-publication.service';
@@ -52,6 +55,8 @@ export class FriendLoopService {
     private readonly matchingJobs?: MatchingJobService,
     @Optional()
     private readonly friendBrain?: FriendAgentBrainService,
+    @Optional()
+    private readonly geoResolver?: GeoResolverService,
   ) {}
 
   async tryHandleEntrance(input: {
@@ -68,9 +73,15 @@ export class FriendLoopService {
       message: input.message,
       slots,
     });
+    const prepared = await this.prepareFriendSlots({
+      task: input.task,
+      message: input.message,
+      slots: decision?.slots ?? slots,
+    });
+    if (prepared.result) return { task: input.task, result: prepared.result };
     const result = await this.intakeResultForSlots({
       task: input.task,
-      slots: decision?.slots ?? slots,
+      slots: prepared.slots,
       assistantMessage:
         '可以，我先帮你整理交友需求。确认下面信息后，我再生成交友卡。',
     });
@@ -91,9 +102,15 @@ export class FriendLoopService {
       message: input.message,
       slots,
     });
+    const prepared = await this.prepareFriendSlots({
+      task: input.task,
+      message: input.message,
+      slots: decision?.slots ?? slots,
+    });
+    if (prepared.result) return { task: input.task, result: prepared.result };
     const result = await this.intakeResultForSlots({
       task: input.task,
-      slots: decision?.slots ?? slots,
+      slots: prepared.slots,
       assistantMessage:
         '已根据你补充的信息更新交友需求。确认下面信息后，我再生成交友卡。',
     });
@@ -110,10 +127,62 @@ export class FriendLoopService {
       ...this.readFriendSlots(task),
       ...this.slotsFromPayload(input.payload ?? {}),
     });
+    const prepared = await this.prepareFriendSlots({
+      task,
+      message: this.text(slots.locationText ?? slots.city),
+      slots,
+    });
+    if (prepared.result) return prepared.result;
+    return this.intakeResultForSlots({
+      task,
+      slots: prepared.slots,
+      assistantMessage: '好的，我们先进入交友闭环。我会帮你整理成一张交友卡。',
+    });
+  }
+
+  async applySelectedSlots(input: {
+    ownerUserId: number;
+    taskId: number;
+    payload: Record<string, unknown>;
+  }): Promise<SocialAgentIntentRouteResult> {
+    const task = await this.assertTaskOwner(input.ownerUserId, input.taskId);
+    const selectedPatch = this.firstRecord(
+      input.payload.selectedPatch,
+      input.payload.selectedCandidate,
+    );
+    const slots = normalizeFriendSlots({
+      ...this.slotsFromPayload(input.payload.inferredSlots),
+      ...this.readFriendSlots(task),
+      ...this.slotsFromPayload(selectedPatch),
+    });
     return this.intakeResultForSlots({
       task,
       slots,
-      assistantMessage: '好的，我们先进入交友闭环。我会帮你整理成一张交友卡。',
+      assistantMessage:
+        '已按你选择的地点更新交友需求。确认下面信息后，我再生成交友卡。',
+    });
+  }
+
+  async openIntakeFromFallback(input: {
+    ownerUserId: number;
+    taskId: number;
+    payload: Record<string, unknown>;
+  }): Promise<SocialAgentIntentRouteResult> {
+    const task = await this.assertTaskOwner(input.ownerUserId, input.taskId);
+    const fallback = this.text(input.payload.noFallback);
+    if (fallback && fallback !== 'friend_intake') {
+      return this.resultWithCards({
+        task,
+        assistantMessage:
+          '好的，这次先不按交友理解。你可以直接告诉我下一步想做什么。',
+        cards: [],
+        action: 'reply',
+      });
+    }
+    return this.intakeResultForSlots({
+      task,
+      slots: this.readFriendSlots(task),
+      assistantMessage: '好的，我会换成填写卡，让你自己选择地点。',
     });
   }
 
@@ -187,9 +256,15 @@ export class FriendLoopService {
       ...this.readFriendSlots(task),
       ...this.slotsFromPayload(input.body.payload),
     });
-    const validation = validateFriendSlots(slots);
-    const decision = this.friendBrain?.decideIntakeSubmit({
+    const prepared = await this.prepareFriendSlots({
+      task,
+      message: this.text(slots.locationText ?? slots.city),
       slots,
+    });
+    if (prepared.result) return prepared.result;
+    const validation = validateFriendSlots(prepared.slots);
+    const decision = this.friendBrain?.decideIntakeSubmit({
+      slots: prepared.slots,
       validation,
     });
     const action =
@@ -197,14 +272,14 @@ export class FriendLoopService {
     if (action === 'ASK_INTAKE') {
       return this.intakeResultForSlots({
         task,
-        slots: decision?.slots ?? slots,
+        slots: decision?.slots ?? prepared.slots,
         assistantMessage: '还需要补齐交友目标和城市，才能生成交友卡。',
       });
     }
     return this.createDraftResult({
       ownerUserId: input.ownerUserId,
       task,
-      slots: decision?.slots ?? slots,
+      slots: decision?.slots ?? prepared.slots,
       assistantMessage: '已收到交友需求，我正在生成交友卡。',
     });
   }
@@ -227,6 +302,81 @@ export class FriendLoopService {
         }),
       ],
       action: 'clarify',
+    });
+  }
+
+  private async prepareFriendSlots(input: {
+    task: AgentTask;
+    message: string;
+    slots: FriendSlots;
+  }): Promise<{
+    slots: FriendSlots;
+    result?: SocialAgentIntentRouteResult;
+  }> {
+    const slots = await this.resolveFriendGeo(input);
+    const geo = slots.geoResolution;
+    if (
+      geo?.needsConfirmation &&
+      Array.isArray(geo.candidates) &&
+      geo.candidates.length > 1
+    ) {
+      const assistantMessage =
+        geo.confirmationQuestion ??
+        '我查到几个可能的地点，请选择这次交友所在城市或区域。';
+      this.rememberFriendSlots(input.task, slots, 'intake');
+      return {
+        slots,
+        result: await this.resultWithCards({
+          task: input.task,
+          assistantMessage,
+          cards: [
+            buildClarificationGeoCandidatesCard({
+              taskId: input.task.id,
+              questionKey: 'friend_location',
+              title: '选择交友地点',
+              body: assistantMessage,
+              inferredIntent: 'friend',
+              inferredSlots: slots as Record<string, unknown>,
+              candidates: geo.candidates,
+              noFallback: 'friend_intake',
+            }),
+          ],
+          action: 'clarify',
+        }),
+      };
+    }
+    return { slots };
+  }
+
+  private async resolveFriendGeo(input: {
+    message: string;
+    slots: FriendSlots;
+  }): Promise<FriendSlots> {
+    if (!this.geoResolver) return input.slots;
+    if (input.slots.geoResolution?.source === 'user_confirmed') {
+      return input.slots;
+    }
+    const query = this.text(
+      input.slots.locationText ?? input.slots.city ?? input.message,
+    );
+    if (!query) return input.slots;
+    const geo = await this.geoResolver.resolveAsync({
+      message: input.message || query,
+      locationText: input.slots.locationText,
+      city: input.slots.city,
+      district: input.slots.district,
+      poiName: input.slots.poiName,
+    });
+    if (!geo || geo.source === 'unknown') return input.slots;
+    return normalizeFriendSlots({
+      ...input.slots,
+      locationText: geo.locationText ?? input.slots.locationText,
+      city: geo.city ?? input.slots.city,
+      district: geo.district ?? input.slots.district,
+      poiName: geo.poiName ?? input.slots.poiName,
+      lat: geo.lat ?? input.slots.lat,
+      lng: geo.lng ?? input.slots.lng,
+      geoResolution: geo,
     });
   }
 
@@ -461,6 +611,9 @@ export class FriendLoopService {
         friendGoal: goal,
         city: city || null,
         locationText: slots.locationText ?? null,
+        district: slots.district ?? null,
+        poiName: slots.poiName ?? null,
+        geoResolution: slots.geoResolution ?? null,
         topicTags: tags,
         genderPreference: slots.genderPreference ?? null,
         bodyPreference: slots.bodyPreference ?? null,
@@ -479,6 +632,8 @@ export class FriendLoopService {
       slots.friendGoal,
       slots.city,
       slots.locationText,
+      slots.district,
+      slots.poiName,
       ...(slots.topicTags ?? []),
       slots.genderPreference,
       slots.bodyPreference,
@@ -496,6 +651,8 @@ export class FriendLoopService {
     const details = [
       slots.city,
       slots.locationText,
+      slots.district,
+      slots.poiName,
       slots.friendGoal,
       ...(slots.topicTags ?? []),
       slots.genderPreference,
@@ -647,13 +804,63 @@ export class FriendLoopService {
       ...payload,
       ...slots,
       topicTags: this.stringList(payload.topicTags ?? slots.topicTags),
+      geoResolution: this.geoResolutionFromPayload(
+        payload.geoResolution ?? slots.geoResolution,
+      ),
     });
+  }
+
+  private geoResolutionFromPayload(value: unknown): GeoResolution | undefined {
+    if (!this.isRecord(value)) return undefined;
+    const rawText = this.text(value.rawText);
+    if (!rawText) return undefined;
+    const confidence = Number(value.confidence);
+    const source = this.text(value.source);
+    return {
+      rawText,
+      locationText: this.text(value.locationText) || undefined,
+      city: sanitizeCity(value.city) ?? undefined,
+      district: this.text(value.district) || undefined,
+      poiName: this.text(value.poiName) || undefined,
+      province: this.text(value.province) || undefined,
+      lat: typeof value.lat === 'number' ? value.lat : undefined,
+      lng: typeof value.lng === 'number' ? value.lng : undefined,
+      source:
+        source === 'amap' ||
+        source === 'cache' ||
+        source === 'explicit_city' ||
+        source === 'poi_dictionary' ||
+        source === 'profile_city' ||
+        source === 'client_geo' ||
+        source === 'llm_inferred' ||
+        source === 'user_confirmed'
+          ? source
+          : 'unknown',
+      confidence: Number.isFinite(confidence) ? confidence : 0,
+      needsConfirmation: value.needsConfirmation === true,
+      confirmationQuestion: this.text(value.confirmationQuestion) || undefined,
+      candidates: Array.isArray(value.candidates)
+        ? (value.candidates as GeoResolution['candidates'])
+        : undefined,
+    };
+  }
+
+  private firstRecord(...values: unknown[]): Record<string, unknown> {
+    return (
+      values.find((value): value is Record<string, unknown> =>
+        this.isRecord(value),
+      ) ?? {}
+    );
   }
 
   private record(value: unknown): Record<string, unknown> {
     return typeof value === 'object' && value !== null && !Array.isArray(value)
       ? (value as Record<string, unknown>)
       : {};
+  }
+
+  private isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === 'object' && value !== null && !Array.isArray(value);
   }
 
   private text(value: unknown): string {
