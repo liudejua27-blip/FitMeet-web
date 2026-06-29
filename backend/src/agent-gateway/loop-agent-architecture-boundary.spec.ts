@@ -14,9 +14,12 @@ describe('Loop agent architecture boundaries', () => {
     'social-agent-route-action-turn',
     'social-agent-main-agent-turn',
     'fitmeet-alpha-agent-sdk',
+    'social-agent-opportunity-card-draft',
+    'social-agent-opportunity-draft-memory',
+    'social-agent-opportunity-clarification',
   ];
 
-  it('keeps loop-owned code from importing legacy route/search/action mainlines', () => {
+  it('keeps loop-owned code from importing legacy mainlines and opportunity draft helpers', () => {
     const violations = loopRoots.flatMap((root) =>
       sourceFiles(join(agentGatewayRoot, root)).flatMap((file) => {
         const contents = readFileSync(file, 'utf8');
@@ -38,11 +41,14 @@ describe('Loop agent architecture boundaries', () => {
     expect(violations).toEqual([]);
   });
 
-  it('marks old route and legacy adapters as deprecated fallback surfaces', () => {
+  it('marks old route, legacy adapters, and opportunity helpers as deprecated fallback surfaces', () => {
     const legacyFiles = [
       'legacy-agent/legacy-agent-adapter.service.ts',
       'social-agent-route-search-turn.service.ts',
       'social-agent-route-action-turn.service.ts',
+      'social-agent-opportunity-card-draft.ts',
+      'social-agent-opportunity-draft-memory.ts',
+      'social-agent-opportunity-clarification.ts',
     ];
 
     for (const legacyFile of legacyFiles) {
@@ -50,6 +56,17 @@ describe('Loop agent architecture boundaries', () => {
       expect(contents).toContain('@deprecated');
       expect(contents.toLowerCase()).toMatch(/legacy|fallback/);
     }
+  });
+
+  it('keeps the opportunity production guard available as reusable safety code', () => {
+    const contents = readFileSync(
+      join(agentGatewayRoot, 'social-agent-opportunity-production-guard.ts'),
+      'utf8',
+    );
+
+    expect(contents).not.toContain('@deprecated');
+    expect(contents).toContain('withSocialAgentOpportunityGuard');
+    expect(contents).toContain('SocialAgentOpportunityGuardIssue');
   });
 });
 
