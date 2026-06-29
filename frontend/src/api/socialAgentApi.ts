@@ -386,7 +386,10 @@ export type FitMeetAlphaCardType =
   | 'loop_choice'
   | 'clarification_binary'
   | 'workout_intake'
-  | 'workout_draft';
+  | 'workout_draft'
+  | 'friend_intake'
+  | 'travel_intake'
+  | 'travel_companion_draft';
 
 export interface FitMeetAlphaCardAction {
   id: string;
@@ -437,6 +440,9 @@ export interface FitMeetAlphaCard {
     | 'clarification.binary'
     | 'workout.intake'
     | 'workout.draft'
+    | 'friend.intake'
+    | 'travel.intake'
+    | 'travel.companion_draft'
     | 'generic.card';
   title: string;
   body?: string;

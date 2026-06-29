@@ -2874,6 +2874,115 @@ describe('AgentWorkspacePage', () => {
     expect(actionStreamSpy).not.toHaveBeenCalled();
   });
 
+  it('refreshes a workout matching queue into candidate cards when the worker emits candidates', async () => {
+    useRealAgentAdapter();
+    useAuthStore.setState({ isLoggedIn: true, showLoginModal: false });
+    const queuedResponse: UserFacingAgentResponse = {
+      ...mockResponse(),
+      taskId: 101,
+      assistantMessage: '约练卡已发布，正在匹配公开可发现的人。',
+      lightStatus: '正在筛选公开可发现的人',
+      workflow: mockWorkflow('agent-task:101', 'MATCHING_QUEUED'),
+      publicLoop: {
+        stage: 'matching_queued',
+        publicIntentId: 'public-intent:workout-501',
+        discoverHref: '/discover?publicIntentId=public-intent%3Aworkout-501',
+        publicIntentHref: '/public-intent/public-intent%3Aworkout-501',
+        messagesHref: null,
+        requiredConfirmation: false,
+      },
+      cards: [],
+    };
+    const candidateResponse: UserFacingAgentResponse = {
+      ...mockCandidateResponse(),
+      taskId: 101,
+      assistantMessage: '已找到 2 个适合这次约练的候选。',
+      workflow: mockWorkflow('agent-task:101', 'CANDIDATES_READY'),
+      publicLoop: {
+        stage: 'candidates_recommended',
+        publicIntentId: 'public-intent:workout-501',
+        discoverHref: '/discover?publicIntentId=public-intent%3Aworkout-501',
+        publicIntentHref: '/public-intent/public-intent%3Aworkout-501',
+        messagesHref: null,
+        requiredConfirmation: true,
+      },
+    };
+    const restoreSpy = vi
+      .spyOn(socialAgentApi, 'restoreSession')
+      .mockImplementation(async (taskId?: number | null) =>
+        taskId === 101
+          ? {
+              ...emptySession(101),
+              hasSession: true,
+              activeTaskId: 101,
+              task: {
+                id: 101,
+                permissionMode: 'limited_auto',
+                goal: '今晚青岛大学跑步约练',
+                status: 'awaiting_confirmation',
+              },
+              result: candidateResponse,
+            }
+          : emptySession(),
+      );
+    vi.spyOn(socialAgentApi, 'listThreads').mockResolvedValue({ threads: [] });
+    vi.spyOn(socialAgentApi, 'updateThread').mockResolvedValue({
+      thread: {
+        id: '101',
+        threadId: 101,
+        taskId: 101,
+        title: '今晚青岛大学跑步约练',
+        preview: '正在匹配公开可发现的人',
+        status: 'regular',
+        goal: '今晚青岛大学跑步约练',
+        messageCount: 2,
+        updatedAt: '2026-06-29T12:00:00.000Z',
+        createdAt: '2026-06-29T12:00:00.000Z',
+      },
+    });
+    vi.spyOn(socialAgentApi, 'runUserFacingStream').mockImplementation(async (_data, onEvent) => {
+      onEvent({ type: 'result', result: queuedResponse });
+      return queuedResponse;
+    });
+
+    await renderAgentPage();
+    submitPrompt('今晚青岛大学附近轻松跑步，找同校的人一起');
+
+    expect(await screen.findByText('约练卡已发布，正在匹配公开可发现的人。')).toBeInTheDocument();
+
+    await act(async () => {
+      window.dispatchEvent(
+        new CustomEvent('fitmeet:realtime', {
+          detail: {
+            eventType: 'agent:candidates',
+            payload: {
+              taskId: 101,
+              publicIntentId: 'public-intent:workout-501',
+              socialRequestId: 501,
+              matchingJobStatus: 'candidates_ready',
+            },
+          },
+        }),
+      );
+    });
+
+    await waitFor(() => expect(restoreSpy).toHaveBeenCalledWith(101));
+    expect(await screen.findByText('已找到 2 个适合这次约练的候选。')).toBeInTheDocument();
+    expect(screen.queryByText('约练卡已发布，正在匹配公开可发现的人。')).not.toBeInTheDocument();
+    expect(screen.getByTestId('assistant-ui-generative-cards')).toHaveAttribute(
+      'data-product-components',
+      expect.stringContaining('CandidateCards'),
+    );
+    expect(getEnabledSchemaActionButton('candidate.generate_opener')).toHaveAttribute(
+      'data-schema-action',
+      'candidate.generate_opener',
+    );
+    expect(getEnabledSchemaActionButton('opener.confirm_send')).toHaveAttribute(
+      'data-requires-confirmation',
+      'true',
+    );
+  });
+
   it('opens publish-to-discover approval inline on the opportunity card instead of stacking a backend approval panel', async () => {
     useRealAgentAdapter();
     useAuthStore.setState({ isLoggedIn: true, showLoginModal: false });
