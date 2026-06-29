@@ -3,6 +3,7 @@ import type {
   LoopSlots,
   LoopStage,
 } from '../loop-agent/loop-agent.types';
+import type { GeoResolution } from '../geo/geo-resolver.types';
 
 export type TravelLoopStage = Extract<
   LoopStage,
@@ -19,6 +20,8 @@ export type TravelLoopStage = Extract<
 
 export type TravelSlots = LoopSlots & {
   destination?: string;
+  city?: string;
+  geoResolution?: GeoResolution;
   departureTime?: string;
   duration?: string;
   budgetRange?: string;

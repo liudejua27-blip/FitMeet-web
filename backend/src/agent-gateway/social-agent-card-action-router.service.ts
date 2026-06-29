@@ -1764,6 +1764,20 @@ export class SocialAgentCardActionRouterService {
             inferredSlots.transportMode,
         ) || undefined,
       tags: explicitTags.length > 0 ? explicitTags : (inferredSlots.tags ?? []),
+      city:
+        this.text(slots.city ?? draft.city ?? metadata.city) ||
+        inferredSlots.city ||
+        undefined,
+      geoResolution:
+        this.record(slots.geoResolution).rawText ||
+        this.record(draft.geoResolution).rawText ||
+        this.record(metadata.geoResolution).rawText
+          ? (this.record(
+              slots.geoResolution ??
+                draft.geoResolution ??
+                metadata.geoResolution,
+            ) as TravelSlots['geoResolution'])
+          : inferredSlots.geoResolution,
       genderPreference:
         this.text(
           slots.genderPreference ??
@@ -1826,7 +1840,10 @@ export class SocialAgentCardActionRouterService {
     const explicitCity = this.text(slots.city ?? draft.city ?? metadata.city);
     if (explicitCity) return explicitCity;
     const inferredSlots = this.travelSlotsFromPublishPayload(payload);
-    return extractKnownCity(inferredSlots.destination);
+    return (
+      this.text(inferredSlots.city) ||
+      extractKnownCity(inferredSlots.destination)
+    );
   }
 
   private loopPublishDraftFallback(

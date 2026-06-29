@@ -471,6 +471,8 @@ export class TravelLoopService {
         accommodationPreference: slots.accommodationPreference ?? null,
         foodPreference: slots.foodPreference ?? null,
         candidatePreference: slots.candidatePreference ?? null,
+        city: slots.city ?? null,
+        geoResolution: slots.geoResolution ?? null,
         safetyBoundary: slots.safetyBoundary ?? defaultTravelSafetyBoundary(),
         visibilityPreference: 'private',
       },
@@ -484,6 +486,7 @@ export class TravelLoopService {
       slots.duration,
       slots.budgetRange,
       slots.transportMode,
+      slots.city,
       ...(slots.tags ?? []),
       slots.candidatePreference,
     ]
@@ -619,7 +622,7 @@ export class TravelLoopService {
   }
 
   private destinationCity(slots: TravelSlots): string | null {
-    return sanitizeCity(slots.destination) ?? null;
+    return sanitizeCity(slots.city) || sanitizeCity(slots.destination) || null;
   }
 
   private async assertTaskOwner(
@@ -636,9 +639,15 @@ export class TravelLoopService {
   private slotsFromPayload(value: unknown): TravelSlots {
     const payload = this.record(value);
     const slots = this.record(payload.slots);
+    const geoResolution = this.record(
+      payload.geoResolution ?? slots.geoResolution,
+    );
     return normalizeTravelSlots({
       ...payload,
       ...slots,
+      ...(geoResolution.rawText
+        ? { geoResolution: geoResolution as TravelSlots['geoResolution'] }
+        : {}),
       tags: this.stringList(payload.tags ?? slots.tags),
     });
   }

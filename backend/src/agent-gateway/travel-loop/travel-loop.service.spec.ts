@@ -141,6 +141,24 @@ describe('TravelLoopService', () => {
     });
   });
 
+  it('does not infer arbitrary destination text as a city without GeoResolver', async () => {
+    const { service, task } = makeService();
+
+    const result = await service.tryHandleEntrance({
+      ownerUserId: 7,
+      task,
+      message: '周末去西湖玩，预算1000元，高铁，找会拍照的搭子',
+    });
+
+    expect(result.result.cards?.[0]).toMatchObject({
+      schemaType: 'travel.intake',
+      data: expect.objectContaining({
+        destination: '西湖',
+        city: null,
+      }),
+    });
+  });
+
   it('uses travel understanding to normalize aliases and fill optional slots', async () => {
     const toolJson = {
       callJson: jest.fn().mockResolvedValue({
@@ -192,6 +210,84 @@ describe('TravelLoopService', () => {
       }),
     });
     expect(draftPublication.stagePrivateDraftForPublish).not.toHaveBeenCalled();
+  });
+
+  it('resolves travel destination through GeoResolver and carries city into the draft', async () => {
+    const geoResolver = {
+      resolveAsync: jest.fn().mockResolvedValue({
+        rawText: '西湖',
+        locationText: '杭州西湖风景名胜区',
+        city: '杭州',
+        district: '西湖区',
+        poiName: '西湖风景名胜区',
+        source: 'amap',
+        confidence: 0.88,
+        needsConfirmation: false,
+      }),
+    };
+    const travelBrain = new TravelAgentBrainService(
+      undefined,
+      geoResolver as never,
+    );
+    const task = makeTask();
+    const { draftPublication, service } = makeService(
+      task,
+      travelBrain as never,
+    );
+
+    const entrance = await service.tryHandleEntrance({
+      ownerUserId: 7,
+      task,
+      message: '周末去西湖玩，预算1000元，高铁，找会拍照的搭子',
+    });
+
+    expect(geoResolver.resolveAsync).toHaveBeenCalledWith(
+      expect.objectContaining({
+        locationText: '西湖',
+      }),
+    );
+    expect(entrance.result.cards?.[0]).toMatchObject({
+      schemaType: 'travel.intake',
+      data: expect.objectContaining({
+        destination: '杭州西湖风景名胜区',
+        city: '杭州',
+        geoResolution: expect.objectContaining({
+          source: 'amap',
+          city: '杭州',
+        }),
+        missingFields: [],
+      }),
+    });
+
+    const memory = task.memory as {
+      travelLoop?: { slots?: Record<string, unknown> };
+    };
+    await service.performTravelAction({
+      ownerUserId: 7,
+      taskId: 101,
+      body: {
+        action: 'travel_intake.submit' as never,
+        payload: {
+          slots: memory.travelLoop?.slots,
+        },
+      },
+    });
+
+    expect(draftPublication.stagePrivateDraftForPublish).toHaveBeenCalledWith(
+      7,
+      101,
+      expect.objectContaining({
+        city: '杭州',
+        locationName: '杭州西湖风景名胜区',
+        metadata: expect.objectContaining({
+          city: '杭州',
+          geoResolution: expect.objectContaining({
+            source: 'amap',
+            city: '杭州',
+          }),
+        }),
+      }),
+    );
   });
 
   it('updates an active travel loop from natural-language follow-up slots', async () => {
