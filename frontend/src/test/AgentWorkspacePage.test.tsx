@@ -19,6 +19,7 @@ import {
   type UserFacingAgentResponse,
   type UserFacingAgentSessionSnapshot,
 } from '../api/socialAgentApi';
+import { socialProfileApi } from '../api/socialProfileApi';
 import { agentApprovalsApi, type AgentApprovalResumePlan } from '../api/agentApprovalsApi';
 import { resetCardActionRuntimeStateForTests } from '../components/assistant-ui/tool-card-actions';
 import { AgentWorkspacePage } from '../pages/AgentWorkspacePage';
@@ -433,6 +434,83 @@ describe('AgentWorkspacePage', () => {
     expect(
       screen.queryByText(/推荐给你的人|约练闭环|今天想认识什么样的人/),
     ).not.toBeInTheDocument();
+  });
+
+  it('does not auto-insert profile completion cards after loop choice bootstrap', async () => {
+    useRealAgentAdapter();
+    useAuthStore.setState({
+      isLoggedIn: true,
+      showLoginModal: false,
+      user: {
+        id: 1002,
+        name: '资料已可匹配用户',
+        avatar: '',
+        color: '#111111',
+        gender: 'unknown',
+        age: 29,
+        city: '青岛',
+        gym: '',
+        bio: '',
+        singleCert: false,
+        interestTags: ['跑步'],
+        trainingDays: 0,
+        trainingCount: 0,
+        caloriesBurned: 0,
+        bestRecords: [],
+        meetCount: 0,
+        followers: 0,
+        following: 0,
+      },
+    });
+    vi.spyOn(socialAgentApi, 'restoreSession').mockResolvedValue(emptySession());
+    vi.spyOn(socialAgentApi, 'listThreads').mockResolvedValue({ threads: [] });
+    vi.spyOn(socialAgentApi, 'getProfileGate').mockResolvedValue({
+      passed: true,
+      missing: [],
+      assistantMessage: '',
+      profileCompleteness: 82,
+      readinessLevel: 'match_ready',
+      canEnterMatchPool: true,
+      nextActions: [],
+    } satisfies SocialAgentProfileGateStatus);
+    const questionsSpy = vi.spyOn(socialProfileApi, 'questions').mockResolvedValue({
+      questions: [],
+      completion: {
+        completedFields: ['city', 'fitnessGoals', 'availableTimes', 'privacyBoundary'],
+        missingFields: ['mbti'],
+        missingRequired: [],
+        missingRecommended: ['mbti'],
+        missingOptional: [],
+        questionQueue: ['mbti'],
+        percent: 82,
+        readinessLevel: 'match_ready',
+        canEnterMatchPool: true,
+        authorizationRequired: false,
+      },
+      pendingProposal: null,
+    });
+    const createThreadSpy = vi.spyOn(socialAgentApi, 'createThread').mockResolvedValue({
+      thread: {
+        id: 'agent-task:202',
+        threadId: 202,
+        taskId: 202,
+        title: '新对话',
+        preview: null,
+        status: 'awaiting_feedback',
+        goal: '',
+        messageCount: 0,
+        updatedAt: new Date().toISOString(),
+        createdAt: new Date().toISOString(),
+      },
+    });
+
+    await renderAgentPage();
+
+    await waitFor(() => expect(createThreadSpy).toHaveBeenCalledTimes(1));
+    expect(await screen.findByTestId('loop-choice-card')).toBeInTheDocument();
+    expect(screen.queryByTestId('profile-completion-card')).not.toBeInTheDocument();
+    expect(screen.queryByText('资料还不完整')).not.toBeInTheDocument();
+    expect(questionsSpy).not.toHaveBeenCalled();
   });
 
   it('shows inline auth instead of opening the login modal on unauthenticated submit', async () => {

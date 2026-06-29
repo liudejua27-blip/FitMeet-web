@@ -24,6 +24,20 @@ describe('workout slot extraction', () => {
     expect(validateWorkoutSlots(slots)).toEqual({ valid: true, missing: [] });
   });
 
+  it('extracts screenshot workout wording without matching an empty time string', () => {
+    const slots = extractWorkoutSlots({
+      message: '我想在青岛大学找个搭子，健身，明天晚上',
+    });
+
+    expect(slots).toMatchObject({
+      activityType: '健身',
+      timePreference: '明天晚上',
+      locationText: expect.stringContaining('青岛大学'),
+      city: '青岛',
+    });
+    expect(validateWorkoutSlots(slots)).toEqual({ valid: true, missing: [] });
+  });
+
   it('merges previous slots and reports missing required fields', () => {
     const slots = extractWorkoutSlots({
       message: '今晚可以',

@@ -157,6 +157,97 @@ describe('SocialAgentChatController final response routing', () => {
       source: 'deterministic_route',
     });
   });
+
+  it('bypasses final-response LLM when message stream already has deterministic cards', async () => {
+    const writes: string[] = [];
+    const finalResponses = {
+      generate: jest.fn().mockResolvedValue('LLM 改写回复'),
+    };
+    const chat = {
+      handleMessageStream: jest.fn(async () => ({
+        taskId: 101,
+        status: AgentTaskStatus.Succeeded,
+        intent: 'workout',
+        confidence: 0.95,
+        entities: {},
+        shouldSearch: false,
+        shouldReplan: false,
+        shouldUpdateProfile: false,
+        shouldExecuteAction: false,
+        replyStrategy: 'workout_loop',
+        source: 'rules',
+        action: 'await_confirmation',
+        savedContext: true,
+        profileUpdated: false,
+        assistantMessage: '我已经整理好这次约练卡，发布前需要你确认。',
+        cards: [
+          {
+            id: 'workout_draft:101',
+            type: 'workout_draft',
+            schemaVersion: 'fitmeet.tool-ui.v1',
+            schemaType: 'workout.draft',
+            title: '健身约练卡',
+            body: '明天晚上 · 青岛大学',
+            status: 'waiting_confirmation',
+            data: {
+              schemaName: 'WorkoutDraftCard',
+              schemaVersion: 'fitmeet.tool-ui.v1',
+              schemaType: 'workout.draft',
+              activityType: '健身',
+              timePreference: '明天晚上',
+              locationText: '青岛大学',
+            },
+            actions: [],
+          },
+        ],
+        permissionMode: 'confirm',
+        safety: {
+          blocked: false,
+          level: 'low',
+          reasons: [],
+          boundaryNotes: [],
+          requiredConfirmations: [],
+        },
+      })),
+    };
+    const controller = new SocialAgentChatController(
+      chat as unknown as SocialAgentChatService,
+      {} as unknown as SocialAgentCandidateCommandService,
+      new UserFacingResponseSanitizerService(
+        new LightStatusMapperService(),
+        new AgentCardAssemblerService(),
+      ),
+      undefined,
+      undefined,
+      finalResponses as never,
+    );
+    const response = {
+      status: jest.fn(),
+      setHeader: jest.fn(),
+      flushHeaders: jest.fn(),
+      write: jest.fn((chunk: string) => {
+        writes.push(chunk);
+      }),
+      end: jest.fn(),
+    } as unknown as Response;
+
+    await controller.handleMessageStream(
+      { user: { id: 7 } } as Parameters<
+        SocialAgentChatController['handleMessageStream']
+      >[0],
+      { message: '我想在青岛大学找个搭子，健身，明天晚上' },
+      response,
+    );
+
+    const serialized = writes.join('');
+    expect(finalResponses.generate).not.toHaveBeenCalled();
+    expect(serialized).toContain('event: result');
+    expect(serialized).toContain('"schemaType":"workout.draft"');
+    expect(serialized).toContain(
+      '"assistantMessageSource":"deterministic_route"',
+    );
+    expect(serialized).not.toContain('LLM 改写回复');
+  });
 });
 
 describe('SocialAgentChatController user interest events', () => {
