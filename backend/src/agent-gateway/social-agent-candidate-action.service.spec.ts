@@ -262,7 +262,17 @@ describe('SocialAgentCandidateActionService', () => {
   });
 
   it('creates an opener draft card without creating approval before the user sends it', async () => {
-    const { approvals, savedEvents, service, task } = makeHarness();
+    const task = makeTask({
+      memory: {
+        workoutLoop: {
+          stage: 'candidates_ready',
+          socialRequestId: 301,
+          publicIntentId: 'public-intent:workout-501',
+          candidateCount: 1,
+        },
+      },
+    });
+    const { approvals, savedEvents, service } = makeHarness(task);
 
     const result = await service.createOpenerDraftFromCardAction(7, 101, {
       action: 'candidate.generate_opener',
@@ -326,6 +336,12 @@ describe('SocialAgentCandidateActionService', () => {
       }),
     });
     expect(task.memory).toMatchObject({
+      workoutLoop: expect.objectContaining({
+        stage: 'opener_ready',
+        targetUserId: 22,
+        candidateRecordId: 501,
+        socialRequestId: 301,
+      }),
       taskMemory: {
         currentTask: expect.objectContaining({
           state: 'messaging_candidate',
@@ -368,6 +384,14 @@ describe('SocialAgentCandidateActionService', () => {
         },
       },
       memory: {
+        workoutLoop: {
+          stage: 'opener_ready',
+          socialRequestId: 301,
+          publicIntentId: 'public-intent:workout-501',
+          candidateCount: 1,
+          targetUserId: 22,
+          candidateRecordId: 501,
+        },
         taskMemory: {
           pendingActions: [],
           candidateState: {
@@ -468,6 +492,13 @@ describe('SocialAgentCandidateActionService', () => {
       }),
     });
     expect(task.memory).toMatchObject({
+      workoutLoop: expect.objectContaining({
+        stage: 'message_confirming',
+        targetUserId: 22,
+        candidateRecordId: 501,
+        socialRequestId: 301,
+        approvalId: 9001,
+      }),
       taskMemory: {
         pendingActions: [
           expect.objectContaining({
@@ -621,6 +652,15 @@ describe('SocialAgentCandidateActionService', () => {
         },
       },
       memory: {
+        workoutLoop: {
+          stage: 'message_confirming',
+          socialRequestId: 301,
+          publicIntentId: 'public-intent:workout-501',
+          candidateCount: 1,
+          targetUserId: 22,
+          candidateRecordId: 501,
+          approvalId: 9001,
+        },
         taskMemory: {
           pendingActions: [
             {
@@ -776,6 +816,15 @@ describe('SocialAgentCandidateActionService', () => {
         },
       },
       memory: {
+        workoutLoop: {
+          stage: 'message_confirming',
+          socialRequestId: 301,
+          publicIntentId: 'public-intent:workout-501',
+          candidateCount: 1,
+          targetUserId: 22,
+          candidateRecordId: 501,
+          approvalId: 9001,
+        },
         taskMemory: {
           pendingActions: [
             {
@@ -879,6 +928,14 @@ describe('SocialAgentCandidateActionService', () => {
       assistantMessage: '已确认发送给小林：今晚先在青岛大学操场轻松跑一段吗？',
     });
     expect(task.memory).toMatchObject({
+      workoutLoop: expect.objectContaining({
+        stage: 'messages_handoff',
+        targetUserId: 22,
+        candidateRecordId: 501,
+        socialRequestId: 301,
+        conversationId: 'conv-1',
+        messageActionId: 'action_send_candidate_message_1',
+      }),
       taskMemory: {
         pendingActions: [],
         currentTask: expect.objectContaining({

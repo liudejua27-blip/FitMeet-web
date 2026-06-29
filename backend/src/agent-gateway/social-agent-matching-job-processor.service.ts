@@ -837,6 +837,24 @@ export class SocialAgentMatchingJobProcessorService {
         },
         updatedAt: now,
       },
+      ...this.workoutLoopMatchingMemoryPatch({
+        memory,
+        socialRequest: input.validation.socialRequest,
+        stage:
+          candidateCount > 0
+            ? 'candidates_ready'
+            : noCandidatesFinal
+              ? 'no_candidates_final'
+              : 'no_candidates',
+        socialRequestId: input.validation.socialRequest.id,
+        publicIntentId: input.validation.publicIntent.id,
+        matchingJobId: input.job.id,
+        matchingJobStatus: input.job.status,
+        candidateCount,
+        candidateSnapshotId: input.candidateSnapshotId,
+        noCandidatesFinal,
+        updatedAt: now,
+      }),
     };
     const loopMemory = transitionSocialAgentState(task, 'candidates_returned', {
       objective: 'candidate_matching',
@@ -1266,6 +1284,41 @@ export class SocialAgentMatchingJobProcessorService {
     return value && typeof value === 'object' && !Array.isArray(value)
       ? (value as Record<string, unknown>)
       : {};
+  }
+
+  private workoutLoopMatchingMemoryPatch(input: {
+    memory: Record<string, unknown>;
+    socialRequest: UserSocialRequest;
+    stage: 'candidates_ready' | 'no_candidates' | 'no_candidates_final';
+    socialRequestId: number;
+    publicIntentId: string;
+    matchingJobId: number;
+    matchingJobStatus: MatchingJobStatus;
+    candidateCount: number;
+    candidateSnapshotId: number | null;
+    noCandidatesFinal: boolean;
+    updatedAt: string;
+  }): Record<string, unknown> {
+    const workoutLoop = this.record(input.memory.workoutLoop);
+    const requestMetadata = this.record(input.socialRequest.metadata);
+    const isWorkoutLoop =
+      Object.keys(workoutLoop).length > 0 ||
+      this.text(requestMetadata.loop) === 'workout';
+    if (!isWorkoutLoop) return {};
+    return {
+      workoutLoop: {
+        ...workoutLoop,
+        stage: input.stage,
+        socialRequestId: input.socialRequestId,
+        publicIntentId: input.publicIntentId,
+        matchingJobId: input.matchingJobId,
+        matchingJobStatus: input.matchingJobStatus,
+        candidateCount: input.candidateCount,
+        candidateSnapshotId: input.candidateSnapshotId,
+        noCandidatesFinal: input.noCandidatesFinal,
+        updatedAt: input.updatedAt,
+      },
+    };
   }
 
   private stringList(value: unknown): string[] {

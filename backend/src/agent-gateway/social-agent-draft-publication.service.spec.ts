@@ -489,7 +489,20 @@ describe('SocialAgentDraftPublicationService', () => {
       savedEvents,
       service,
       task,
-    } = makeHarness();
+    } = makeHarness(
+      makeTask({
+        memory: {
+          workoutLoop: {
+            stage: 'draft_ready',
+            slots: {
+              activityType: '跑步',
+              timePreference: '今晚',
+              locationText: '青岛',
+            },
+          },
+        },
+      }),
+    );
 
     const result = await service.publishDraft(7, 101, {
       socialRequestId: 301,
@@ -631,6 +644,22 @@ describe('SocialAgentDraftPublicationService', () => {
         matchingJobId: 9001,
         matchingJobStatus: MatchingJobStatus.Queued,
         sourceVersion: 'source-v1',
+      },
+      workoutLoop: {
+        stage: 'matching_queued',
+        socialRequestId: 301,
+        publicIntentId: 'social_request_301',
+        discoverHref: '/discover?publicIntentId=social_request_301',
+        publicIntentHref: '/public-intent/social_request_301',
+        matchingJobId: 9001,
+        matchingJobStatus: MatchingJobStatus.Queued,
+        sourceVersion: 'source-v1',
+        slots: {
+          activityType: '跑步',
+          timePreference: '今晚',
+          locationText: '青岛',
+        },
+        updatedAt: expect.any(String),
       },
     });
     expect(savedEvents).toEqual(

@@ -18,6 +18,16 @@ describe('SocialAgentMatchingJobProcessorService', () => {
   it('marks the job candidates_ready only when candidates exist', async () => {
     const harness = makeHarness({
       candidates: [makeCandidate()],
+      taskMemory: {
+        workoutLoop: {
+          stage: 'matching_queued',
+          slots: {
+            activityType: '羽毛球',
+            timePreference: '周末下午',
+            locationText: '五四广场',
+          },
+        },
+      },
     });
 
     await expect(harness.service.processClaimedJob(makeJob())).resolves.toBe(
@@ -56,6 +66,18 @@ describe('SocialAgentMatchingJobProcessorService', () => {
       expect.objectContaining({
         status: AgentTaskStatus.AwaitingConfirmation,
         statusReason: 'matching_job_candidates_ready',
+        memory: expect.objectContaining({
+          workoutLoop: expect.objectContaining({
+            stage: 'candidates_ready',
+            socialRequestId: 301,
+            publicIntentId: 'social_request_301',
+            matchingJobId: 9001,
+            matchingJobStatus: MatchingJobStatus.CandidatesReady,
+            candidateCount: 1,
+            candidateSnapshotId: 501,
+            noCandidatesFinal: false,
+          }),
+        }),
         result: expect.objectContaining({
           cards: expect.arrayContaining([
             expect.objectContaining({
@@ -131,7 +153,12 @@ describe('SocialAgentMatchingJobProcessorService', () => {
   });
 
   it('marks a completed search with zero candidates as no_candidates', async () => {
-    const harness = makeHarness({ candidates: [] });
+    const harness = makeHarness({
+      candidates: [],
+      socialRequest: {
+        metadata: { loop: 'workout' },
+      },
+    });
 
     await expect(harness.service.processClaimedJob(makeJob())).resolves.toBe(
       MatchingJobStatus.NoCandidates,
@@ -145,6 +172,18 @@ describe('SocialAgentMatchingJobProcessorService', () => {
       expect.objectContaining({
         status: AgentTaskStatus.WaitingResult,
         statusReason: 'matching_job_no_candidates',
+        memory: expect.objectContaining({
+          workoutLoop: expect.objectContaining({
+            stage: 'no_candidates',
+            socialRequestId: 301,
+            publicIntentId: 'social_request_301',
+            matchingJobId: 9001,
+            matchingJobStatus: MatchingJobStatus.NoCandidates,
+            candidateCount: 0,
+            candidateSnapshotId: 501,
+            noCandidatesFinal: false,
+          }),
+        }),
         result: expect.objectContaining({
           cards: expect.arrayContaining([
             expect.objectContaining({
@@ -200,6 +239,9 @@ describe('SocialAgentMatchingJobProcessorService', () => {
     const harness = makeHarness({
       candidates: [],
       jobOverrides: recoveryJob,
+      socialRequest: {
+        metadata: { loop: 'workout' },
+      },
     });
 
     await expect(
@@ -210,6 +252,18 @@ describe('SocialAgentMatchingJobProcessorService', () => {
       expect.objectContaining({
         status: AgentTaskStatus.WaitingResult,
         statusReason: 'matching_job_no_candidates_final',
+        memory: expect.objectContaining({
+          workoutLoop: expect.objectContaining({
+            stage: 'no_candidates_final',
+            socialRequestId: 301,
+            publicIntentId: 'social_request_301',
+            matchingJobId: 9001,
+            matchingJobStatus: MatchingJobStatus.NoCandidates,
+            candidateCount: 0,
+            candidateSnapshotId: 501,
+            noCandidatesFinal: true,
+          }),
+        }),
         result: expect.objectContaining({
           chatRun: expect.objectContaining({
             noCandidatesFinal: true,
@@ -403,6 +457,8 @@ function makeHarness(
       }>
     >;
     jobOverrides?: Record<string, unknown>;
+    socialRequest?: Record<string, unknown>;
+    taskMemory?: Record<string, unknown>;
   } = {},
 ) {
   const publicIntent = options.publicIntent ?? makePublicIntent();
@@ -467,7 +523,7 @@ function makeHarness(
         sourceVersion: 'source-v1',
       },
     },
-    memory: {},
+    memory: options.taskMemory ?? {},
   };
   const taskRepo = {
     findOne: jest.fn(async () => task),
@@ -566,7 +622,9 @@ function makeHarness(
       }
       if (name === 'UserSocialRequest') {
         return {
-          createQueryBuilder: jest.fn(() => queryBuilder(makeSocialRequest())),
+          createQueryBuilder: jest.fn(() =>
+            queryBuilder(makeSocialRequest(options.socialRequest)),
+          ),
         };
       }
       if (name === 'AgentTask') {
@@ -605,20 +663,7 @@ function makeHarness(
     })),
   };
   const userSocialRequestRepo = {
-    findOne: jest.fn(async () => ({
-      id: 301,
-      userId: 7,
-      title: '青岛羽毛球',
-      description: '周末下午公开场所',
-      rawText: '周末下午找羽毛球搭子',
-      city: '青岛',
-      activityType: 'badminton',
-      interestTags: ['羽毛球'],
-      status: UserSocialRequestStatus.Matching,
-      visibility: SocialRequestVisibility.Public,
-      metadata: {},
-      expiresAt: new Date(Date.now() + 60 * 60 * 1000),
-    })),
+    findOne: jest.fn(async () => makeSocialRequest(options.socialRequest)),
   };
   return {
     candidatePool,
@@ -658,7 +703,7 @@ function queryBuilder(result: unknown) {
   };
 }
 
-function makeSocialRequest() {
+function makeSocialRequest(overrides: Record<string, unknown> = {}) {
   return {
     id: 301,
     userId: 7,
@@ -672,6 +717,7 @@ function makeSocialRequest() {
     visibility: SocialRequestVisibility.Public,
     metadata: {},
     expiresAt: new Date(Date.now() + 60 * 60 * 1000),
+    ...overrides,
   };
 }
 

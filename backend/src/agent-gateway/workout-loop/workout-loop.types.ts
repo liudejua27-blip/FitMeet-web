@@ -3,8 +3,14 @@ export type WorkoutLoopStage =
   | 'draft_ready'
   | 'publish_confirming'
   | 'published'
-  | 'matching'
-  | 'candidates_ready';
+  | 'matching_queued'
+  | 'candidates_ready'
+  | 'no_candidates'
+  | 'no_candidates_final'
+  | 'opener_ready'
+  | 'message_confirming'
+  | 'messages_handoff'
+  | 'done';
 
 export type WorkoutSlots = {
   activityType?: string;

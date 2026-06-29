@@ -1223,6 +1223,18 @@ export class SocialAgentDraftPublicationService {
         sourceVersion,
         updatedAt: publishedAt,
       },
+      ...this.workoutLoopPublishMemoryPatch({
+        memory,
+        draft,
+        socialRequestId: expectedSocialRequestId,
+        publicIntentId,
+        discoverHref,
+        publicIntentHref,
+        matchingJobId: matchingJob.id,
+        matchingJobStatus: matchingJob.status,
+        sourceVersion,
+        updatedAt: publishedAt,
+      }),
     };
     task.status = AgentTaskStatus.Succeeded;
     task.statusReason = 'social_request_published_and_synced';
@@ -1854,6 +1866,40 @@ export class SocialAgentDraftPublicationService {
 
   private record(value: unknown): Record<string, unknown> {
     return this.isRecord(value) ? value : {};
+  }
+
+  private workoutLoopPublishMemoryPatch(input: {
+    memory: Record<string, unknown>;
+    draft: CreateSocialRequestDto & { socialRequestId?: number | null };
+    socialRequestId: number;
+    publicIntentId: string;
+    discoverHref: string;
+    publicIntentHref: string;
+    matchingJobId: number;
+    matchingJobStatus: MatchingJobStatus;
+    sourceVersion: string;
+    updatedAt: string;
+  }): Record<string, unknown> {
+    const workoutLoop = this.record(input.memory.workoutLoop);
+    const draftMetadata = this.record(input.draft.metadata);
+    const isWorkoutLoop =
+      Object.keys(workoutLoop).length > 0 ||
+      this.text(draftMetadata.loop) === 'workout';
+    if (!isWorkoutLoop) return {};
+    return {
+      workoutLoop: {
+        ...workoutLoop,
+        stage: 'matching_queued',
+        socialRequestId: input.socialRequestId,
+        publicIntentId: input.publicIntentId,
+        discoverHref: input.discoverHref,
+        publicIntentHref: input.publicIntentHref,
+        matchingJobId: input.matchingJobId,
+        matchingJobStatus: input.matchingJobStatus,
+        sourceVersion: input.sourceVersion,
+        updatedAt: input.updatedAt,
+      },
+    };
   }
 
   private firstNonEmptyRecord(...values: unknown[]): Record<string, unknown> {

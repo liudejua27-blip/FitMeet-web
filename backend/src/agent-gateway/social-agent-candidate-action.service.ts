@@ -92,6 +92,11 @@ type CandidateActionOptions = {
   signal?: AbortSignal | null;
 };
 
+type WorkoutLoopCandidateStage =
+  | 'opener_ready'
+  | 'message_confirming'
+  | 'messages_handoff';
+
 @Injectable()
 export class SocialAgentCandidateActionService {
   private readonly logger = new Logger(SocialAgentCandidateActionService.name);
@@ -228,6 +233,15 @@ export class SocialAgentCandidateActionService {
       'message_action',
       openerDraft.transitionPatch,
     );
+    this.rememberWorkoutLoopCandidateStage(task, 'opener_ready', {
+      targetUserId,
+      candidateRecordId: this.number(
+        payload.candidateRecordId ?? candidate.candidateRecordId,
+      ),
+      socialRequestId: this.number(
+        payload.socialRequestId ?? candidate.socialRequestId,
+      ),
+    });
     await this.taskRepo.save(task);
     await this.loopStateEvents?.writeCurrentTaskTransition({
       task,
@@ -435,6 +449,13 @@ export class SocialAgentCandidateActionService {
       'message_action',
       confirmedMessage.transitionPatch,
     );
+    this.rememberWorkoutLoopCandidateStage(task, 'messages_handoff', {
+      targetUserId,
+      candidateRecordId,
+      socialRequestId,
+      conversationId: confirmedMessage.conversationId,
+      messageActionId: action.id,
+    });
     await this.taskRepo.save(task);
     await this.loopStateEvents?.writeCurrentTaskTransition({
       task,
@@ -1839,6 +1860,12 @@ export class SocialAgentCandidateActionService {
       'confirmation_required',
       openerDraft.transitionPatch,
     );
+    this.rememberWorkoutLoopCandidateStage(input.task, 'message_confirming', {
+      targetUserId: input.targetUserId,
+      candidateRecordId: input.candidateRecordId,
+      socialRequestId: input.socialRequestId,
+      approvalId: approval.id,
+    });
     await this.taskRepo.save(input.task);
     await this.recordCandidateAuditEvent({
       ownerUserId: input.ownerUserId,
@@ -2347,6 +2374,33 @@ export class SocialAgentCandidateActionService {
 
   private record(value: unknown): Record<string, unknown> {
     return this.isRecord(value) ? value : {};
+  }
+
+  private rememberWorkoutLoopCandidateStage(
+    task: AgentTask,
+    stage: WorkoutLoopCandidateStage,
+    patch: Record<string, unknown>,
+  ): void {
+    const memory = this.record(task.memory);
+    const workoutLoop = this.record(memory.workoutLoop);
+    if (Object.keys(workoutLoop).length === 0) return;
+    const definedPatch = Object.fromEntries(
+      Object.entries(patch).filter(([, value]) => {
+        if (value === null || value === undefined) return false;
+        if (typeof value === 'string' && value.trim().length === 0)
+          return false;
+        return true;
+      }),
+    );
+    task.memory = {
+      ...memory,
+      workoutLoop: {
+        ...workoutLoop,
+        stage,
+        ...definedPatch,
+        updatedAt: new Date().toISOString(),
+      },
+    };
   }
 
   private looksLikeMessageSendConfirmation(message: string): boolean {
