@@ -7,6 +7,43 @@ import type {
 
 const DEFAULT_SAFETY_BOUNDARY =
   '默认安全设置：公共场所、站内沟通、不交换联系方式、不公开精确位置';
+const PLACE_MARKERS = [
+  '地点在',
+  '位置在',
+  '我想在',
+  '想在',
+  '我在',
+  '在',
+  '去',
+  '到',
+];
+const PLACE_TIME_PREFIXES = [
+  '今天',
+  '今晚',
+  '明天',
+  '明晚',
+  '后天',
+  '周末',
+  '本周末',
+  '下周末',
+  '上午',
+  '中午',
+  '下午',
+  '晚上',
+  '早上',
+];
+const PLACE_STOP_WORDS = [
+  '找个搭子',
+  '找搭子',
+  '找人',
+  '一起',
+  '健身',
+  '跑步',
+  '夜跑',
+  '运动',
+  '散步',
+  '打球',
+];
 
 export function extractWorkoutSlots(input: {
   message: string;
@@ -139,15 +176,52 @@ function extractPlace(message: string): string | undefined {
 }
 
 function cleanPlaceText(value: string): string {
-  return value
-    .replace(/^.*(?:在|去|到|地点在|位置在)(?=[\u4e00-\u9fa5A-Za-z0-9·•-])/, '')
-    .replace(
-      /^(今天|今晚|明天|明晚|后天|周末|本周末|下周末|上午|中午|下午|晚上|早上)+/,
-      '',
-    )
-    .replace(/^(我想在|想在|我在|在|去|到|地点在|位置在)/, '')
-    .replace(/(找个?搭子|找人|一起|健身|跑步|夜跑|运动|散步|打球).*$/, '')
-    .trim();
+  let text = value.trim();
+  const marker = lastMarker(text, PLACE_MARKERS);
+  if (marker) text = text.slice(marker.index + marker.value.length).trim();
+  text = removeLeadingTokens(text, PLACE_TIME_PREFIXES);
+  text = removeLeadingTokens(text, PLACE_MARKERS);
+  const stopIndex = firstTokenIndex(text, PLACE_STOP_WORDS);
+  if (stopIndex >= 0) text = text.slice(0, stopIndex);
+  return text.trim();
+}
+
+function lastMarker(
+  text: string,
+  markers: string[],
+): { index: number; value: string } | null {
+  let result: { index: number; value: string } | null = null;
+  for (const marker of markers) {
+    const index = text.lastIndexOf(marker);
+    if (index >= 0 && (!result || index > result.index)) {
+      result = { index, value: marker };
+    }
+  }
+  return result;
+}
+
+function removeLeadingTokens(text: string, tokens: string[]): string {
+  let next = text.trim();
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const token of tokens) {
+      if (next.startsWith(token)) {
+        next = next.slice(token.length).trim();
+        changed = true;
+        break;
+      }
+    }
+  }
+  return next;
+}
+
+function firstTokenIndex(text: string, tokens: string[]): number {
+  return tokens.reduce((first, token) => {
+    const index = text.indexOf(token);
+    if (index < 0) return first;
+    return first < 0 ? index : Math.min(first, index);
+  }, -1);
 }
 
 function placeScore(value: string): number {
