@@ -95,7 +95,7 @@ type CandidateActionOptions = {
   signal?: AbortSignal | null;
 };
 
-type WorkoutLoopCandidateStage =
+type LoopCandidateStage =
   | 'opener_ready'
   | 'message_confirming'
   | 'messages_handoff';
@@ -251,7 +251,7 @@ export class SocialAgentCandidateActionService {
       'message_action',
       openerDraft.transitionPatch,
     );
-    this.rememberWorkoutLoopCandidateStage(task, 'opener_ready', {
+    this.rememberLoopCandidateStage(task, 'opener_ready', {
       targetUserId,
       candidateRecordId: this.number(
         payload.candidateRecordId ?? candidate.candidateRecordId,
@@ -623,7 +623,7 @@ export class SocialAgentCandidateActionService {
       'message_action',
       confirmedMessage.transitionPatch,
     );
-    this.rememberWorkoutLoopCandidateStage(task, 'messages_handoff', {
+    this.rememberLoopCandidateStage(task, 'messages_handoff', {
       targetUserId,
       candidateRecordId,
       socialRequestId,
@@ -2034,7 +2034,7 @@ export class SocialAgentCandidateActionService {
       'confirmation_required',
       openerDraft.transitionPatch,
     );
-    this.rememberWorkoutLoopCandidateStage(input.task, 'message_confirming', {
+    this.rememberLoopCandidateStage(input.task, 'message_confirming', {
       targetUserId: input.targetUserId,
       candidateRecordId: input.candidateRecordId,
       socialRequestId: input.socialRequestId,
@@ -2550,14 +2550,15 @@ export class SocialAgentCandidateActionService {
     return this.isRecord(value) ? value : {};
   }
 
-  private rememberWorkoutLoopCandidateStage(
+  private rememberLoopCandidateStage(
     task: AgentTask,
-    stage: WorkoutLoopCandidateStage,
+    stage: LoopCandidateStage,
     patch: Record<string, unknown>,
   ): void {
     const memory = this.record(task.memory);
-    const workoutLoop = this.record(memory.workoutLoop);
-    if (Object.keys(workoutLoop).length === 0) return;
+    const loopKey = this.activeLoopMemoryKey(memory);
+    if (!loopKey) return;
+    const loopMemory = this.record(memory[loopKey]);
     const definedPatch = Object.fromEntries(
       Object.entries(patch).filter(([, value]) => {
         if (value === null || value === undefined) return false;
@@ -2568,13 +2569,22 @@ export class SocialAgentCandidateActionService {
     );
     task.memory = {
       ...memory,
-      workoutLoop: {
-        ...workoutLoop,
+      [loopKey]: {
+        ...loopMemory,
         stage,
         ...definedPatch,
         updatedAt: new Date().toISOString(),
       },
     };
+  }
+
+  private activeLoopMemoryKey(
+    memory: Record<string, unknown>,
+  ): 'workoutLoop' | 'friendLoop' | 'travelLoop' | null {
+    for (const key of ['workoutLoop', 'friendLoop', 'travelLoop'] as const) {
+      if (Object.keys(this.record(memory[key])).length > 0) return key;
+    }
+    return null;
   }
 
   private looksLikeMessageSendConfirmation(message: string): boolean {

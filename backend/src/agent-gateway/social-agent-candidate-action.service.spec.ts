@@ -436,6 +436,70 @@ describe('SocialAgentCandidateActionService', () => {
     );
   });
 
+  it('updates friend loop stage when generating an opener from a friend candidate card', async () => {
+    const task = makeTask({
+      goal: '交友匹配',
+      memory: {
+        friendLoop: {
+          stage: 'candidates_ready',
+          matchingJobId: 7001,
+          candidateCount: 1,
+          slots: {
+            friendGoal: '认识同城朋友',
+            city: '上海',
+            topicTags: ['咖啡', '展览'],
+          },
+        },
+      },
+    });
+    const openerDrafts = {
+      draft: jest
+        .fn()
+        .mockResolvedValue('看到你也喜欢展览，可以先站内聊聊周末安排吗？'),
+    };
+    const { service } = makeHarness(task, openerDrafts);
+
+    const result = await service.createOpenerDraftFromCardAction(7, 101, {
+      action: 'candidate.generate_opener',
+      payload: {
+        taskId: 101,
+        targetUserId: 33,
+        socialRequestId: 701,
+        candidateRecordId: 703,
+        candidate: {
+          userId: 33,
+          candidateRecordId: 703,
+          displayName: '小周',
+          suggestedMessage: '你好，可以先站内聊聊兴趣吗？',
+          metadata: { loop: 'friend' },
+        },
+      },
+    });
+
+    expect(openerDrafts.draft).toHaveBeenCalledWith({
+      task,
+      candidate: expect.objectContaining({
+        displayName: '小周',
+      }),
+      payload: expect.objectContaining({
+        taskId: 101,
+        targetUserId: 33,
+      }),
+      fallbackDraft: '你好，可以先站内聊聊兴趣吗？',
+    });
+    expect(result.cards?.[0]).toMatchObject({
+      body: '看到你也喜欢展览，可以先站内聊聊周末安排吗？',
+    });
+    expect(task.memory).toMatchObject({
+      friendLoop: expect.objectContaining({
+        stage: 'opener_ready',
+        targetUserId: 33,
+        candidateRecordId: 703,
+        socialRequestId: 701,
+      }),
+    });
+  });
+
   it('uses the workout opener draft service before falling back to the template draft', async () => {
     const task = makeTask({
       memory: {
