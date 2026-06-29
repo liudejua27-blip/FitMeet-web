@@ -100,6 +100,10 @@ type WorkoutLoopCandidateStage =
   | 'message_confirming'
   | 'messages_handoff';
 
+type WorkoutOpenerSendDecision =
+  | 'request_send_approval'
+  | 'send_after_approval';
+
 @Injectable()
 export class SocialAgentCandidateActionService {
   private readonly logger = new Logger(SocialAgentCandidateActionService.name);
@@ -396,6 +400,91 @@ export class SocialAgentCandidateActionService {
     return draft;
   }
 
+  private async decideWorkoutOpenerSend(input: {
+    task: AgentTask;
+    targetUserId: number;
+    candidateRecordId: number | null;
+    socialRequestId: number | null;
+    requestedApprovalId: number | null;
+    hasPendingApproval: boolean;
+    messageLength: number;
+  }): Promise<WorkoutOpenerSendDecision> {
+    const fallbackDecision: WorkoutOpenerSendDecision = input.hasPendingApproval
+      ? 'send_after_approval'
+      : 'request_send_approval';
+    if (!this.agentLoop) return fallbackDecision;
+
+    let decision = fallbackDecision;
+    const toolName = 'workout_agent.confirm_opener_send';
+    const runtime: AgentLoopBrainRuntime = {
+      decide: ({ observations }) => {
+        if (observations.length === 0) {
+          return {
+            reason: input.hasPendingApproval
+              ? 'approval_exists_before_send'
+              : 'approval_required_before_send',
+            critique:
+              'Observe send-confirmation state only; message delivery remains behind approval.',
+            tool: {
+              agent: 'Agent Brain',
+              toolName,
+              input: {
+                taskId: input.task.id,
+                targetUserId: input.targetUserId,
+                candidateRecordId: input.candidateRecordId,
+                socialRequestId: input.socialRequestId,
+                requestedApprovalId: input.requestedApprovalId,
+                hasPendingApproval: input.hasPendingApproval,
+                messageLength: input.messageLength,
+              },
+            },
+          };
+        }
+        return {
+          done: true,
+          reason:
+            decision === 'send_after_approval'
+              ? 'continue_after_recorded_approval'
+              : 'request_user_send_approval',
+          finalObservation: {
+            toolName,
+            status: 'completed',
+            decision,
+            approvalRequired: decision === 'request_send_approval',
+            canSend: decision === 'send_after_approval',
+          },
+        };
+      },
+    };
+
+    await this.agentLoop.execute({
+      taskId: input.task.id,
+      goal: 'Workout agent decides the opener send confirmation boundary.',
+      agent: 'Agent Brain',
+      plan: { reason: 'Workout opener send confirmation runtime', tools: [] },
+      brain: runtime,
+      maxToolCalls: 2,
+      runner: () => {
+        decision = input.hasPendingApproval
+          ? 'send_after_approval'
+          : 'request_send_approval';
+        return Promise.resolve({
+          toolName,
+          status: 'observed',
+          decision,
+          hasPendingApproval: input.hasPendingApproval,
+          requestedApprovalId: input.requestedApprovalId,
+          targetUserId: input.targetUserId,
+          candidateRecordId: input.candidateRecordId,
+          socialRequestId: input.socialRequestId,
+          messageLength: input.messageLength,
+        });
+      },
+    });
+
+    return decision;
+  }
+
   async confirmOpenerSendFromCardAction(
     ownerUserId: number,
     taskId: number,
@@ -436,53 +525,6 @@ export class SocialAgentCandidateActionService {
           return false;
         return requestedApprovalId ? action.id === requestedApprovalId : true;
       });
-    if (!pendingMessageAction) {
-      const repeated = this.duplicateConfirmedCandidateMessageResult({
-        task,
-        targetUserId,
-        candidate,
-        text,
-        candidateRecordId:
-          this.number(
-            payload.candidateRecordId ??
-              draft.candidateRecordId ??
-              candidate.candidateRecordId,
-          ) ?? null,
-        socialRequestId:
-          this.number(
-            payload.socialRequestId ??
-              draft.socialRequestId ??
-              candidate.socialRequestId,
-          ) ?? null,
-      });
-      if (repeated) return repeated;
-      return this.createOpenerSendApprovalFromDraft({
-        ownerUserId,
-        task,
-        body,
-        candidate,
-        targetUserId,
-        text,
-        candidateRecordId:
-          this.number(
-            payload.candidateRecordId ??
-              draft.candidateRecordId ??
-              candidate.candidateRecordId,
-          ) ?? null,
-        socialRequestId:
-          this.number(
-            payload.socialRequestId ??
-              draft.socialRequestId ??
-              candidate.socialRequestId,
-          ) ?? null,
-      });
-    }
-    await this.approveOpenerApprovalBeforeSend(
-      task,
-      ownerUserId,
-      pendingMessageAction.id,
-    );
-
     const candidateRecordId = this.number(
       payload.candidateRecordId ??
         draft.candidateRecordId ??
@@ -493,6 +535,44 @@ export class SocialAgentCandidateActionService {
         draft.socialRequestId ??
         candidate.socialRequestId,
     );
+    const sendDecision = await this.decideWorkoutOpenerSend({
+      task,
+      targetUserId,
+      candidateRecordId: candidateRecordId ?? null,
+      socialRequestId: socialRequestId ?? null,
+      requestedApprovalId: requestedApprovalId ?? null,
+      hasPendingApproval: Boolean(pendingMessageAction),
+      messageLength: Array.from(text).length,
+    });
+    const canSendAfterApproval =
+      sendDecision === 'send_after_approval' && Boolean(pendingMessageAction);
+    if (!canSendAfterApproval || !pendingMessageAction) {
+      const repeated = this.duplicateConfirmedCandidateMessageResult({
+        task,
+        targetUserId,
+        candidate,
+        text,
+        candidateRecordId: candidateRecordId ?? null,
+        socialRequestId: socialRequestId ?? null,
+      });
+      if (repeated) return repeated;
+      return this.createOpenerSendApprovalFromDraft({
+        ownerUserId,
+        task,
+        body,
+        candidate,
+        targetUserId,
+        text,
+        candidateRecordId: candidateRecordId ?? null,
+        socialRequestId: socialRequestId ?? null,
+      });
+    }
+    await this.approveOpenerApprovalBeforeSend(
+      task,
+      ownerUserId,
+      pendingMessageAction.id,
+    );
+
     const action = await this.executor.executeToolAction(
       task.id,
       SocialAgentToolName.SendMessageToCandidate,
