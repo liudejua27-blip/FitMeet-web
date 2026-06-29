@@ -388,7 +388,7 @@ category_for_path() {
     deploy/*|docker-compose.prod.yml|scripts/build-deploy-zip.*|scripts/check-production-deploy-consistency.mjs|scripts/ecs-*|scripts/verify-production.sh|scripts/verify-agent-goal-production.sh|scripts/verify-agent-token-cost.sh|scripts/verify-agent-release.sh|scripts/agent-release-matrix.sh|scripts/agent-release-worktree-audit.sh|scripts/launch-status.sh|backend/src/config/production-*|backend/src/users/user.entity.ts|.env.example|backend/.env.example|frontend/.env.example)
       printf 'deploy-production'
       ;;
-    docs/*|README.md|frontend/FRONTEND_ACCEPTANCE_CHECKLIST.md|frontend/scripts/*|frontend/src/api/fitmeetCoreContract.ts|frontend/src/test/*|frontend/src/test/utils/*|scripts/fix-*|scripts/verify-agent-release.sh|scripts/verify-agent-skills.mjs|scripts/run-agent-skill-evals.mjs|scripts/agent-release-matrix.sh|scripts/stage-agent-release-bucket.sh)
+    docs/*|README.md|docs/agent/ui-reference-boundary.md|frontend/scripts/*|frontend/src/api/fitmeetCoreContract.ts|frontend/src/test/*|frontend/src/test/utils/*|scripts/fix-*|scripts/verify-agent-release.sh|scripts/verify-agent-skills.mjs|scripts/run-agent-skill-evals.mjs|scripts/agent-release-matrix.sh|scripts/stage-agent-release-bucket.sh)
       printf 'tests-docs'
       ;;
     *)

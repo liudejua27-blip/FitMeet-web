@@ -15,7 +15,7 @@ usage() {
   cat <<'EOF'
 Usage: scripts/agent-release-matrix.sh [options]
 
-Runs the FitMeet Agent release matrix from docs/agent-release-e2e-matrix.md.
+Runs the FitMeet Agent release matrix from docs/agent/release-gates.md.
 The default path is non-mutating except local/browser checks.
 
 Options:

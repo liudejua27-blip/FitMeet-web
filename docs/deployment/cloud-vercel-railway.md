@@ -341,5 +341,5 @@ GitHub import, or domain verification, use the ECS package instead:
 Then follow:
 
 ```text
-docs/deployment-aliyun-ecs.md
+docs/deployment/ecs-fallback.md
 ```

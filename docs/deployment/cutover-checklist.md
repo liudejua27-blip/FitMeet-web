@@ -6,7 +6,7 @@ Use this checklist on launch day after code-side readiness has passed. It is
 ordered so Web, backend, database, DNS, and iOS TestFlight stay on the same API
 contract.
 
-Use `docs/production-secrets-checklist.md` while filling Railway, Vercel, iOS,
+Use `docs/deployment/secrets-checklist.md` while filling Railway, Vercel, iOS,
 and smoke-test variables. Keep real values out of Git and documentation.
 
 ## 0. Current Known Blockers
@@ -276,7 +276,7 @@ Upload when the dry-run command is correct:
 Upload and follow:
 
 ```text
-docs/deployment-aliyun-ecs.md
+docs/deployment/ecs-fallback.md
 ```
 
 On the server, verify and install the package with:

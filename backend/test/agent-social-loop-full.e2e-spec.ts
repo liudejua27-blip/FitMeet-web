@@ -448,12 +448,13 @@ describe('Agent social loop full E2E contract matrix', () => {
     const requiredTools = [
       {
         name: 'create_social_request',
-        approval: true,
+        approval: false,
         sideEffect: 'social_request_create_or_draft',
       },
       {
         name: 'publish_social_request',
         approval: true,
+        plannerEnabled: false,
         sideEffect: 'social_request_create',
       },
       { name: 'search_real_candidates', approval: false },
@@ -489,14 +490,19 @@ describe('Agent social loop full E2E contract matrix', () => {
         sideEffect: 'approval_status_update',
       },
       { name: 'check_safety_policy', approval: false },
-      { name: 'report_safety_issue', approval: true, sideEffect: 'safety' },
+      {
+        name: 'report_safety_issue',
+        approval: false,
+        plannerEnabled: false,
+        sideEffect: 'safety',
+      },
       { name: 'redact_sensitive_output', approval: false },
     ];
 
     for (const item of requiredTools) {
       const tool = requireTool(registry, item.name);
       expect(tool.runtimeStatus).toBe('implemented');
-      expect(tool.plannerEnabled).toBe(true);
+      expect(tool.plannerEnabled).toBe(item.plannerEnabled ?? true);
       expect(tool.requiresApproval).toBe(item.approval);
       expect(tool.dataScope).toBeTruthy();
       expect(tool.failureFallback).toBeTruthy();
