@@ -61,7 +61,7 @@
     "class-transformer": "0.5",
     "class-validator": "^0.14.4",
     "compression": "^1.8.1",
-    "helmet": "^8.1.0",
+    "helmet": "^8.2.0",
     "ioredis": "^5.10.0",
     "mongoose": "^8.23.0",
     "multer": "^2.1.1",
