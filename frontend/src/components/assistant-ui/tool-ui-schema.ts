@@ -13,6 +13,10 @@ export type ToolUISchemaType =
   | 'meet_loop.timeline'
   | 'public_intent.application'
   | 'safety.approval'
+  | 'loop.choice'
+  | 'clarification.binary'
+  | 'workout.intake'
+  | 'workout.draft'
   | 'generic.card';
 
 export type ToolUIProductComponent =
@@ -25,6 +29,10 @@ export type ToolUIProductComponent =
   | 'MeetLoopTimeline'
   | 'PublicIntentApplicationCard'
   | 'ApprovalPanel'
+  | 'LoopChoiceCard'
+  | 'ClarificationBinaryCard'
+  | 'WorkoutIntakeCard'
+  | 'WorkoutDraftCard'
   | 'GenericCard';
 
 export type ToolUISchemaAction =
@@ -67,6 +75,18 @@ export type ToolUISchemaAction =
   | 'slot_completion.use_default_safety'
   | 'slot_completion.custom_safety'
   | 'slot_completion.cancel'
+  | 'loop_choice.workout'
+  | 'loop_choice.friend'
+  | 'loop_choice.travel'
+  | 'clarification.yes'
+  | 'clarification.no'
+  | 'workout_intake.submit'
+  | 'workout_intake.use_defaults'
+  | 'workout_intake.cancel'
+  | 'workout_draft.publish'
+  | 'workout_draft.private_match'
+  | 'workout_draft.edit'
+  | 'workout_draft.cancel'
   | 'public_intent_application.accept'
   | 'public_intent_application.reject'
   | 'public_intent_application.view_profile'
@@ -104,6 +124,10 @@ export type ToolUICardCollectionSummary = {
   profileCompletionCount: number;
   meetLoopCount: number;
   applicationCount: number;
+  loopChoiceCount: number;
+  clarificationCount: number;
+  workoutIntakeCount: number;
+  workoutDraftCount: number;
   genericCount: number;
   components: ToolUIProductComponent[];
 };
@@ -868,6 +892,10 @@ export function productComponentForSchemaType(
   if (schemaType === 'meet_loop.timeline') return 'MeetLoopTimeline';
   if (schemaType === 'public_intent.application') return 'PublicIntentApplicationCard';
   if (schemaType === 'safety.approval') return 'ApprovalPanel';
+  if (schemaType === 'loop.choice') return 'LoopChoiceCard';
+  if (schemaType === 'clarification.binary') return 'ClarificationBinaryCard';
+  if (schemaType === 'workout.intake') return 'WorkoutIntakeCard';
+  if (schemaType === 'workout.draft') return 'WorkoutDraftCard';
   return 'GenericCard';
 }
 
@@ -897,8 +925,22 @@ export function summarizeToolUICardCollection(
   const applicationCount = cards.filter(
     (card) => card.schemaType === 'public_intent.application',
   ).length;
+  const loopChoiceCount = cards.filter((card) => card.schemaType === 'loop.choice').length;
+  const clarificationCount = cards.filter(
+    (card) => card.schemaType === 'clarification.binary',
+  ).length;
+  const workoutIntakeCount = cards.filter((card) => card.schemaType === 'workout.intake').length;
+  const workoutDraftCount = cards.filter((card) => card.schemaType === 'workout.draft').length;
   const genericCount = cards.filter((card) => card.schemaType === 'generic.card').length;
-  const opportunityCount = candidateCount + activityCount + slotCompletionCount + applicationCount;
+  const opportunityCount =
+    candidateCount +
+    activityCount +
+    slotCompletionCount +
+    applicationCount +
+    loopChoiceCount +
+    clarificationCount +
+    workoutIntakeCount +
+    workoutDraftCount;
   const components = Array.from(
     new Set(cards.map((card) => productComponentForSchemaType(card.schemaType))),
   );
@@ -909,13 +951,24 @@ export function summarizeToolUICardCollection(
     slotCompletionCount > 0 ? `${slotCompletionCount} 张补充卡` : null,
     meetLoopCount > 0 ? `${meetLoopCount} 个约练进展` : null,
     applicationCount > 0 ? `${applicationCount} 条报名申请` : null,
+    loopChoiceCount > 0 ? `${loopChoiceCount} 张闭环选择卡` : null,
+    clarificationCount > 0 ? `${clarificationCount} 张确认卡` : null,
+    workoutIntakeCount > 0 ? `${workoutIntakeCount} 张约练填写卡` : null,
+    workoutDraftCount > 0 ? `${workoutDraftCount} 张约练草稿` : null,
     lifeGraphDiffCount > 0 ? `${lifeGraphDiffCount} 条画像建议` : null,
     profileCompletionCount > 0 ? `${profileCompletionCount} 张资料补全卡` : null,
     approvalCount > 0 ? `${approvalCount} 个待确认动作` : null,
   ].filter(Boolean);
   const title = titleParts.length > 0 ? titleParts.join(' · ') : '整理结果';
   let detail = '结果已按安全的消息卡片展示。';
-  if (opportunityCount > 0) {
+  if (
+    loopChoiceCount > 0 ||
+    clarificationCount > 0 ||
+    workoutIntakeCount > 0 ||
+    workoutDraftCount > 0
+  ) {
+    detail = '约练闭环按选择、确认、填写和发布确认展示；资料补全不会阻断本次约练卡。';
+  } else if (opportunityCount > 0) {
     detail = '候选、约练和真实动作都按结构化卡片展示；涉及连接、发送或公开时会先确认。';
   } else if (emptyCount > 0) {
     detail = '没有真实候选时，不会编造结果；你可以选择发布到发现、扩大范围或调整时间。';
@@ -942,6 +995,10 @@ export function summarizeToolUICardCollection(
     profileCompletionCount,
     meetLoopCount,
     applicationCount,
+    loopChoiceCount,
+    clarificationCount,
+    workoutIntakeCount,
+    workoutDraftCount,
     genericCount,
     components,
   };
@@ -983,6 +1040,10 @@ export function schemaDefaultTitle(schemaType: ToolUISchemaType) {
   if (schemaType === 'meet_loop.timeline') return '约练进展';
   if (schemaType === 'public_intent.application') return '约练报名申请';
   if (schemaType === 'safety.approval') return '安全确认';
+  if (schemaType === 'loop.choice') return '选择要开始的闭环';
+  if (schemaType === 'clarification.binary') return '确认一下';
+  if (schemaType === 'workout.intake') return '填写本次约练需求';
+  if (schemaType === 'workout.draft') return '约练卡草稿';
   return '整理结果';
 }
 
@@ -1001,6 +1062,10 @@ export function toolUISchemaTypeFromUnknown(value: unknown): ToolUISchemaType | 
     text === 'meet_loop.timeline' ||
     text === 'public_intent.application' ||
     text === 'safety.approval' ||
+    text === 'loop.choice' ||
+    text === 'clarification.binary' ||
+    text === 'workout.intake' ||
+    text === 'workout.draft' ||
     text === 'generic.card'
   ) {
     return text;
@@ -1050,6 +1115,18 @@ export function toolUISchemaActionFromUnknown(value: unknown): ToolUISchemaActio
     text === 'slot_completion.use_default_safety' ||
     text === 'slot_completion.custom_safety' ||
     text === 'slot_completion.cancel' ||
+    text === 'loop_choice.workout' ||
+    text === 'loop_choice.friend' ||
+    text === 'loop_choice.travel' ||
+    text === 'clarification.yes' ||
+    text === 'clarification.no' ||
+    text === 'workout_intake.submit' ||
+    text === 'workout_intake.use_defaults' ||
+    text === 'workout_intake.cancel' ||
+    text === 'workout_draft.publish' ||
+    text === 'workout_draft.private_match' ||
+    text === 'workout_draft.edit' ||
+    text === 'workout_draft.cancel' ||
     text === 'public_intent_application.accept' ||
     text === 'public_intent_application.reject' ||
     text === 'public_intent_application.view_profile' ||
@@ -1077,6 +1154,7 @@ function toolUISchemaActionFromLegacyAction(value: string | null): ToolUISchemaA
   if (value === 'view_activity') return 'activity.view_detail';
   if (value === 'publish_social_request') return 'publish_to_discover';
   if (value === 'publish_to_discover') return 'publish_to_discover';
+  if (value === 'workout_draft.publish') return 'workout_draft.publish';
   if (value === 'create_activity') return 'activity.confirm_create';
   if (value === 'modify_activity') return 'activity.modify_time';
   if (value === 'change_time') return 'activity.modify_time';
@@ -1116,11 +1194,13 @@ function legacyActionRequiresConfirmation(
     rawAction === 'send_message' ||
     rawAction === 'publish_social_request' ||
     rawAction === 'publish_to_discover' ||
+    rawAction === 'workout_draft.publish' ||
     rawAction === 'create_activity' ||
     rawAction === 'confirm_profile_update' ||
     schemaAction === 'candidate.connect' ||
     schemaAction === 'opener.confirm_send' ||
     schemaAction === 'publish_to_discover' ||
+    schemaAction === 'workout_draft.publish' ||
     schemaAction === 'activity.confirm_create' ||
     schemaAction === 'life_graph.accept_update' ||
     schemaAction === 'public_intent_application.accept'

@@ -31,6 +31,10 @@ const FITMEET_TOOL_UI_SCHEMA_TYPES = new Set([
   'life_graph.diff',
   'meet_loop.timeline',
   'safety.approval',
+  'loop.choice',
+  'clarification.binary',
+  'workout.intake',
+  'workout.draft',
   'generic.card',
 ]);
 

@@ -176,10 +176,12 @@ import { SocialAgentRouteAgentLoopRunnerService } from './social-agent-route-age
 import { SocialAgentProfileGateService } from './social-agent-profile-gate.service';
 import { SocialAgentStreamingResponseService } from './social-agent-streaming-response.service';
 import { SocialAgentTargetResolverService } from './social-agent-target-resolver.service';
+import { ClarificationCardActionService } from './clarification/clarification-card-action.service';
 import { AgentWebhookService } from './agent-webhook.service';
 import { AiSocialAutopilotService } from './ai-social-autopilot.service';
 import { AgentDiscoveryService } from './agent-discovery.service';
 import { AgentProfileQAService } from './agent-profile-qa.service';
+import { FitMeetLoopRouterService } from './loop-router/fitmeet-loop-router.service';
 import { ProfileMatchService } from './profile-match.service';
 import { ProfileMatchAutopilotService } from './profile-match-autopilot.service';
 import { MatchReasonerService } from './match-reasoner.service';
@@ -244,6 +246,7 @@ import { SocialActivity } from '../activities/entities/activity.entity';
 import { RealtimeModule } from '../realtime/realtime.module';
 import { AdminRbacModule } from '../admin-rbac/admin-rbac.module';
 import { FeatureFlagService } from '../common/feature-flag.service';
+import { WorkoutLoopService } from './workout-loop/workout-loop.service';
 
 @Module({
   imports: [
@@ -338,6 +341,9 @@ import { FeatureFlagService } from '../common/feature-flag.service';
     PublicIntentPrivacyGuardService,
     SocialIntentRateLimitService,
     SocialAgentDomainClassifierService,
+    FitMeetLoopRouterService,
+    ClarificationCardActionService,
+    WorkoutLoopService,
     FeatureFlagService,
     AgentApprovalDispatcherService,
     AgentSettingsService,
@@ -508,6 +514,9 @@ import { FeatureFlagService } from '../common/feature-flag.service';
     PublicIntentPrivacyGuardService,
     SocialIntentRateLimitService,
     SocialAgentDomainClassifierService,
+    FitMeetLoopRouterService,
+    ClarificationCardActionService,
+    WorkoutLoopService,
     FeatureFlagService,
     AgentApprovalDispatcherService,
     AgentSettingsService,

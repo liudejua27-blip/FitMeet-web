@@ -917,7 +917,11 @@ export class FitMeetAlphaAgentSdkService {
         schemaType === 'social_match.no_candidates' ||
         schemaType === 'social_match.privacy_guard' ||
         schemaType === 'social_match.rate_limited' ||
-        schemaType === 'meet_loop.timeline'
+        schemaType === 'meet_loop.timeline' ||
+        schemaType === 'loop.choice' ||
+        schemaType === 'clarification.binary' ||
+        schemaType === 'workout.intake' ||
+        schemaType === 'workout.draft'
       );
     });
   }

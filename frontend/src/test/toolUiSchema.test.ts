@@ -55,6 +55,10 @@ describe('tool-ui-schema', () => {
       'PublicIntentApplicationCard',
     );
     expect(productComponentForSchemaType('safety.approval')).toBe('ApprovalPanel');
+    expect(productComponentForSchemaType('loop.choice')).toBe('LoopChoiceCard');
+    expect(productComponentForSchemaType('clarification.binary')).toBe('ClarificationBinaryCard');
+    expect(productComponentForSchemaType('workout.intake')).toBe('WorkoutIntakeCard');
+    expect(productComponentForSchemaType('workout.draft')).toBe('WorkoutDraftCard');
 
     const cards = [
       normalizeAssistantCard({
@@ -151,6 +155,39 @@ describe('tool-ui-schema', () => {
       ],
     });
     expect(summarizeToolUICardCollection(cards).detail).toContain('结构化卡片');
+  });
+
+  it('recognizes Workout Loop schemas and actions', () => {
+    const cards = [
+      normalizeAssistantCard({
+        schemaVersion: FITMEET_TOOL_UI_SCHEMA_VERSION,
+        schemaType: 'workout.draft',
+        title: '约练卡草稿',
+        data: {
+          schemaName: 'WorkoutDraftCard',
+          schemaVersion: FITMEET_TOOL_UI_SCHEMA_VERSION,
+          schemaType: 'workout.draft',
+        },
+      }),
+    ];
+
+    expect(toolUISchemaTypeFromUnknown('loop.choice')).toBe('loop.choice');
+    expect(toolUISchemaTypeFromUnknown('clarification.binary')).toBe('clarification.binary');
+    expect(toolUISchemaTypeFromUnknown('workout.intake')).toBe('workout.intake');
+    expect(toolUISchemaTypeFromUnknown('workout.draft')).toBe('workout.draft');
+    expect(toolUISchemaActionFromUnknown('loop_choice.workout')).toBe('loop_choice.workout');
+    expect(toolUISchemaActionFromUnknown('clarification.yes')).toBe('clarification.yes');
+    expect(toolUISchemaActionFromUnknown('workout_intake.submit')).toBe(
+      'workout_intake.submit',
+    );
+    expect(toolUISchemaActionFromUnknown('workout_draft.publish')).toBe(
+      'workout_draft.publish',
+    );
+    expect(summarizeToolUICardCollection(cards)).toMatchObject({
+      workoutDraftCount: 1,
+      components: ['WorkoutDraftCard'],
+    });
+    expect(summarizeToolUICardCollection(cards).detail).toContain('约练闭环');
   });
 
   it('normalizes public intent application cards for owner-side Agent actions', () => {

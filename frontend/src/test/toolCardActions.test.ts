@@ -559,4 +559,47 @@ describe('tool-card-actions runtime identity', () => {
     expect(detailAction).toBeTruthy();
     expect(cardActionNavigationHrefForTests(card, detailAction!)).toBe('/public-intent/intent_302');
   });
+
+  it('keeps workout draft publish as the primary confirmable action', () => {
+    const card: SchemaDrivenAssistantCard = {
+      id: 'workout_draft:101:501',
+      type: 'workout_draft',
+      schemaVersion: FITMEET_TOOL_UI_SCHEMA_VERSION,
+      schemaType: 'workout.draft',
+      title: '今晚青岛大学附近跑步约练',
+      data: {
+        taskId: 101,
+        socialRequestId: 501,
+      },
+      actions: [
+        {
+          id: 'private_match',
+          label: '不公开，先保存',
+          action: 'workout_draft.private_match',
+          schemaAction: 'workout_draft.private_match',
+          requiresConfirmation: false,
+          payload: { taskId: 101, socialRequestId: 501 },
+        },
+        {
+          id: 'publish',
+          label: '发布到发现',
+          action: 'workout_draft.publish',
+          schemaAction: 'workout_draft.publish',
+          requiresConfirmation: true,
+          payload: { taskId: 101, socialRequestId: 501 },
+        },
+      ],
+    };
+
+    const actions = visibleCardActions(card, card.actions);
+
+    expect(actions.map((action) => action.schemaAction)).toEqual([
+      'workout_draft.publish',
+      'workout_draft.private_match',
+    ]);
+    expect(actions[0]).toMatchObject({
+      label: '发布到发现',
+      requiresConfirmation: true,
+    });
+  });
 });

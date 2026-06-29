@@ -7,7 +7,11 @@ import {
   type SocialProfileCompletion,
   type SocialProfileQuestion,
 } from '../../api/socialProfileApi';
-import type { FitMeetAlphaCard, UserFacingAgentResponse } from '../../api/socialAgentApi';
+import {
+  socialAgentApi,
+  type FitMeetAlphaCard,
+  type UserFacingAgentResponse,
+} from '../../api/socialAgentApi';
 import { buildAgentAssistantProps } from './buildAgentAssistantProps';
 import { useSocialAgentThreadStore } from './socialAgentThreadStore';
 import {
@@ -131,6 +135,7 @@ export function useAgentWorkspaceController(view: AgentView) {
     nextId,
   });
   const skipNextRestoreRef = useRef(false);
+  const loopChoiceBootstrapRef = useRef<string | null>(null);
   const profileCompletionBootstrapRef = useRef<string | null>(null);
   const createBranchForNextAssistantRef = useRef(false);
   const { agentAdapter, isRealAgent } = useAgentAdapterRuntime();
@@ -142,6 +147,68 @@ export function useAgentWorkspaceController(view: AgentView) {
       userResult && responseAwaitsOpportunityClarification(userResult),
     );
   }, [pendingOpportunityClarificationRef, userResult]);
+
+  useEffect(() => {
+    const userKey = currentUserId ? String(currentUserId) : null;
+    if (!userKey) return;
+    if (!isRealAgent || !isLoggedIn || shellView !== 'chat' || sessionRestoring || isRunning) {
+      return;
+    }
+    if (messages.length > 0 || activeTaskId) return;
+    if (loopChoiceBootstrapRef.current === userKey) return;
+    let cancelled = false;
+    loopChoiceBootstrapRef.current = userKey;
+    socialAgentApi
+      .createThread('新对话')
+      .then(({ thread }) => {
+        if (cancelled) return;
+        const taskId = numberFromUnknown(thread.taskId);
+        if (!taskId) return;
+        const response = buildLoopChoiceBootstrapResponse({
+          taskId,
+          permissionMode: mode,
+        });
+        setActiveTaskId(taskId);
+        setActiveThreadId(thread.id);
+        setUserResult(response);
+        setMessages((current) => {
+          if (current.length > 0 || current.some(messageHasLoopChoiceCard)) return current;
+          return [
+            {
+              id: `assistant-loop-choice-${Date.now()}`,
+              role: 'assistant',
+              content: response.assistantMessage,
+              status: 'done',
+              result: response,
+              taskId,
+              assistantMessageSource: response.assistantMessageSource,
+              showSocialResult: true,
+              conversationIntent: 'conversation',
+            },
+          ];
+        });
+      })
+      .catch(() => {
+        loopChoiceBootstrapRef.current = null;
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    activeTaskId,
+    currentUserId,
+    isLoggedIn,
+    isRealAgent,
+    isRunning,
+    messages,
+    mode,
+    sessionRestoring,
+    setActiveTaskId,
+    setActiveThreadId,
+    setMessages,
+    setUserResult,
+    shellView,
+  ]);
 
   const refreshMatchingSnapshot = useCallback(
     async (taskId: number | null | undefined) => {
@@ -301,6 +368,7 @@ export function useAgentWorkspaceController(view: AgentView) {
   const resetConversation = useCallback(() => {
     clearStoredAgentThread(currentUserId);
     skipNextRestoreRef.current = true;
+    loopChoiceBootstrapRef.current = null;
     profileCompletionBootstrapRef.current = null;
     resetConversationCore(conversationSteps);
     setIsRunning(false);
@@ -314,6 +382,7 @@ export function useAgentWorkspaceController(view: AgentView) {
     if (!isRealAgent || !isLoggedIn || shellView !== 'chat' || sessionRestoring || isRunning) {
       return;
     }
+    if (messages.length === 0 && !explicitProfileIntent) return;
     if (profileCompletionBootstrapRef.current === userKey && !explicitProfileIntent) return;
     if (messages.some(messageHasProfileCompletionCard)) return;
 
@@ -673,6 +742,10 @@ function messageHasProfileCompletionCard(message: { result?: UserFacingAgentResp
   );
 }
 
+function messageHasLoopChoiceCard(message: { result?: UserFacingAgentResponse | null }) {
+  return Boolean(message.result?.cards?.some((card) => card.schemaType === 'loop.choice'));
+}
+
 function shouldPollMatchingSnapshot(
   response: UserFacingAgentResponse | null,
   taskStatus: string | null,
@@ -716,6 +789,68 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
+function buildLoopChoiceBootstrapResponse(input: {
+  taskId: number;
+  permissionMode: UserFacingAgentResponse['permissionMode'];
+}): UserFacingAgentResponse {
+  const card: FitMeetAlphaCard = {
+    id: `loop_choice:onboarding:${input.taskId}`,
+    type: 'loop_choice',
+    schemaVersion: 'fitmeet.tool-ui.v1',
+    schemaType: 'loop.choice',
+    title: '你今天想做什么？',
+    body: '先选一个闭环。我会优先让约练走最短链路；交友和旅游即将支持。',
+    status: 'waiting_confirmation',
+    data: {
+      taskId: input.taskId,
+      schemaName: 'LoopChoiceCard',
+      schemaVersion: 'fitmeet.tool-ui.v1',
+      schemaType: 'loop.choice',
+    },
+    actions: [
+      {
+        id: 'workout',
+        label: '约练',
+        action: 'loop_choice.workout',
+        schemaAction: 'loop_choice.workout',
+        requiresConfirmation: false,
+        payload: { taskId: input.taskId },
+      },
+      {
+        id: 'friend',
+        label: '交友',
+        action: 'loop_choice.friend',
+        schemaAction: 'loop_choice.friend',
+        requiresConfirmation: false,
+        payload: { taskId: input.taskId },
+      },
+      {
+        id: 'travel',
+        label: '旅游',
+        action: 'loop_choice.travel',
+        schemaAction: 'loop_choice.travel',
+        requiresConfirmation: false,
+        payload: { taskId: input.taskId },
+      },
+    ],
+  };
+  return {
+    taskId: input.taskId,
+    assistantMessage: '你今天想做什么？',
+    assistantMessageSource: 'deterministic_route',
+    lightStatus: '已整理回复',
+    cards: [card],
+    safeStatus: {
+      blocked: false,
+      level: 'low',
+      boundaryNotes: [],
+      requiredConfirmations: [],
+    },
+    pendingConfirmations: [],
+    permissionMode: input.permissionMode,
+  };
+}
+
 function buildProfileCompletionBootstrapResponse(input: {
   userId: string;
   questions: SocialProfileQuestion[];
@@ -729,8 +864,8 @@ function buildProfileCompletionBootstrapResponse(input: {
     type: 'profile_completion',
     schemaVersion: 'fitmeet.tool-ui.v1',
     schemaType: 'profile.completion',
-    title: '让 Agent 帮你补充个人信息',
-    body: '回答几个问题后，我会先生成更新预览；确认后才保存到个人信息。',
+    title: '资料还不完整',
+    body: '资料还不完整，我可以帮你补充。你也可以先创建本次约练卡。',
     status: 'waiting_confirmation',
     data: {
       schemaName: 'ProfileCompletionCard',
@@ -747,13 +882,14 @@ function buildProfileCompletionBootstrapResponse(input: {
         '不会生成邀约文案',
         '不会自动开始匹配',
         '所有问题都可以跳过',
+        '资料补全不阻断本次约练、交友或旅游闭环',
       ],
     },
     actions: [],
   };
   return {
     assistantMessage:
-      '我先帮你补充个人信息。你可以回答几个问题，我会先生成更新预览，确认后才保存。',
+      '资料还不完整，我可以帮你补充。你也可以先创建本次约练卡。',
     assistantMessageSource: 'deterministic_route',
     lightStatus: '正在整理回复',
     cards: [card],

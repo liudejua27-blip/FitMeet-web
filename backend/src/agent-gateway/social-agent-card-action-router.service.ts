@@ -24,6 +24,8 @@ import { PublicIntentPrivacyGuardService } from './public-intent-privacy-guard.s
 import { SocialIntentRateLimitService } from './social-intent-rate-limit.service';
 import { SocialAgentMatchRelaxationActionService } from './social-agent-match-relaxation-action.service';
 import { SocialAgentApplicationActionService } from './social-agent-application-action.service';
+import { ClarificationCardActionService } from './clarification/clarification-card-action.service';
+import { WorkoutLoopService } from './workout-loop/workout-loop.service';
 
 type HandleMessage = (
   body: SocialAgentRouteMessageBody,
@@ -50,6 +52,10 @@ export class SocialAgentCardActionRouterService {
     private readonly matchingRelaxation?: SocialAgentMatchRelaxationActionService,
     @Optional()
     private readonly applicationActions?: SocialAgentApplicationActionService,
+    @Optional()
+    private readonly workoutLoop?: WorkoutLoopService,
+    @Optional()
+    private readonly clarificationActions?: ClarificationCardActionService,
   ) {}
 
   async perform(input: {
@@ -191,6 +197,60 @@ export class SocialAgentCardActionRouterService {
       });
     }
 
+    if (this.isLoopChoiceAction(action)) {
+      return this.performLoopChoiceAction(
+        ownerUserId,
+        taskId,
+        action,
+        normalizedBody,
+      );
+    }
+
+    if (this.isClarificationAction(action)) {
+      if (!this.clarificationActions) {
+        throw new BadRequestException('Clarification runtime is unavailable');
+      }
+      return this.clarificationActions.perform({
+        ownerUserId,
+        taskId,
+        body: normalizedBody,
+      });
+    }
+
+    if (action === 'workout_draft.publish') {
+      const publishResult = await this.publishToDiscoverFromCardAction(
+        ownerUserId,
+        taskId,
+        { ...normalizedBody, action: 'publish_to_discover' },
+        input.handleMessage,
+        input.emit,
+        input.options,
+      );
+      if (publishResult.publicLoop?.stage !== 'discover_visible') {
+        return publishResult;
+      }
+      return {
+        ...publishResult,
+        assistantMessage:
+          '已发布到发现页，并进入约练匹配队列。发送邀请、加好友或私信前仍会让你确认。',
+        publicLoop: {
+          ...publishResult.publicLoop,
+          stage: 'matching_queued',
+        },
+      };
+    }
+
+    if (this.isWorkoutAction(action)) {
+      if (!this.workoutLoop) {
+        throw new BadRequestException('Workout loop runtime is unavailable');
+      }
+      return this.workoutLoop.performWorkoutAction({
+        ownerUserId,
+        taskId,
+        body: normalizedBody,
+      });
+    }
+
     if (
       action === 'candidate.view_detail' ||
       action === 'candidate.more_like_this' ||
@@ -288,7 +348,9 @@ export class SocialAgentCardActionRouterService {
 
   private isPublishAction(action: string) {
     return (
-      action === 'publish_to_discover' || action === 'publish_social_request'
+      action === 'publish_to_discover' ||
+      action === 'publish_social_request' ||
+      action === 'workout_draft.publish'
     );
   }
 
@@ -313,6 +375,29 @@ export class SocialAgentCardActionRouterService {
       action === 'public_intent_application.reject' ||
       action === 'public_intent_application.view_profile' ||
       action === 'public_intent_application.open_conversation'
+    );
+  }
+
+  private isLoopChoiceAction(action: string) {
+    return (
+      action === 'loop_choice.workout' ||
+      action === 'loop_choice.friend' ||
+      action === 'loop_choice.travel'
+    );
+  }
+
+  private isClarificationAction(action: string) {
+    return action === 'clarification.yes' || action === 'clarification.no';
+  }
+
+  private isWorkoutAction(action: string) {
+    return (
+      action === 'workout_intake.submit' ||
+      action === 'workout_intake.use_defaults' ||
+      action === 'workout_intake.cancel' ||
+      action === 'workout_draft.private_match' ||
+      action === 'workout_draft.edit' ||
+      action === 'workout_draft.cancel'
     );
   }
 
@@ -485,6 +570,17 @@ export class SocialAgentCardActionRouterService {
       'matching.relax_tags',
       'public_intent_application.view_profile',
       'public_intent_application.open_conversation',
+      'loop_choice.workout',
+      'loop_choice.friend',
+      'loop_choice.travel',
+      'clarification.yes',
+      'clarification.no',
+      'workout_intake.submit',
+      'workout_intake.use_defaults',
+      'workout_intake.cancel',
+      'workout_draft.private_match',
+      'workout_draft.edit',
+      'workout_draft.cancel',
       'candidate.generate_opener',
       'opener.regenerate',
       'opener.reject',
@@ -509,6 +605,7 @@ export class SocialAgentCardActionRouterService {
       'life_graph.reject_update',
       'meet_loop.resume',
       'meet_loop.reschedule',
+      'workout_draft.publish',
     ]).has(action);
   }
 
@@ -613,9 +710,12 @@ export class SocialAgentCardActionRouterService {
     }
     if (
       normalized === 'publish_social_request' ||
-      normalized === 'publish_to_discover'
+      normalized === 'publish_to_discover' ||
+      normalized === 'workout_draft.publish'
     ) {
-      return 'publish_to_discover';
+      return normalized === 'workout_draft.publish'
+        ? 'workout_draft.publish'
+        : 'publish_to_discover';
     }
     if (normalized === 'create_activity') {
       return 'activity.confirm_create';
@@ -646,6 +746,13 @@ export class SocialAgentCardActionRouterService {
     if (this.isPublishAction(action)) return 'FitMeet Main Agent' as const;
     if (this.isPublishDismissAction(action))
       return 'FitMeet Main Agent' as const;
+    if (
+      action.startsWith('loop_choice.') ||
+      action.startsWith('clarification.') ||
+      action.startsWith('workout_')
+    ) {
+      return 'FitMeet Main Agent' as const;
+    }
     if (action.startsWith('matching.')) return 'FitMeet Main Agent' as const;
     if (action.startsWith('public_intent_application.'))
       return 'Match Agent' as const;
@@ -665,6 +772,46 @@ export class SocialAgentCardActionRouterService {
       return 'Match Agent' as const;
     }
     return 'FitMeet Main Agent' as const;
+  }
+
+  private async performLoopChoiceAction(
+    ownerUserId: number,
+    taskId: number,
+    action: string,
+    body: SocialAgentCardActionBody,
+  ): Promise<SocialAgentIntentRouteResult> {
+    if (action === 'loop_choice.workout') {
+      if (!this.workoutLoop) {
+        throw new BadRequestException('Workout loop runtime is unavailable');
+      }
+      return this.workoutLoop.startWorkoutIntake({
+        ownerUserId,
+        taskId,
+        payload: this.record(body.payload),
+      });
+    }
+    const label = action === 'loop_choice.travel' ? '旅游' : '交友';
+    return this.simpleRouteResult({
+      taskId,
+      assistantMessage: `${label}闭环即将支持。你现在可以先使用约练闭环。`,
+      cards: [
+        {
+          id: `${action}:coming_soon:${taskId}`,
+          type: 'generic_card',
+          schemaVersion: 'fitmeet.tool-ui.v1',
+          schemaType: 'generic.card',
+          title: `${label}闭环即将支持`,
+          body: '本批 MVP 先开放约练闭环。该方向会保留在后续版本中。',
+          status: 'ready',
+          data: {
+            taskId,
+            selectedLoop: action.replace('loop_choice.', ''),
+            availability: 'coming_soon',
+          },
+          actions: [],
+        },
+      ],
+    });
   }
 
   private async dismissPublishDraftFromCardAction(
