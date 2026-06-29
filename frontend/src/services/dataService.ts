@@ -15,6 +15,7 @@ export function getPublicSocialIntents(params?: {
   city?: string;
   requestType?: string;
   status?: string;
+  publicIntentId?: string;
 }): Promise<PublicSocialIntent[]> {
   return api.getPublicSocialIntents(params);
 }
