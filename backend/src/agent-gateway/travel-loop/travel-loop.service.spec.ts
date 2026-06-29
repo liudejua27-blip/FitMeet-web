@@ -166,7 +166,15 @@ describe('TravelLoopService', () => {
       callJson: jest.fn().mockResolvedValue({
         intent: 'travel',
         confidence: 0.9,
-        destination: '成都',
+        locationMention: {
+          rawText: '蓉城',
+          normalizedText: '成都',
+          cityHint: '成都',
+          districtHint: '锦江区',
+          poiHint: '成都远洋太古里',
+          relation: 'city_only',
+          needsGeoResolution: true,
+        },
         departureTime: '周末',
         duration: '两天一晚',
         budgetRange: '1000元',
@@ -201,6 +209,9 @@ describe('TravelLoopService', () => {
       schemaType: 'travel.intake',
       data: expect.objectContaining({
         destination: '成都',
+        city: '成都',
+        district: '锦江区',
+        poiName: '成都远洋太古里',
         departureTime: '周末',
         duration: '两天一晚',
         budgetRange: '1000元',

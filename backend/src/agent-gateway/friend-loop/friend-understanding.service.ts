@@ -8,13 +8,30 @@ import { SocialAgentToolJsonModelService } from '../social-agent-tool-json-model
 import type { FriendSlots } from './friend-loop.types';
 import { validateFriendSlots } from './friend-slot-extractor';
 
+const FriendLocationMentionSchema = z
+  .object({
+    rawText: z.string().optional(),
+    normalizedText: z.string().optional(),
+    cityHint: z.string().optional(),
+    districtHint: z.string().optional(),
+    poiHint: z.string().optional(),
+    relation: z
+      .enum(['near', 'inside', 'route', 'city_only', 'unknown'])
+      .optional(),
+    needsGeoResolution: z.boolean().catch(true),
+  })
+  .optional();
+
 const FriendUnderstandingSchema = z.object({
   intent: z
     .enum(['friend', 'workout', 'travel', 'profile', 'casual', 'uncertain'])
     .catch('uncertain'),
   confidence: z.number().min(0).max(1).catch(0),
   friendGoal: z.string().optional(),
+  locationMention: FriendLocationMentionSchema,
   city: z.string().optional(),
+  district: z.string().optional(),
+  poiName: z.string().optional(),
   locationText: z.string().optional(),
   topicTags: z.array(z.string()).catch([]),
   genderPreference: z.string().optional(),
@@ -88,10 +105,24 @@ export class FriendUnderstandingService {
     ) {
       return {};
     }
+    const locationMention = understanding.locationMention;
+    const locationText =
+      this.text(locationMention?.normalizedText) ||
+      this.text(locationMention?.rawText) ||
+      this.text(understanding.locationText);
+    const city =
+      this.text(locationMention?.cityHint) || this.text(understanding.city);
+    const district =
+      this.text(locationMention?.districtHint) ||
+      this.text(understanding.district);
+    const poiName =
+      this.text(locationMention?.poiHint) || this.text(understanding.poiName);
     return {
       friendGoal: this.text(understanding.friendGoal) || undefined,
-      city: sanitizeCity(understanding.city) ?? undefined,
-      locationText: this.text(understanding.locationText) || undefined,
+      city: sanitizeCity(city) ?? undefined,
+      district: district || undefined,
+      poiName: poiName || undefined,
+      locationText: locationText || undefined,
       topicTags: this.stringList(understanding.topicTags),
       genderPreference: this.text(understanding.genderPreference) || undefined,
       bodyPreference: this.text(understanding.bodyPreference) || undefined,
@@ -120,6 +151,8 @@ export class FriendUnderstandingService {
       ...ruleSlots,
       friendGoal: this.friendGoal(ruleSlots, llmSlots),
       city: llmSlots.city || ruleSlots.city,
+      district: llmSlots.district || ruleSlots.district,
+      poiName: llmSlots.poiName || ruleSlots.poiName,
       locationText: llmSlots.locationText || ruleSlots.locationText,
       topicTags,
       genderPreference:
@@ -159,7 +192,7 @@ export class FriendUnderstandingService {
   }): string {
     return JSON.stringify({
       instruction:
-        'Extract friend-loop intent and slots from the user message. Return only JSON. Do not publish, match, send messages, save profile, or make contact decisions. Only identify the user-facing friend card fields.',
+        'Extract friend-loop intent and slots from the user message. Return only JSON. Do not publish, match, send messages, save profile, or make contact decisions. Put location clues into locationMention; maps/geocoding will decide the true city/POI.',
       allowedIntentValues: [
         'friend',
         'workout',
@@ -172,8 +205,7 @@ export class FriendUnderstandingService {
         'intent',
         'confidence',
         'friendGoal',
-        'city',
-        'locationText',
+        'locationMention',
         'topicTags',
         'genderPreference',
         'bodyPreference',
@@ -187,6 +219,16 @@ export class FriendUnderstandingService {
         'clarificationQuestion',
       ],
       userMessage: cleanDisplayText(input.message, ''),
+      locationMentionContract: {
+        rawText: 'exact location words used by user, e.g. 华师大附近',
+        normalizedText: 'clean query for map lookup, e.g. 华师大',
+        cityHint: 'only if user explicitly gave or strongly implied a city',
+        districtHint:
+          'only if user explicitly gave or strongly implied a district',
+        poiHint: 'POI/school/mall/landmark clue',
+        relation: ['near', 'inside', 'route', 'city_only', 'unknown'],
+        needsGeoResolution: true,
+      },
       ruleSlots: input.ruleSlots,
       taskMemory: this.safeTaskMemory(input.task ?? null),
     });
