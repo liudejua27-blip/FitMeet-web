@@ -63,7 +63,11 @@ export class FriendLoopService {
       message: input.message,
       previousSlots: this.readFriendSlots(input.task),
     });
-    const decision = this.friendBrain?.decideEntrance({ slots });
+    const decision = await this.friendBrain?.decideEntrance({
+      task: input.task,
+      message: input.message,
+      slots,
+    });
     const result = await this.intakeResultForSlots({
       task: input.task,
       slots: decision?.slots ?? slots,

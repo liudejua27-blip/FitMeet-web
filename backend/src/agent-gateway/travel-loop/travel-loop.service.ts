@@ -63,7 +63,11 @@ export class TravelLoopService {
       message: input.message,
       previousSlots: this.readTravelSlots(input.task),
     });
-    const decision = this.travelBrain?.decideEntrance({ slots });
+    const decision = await this.travelBrain?.decideEntrance({
+      task: input.task,
+      message: input.message,
+      slots,
+    });
     const result = await this.intakeResultForSlots({
       task: input.task,
       slots: decision?.slots ?? slots,

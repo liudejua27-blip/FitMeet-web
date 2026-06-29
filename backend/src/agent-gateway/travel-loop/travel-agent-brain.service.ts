@@ -1,5 +1,6 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Optional } from '@nestjs/common';
 
+import type { AgentTask } from '../entities/agent-task.entity';
 import type {
   LoopAgentDecisionAction,
   LoopAgentDecisionBase,
@@ -9,6 +10,7 @@ import type {
   TravelSlotValidation,
   TravelSlots,
 } from './travel-loop.types';
+import { TravelUnderstandingService } from './travel-understanding.service';
 
 export type TravelAgentDecisionAction = Extract<
   LoopAgentDecisionAction,
@@ -24,12 +26,23 @@ export type TravelAgentDecision = LoopAgentDecisionBase<
 
 @Injectable()
 export class TravelAgentBrainService {
-  decideEntrance(input: { slots: TravelSlots }): TravelAgentDecision {
+  constructor(
+    @Optional()
+    private readonly understanding?: TravelUnderstandingService,
+  ) {}
+
+  async decideEntrance(input: {
+    task?: AgentTask | null;
+    message: string;
+    slots: TravelSlots;
+    signal?: AbortSignal | null;
+  }): Promise<TravelAgentDecision> {
+    const slots = await this.enrichEntranceSlots(input);
     return {
       loopKind: 'travel',
       action: 'ASK_INTAKE',
       reason: 'travel_entrance_collect_slots',
-      slots: input.slots,
+      slots,
       missing: [],
     };
   }
@@ -54,5 +67,25 @@ export class TravelAgentBrainService {
       slots: input.slots,
       missing: [],
     };
+  }
+
+  private async enrichEntranceSlots(input: {
+    task?: AgentTask | null;
+    message: string;
+    slots: TravelSlots;
+    signal?: AbortSignal | null;
+  }): Promise<TravelSlots> {
+    if (!this.understanding?.shouldCall(input)) return input.slots;
+    const understanding = await this.understanding.understand({
+      task: input.task ?? null,
+      message: input.message,
+      ruleSlots: input.slots,
+      signal: input.signal ?? null,
+    });
+    return this.understanding.mergeSlots(
+      input.slots,
+      this.understanding.slotsFromUnderstanding(understanding),
+      input.message,
+    );
   }
 }

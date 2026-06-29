@@ -4,7 +4,9 @@ import {
   AgentTaskStatus,
 } from '../entities/agent-task.entity';
 import { MatchingJobStatus } from '../entities/matching-job.entity';
+import { FriendAgentBrainService } from './friend-agent-brain.service';
 import { FriendLoopService } from './friend-loop.service';
+import { FriendUnderstandingService } from './friend-understanding.service';
 
 function makeTask(overrides: Partial<AgentTask> = {}): AgentTask {
   return {
@@ -135,6 +137,78 @@ describe('FriendLoopService', () => {
     expect((task.memory as Record<string, unknown>).friendLoop).toMatchObject({
       stage: 'intake',
     });
+  });
+
+  it('uses friend understanding to fill slots that rules miss', async () => {
+    const toolJson = {
+      callJson: jest.fn().mockResolvedValue({
+        intent: 'friend',
+        confidence: 0.88,
+        friendGoal: '认识同城朋友',
+        city: '上海',
+        topicTags: ['咖啡', '低压力社交'],
+        scenePreference: '先站内聊聊',
+        timePreference: '周末',
+        candidatePreference: '兴趣相近',
+        missing: [],
+        assumptions: [],
+        needsClarification: false,
+      }),
+    };
+    const friendBrain = new FriendAgentBrainService(
+      new FriendUnderstandingService(toolJson as never),
+    );
+    const { draftPublication, service } = makeService(
+      makeTask(),
+      friendBrain as never,
+    );
+
+    const result = await service.tryHandleEntrance({
+      ownerUserId: 7,
+      task: makeTask(),
+      message: '想在魔都认识同城咖啡朋友，周末先站内聊',
+    });
+
+    expect(toolJson.callJson).toHaveBeenCalledWith(
+      expect.objectContaining({ purpose: 'friend_understanding' }),
+    );
+    expect(result.result.cards?.[0]).toMatchObject({
+      schemaType: 'friend.intake',
+      data: expect.objectContaining({
+        friendGoal: '认识同城朋友',
+        city: '上海',
+        topicTags: expect.arrayContaining(['咖啡', '低压力社交']),
+        scenePreference: '先站内聊聊',
+        timePreference: '周末',
+        candidatePreference: '兴趣相近',
+      }),
+    });
+    expect(draftPublication.stagePrivateDraftForPublish).not.toHaveBeenCalled();
+  });
+
+  it('keeps friend understanding fallback conservative when model runtime is unavailable', async () => {
+    const friendBrain = new FriendAgentBrainService(
+      new FriendUnderstandingService(),
+    );
+    const { draftPublication, service } = makeService(
+      makeTask(),
+      friendBrain as never,
+    );
+
+    const result = await service.tryHandleEntrance({
+      ownerUserId: 7,
+      task: makeTask(),
+      message: '想在魔都认识同城朋友',
+    });
+
+    expect(result.result.cards?.[0]).toMatchObject({
+      schemaType: 'friend.intake',
+      data: expect.objectContaining({
+        friendGoal: '认识新朋友',
+        missingFields: expect.arrayContaining(['city']),
+      }),
+    });
+    expect(draftPublication.stagePrivateDraftForPublish).not.toHaveBeenCalled();
   });
 
   it('keeps intake when required friend slots are missing', async () => {
