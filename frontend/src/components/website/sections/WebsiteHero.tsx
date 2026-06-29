@@ -13,6 +13,7 @@ export function WebsiteHero({ name }: { name: keyof typeof websiteHeroConfig }) 
       description={config.description}
       eyebrow={config.eyebrow}
       layout={layout}
+      pageName={name}
       proofItems={config.proofItems}
       title={config.title}
       visual={visual ? <EnterpriseHeroVisual variant={visual} /> : undefined}

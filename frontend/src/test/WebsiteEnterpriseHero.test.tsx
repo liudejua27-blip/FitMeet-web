@@ -5,8 +5,8 @@ import { MemoryRouter } from 'react-router-dom';
 import { describe, expect, it } from 'vitest';
 import { WebsitePlatform, type WebsitePage } from '../components/website/WebsitePlatform';
 
-const splitPages: WebsitePage[] = ['home', 'features', 'safety', 'download'];
-const centerPages: WebsitePage[] = ['about', 'demo'];
+const splitPages: WebsitePage[] = ['home', 'features', 'safety', 'download', 'about'];
+const centerPages: WebsitePage[] = ['demo'];
 const websitePages: WebsitePage[] = [...splitPages, ...centerPages];
 
 function renderWebsite(page: WebsitePage, route = page === 'home' ? '/' : `/${page}`) {
@@ -34,9 +34,10 @@ describe('Website enterprise hero system', () => {
 
     expect(hero).toHaveClass('fm-enterprise-hero-system--split');
     expect(hero?.querySelectorAll('.fm-product-proof-visual')).toHaveLength(1);
+    expect(hero?.querySelectorAll('.fm-product-proof-visual__chips span').length).toBeGreaterThan(0);
     expect(
       hero?.querySelectorAll('.fm-product-proof-visual__chips span').length,
-    ).toBeLessThanOrEqual(2);
+    ).toBeLessThanOrEqual(4);
   });
 
   it.each(centerPages)('renders %s as a centered hero without forced visual art', (page) => {
@@ -83,22 +84,48 @@ describe('Website enterprise hero system', () => {
     expect(screen.getByRole('heading', { name: '公司' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: '安全与法律' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: '联系' })).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: '15253005312@163.com' })).toHaveAttribute(
+    expect(screen.getByRole('link', { name: '152530005312@163.com' })).toHaveAttribute(
       'href',
-      'mailto:15253005312@163.com',
+      'mailto:152530005312@163.com',
     );
   });
 
-  it('uses the generated demand-flow wallpaper as a contextual visual asset', () => {
+  it('uses the generated black-gold Social World hero asset', () => {
     renderWebsite('home');
 
-    const wallpaper = screen.getByRole('img', {
-      name: 'FitMeet 需求流社交城市夜景与连接网络',
+    expect(screen.getByRole('heading', { name: 'Social World' })).toBeInTheDocument();
+    expect(screen.getAllByText(/让社交更简单/).length).toBeGreaterThan(0);
+
+    const heroVisual = screen.getByRole('img', {
+      name: 'FitMeet Social World 黑金 App 需求流产品预览',
     });
 
-    expect(wallpaper).toHaveAttribute(
+    expect(heroVisual).toHaveAttribute(
       'src',
-      '/images/fitmeet/generated/social-world-demand-wallpaper-1920.jpg',
+      '/images/fitmeet/website/social-world-hero-clean-v3.jpg',
+    );
+  });
+
+  it('uses the generated product suite asset outside the homepage and about globe', () => {
+    renderWebsite('features', '/features');
+
+    expect(
+      screen.getByRole('img', {
+        name: 'FitMeet Agent、Discover、Matching、Messages 和 Safety 产品能力图',
+      }),
+    ).toHaveAttribute('src', '/images/fitmeet/website/social-world-product-suite-v4.jpg');
+  });
+
+  it('keeps the globe visual exclusive to the About page hero', () => {
+    renderWebsite('about', '/about');
+
+    const aboutVisual = screen.getByRole('img', {
+      name: 'FitMeet Social World 全球真实社交愿景黑金视觉',
+    });
+
+    expect(aboutVisual).toHaveAttribute(
+      'src',
+      '/images/fitmeet/website/social-world-about-earth-v3.jpg',
     );
   });
 
@@ -107,9 +134,9 @@ describe('Website enterprise hero system', () => {
 
     expect(screen.getByText('核心产品流程')).toBeInTheDocument();
     expect(screen.queryByText('核心截图')).not.toBeInTheDocument();
-    expect(screen.getByText('Agent 生成需求卡')).toBeInTheDocument();
-    expect(screen.getByText('Discover 公开可见')).toBeInTheDocument();
-    expect(screen.getByText('消息页承接后续')).toBeInTheDocument();
+    expect(screen.getByText('Agent 生成 Social Card')).toBeInTheDocument();
+    expect(screen.getByText('Discover 真实可见')).toBeInTheDocument();
+    expect(screen.getByText('Messages 承接后续')).toBeInTheDocument();
   });
 
   it('exposes the public demo as an accessible tab interface', () => {

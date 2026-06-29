@@ -12,13 +12,13 @@ const principles = [
 const stageItems = [
   [
     '当前阶段',
-    'FitMeet 正在打磨 Beta 版本，优先验证 Agent 资料补全、约练卡发布、Discover 可见和消息承接。',
+    'FitMeet 正在打磨 Beta 版本，优先验证 Agent 资料补全、约练卡发布、Discover 可见、匹配推荐和消息承接。',
   ],
   [
     '产品方向',
-    '围绕城市青年真实生活社交，把约练、交友和搭子需求做成一条可确认、可撤回、可追踪的闭环。',
+    '围绕城市青年真实生活社交，把约练、交友和搭子需求做成 Social World 中可确认、可撤回、可追踪的闭环。',
   ],
-  ['品牌使命', '让社交从随机刷人变成由具体需求驱动的真实连接。'],
+  ['品牌使命', '让社交更简单：从随机刷人变成由具体需求驱动的真实连接。'],
 ];
 
 export function AboutWebsitePage() {
@@ -28,8 +28,16 @@ export function AboutWebsitePage() {
       <WebsiteSection
         id="stage"
         label="Company"
-        title="FitMeet 还在早期，但产品边界必须从第一天清楚。"
+        title="FitMeet 还在早期，但 Social World 的产品边界必须从第一天清楚。"
       >
+        <figure className="fm-about-visual">
+          <img
+            src="/images/fitmeet/website/social-world-about-earth-v3.jpg"
+            alt="FitMeet Social World 真实社交愿景黑金地球视觉"
+            loading="lazy"
+            decoding="async"
+          />
+        </figure>
         <div className="fm-about-brief">
           {stageItems.map(([title, body]) => (
             <article key={title}>
@@ -78,7 +86,7 @@ export function AboutWebsitePage() {
       </section>
       <FinalCTA
         label="Social World"
-        title="准备好从一个真实需求开始认识人。"
+        title="准备好从 Social World 的一个真实需求开始认识人。"
         body="先体验 Agent 生成需求卡，或者进入发现页看附近已经公开的约练、交友和搭子场景。"
         primary={{ label: '体验 Agent', to: '/agent' }}
         secondary={{ label: '进入发现', to: '/discover', siteLink: true }}
