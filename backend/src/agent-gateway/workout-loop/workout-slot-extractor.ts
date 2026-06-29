@@ -1,5 +1,9 @@
 import { cleanDisplayText } from '../../common/display-text.util';
-import type { WorkoutSlotValidation, WorkoutSlots } from './workout-loop.types';
+import type {
+  WorkoutRequiredSlot,
+  WorkoutSlotValidation,
+  WorkoutSlots,
+} from './workout-loop.types';
 
 const DEFAULT_SAFETY_BOUNDARY =
   '默认安全设置：公共场所、站内沟通、不交换联系方式、不公开精确位置';
@@ -27,11 +31,30 @@ export function extractWorkoutSlots(input: {
 export function validateWorkoutSlots(
   slots: WorkoutSlots,
 ): WorkoutSlotValidation {
-  const missing: WorkoutSlotValidation['missing'] = [];
+  return validateWorkoutSlotsForDraft(slots);
+}
+
+export function validateWorkoutSlotsForDraft(
+  slots: WorkoutSlots,
+): WorkoutSlotValidation {
+  const missing: WorkoutRequiredSlot[] = [];
   if (!slots.activityType) missing.push('activityType');
   if (!slots.timePreference) missing.push('timePreference');
   if (!slots.locationText && !slots.city) missing.push('locationText');
   return { valid: missing.length === 0, missing };
+}
+
+export function validateWorkoutSlotsForPublish(
+  slots: WorkoutSlots,
+): WorkoutSlotValidation {
+  const validation = validateWorkoutSlotsForDraft(slots);
+  const missing = [...validation.missing];
+  if (!slots.city) missing.push('city');
+  if (!slots.locationText) missing.push('locationText');
+  return {
+    valid: missing.length === 0,
+    missing: Array.from(new Set(missing)),
+  };
 }
 
 export function defaultWorkoutSafetyBoundary() {
@@ -42,6 +65,10 @@ function extractActivity(message: string): string | undefined {
   const activities = [
     '羽毛球',
     '篮球',
+    'citywalk',
+    'city walk',
+    '练肩',
+    '夜跑',
     '跑步',
     '慢跑',
     '健身',
@@ -54,6 +81,9 @@ function extractActivity(message: string): string | undefined {
   ];
   const matched = activities.find((item) => message.includes(item));
   if (!matched) return undefined;
+  if (matched === 'city walk') return 'citywalk';
+  if (matched === '练肩') return '健身';
+  if (matched === '夜跑') return '跑步';
   if (matched === '慢跑') return '跑步';
   if (matched === '撸铁') return '健身';
   return matched;
@@ -62,7 +92,7 @@ function extractActivity(message: string): string | undefined {
 function extractTime(message: string): string | undefined {
   const explicit = Array.from(
     message.matchAll(
-      /(?:(今天|今晚|明天|后天|本周末|下周末|周末)\s*(上午|中午|下午|晚上|早上)?\s*(\d{1,2}\s*[点:：]\s*\d{0,2})?|(?:上午|中午|下午|晚上|早上)\s*(\d{1,2}\s*[点:：]\s*\d{0,2})?|(\d{1,2}\s*[点:：]\s*\d{0,2}))/g,
+      /(?:(今天|今晚|明天|明晚|后天|本周末|下周末|周末)\s*(上午|中午|下午|晚上|早上)?\s*(\d{1,2}\s*[点:：]\s*\d{0,2})?|(?:上午|中午|下午|晚上|早上)\s*(\d{1,2}\s*[点:：]\s*\d{0,2})?|(\d{1,2}\s*[点:：]\s*\d{0,2}))/g,
     ),
   )
     .map((match) => match[0]?.replace(/\s+/g, ''))
@@ -71,7 +101,7 @@ function extractTime(message: string): string | undefined {
     .map((value) => ({
       value,
       score:
-        (/(今天|今晚|明天|后天|本周末|下周末|周末)/.test(value) ? 2 : 0) +
+        (/(今天|今晚|明天|明晚|后天|本周末|下周末|周末)/.test(value) ? 2 : 0) +
         (/(上午|中午|下午|晚上|早上)/.test(value) ? 2 : 0) +
         (/(\d{1,2})[点:：]/.test(value) ? 3 : 0),
     }))
@@ -81,15 +111,19 @@ function extractTime(message: string): string | undefined {
         right.score - left.score || right.value.length - left.value.length,
     );
   if (scored[0]?.value) return scored[0].value;
+  const relative = message.match(
+    /(下班后|工作日晚上|夜跑|这周末|本周末|下周末)/,
+  );
+  if (relative?.[0]) return relative[0] === '夜跑' ? '夜间' : relative[0];
   const weekday = message.match(
-    /(周一|周二|周三|周四|周五|周六|周日|星期[一二三四五六日天])/,
+    /((?:周一|周二|周三|周四|周五|周六|周日|星期[一二三四五六日天])(?:上午|中午|下午|晚上|早上|下班后)?)/,
   );
   return weekday?.[0];
 }
 
 function extractPlace(message: string): string | undefined {
   const suffixPlacePattern =
-    /([\u4e00-\u9fa5A-Za-z0-9·•-]{2,32}?(?:(?:大学|学院|公园|广场|体育馆|健身房|球馆|操场|商场|校区|中心|海边|河边)(?:附近)?|附近))/g;
+    /([\u4e00-\u9fa5A-Za-z0-9·•-]{2,32}?(?:(?:大学|学院|公园|广场|体育馆|健身房|球馆|操场|商场|校区|中心|海边|河边|湖)(?:附近)?|附近))/g;
   const candidates = Array.from(message.matchAll(suffixPlacePattern))
     .map((match) => cleanPlaceText(match[1] ?? ''))
     .filter(Boolean)
@@ -108,40 +142,67 @@ function cleanPlaceText(value: string): string {
   return value
     .replace(/^.*(?:在|去|到|地点在|位置在)(?=[\u4e00-\u9fa5A-Za-z0-9·•-])/, '')
     .replace(
-      /^(今天|今晚|明天|后天|周末|本周末|下周末|上午|中午|下午|晚上|早上)+/,
+      /^(今天|今晚|明天|明晚|后天|周末|本周末|下周末|上午|中午|下午|晚上|早上)+/,
       '',
     )
     .replace(/^(我想在|想在|我在|在|去|到|地点在|位置在)/, '')
-    .replace(/(找个?搭子|找人|一起|健身|跑步|运动|散步|打球).*$/, '')
+    .replace(/(找个?搭子|找人|一起|健身|跑步|夜跑|运动|散步|打球).*$/, '')
     .trim();
 }
 
 function placeScore(value: string): number {
   return (
-    (/(大学|学院|公园|广场|体育馆|健身房|球馆|操场|商场|校区|中心|海边|河边)/.test(
+    (/(大学|学院|公园|广场|体育馆|健身房|球馆|操场|商场|校区|中心|海边|河边|湖)/.test(
       value,
     )
       ? 3
       : 0) +
     (/(附近)$/.test(value) ? 1 : 0) -
-    (/^(我|想|发布|约练|今天|明天|后天)/.test(value) ? 2 : 0)
+    (/^(我|想|发布|约练|今天|明天|明晚|后天)/.test(value) ? 2 : 0)
   );
 }
 
 function extractCity(message: string): string | undefined {
   const cities = [
-    '青岛',
     '北京',
     '上海',
-    '杭州',
-    '深圳',
     '广州',
-    '南京',
+    '深圳',
+    '杭州',
     '成都',
+    '重庆',
+    '南京',
+    '苏州',
     '武汉',
     '西安',
+    '长沙',
+    '郑州',
+    '天津',
+    '青岛',
+    '济南',
     '厦门',
-    '苏州',
+    '宁波',
+    '合肥',
+    '大连',
+    '沈阳',
+    '昆明',
+    '佛山',
+    '东莞',
+    '无锡',
+    '珠海',
+    '南昌',
+    '南宁',
+    '贵阳',
+    '太原',
+    '石家庄',
+    '哈尔滨',
+    '长春',
+    '兰州',
+    '海口',
+    '三亚',
+    '香港',
+    '澳门',
+    '台北',
   ];
   return cities.find((city) => message.includes(city));
 }
@@ -167,10 +228,10 @@ function extractCandidatePreference(message: string): string | undefined {
   );
   if (explicit?.[2]) return explicit[2].trim();
   const match = message.match(
-    /(希望|想找|最好|优先)(.{1,40})(?:一起|陪我|跑步|健身|运动|散步|打球|$)/,
+    /(希望|想找|最好|优先)(.{1,40})(?:一起|陪我|跑步|夜跑|健身|运动|散步|打球|$)/,
   );
   return match?.[2]
     ?.replace(/^[个一位些\s，,。；;]+/, '')
-    .replace(/(今天|今晚|明天|后天|上午|中午|下午|晚上|早上).*/, '')
+    .replace(/(今天|今晚|明天|明晚|后天|上午|中午|下午|晚上|早上).*/, '')
     .trim();
 }

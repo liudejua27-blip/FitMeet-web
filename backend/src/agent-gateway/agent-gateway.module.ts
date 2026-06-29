@@ -246,7 +246,13 @@ import { SocialActivity } from '../activities/entities/activity.entity';
 import { RealtimeModule } from '../realtime/realtime.module';
 import { AdminRbacModule } from '../admin-rbac/admin-rbac.module';
 import { FeatureFlagService } from '../common/feature-flag.service';
+import { AgentEntryOrchestratorService } from './agent-entry/agent-entry-orchestrator.service';
+import { LegacyAgentAdapterService } from './legacy-agent/legacy-agent-adapter.service';
+import { ProfileLoopService } from './profile-loop/profile-loop.service';
+import { GeoResolverService } from './geo/geo-resolver.service';
+import { WorkoutEntryArbitrationService } from './workout-loop/workout-entry-arbitration.service';
 import { WorkoutLoopService } from './workout-loop/workout-loop.service';
+import { WorkoutUnderstandingService } from './workout-loop/workout-understanding.service';
 
 @Module({
   imports: [
@@ -341,9 +347,15 @@ import { WorkoutLoopService } from './workout-loop/workout-loop.service';
     PublicIntentPrivacyGuardService,
     SocialIntentRateLimitService,
     SocialAgentDomainClassifierService,
+    AgentEntryOrchestratorService,
+    LegacyAgentAdapterService,
     FitMeetLoopRouterService,
     ClarificationCardActionService,
+    ProfileLoopService,
+    GeoResolverService,
+    WorkoutEntryArbitrationService,
     WorkoutLoopService,
+    WorkoutUnderstandingService,
     FeatureFlagService,
     AgentApprovalDispatcherService,
     AgentSettingsService,
@@ -516,7 +528,10 @@ import { WorkoutLoopService } from './workout-loop/workout-loop.service';
     SocialAgentDomainClassifierService,
     FitMeetLoopRouterService,
     ClarificationCardActionService,
+    GeoResolverService,
+    WorkoutEntryArbitrationService,
     WorkoutLoopService,
+    WorkoutUnderstandingService,
     FeatureFlagService,
     AgentApprovalDispatcherService,
     AgentSettingsService,

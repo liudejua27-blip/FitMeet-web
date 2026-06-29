@@ -15,6 +15,8 @@ describe('classifyWorkoutIntent', () => {
 
   it('detects activity plus time and place context', () => {
     expect(classifyWorkoutIntent('今晚青岛大学附近散步')).toBe('workout');
+    expect(classifyWorkoutIntent('明晚陆家嘴健身')).toBe('workout');
+    expect(classifyWorkoutIntent('苏州金鸡湖夜跑')).toBe('workout');
   });
 
   it('honors negative workout intent', () => {

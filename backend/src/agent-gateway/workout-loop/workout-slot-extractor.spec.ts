@@ -2,6 +2,7 @@ import {
   defaultWorkoutSafetyBoundary,
   extractWorkoutSlots,
   validateWorkoutSlots,
+  validateWorkoutSlotsForPublish,
 } from './workout-slot-extractor';
 
 describe('workout slot extraction', () => {
@@ -54,6 +55,45 @@ describe('workout slot extraction', () => {
       visibilityPreference: 'public',
     });
     expect(validateWorkoutSlots(slots)).toEqual({ valid: true, missing: [] });
+  });
+
+  it('supports non-Qingdao city and night run wording', () => {
+    const slots = extractWorkoutSlots({
+      message: '苏州金鸡湖夜跑',
+    });
+
+    expect(slots).toMatchObject({
+      activityType: '跑步',
+      timePreference: '夜间',
+      locationText: '苏州金鸡湖',
+      city: '苏州',
+    });
+  });
+
+  it('does not invent Qingdao when a local POI has no city signal', () => {
+    const slots = extractWorkoutSlots({
+      message: '明晚陆家嘴健身',
+    });
+
+    expect(slots).toMatchObject({
+      activityType: '健身',
+      timePreference: '明晚',
+    });
+    expect(slots.city).toBeUndefined();
+    expect(slots.locationText).toBeUndefined();
+    expect(validateWorkoutSlots(slots)).toEqual({
+      valid: false,
+      missing: ['locationText'],
+    });
+    expect(
+      validateWorkoutSlotsForPublish({
+        ...slots,
+        locationText: '陆家嘴附近',
+      }),
+    ).toEqual({
+      valid: false,
+      missing: ['city'],
+    });
   });
 
   it('merges previous slots and reports missing required fields', () => {

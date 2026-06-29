@@ -73,36 +73,32 @@ function makeHarness(
   const taskLifecycle = {
     ensureConversationTask: jest.fn().mockResolvedValue(task),
   };
-  const mainAgentTurn = {
-    handleRouteTurn: jest.fn().mockResolvedValue({
-      task,
-      result: options.earlyResult ?? null,
-    }),
-  };
-  const workoutLoop = {
-    tryHandleEntrance: jest
-      .fn()
-      .mockResolvedValue(options.workoutResult ?? null),
+  const agentEntry = {
+    handle: jest.fn().mockResolvedValue(
+      options.workoutResult ?? {
+        source: 'legacy_fallback',
+        task,
+        result: options.earlyResult ?? null,
+      },
+    ),
   };
   const service = new SocialAgentRouteEntranceService(
     messageLog as never,
     taskLifecycle as never,
-    mainAgentTurn as never,
-    workoutLoop as never,
+    agentEntry as never,
   );
   return {
-    mainAgentTurn,
+    agentEntry,
     messageLog,
     service,
     task,
     taskLifecycle,
-    workoutLoop,
   };
 }
 
 describe('SocialAgentRouteEntranceService', () => {
   it('rejects empty route messages before creating a task', async () => {
-    const { mainAgentTurn, messageLog, service, taskLifecycle } = makeHarness();
+    const { agentEntry, messageLog, service, taskLifecycle } = makeHarness();
 
     await expect(
       service.enter({
@@ -113,11 +109,11 @@ describe('SocialAgentRouteEntranceService', () => {
 
     expect(taskLifecycle.ensureConversationTask).not.toHaveBeenCalled();
     expect(messageLog.recordUserMessage).not.toHaveBeenCalled();
-    expect(mainAgentTurn.handleRouteTurn).not.toHaveBeenCalled();
+    expect(agentEntry.handle).not.toHaveBeenCalled();
   });
 
-  it('normalizes input, ensures the conversation task, records the user message, and enters Main Agent routing', async () => {
-    const { mainAgentTurn, messageLog, service, task, taskLifecycle } =
+  it('normalizes input, ensures the conversation task, records the user message, and enters the agent orchestrator', async () => {
+    const { agentEntry, messageLog, service, task, taskLifecycle } =
       makeHarness();
 
     const result = await service.enter({
@@ -146,12 +142,17 @@ describe('SocialAgentRouteEntranceService', () => {
       task,
       '帮我找青岛周末跑步搭子',
     );
-    expect(mainAgentTurn.handleRouteTurn).toHaveBeenCalledWith({
+    expect(agentEntry.handle).toHaveBeenCalledWith({
       ownerUserId: 7,
       task,
+      body: {
+        taskId: 101,
+        message: '  帮我找青岛周末跑步搭子  ',
+        hasCandidates: true,
+      },
       message: '帮我找青岛周末跑步搭子',
-      hasCandidates: true,
       startedAt: result.startedAt,
+      signal: undefined,
     });
   });
 
@@ -212,7 +213,7 @@ describe('SocialAgentRouteEntranceService', () => {
         ],
       }),
     };
-    const { mainAgentTurn, messageLog, service, workoutLoop } = makeHarness({
+    const { agentEntry, messageLog, service } = makeHarness({
       task,
       workoutResult,
     });
@@ -232,11 +233,13 @@ describe('SocialAgentRouteEntranceService', () => {
       task,
       '今晚青岛大学附近跑步',
     );
-    expect(workoutLoop.tryHandleEntrance).toHaveBeenCalledWith({
+    expect(agentEntry.handle).toHaveBeenCalledWith({
       ownerUserId: 7,
       task,
+      body: { message: '今晚青岛大学附近跑步' },
       message: '今晚青岛大学附近跑步',
+      startedAt: expect.any(Number),
+      signal: undefined,
     });
-    expect(mainAgentTurn.handleRouteTurn).not.toHaveBeenCalled();
   });
 });

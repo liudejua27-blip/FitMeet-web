@@ -269,6 +269,51 @@ describe('SocialAgentCardActionRouterService', () => {
     expect(result.assistantMessage).toContain('进入约练匹配队列');
   });
 
+  it('does not publish workout drafts with an empty city or default them to Qingdao', async () => {
+    const { draftPublication, handleMessage, service } = makeHarness();
+
+    const result = await service.perform({
+      ownerUserId: 7,
+      taskId: 101,
+      body: {
+        action: 'workout_draft.publish' as never,
+        payload: {
+          confirmedPublish: true,
+          socialRequestId: 501,
+          slots: {
+            activityType: '跑步',
+            timePreference: '明晚',
+            locationText: '学校附近',
+          },
+          socialRequestDraft: {
+            title: '明晚学校附近跑步约练',
+            activityType: '跑步',
+            metadata: { loop: 'workout' },
+          },
+        },
+      },
+      handleMessage,
+    });
+
+    expect(handleMessage).not.toHaveBeenCalled();
+    expect(draftPublication.publishDraft).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      action: 'reply',
+      publicLoop: expect.objectContaining({
+        stage: 'publish_confirmation_required',
+      }),
+      cards: [
+        expect.objectContaining({
+          schemaType: 'workout.intake',
+          data: expect.objectContaining({
+            city: null,
+            missingFields: expect.arrayContaining(['city']),
+          }),
+        }),
+      ],
+    });
+  });
+
   it('keeps low-risk candidate card actions approval-free while still dispatching through AgentLoop', async () => {
     const { candidateActions, executeCalls, handleMessage, metrics, service } =
       makeHarness();

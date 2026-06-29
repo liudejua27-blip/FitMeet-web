@@ -15,17 +15,22 @@ import {
 import { buildClarificationBinaryCard } from '../clarification/clarification-binary-card.presenter';
 import { AgentTask, AgentTaskStatus } from '../entities/agent-task.entity';
 import type { FitMeetAlphaCard } from '../fitmeet-alpha-agent.types';
+import { GeoResolverService } from '../geo/geo-resolver.service';
 import { FitMeetLoopRouterService } from '../loop-router/fitmeet-loop-router.service';
 import type { SocialAgentCardActionBody } from '../social-agent-action.types';
 import { SocialAgentDraftPublicationService } from '../social-agent-draft-publication.service';
 import { SocialAgentMessageLogService } from '../social-agent-message-log.service';
 import type { SocialAgentIntentRouteResult } from '../social-agent-chat.types';
+import type { WorkoutUnderstandingResult } from './workout-understanding.service';
+import { WorkoutUnderstandingService } from './workout-understanding.service';
 import { classifyWorkoutIntent } from './workout-intent-classifier';
 import type { WorkoutLoopStage, WorkoutSlots } from './workout-loop.types';
 import {
   defaultWorkoutSafetyBoundary,
   extractWorkoutSlots,
   validateWorkoutSlots,
+  validateWorkoutSlotsForDraft,
+  validateWorkoutSlotsForPublish,
 } from './workout-slot-extractor';
 import {
   buildWorkoutDraftCard,
@@ -49,69 +54,87 @@ export class WorkoutLoopService {
     private readonly messageLog: SocialAgentMessageLogService,
     @Optional()
     private readonly draftPublication?: SocialAgentDraftPublicationService,
+    @Optional()
+    private readonly geoResolver?: GeoResolverService,
+    @Optional()
+    private readonly understanding?: WorkoutUnderstandingService,
   ) {}
 
   async tryHandleEntrance(input: {
     ownerUserId: number;
     task: AgentTask;
     message: string;
+    bypassRouter?: boolean;
+    prefilledSlots?: WorkoutSlots;
+    understanding?: WorkoutUnderstandingResult | null;
   }): Promise<{
     task: AgentTask;
     result: SocialAgentIntentRouteResult;
   } | null> {
     if (classifyWorkoutIntent(input.message) === 'negative') return null;
     const loopIntent = this.loopRouter.classify(input.message);
-    if (loopIntent.intent !== 'workout') return null;
+    if (
+      !input.bypassRouter &&
+      (loopIntent.intent !== 'workout' ||
+        loopIntent.disposition !== 'accept_loop')
+    ) {
+      return null;
+    }
 
-    const slots = extractWorkoutSlots({
+    const slots = await this.prepareWorkoutSlots({
+      task: input.task,
       message: input.message,
-      previousSlots: this.readWorkoutSlots(input.task),
+      loopIntent,
+      prefilledSlots: input.prefilledSlots,
+      understanding: input.understanding,
     });
-    this.rememberWorkoutSlots(input.task, slots, 'intake');
-    const validation = validateWorkoutSlots(slots);
 
-    if (!validation.valid) {
-      const result = await this.resultWithCards({
-        task: input.task,
-        assistantMessage: '可以，我先帮你生成约练卡。还需要补充下面这些信息。',
-        cards: [
-          buildWorkoutIntakeCard({
-            taskId: input.task.id,
-            slots,
-            missing: validation.missing,
-          }),
-        ],
-        action: 'clarify',
-      });
-      return { task: input.task, result };
-    }
-
-    if (loopIntent.confidence >= 0.7 && loopIntent.confidence < 0.9) {
-      const body = `我理解为：${slots.timePreference}在${slots.locationText ?? slots.city}找${slots.activityType}搭子，对吗？`;
-      const result = await this.resultWithCards({
-        task: input.task,
-        assistantMessage: '我先确认一下你的约练需求。',
-        cards: [
-          buildClarificationBinaryCard({
-            taskId: input.task.id,
-            questionKey: 'confirm_workout_intent',
-            body,
-            inferredIntent: 'workout',
-            inferredSlots: slots as Record<string, unknown>,
-            yesPatch: slots as Record<string, unknown>,
-            noFallback: 'workout_intake',
-            confidence: loopIntent.confidence,
-          }),
-        ],
-        action: 'clarify',
-      });
-      return { task: input.task, result };
-    }
-
-    const result = await this.createDraftResult({
+    const result = await this.resultForSlots({
       ownerUserId: input.ownerUserId,
       task: input.task,
       slots,
+      assistantMessage: '可以，我先帮你生成约练卡。',
+    });
+    return { task: input.task, result };
+  }
+
+  async confirmArbitratedWorkout(input: {
+    ownerUserId: number;
+    task: AgentTask;
+    message: string;
+    slots: WorkoutSlots;
+    understanding?: WorkoutUnderstandingResult | null;
+  }): Promise<{
+    task: AgentTask;
+    result: SocialAgentIntentRouteResult;
+  }> {
+    const slots = this.applyGeoToSlots(input.slots, input.message);
+    const result = await this.resultForSlots({
+      ownerUserId: input.ownerUserId,
+      task: input.task,
+      slots,
+      assistantMessage: '我先帮你整理本次约练需求。',
+    });
+    return { task: input.task, result };
+  }
+
+  async continueEntrance(input: {
+    ownerUserId: number;
+    task: AgentTask;
+    message: string;
+  }): Promise<{
+    task: AgentTask;
+    result: SocialAgentIntentRouteResult;
+  }> {
+    const slots = await this.prepareWorkoutSlots({
+      task: input.task,
+      message: input.message,
+    });
+    const result = await this.resultForSlots({
+      ownerUserId: input.ownerUserId,
+      task: input.task,
+      slots,
+      assistantMessage: '已根据你补充的信息生成约练卡。',
     });
     return { task: input.task, result };
   }
@@ -148,12 +171,15 @@ export class WorkoutLoopService {
     payload: Record<string, unknown>;
   }): Promise<SocialAgentIntentRouteResult> {
     const task = await this.assertTaskOwner(input.ownerUserId, input.taskId);
-    const slots = {
-      ...this.readWorkoutSlots(task),
-      ...this.slotsFromPayload(input.payload.yesPatch),
-      ...this.slotsFromPayload(input.payload),
-    };
-    const validation = validateWorkoutSlots(slots);
+    const slots = this.applyGeoToSlots(
+      {
+        ...this.readWorkoutSlots(task),
+        ...this.slotsFromPayload(input.payload.yesPatch),
+        ...this.slotsFromPayload(input.payload),
+      },
+      this.text(input.payload.locationText ?? input.payload.city),
+    );
+    const validation = validateWorkoutSlotsForPublish(slots);
     this.rememberWorkoutSlots(
       task,
       slots,
@@ -281,6 +307,195 @@ export class WorkoutLoopService {
     throw new BadRequestException('Unsupported workout action');
   }
 
+  private async prepareWorkoutSlots(input: {
+    task: AgentTask;
+    message: string;
+    loopIntent?: ReturnType<FitMeetLoopRouterService['classify']>;
+    prefilledSlots?: WorkoutSlots;
+    understanding?: WorkoutUnderstandingResult | null;
+  }): Promise<WorkoutSlots> {
+    const ruleSlots = input.prefilledSlots
+      ? this.normalizeSlots(input.prefilledSlots)
+      : extractWorkoutSlots({
+          message: input.message,
+          previousSlots: this.readWorkoutSlots(input.task),
+        });
+    let slots = this.applyGeoToSlots(ruleSlots, input.message);
+    let understanding = input.understanding ?? null;
+    const loopIntent =
+      input.loopIntent ?? this.loopRouter.classify(input.message);
+    if (
+      !understanding &&
+      this.understanding?.shouldCall({ slots, loopIntent })
+    ) {
+      understanding = await this.understanding.understand({
+        task: input.task,
+        message: input.message,
+        ruleSlots: slots,
+        loopIntent,
+      });
+    }
+    const understandingSlots =
+      this.understanding?.slotsFromUnderstanding(understanding) ?? {};
+    slots = this.applyGeoToSlots(
+      this.normalizeSlots({
+        ...understandingSlots,
+        ...ruleSlots,
+        ...this.compactSlots(input.prefilledSlots ?? {}),
+      }),
+      input.message,
+    );
+    return slots;
+  }
+
+  private async resultForSlots(input: {
+    ownerUserId: number;
+    task: AgentTask;
+    slots: WorkoutSlots;
+    assistantMessage: string;
+  }): Promise<SocialAgentIntentRouteResult> {
+    const draftValidation = validateWorkoutSlotsForDraft(input.slots);
+    this.rememberWorkoutSlots(input.task, input.slots, 'intake');
+
+    if (!draftValidation.valid) {
+      return this.resultWithCards({
+        task: input.task,
+        assistantMessage: input.assistantMessage + ' 还需要补充下面这些信息。',
+        cards: [
+          buildWorkoutIntakeCard({
+            taskId: input.task.id,
+            slots: input.slots,
+            missing: draftValidation.missing,
+          }),
+        ],
+        action: 'clarify',
+      });
+    }
+
+    if (this.needsGeoConfirmation(input.slots)) {
+      return this.geoClarificationResult({
+        task: input.task,
+        slots: input.slots,
+        confidence: input.slots.geoResolution?.confidence,
+        question:
+          input.slots.geoResolution?.confirmationQuestion ??
+          this.workoutConfirmationQuestion(input.slots),
+      });
+    }
+
+    const publishValidation = validateWorkoutSlotsForPublish(input.slots);
+    if (!publishValidation.valid) {
+      return this.resultWithCards({
+        task: input.task,
+        assistantMessage: '发布约练卡前还需要补齐地点城市信息。',
+        cards: [
+          buildWorkoutIntakeCard({
+            taskId: input.task.id,
+            slots: input.slots,
+            missing: publishValidation.missing,
+          }),
+        ],
+        action: 'clarify',
+      });
+    }
+
+    return this.createDraftResult({
+      ownerUserId: input.ownerUserId,
+      task: input.task,
+      slots: input.slots,
+      assistantMessage: input.assistantMessage,
+    });
+  }
+
+  private async geoClarificationResult(input: {
+    task: AgentTask;
+    slots: WorkoutSlots;
+    question: string;
+    confidence?: number | null;
+  }): Promise<SocialAgentIntentRouteResult> {
+    this.rememberWorkoutSlots(input.task, input.slots, 'clarifying');
+    const yesPatch = this.confirmedGeoSlots(input.slots);
+    return this.resultWithCards({
+      task: input.task,
+      assistantMessage: '我先确认一下你的约练地点和需求。',
+      cards: [
+        buildClarificationBinaryCard({
+          taskId: input.task.id,
+          questionKey: 'confirm_workout_geo',
+          body: input.question,
+          inferredIntent: 'workout',
+          inferredSlots: input.slots as Record<string, unknown>,
+          yesPatch: yesPatch as Record<string, unknown>,
+          noFallback: 'workout_intake',
+          confidence: input.confidence ?? input.slots.geoResolution?.confidence,
+        }),
+      ],
+      action: 'clarify',
+    });
+  }
+
+  private applyGeoToSlots(slots: WorkoutSlots, message: string): WorkoutSlots {
+    if (!this.geoResolver) return slots;
+    const alreadyResolvedBySystem =
+      slots.geoResolution &&
+      slots.geoResolution.source !== 'explicit_city' &&
+      slots.geoResolution.source !== 'user_confirmed';
+    const geo = this.geoResolver.resolve({
+      message,
+      locationText: slots.locationText,
+      city: alreadyResolvedBySystem ? undefined : slots.city,
+      district: slots.district,
+      poiName: slots.poiName,
+      userConfirmed: slots.geoResolution?.source === 'user_confirmed',
+    });
+    return this.normalizeSlots({
+      ...slots,
+      locationText: geo.locationText ?? slots.locationText,
+      city: geo.city ?? slots.city,
+      district: geo.district ?? slots.district,
+      poiName: geo.poiName ?? slots.poiName,
+      lat: geo.lat ?? slots.lat,
+      lng: geo.lng ?? slots.lng,
+      geoResolution: geo,
+    });
+  }
+
+  private needsGeoConfirmation(slots: WorkoutSlots): boolean {
+    const geo = slots.geoResolution;
+    if (!geo?.needsConfirmation) return false;
+    if (!geo.city) return false;
+    return geo.source !== 'explicit_city' && geo.source !== 'user_confirmed';
+  }
+
+  private confirmedGeoSlots(slots: WorkoutSlots): WorkoutSlots {
+    return this.normalizeSlots({
+      ...slots,
+      geoResolution: {
+        ...(slots.geoResolution ?? {
+          rawText: slots.locationText ?? slots.city ?? '',
+          confidence: 1,
+          needsConfirmation: false,
+        }),
+        source: 'user_confirmed',
+        confidence: 1,
+        needsConfirmation: false,
+      },
+    });
+  }
+
+  private workoutConfirmationQuestion(slots: WorkoutSlots): string {
+    const location = slots.city
+      ? `${slots.city}${slots.locationText ?? ''}`
+      : (slots.locationText ?? '这个地点');
+    return `我理解为：${slots.timePreference ?? '近期'}在${location}找${slots.activityType ?? '运动'}搭子，对吗？`;
+  }
+
+  private compactSlots(slots: Partial<WorkoutSlots>): Partial<WorkoutSlots> {
+    return Object.fromEntries(
+      Object.entries(slots).filter(([, value]) => value !== undefined),
+    ) as Partial<WorkoutSlots>;
+  }
+
   private async submitIntake(
     input: {
       ownerUserId: number;
@@ -291,39 +506,25 @@ export class WorkoutLoopService {
   ): Promise<SocialAgentIntentRouteResult> {
     const task = await this.assertTaskOwner(input.ownerUserId, input.taskId);
     const payloadSlots = this.slotsFromPayload(input.body.payload);
-    const slots = {
-      ...this.readWorkoutSlots(task),
-      ...payloadSlots,
-      ...(options.useDefaults
-        ? {
-            safetyBoundary:
-              payloadSlots.safetyBoundary ?? defaultWorkoutSafetyBoundary(),
-            radiusKm: payloadSlots.radiusKm ?? 3,
-            visibilityPreference: payloadSlots.visibilityPreference ?? 'public',
-          }
-        : {}),
-    };
-    const validation = validateWorkoutSlots(slots);
-    this.rememberWorkoutSlots(
-      task,
-      slots,
-      validation.valid ? 'draft_ready' : 'intake',
+    const slots = this.applyGeoToSlots(
+      {
+        ...this.readWorkoutSlots(task),
+        ...payloadSlots,
+        ...(options.useDefaults
+          ? {
+              safetyBoundary:
+                payloadSlots.safetyBoundary ?? defaultWorkoutSafetyBoundary(),
+              radiusKm: payloadSlots.radiusKm ?? 3,
+              visibilityPreference:
+                payloadSlots.visibilityPreference ?? 'public',
+            }
+          : {}),
+      },
+      [payloadSlots.city, payloadSlots.locationText, payloadSlots.poiName]
+        .filter(Boolean)
+        .join(' '),
     );
-    if (!validation.valid) {
-      return this.resultWithCards({
-        task,
-        assistantMessage: '已收到约练需求，还需要补齐下面的信息。',
-        cards: [
-          buildWorkoutIntakeCard({
-            taskId: task.id,
-            slots,
-            missing: validation.missing,
-          }),
-        ],
-        action: 'clarify',
-      });
-    }
-    return this.createDraftResult({
+    return this.resultForSlots({
       ownerUserId: input.ownerUserId,
       task,
       slots,
@@ -409,8 +610,11 @@ export class WorkoutLoopService {
   ): WorkoutDraftForPublish {
     const activityType = slots.activityType ?? '运动';
     const city = sanitizeCity(
-      slots.city ?? this.cityFromLocation(slots.locationText) ?? '青岛',
+      slots.city ?? this.cityFromLocation(slots.locationText),
     );
+    if (!city) {
+      throw new BadRequestException('Workout city is required before publish');
+    }
     const location = slots.locationText ?? city;
     const title = `${slots.timePreference ?? '近期'}${location}${activityType}约练`;
     const description = [
@@ -429,6 +633,8 @@ export class WorkoutLoopService {
       description,
       rawText: description,
       city,
+      lat: slots.lat,
+      lng: slots.lng,
       radiusKm: slots.radiusKm ?? 3,
       interestTags: [activityType, slots.intensity].filter(
         (item): item is string => Boolean(item),
@@ -453,6 +659,11 @@ export class WorkoutLoopService {
         timePreference: slots.timePreference ?? null,
         locationText: slots.locationText ?? null,
         city,
+        district: slots.district ?? null,
+        poiName: slots.poiName ?? null,
+        lat: slots.lat ?? null,
+        lng: slots.lng ?? null,
+        geoResolution: slots.geoResolution ?? null,
         radiusKm: slots.radiusKm ?? 3,
         intensity: slots.intensity ?? null,
         candidatePreference: slots.candidatePreference ?? null,
@@ -577,6 +788,7 @@ export class WorkoutLoopService {
   private normalizeSlots(value: unknown): WorkoutSlots {
     const record = this.record(value);
     const visibility = this.text(record.visibilityPreference);
+    const geoResolution = this.normalizeGeoResolution(record.geoResolution);
     return {
       activityType: this.text(record.activityType) || undefined,
       timePreference: this.text(record.timePreference) || undefined,
@@ -584,6 +796,11 @@ export class WorkoutLoopService {
         this.text(record.locationText ?? record.locationPreference) ||
         undefined,
       city: this.text(record.city) || undefined,
+      district: this.text(record.district) || undefined,
+      poiName: this.text(record.poiName) || undefined,
+      lat: this.coordinate(record.lat) ?? undefined,
+      lng: this.coordinate(record.lng) ?? undefined,
+      geoResolution,
       radiusKm: this.number(record.radiusKm) ?? undefined,
       intensity: this.text(record.intensity) || undefined,
       candidatePreference: this.text(record.candidatePreference) || undefined,
@@ -607,18 +824,25 @@ export class WorkoutLoopService {
   private cityFromLocation(value: string | undefined): string | undefined {
     if (!value) return undefined;
     return [
-      '青岛',
       '北京',
       '上海',
-      '杭州',
-      '深圳',
       '广州',
-      '南京',
+      '深圳',
+      '杭州',
       '成都',
+      '重庆',
+      '南京',
+      '苏州',
       '武汉',
       '西安',
+      '长沙',
+      '郑州',
+      '天津',
+      '青岛',
+      '济南',
       '厦门',
-      '苏州',
+      '宁波',
+      '合肥',
     ].find((city) => value.includes(city));
   }
 
@@ -635,5 +859,51 @@ export class WorkoutLoopService {
   private number(value: unknown): number | null {
     const number = Number(value);
     return Number.isFinite(number) && number > 0 ? number : null;
+  }
+
+  private coordinate(value: unknown): number | null {
+    const number = Number(value);
+    return Number.isFinite(number) ? number : null;
+  }
+
+  private normalizeGeoResolution(
+    value: unknown,
+  ): WorkoutSlots['geoResolution'] | undefined {
+    const record = this.record(value);
+    const rawText = this.text(record.rawText);
+    if (!rawText && Object.keys(record).length === 0) return undefined;
+    const source = this.geoSource(record.source);
+    return {
+      rawText,
+      locationText: this.text(record.locationText) || undefined,
+      city: this.text(record.city) || undefined,
+      district: this.text(record.district) || undefined,
+      poiName: this.text(record.poiName) || undefined,
+      province: this.text(record.province) || undefined,
+      lat: this.coordinate(record.lat) ?? undefined,
+      lng: this.coordinate(record.lng) ?? undefined,
+      source,
+      confidence: this.coordinate(record.confidence) ?? 0,
+      needsConfirmation: record.needsConfirmation === true,
+      confirmationQuestion: this.text(record.confirmationQuestion) || undefined,
+    };
+  }
+
+  private geoSource(
+    value: unknown,
+  ): NonNullable<WorkoutSlots['geoResolution']>['source'] {
+    const source = this.text(value);
+    if (
+      source === 'explicit_city' ||
+      source === 'poi_dictionary' ||
+      source === 'profile_city' ||
+      source === 'client_geo' ||
+      source === 'llm_inferred' ||
+      source === 'user_confirmed' ||
+      source === 'unknown'
+    ) {
+      return source;
+    }
+    return 'unknown';
   }
 }

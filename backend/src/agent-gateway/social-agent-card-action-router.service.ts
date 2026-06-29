@@ -25,7 +25,10 @@ import { SocialIntentRateLimitService } from './social-intent-rate-limit.service
 import { SocialAgentMatchRelaxationActionService } from './social-agent-match-relaxation-action.service';
 import { SocialAgentApplicationActionService } from './social-agent-application-action.service';
 import { ClarificationCardActionService } from './clarification/clarification-card-action.service';
+import { buildWorkoutIntakeCard } from './workout-loop/workout-card.presenter';
 import { WorkoutLoopService } from './workout-loop/workout-loop.service';
+import type { WorkoutSlots } from './workout-loop/workout-loop.types';
+import { validateWorkoutSlotsForPublish } from './workout-loop/workout-slot-extractor';
 
 type HandleMessage = (
   body: SocialAgentRouteMessageBody,
@@ -856,6 +859,35 @@ export class SocialAgentCardActionRouterService {
     void emit;
     void options;
     const payload = this.record(body.payload);
+    const isWorkoutPublish = this.isWorkoutPublishPayload(body, payload);
+    if (isWorkoutPublish) {
+      const slots = this.workoutSlotsFromPublishPayload(payload);
+      const validation = validateWorkoutSlotsForPublish(slots);
+      if (!validation.valid) {
+        return this.simpleRouteResult({
+          taskId,
+          assistantMessage:
+            '发布到发现前需要补充本次约练的城市和地点，避免生成错误城市的约练卡。',
+          cards: [
+            buildWorkoutIntakeCard({
+              taskId,
+              slots,
+              missing: validation.missing,
+              title: '补充约练地点',
+              body: '请补充本次约练发生的城市和地点；不会使用默认城市代替。',
+            }),
+          ],
+          publicLoop: {
+            stage: 'publish_confirmation_required',
+            publicIntentId: null,
+            discoverHref: null,
+            publicIntentHref: null,
+            messagesHref: null,
+            requiredConfirmation: true,
+          },
+        });
+      }
+    }
     const confirmed =
       payload.confirmedPublish === true ||
       payload.approved === true ||
@@ -928,7 +960,9 @@ export class SocialAgentCardActionRouterService {
     if (!this.draftPublication) {
       throw new BadRequestException('Discover publish runtime is unavailable');
     }
-    const publishDraft = this.publishDraftFromPayload(payload);
+    const publishDraft = this.publishDraftFromPayload(payload, {
+      requireCity: isWorkoutPublish,
+    });
     const privacyResult = this.privacyGuard?.inspect(publishDraft);
     if (privacyResult?.blocked) {
       return this.simpleRouteResult({
@@ -1204,6 +1238,7 @@ export class SocialAgentCardActionRouterService {
 
   private publishDraftFromPayload(
     payload: Record<string, unknown>,
+    options: { requireCity?: boolean } = {},
   ): CreateSocialRequestDto & { socialRequestId?: number | null } {
     const draft = {
       ...this.record(payload.socialRequestDraft),
@@ -1227,6 +1262,10 @@ export class SocialAgentCardActionRouterService {
     const description =
       this.text(draft.description ?? draft.summary ?? draft.body) ||
       '公共场所、低压力、先站内沟通的 FitMeet 约练。';
+    const city = this.text(draft.city);
+    if (options.requireCity && !city) {
+      throw new BadRequestException('Workout city is required before publish');
+    }
     return {
       ...draft,
       socialRequestId,
@@ -1236,7 +1275,7 @@ export class SocialAgentCardActionRouterService {
       title,
       description,
       rawText: this.text(draft.rawText ?? description) || description,
-      city: this.text(draft.city) || '青岛',
+      city: options.requireCity ? city : city || '青岛',
       radiusKm: this.number(draft.radiusKm) ?? 5,
       interestTags: this.stringArray(
         draft.interestTags ?? draft.tags ?? [activityType],
@@ -1253,6 +1292,114 @@ export class SocialAgentCardActionRouterService {
         publishSource: 'agent_card_action',
       },
     } as CreateSocialRequestDto & { socialRequestId?: number | null };
+  }
+
+  private isWorkoutPublishPayload(
+    body: SocialAgentCardActionBody,
+    payload: Record<string, unknown>,
+  ): boolean {
+    if (this.text(body.action) === 'workout_draft.publish') return true;
+    const draft = {
+      ...this.record(payload.socialRequestDraft),
+      ...this.record(payload.draft),
+      ...this.record(payload.activity),
+      ...payload,
+    };
+    const metadata = {
+      ...this.record(draft.metadata),
+      ...this.record(payload.metadata),
+    };
+    return (
+      this.text(metadata.loop) === 'workout' ||
+      this.text(metadata.source) === 'workout_loop_mvp' ||
+      this.text(metadata.workoutLoopStage).length > 0
+    );
+  }
+
+  private workoutSlotsFromPublishPayload(
+    payload: Record<string, unknown>,
+  ): WorkoutSlots {
+    const draft = {
+      ...this.record(payload.socialRequestDraft),
+      ...this.record(payload.draft),
+      ...this.record(payload.activity),
+      ...payload,
+    };
+    const slots = this.record(payload.slots);
+    const metadata = {
+      ...this.record(draft.metadata),
+      ...this.record(payload.metadata),
+    };
+    return {
+      activityType:
+        this.text(
+          slots.activityType ??
+            draft.activityType ??
+            draft.requestType ??
+            draft.type ??
+            metadata.activityType,
+        ) || undefined,
+      timePreference:
+        this.text(
+          slots.timePreference ??
+            draft.timePreference ??
+            metadata.timePreference,
+        ) || undefined,
+      locationText:
+        this.text(
+          slots.locationText ??
+            slots.locationPreference ??
+            draft.locationText ??
+            draft.locationName ??
+            draft.locationPreference ??
+            metadata.locationText,
+        ) || undefined,
+      city: this.text(slots.city ?? draft.city ?? metadata.city) || undefined,
+      district:
+        this.text(slots.district ?? draft.district ?? metadata.district) ||
+        undefined,
+      poiName:
+        this.text(slots.poiName ?? draft.poiName ?? metadata.poiName) ||
+        undefined,
+      lat: this.number(slots.lat ?? draft.lat ?? metadata.lat) ?? undefined,
+      lng: this.number(slots.lng ?? draft.lng ?? metadata.lng) ?? undefined,
+      geoResolution:
+        this.record(slots.geoResolution).rawText ||
+        this.record(draft.geoResolution).rawText ||
+        this.record(metadata.geoResolution).rawText
+          ? (this.record(
+              slots.geoResolution ??
+                draft.geoResolution ??
+                metadata.geoResolution,
+            ) as WorkoutSlots['geoResolution'])
+          : undefined,
+      radiusKm:
+        this.number(slots.radiusKm ?? draft.radiusKm ?? metadata.radiusKm) ??
+        undefined,
+      intensity:
+        this.text(slots.intensity ?? draft.intensity ?? metadata.intensity) ||
+        undefined,
+      candidatePreference:
+        this.text(
+          slots.candidatePreference ??
+            draft.candidatePreference ??
+            metadata.candidatePreference,
+        ) || undefined,
+      safetyBoundary:
+        this.text(
+          slots.safetyBoundary ??
+            draft.safetyBoundary ??
+            metadata.safetyBoundary,
+        ) || undefined,
+      visibilityPreference:
+        this.text(
+          slots.visibilityPreference ??
+            draft.visibilityPreference ??
+            metadata.visibilityPreference,
+        ) === 'private'
+          ? 'private'
+          : 'public',
+    };
   }
 
   private simpleRouteResult(input: {
