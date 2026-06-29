@@ -704,6 +704,13 @@ export function isSocialSurfaceCard(card: { type?: string; schemaType?: string; 
     schemaType === 'social_match.slot_completion' ||
     schemaType === 'meet_loop.timeline' ||
     schemaType === 'life_graph.diff' ||
+    schemaType === 'loop.choice' ||
+    schemaType === 'clarification.binary' ||
+    schemaType === 'workout.intake' ||
+    schemaType === 'workout.draft' ||
+    schemaType === 'friend.intake' ||
+    schemaType === 'travel.intake' ||
+    schemaType === 'travel.companion_draft' ||
     isApprovalCard(card)
   );
 }

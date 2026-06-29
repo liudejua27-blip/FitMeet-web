@@ -921,7 +921,10 @@ export class FitMeetAlphaAgentSdkService {
         schemaType === 'loop.choice' ||
         schemaType === 'clarification.binary' ||
         schemaType === 'workout.intake' ||
-        schemaType === 'workout.draft'
+        schemaType === 'workout.draft' ||
+        schemaType === 'friend.intake' ||
+        schemaType === 'travel.intake' ||
+        schemaType === 'travel.companion_draft'
       );
     });
   }

@@ -35,6 +35,9 @@ const FITMEET_TOOL_UI_SCHEMA_TYPES = new Set([
   'clarification.binary',
   'workout.intake',
   'workout.draft',
+  'friend.intake',
+  'travel.intake',
+  'travel.companion_draft',
   'generic.card',
 ]);
 

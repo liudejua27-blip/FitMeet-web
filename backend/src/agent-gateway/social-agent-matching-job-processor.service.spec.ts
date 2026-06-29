@@ -58,7 +58,33 @@ describe('SocialAgentMatchingJobProcessorService', () => {
         statusReason: 'matching_job_candidates_ready',
         result: expect.objectContaining({
           cards: expect.arrayContaining([
-            expect.objectContaining({ type: 'candidate_card' }),
+            expect.objectContaining({
+              type: 'candidate_card',
+              schemaType: 'social_match.candidate',
+              data: expect.objectContaining({
+                taskId: 101,
+                targetUserId: 8,
+                socialRequestId: 301,
+              }),
+              actions: expect.arrayContaining([
+                expect.objectContaining({
+                  schemaAction: 'candidate.generate_opener',
+                  requiresConfirmation: false,
+                }),
+                expect.objectContaining({
+                  schemaAction: 'opener.confirm_send',
+                  requiresConfirmation: true,
+                  payload: expect.objectContaining({
+                    taskId: 101,
+                    targetUserId: 8,
+                    socialRequestId: 301,
+                    approvalRequired: true,
+                    checkpointRequired: true,
+                    resumeMode: 'resume_after_approval',
+                  }),
+                }),
+              ]),
+            }),
           ]),
         }),
       }),
@@ -93,6 +119,13 @@ describe('SocialAgentMatchingJobProcessorService', () => {
         candidateCount: 1,
         candidateSnapshotId: 501,
         matchingJobStatus: MatchingJobStatus.CandidatesReady,
+        publicLoopStage: 'candidates_recommended',
+        candidates: expect.arrayContaining([
+          expect.objectContaining({
+            candidateUserId: 8,
+            candidateSnapshotId: 501,
+          }),
+        ]),
       }),
     );
   });

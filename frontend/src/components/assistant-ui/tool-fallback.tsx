@@ -115,6 +115,9 @@ const ASSISTANT_CARD_RENDERERS: Record<ToolUISchemaType, ToolUICardRenderer> = {
   'clarification.binary': ClarificationBinaryResultCard,
   'workout.intake': WorkoutIntakeResultCard,
   'workout.draft': WorkoutDraftResultCard,
+  'friend.intake': GenericResultCard,
+  'travel.intake': GenericResultCard,
+  'travel.companion_draft': GenericResultCard,
   'generic.card': GenericResultCard,
 };
 
