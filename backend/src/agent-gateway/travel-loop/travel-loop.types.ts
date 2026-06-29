@@ -21,6 +21,10 @@ export type TravelLoopStage = Extract<
 export type TravelSlots = LoopSlots & {
   destination?: string;
   city?: string;
+  district?: string;
+  poiName?: string;
+  lat?: number;
+  lng?: number;
   geoResolution?: GeoResolution;
   departureTime?: string;
   duration?: string;

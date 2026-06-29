@@ -3,6 +3,7 @@ import { BadRequestException, Injectable, Optional } from '@nestjs/common';
 import type { SocialAgentCardActionBody } from '../social-agent-action.types';
 import type { SocialAgentIntentRouteResult } from '../social-agent-chat.types';
 import { FriendLoopService } from '../friend-loop/friend-loop.service';
+import { TravelLoopService } from '../travel-loop/travel-loop.service';
 import { WorkoutLoopService } from '../workout-loop/workout-loop.service';
 
 @Injectable()
@@ -12,6 +13,8 @@ export class ClarificationCardActionService {
     private readonly workoutLoop?: WorkoutLoopService,
     @Optional()
     private readonly friendLoop?: FriendLoopService,
+    @Optional()
+    private readonly travelLoop?: TravelLoopService,
   ) {}
 
   async perform(input: {
@@ -41,6 +44,18 @@ export class ClarificationCardActionService {
           payload: record(input.body.payload),
         });
       }
+      if (this.isTravelClarification(input.body.payload)) {
+        if (!this.travelLoop) {
+          throw new BadRequestException(
+            'Travel clarification runtime unavailable',
+          );
+        }
+        return this.travelLoop.applySelectedSlots({
+          ownerUserId: input.ownerUserId,
+          taskId: input.taskId,
+          payload: record(input.body.payload),
+        });
+      }
       return this.assertWorkoutLoop().applySelectedSlots({
         ownerUserId: input.ownerUserId,
         taskId: input.taskId,
@@ -60,6 +75,18 @@ export class ClarificationCardActionService {
           payload: record(input.body.payload),
         });
       }
+      if (this.isTravelClarification(input.body.payload)) {
+        if (!this.travelLoop) {
+          throw new BadRequestException(
+            'Travel clarification runtime unavailable',
+          );
+        }
+        return this.travelLoop.openIntakeFromFallback({
+          ownerUserId: input.ownerUserId,
+          taskId: input.taskId,
+          payload: record(input.body.payload),
+        });
+      }
       return this.assertWorkoutLoop().openIntakeFromFallback({
         ownerUserId: input.ownerUserId,
         taskId: input.taskId,
@@ -74,6 +101,14 @@ export class ClarificationCardActionService {
     return (
       text(payload.inferredIntent) === 'friend' ||
       text(payload.noFallback) === 'friend_intake'
+    );
+  }
+
+  private isTravelClarification(value: unknown): boolean {
+    const payload = record(value);
+    return (
+      text(payload.inferredIntent) === 'travel' ||
+      text(payload.noFallback) === 'travel_intake'
     );
   }
 

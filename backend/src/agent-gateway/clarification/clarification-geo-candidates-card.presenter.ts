@@ -31,10 +31,12 @@ export function buildClarificationGeoCandidatesCard(input: {
         payload: {
           taskId: input.taskId,
           questionKey: input.questionKey,
+          inferredIntent: input.inferredIntent,
           inferredSlots: input.inferredSlots ?? {},
           selectedIndex: index,
           selectedCandidate: candidate,
           selectedPatch,
+          noFallback: input.noFallback ?? 'workout_intake',
         },
       };
     },

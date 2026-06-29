@@ -27,6 +27,7 @@ function makeService(
     decideEntrance?: jest.Mock;
     decideIntakeSubmit?: jest.Mock;
   },
+  geoResolver?: { resolveAsync?: jest.Mock },
 ) {
   const taskRepo = {
     findOne: jest.fn().mockResolvedValue(task),
@@ -62,6 +63,7 @@ function makeService(
     draftPublication as never,
     matchingJobs as never,
     travelBrain as never,
+    geoResolver as never,
   );
   return {
     draftPublication,
@@ -288,6 +290,148 @@ describe('TravelLoopService', () => {
         }),
       }),
     );
+  });
+
+  it('returns geo candidate clarification when travel destination is ambiguous', async () => {
+    const task = makeTask();
+    const geoResolver = {
+      resolveAsync: jest.fn().mockResolvedValue({
+        rawText: '太古里',
+        locationText: '太古里',
+        source: 'amap',
+        confidence: 0.62,
+        needsConfirmation: true,
+        confirmationQuestion: '我查到几个太古里，你这次旅行想去哪个？',
+        candidates: [
+          {
+            name: '成都远洋太古里',
+            address: '成都市锦江区中纱帽街',
+            province: '四川省',
+            city: '成都',
+            district: '锦江区',
+            level: 'poi',
+            source: 'amap',
+            confidence: 0.82,
+          },
+          {
+            name: '三里屯太古里',
+            address: '北京市朝阳区三里屯路',
+            province: '北京市',
+            city: '北京',
+            district: '朝阳区',
+            level: 'poi',
+            source: 'amap',
+            confidence: 0.78,
+          },
+        ],
+      }),
+    };
+    const { service } = makeService(task, undefined, geoResolver);
+
+    const result = await service.tryHandleEntrance({
+      ownerUserId: 7,
+      task,
+      message: '周末去太古里玩，预算1000元，高铁，找会拍照的搭子',
+    });
+
+    expect(geoResolver.resolveAsync).toHaveBeenCalledWith(
+      expect.objectContaining({
+        locationText: '太古里',
+      }),
+    );
+    expect(result.result.cards?.[0]).toMatchObject({
+      schemaType: 'clarification.geo_candidates',
+      title: '选择旅行目的地',
+      data: expect.objectContaining({
+        inferredIntent: 'travel',
+        noFallback: 'travel_intake',
+        candidates: [
+          expect.objectContaining({ name: '成都远洋太古里', source: 'amap' }),
+          expect.objectContaining({ name: '三里屯太古里', source: 'amap' }),
+        ],
+      }),
+      actions: expect.arrayContaining([
+        expect.objectContaining({
+          action: 'clarification.select',
+          payload: expect.objectContaining({
+            inferredIntent: 'travel',
+            noFallback: 'travel_intake',
+          }),
+        }),
+      ]),
+    });
+    expect((task.memory as Record<string, unknown>).travelLoop).toMatchObject({
+      stage: 'intake',
+      slots: expect.objectContaining({
+        destination: '太古里',
+        geoResolution: expect.objectContaining({
+          source: 'amap',
+          needsConfirmation: true,
+        }),
+      }),
+    });
+  });
+
+  it('applies a selected travel geo candidate back into the intake card', async () => {
+    const task = makeTask({
+      memory: {
+        travelLoop: {
+          stage: 'intake',
+          slots: {
+            destination: '太古里',
+            departureTime: '周末',
+            budgetRange: '1000元',
+            transportMode: '高铁',
+          },
+        },
+      },
+    });
+    const { service } = makeService(task);
+
+    const result = await service.applySelectedSlots({
+      ownerUserId: 7,
+      taskId: 101,
+      payload: {
+        inferredIntent: 'travel',
+        inferredSlots: {
+          destination: '太古里',
+          departureTime: '周末',
+          budgetRange: '1000元',
+          transportMode: '高铁',
+        },
+        selectedPatch: {
+          locationText: '成都锦江区成都远洋太古里',
+          city: '成都',
+          district: '锦江区',
+          poiName: '成都远洋太古里',
+          geoResolution: {
+            rawText: '成都远洋太古里',
+            locationText: '成都锦江区成都远洋太古里',
+            city: '成都',
+            district: '锦江区',
+            poiName: '成都远洋太古里',
+            source: 'user_confirmed',
+            confidence: 1,
+            needsConfirmation: false,
+          },
+        },
+      },
+    });
+
+    expect(result.cards?.[0]).toMatchObject({
+      schemaType: 'travel.intake',
+      data: expect.objectContaining({
+        destination: '成都锦江区成都远洋太古里',
+        city: '成都',
+        district: '锦江区',
+        poiName: '成都远洋太古里',
+        geoResolution: expect.objectContaining({
+          source: 'user_confirmed',
+          city: '成都',
+        }),
+        missingFields: [],
+      }),
+    });
   });
 
   it('updates an active travel loop from natural-language follow-up slots', async () => {

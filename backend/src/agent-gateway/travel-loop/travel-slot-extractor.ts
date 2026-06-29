@@ -95,6 +95,10 @@ export function normalizeTravelSlots(
   return {
     destination: cleanDisplayText(value.destination, '') || undefined,
     city: sanitizeCity(value.city) || undefined,
+    district: cleanDisplayText(value.district, '') || undefined,
+    poiName: cleanDisplayText(value.poiName, '') || undefined,
+    lat: typeof value.lat === 'number' ? value.lat : undefined,
+    lng: typeof value.lng === 'number' ? value.lng : undefined,
     geoResolution: value.geoResolution,
     departureTime: cleanDisplayText(value.departureTime, '') || undefined,
     duration: cleanDisplayText(value.duration, '') || undefined,
