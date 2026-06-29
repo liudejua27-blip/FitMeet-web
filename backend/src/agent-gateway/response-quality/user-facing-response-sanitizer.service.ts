@@ -289,6 +289,17 @@ export class UserFacingResponseSanitizerService {
       this.isRecord(result) ? result.messagesHref : undefined,
     ]);
     const confirmation = this.publicLoopConfirmation(pendingConfirmations);
+    const matchingJobStatus = this.firstText([
+      ...cardRecords.map(
+        (card) => this.recordValue(card.data).matchingJobStatus,
+      ),
+      ...cardRecords.map((card) =>
+        this.isRecord(this.recordValue(card.data).matchingJob)
+          ? this.recordValue(this.recordValue(card.data).matchingJob).status
+          : undefined,
+      ),
+      this.isRecord(result) ? result.matchingJobStatus : undefined,
+    ]);
 
     if (messagesHref) {
       return {
@@ -311,6 +322,20 @@ export class UserFacingResponseSanitizerService {
         publicIntentHref,
         messagesHref: null,
         requiredConfirmation: true,
+      };
+    }
+
+    if (
+      publicIntentId &&
+      /queued|running|pending|matching_queued/i.test(matchingJobStatus ?? '')
+    ) {
+      return {
+        stage: 'matching_queued',
+        publicIntentId,
+        discoverHref,
+        publicIntentHref,
+        messagesHref: null,
+        requiredConfirmation: false,
       };
     }
 
@@ -491,6 +516,7 @@ export class UserFacingResponseSanitizerService {
       stage !== 'ranking_candidates' &&
       stage !== 'safety_checking' &&
       stage !== 'no_candidates' &&
+      stage !== 'no_candidates_final' &&
       stage !== 'candidates_recommended' &&
       stage !== 'contact_confirmation_required' &&
       stage !== 'messages_handoff' &&
