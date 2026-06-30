@@ -133,10 +133,11 @@ Friend and Travel now follow the card-driven loop template instead of returning
 coming-soon placeholders. They have lightweight loop brains, dedicated loop
 services, intake cards, draft cards, private matching jobs, and route/action
 wiring. They also have dedicated understanding services for structured slot
-fallback. They are still lighter than Workout because they do not yet have the
-same nationwide multi-candidate geo-confirmation depth or dedicated opener
-prompting, but they must keep using the shared loop contract and the same
-durable matching, realtime, opener, and approval boundaries.
+fallback and loop-aware opener prompts through the shared opener draft runtime.
+They are still lighter than Workout because their scoring, recovery, and
+post-match strategy depth are smaller, but they must keep using the shared loop
+contract and the same durable matching, realtime, opener, and approval
+boundaries.
 
 ## Next Loop Template
 
@@ -163,8 +164,8 @@ The remaining work should not re-expand the legacy agent. Continue tightening
 the loop agents in place:
 
 - keep Profile completion as a non-blocking nudge, not a gate
-- extend Friend and Travel toward Workout-level geo-confirmation and opener
-  prompts
+- extend Friend and Travel toward Workout-level scoring, recovery, and
+  post-match strategy depth
 - add broader real-database smoke coverage for public and private matching
 - move shared card, intake, draft, and opener helpers only when duplication
   becomes a real maintenance cost

@@ -500,6 +500,69 @@ describe('SocialAgentCandidateActionService', () => {
     });
   });
 
+  it('routes friend opener drafting through loop-aware AgentLoop runtime when available', async () => {
+    const task = makeTask({
+      goal: '交友匹配',
+      memory: {
+        friendLoop: {
+          stage: 'candidates_ready',
+          matchingJobId: 7001,
+          candidateCount: 1,
+          slots: {
+            friendGoal: '认识同城朋友',
+            city: '上海',
+            topicTags: ['咖啡', '展览'],
+          },
+        },
+      },
+    });
+    const openerDrafts = {
+      draft: jest
+        .fn()
+        .mockResolvedValue('看到你也喜欢展览，可以先站内聊聊周末安排吗？'),
+    };
+    const records: Array<Record<string, unknown>> = [];
+    const agentLoop = makeAgentLoopRuntimeRecorder(records);
+    const { service } = makeHarness(task, openerDrafts, agentLoop);
+
+    const result = await service.createOpenerDraftFromCardAction(7, 101, {
+      action: 'candidate.generate_opener',
+      payload: {
+        taskId: 101,
+        targetUserId: 33,
+        socialRequestId: 701,
+        candidateRecordId: 703,
+        candidate: {
+          userId: 33,
+          candidateRecordId: 703,
+          displayName: '小周',
+          suggestedMessage: '你好，可以先站内聊聊兴趣吗？',
+          metadata: { loop: 'friend' },
+        },
+      },
+    });
+
+    expect(records[0]).toMatchObject({
+      goal: 'Friend agent drafts a safe opener before user send approval.',
+      toolName: 'friend_agent.generate_opener',
+      toolInput: expect.objectContaining({
+        taskId: 101,
+        targetUserId: 33,
+        candidateRecordId: 703,
+      }),
+    });
+    expect(records[1]).toMatchObject({
+      finalObservation: expect.objectContaining({
+        toolName: 'friend_agent.generate_opener',
+        draftReady: true,
+      }),
+    });
+    expect(openerDrafts.draft).toHaveBeenCalledTimes(1);
+    expect(result.cards?.[0]).toMatchObject({
+      body: '看到你也喜欢展览，可以先站内聊聊周末安排吗？',
+    });
+  });
+
   it('uses the workout opener draft service before falling back to the template draft', async () => {
     const task = makeTask({
       memory: {
@@ -753,6 +816,99 @@ describe('SocialAgentCandidateActionService', () => {
     });
     expect(executor.executeToolAction).not.toHaveBeenCalled();
     expect(approvals.approve).not.toHaveBeenCalled();
+    expect(approvals.create).toHaveBeenCalledTimes(1);
+    expect(result).toMatchObject({
+      action: 'await_confirmation',
+      assistantMessage: '发送邀请前需要你确认。确认前不会触达对方。',
+    });
+  });
+
+  it('routes travel opener send approval through loop-aware AgentLoop runtime', async () => {
+    const task = makeTask({
+      result: {
+        cardActionDraft: {
+          action: 'candidate.generate_opener',
+          targetUserId: 44,
+          candidateRecordId: 804,
+          socialRequestId: 801,
+          candidate: {
+            userId: 44,
+            candidateUserId: 44,
+            candidateRecordId: 804,
+            socialRequestId: 801,
+            displayName: '阿宁',
+            metadata: { loop: 'travel' },
+          },
+          message: '看到你也想去成都，可以先站内聊聊时间和路线吗？',
+          idempotencyKey: 'travel-opener-confirm-1',
+        },
+      },
+      memory: {
+        travelLoop: {
+          stage: 'opener_ready',
+          matchingJobId: 8001,
+          candidateCount: 1,
+          targetUserId: 44,
+          candidateRecordId: 804,
+          socialRequestId: 801,
+        },
+        taskMemory: {
+          pendingActions: [],
+          candidateState: {
+            recommendedIds: [],
+            rejectedIds: [],
+            savedIds: [],
+            contactedIds: [],
+          },
+          activityState: { recommendedIds: [], rejectedIds: [] },
+          activeEntities: {},
+          stableProfileFacts: {},
+          boundaries: [],
+          preferences: [],
+          misunderstandings: [],
+          lastUserMessages: [],
+          recentActions: [],
+          updatedAt: '2026-06-06T00:00:00.000Z',
+        },
+      },
+    });
+    const records: Array<Record<string, unknown>> = [];
+    const agentLoop = makeAgentLoopRuntimeRecorder(records);
+    const { approvals, executor, service } = makeHarness(
+      task,
+      undefined,
+      agentLoop,
+    );
+
+    const result = await service.confirmOpenerSendFromCardAction(7, 101, {
+      action: 'opener.confirm_send',
+      idempotencyKey: 'travel-opener-confirm-1',
+      payload: {
+        taskId: 101,
+        targetUserId: 44,
+      },
+    });
+
+    expect(records[0]).toMatchObject({
+      goal: 'Travel agent decides the opener send confirmation boundary.',
+      toolName: 'travel_agent.confirm_opener_send',
+      toolInput: expect.objectContaining({
+        taskId: 101,
+        targetUserId: 44,
+        candidateRecordId: 804,
+        socialRequestId: 801,
+        hasPendingApproval: false,
+      }),
+    });
+    expect(records[1]).toMatchObject({
+      finalObservation: expect.objectContaining({
+        toolName: 'travel_agent.confirm_opener_send',
+        decision: 'request_send_approval',
+        approvalRequired: true,
+        canSend: false,
+      }),
+    });
+    expect(executor.executeToolAction).not.toHaveBeenCalled();
     expect(approvals.create).toHaveBeenCalledTimes(1);
     expect(result).toMatchObject({
       action: 'await_confirmation',

@@ -90,6 +90,7 @@ import { SocialCandidateAuditService } from './social-candidate-audit.service';
 import type { SocialCandidateEventType } from './entities/social-candidate-event.entity';
 import { SocialAgentLoopStateTransitionEventService } from './social-agent-loop-state-transition-event.service';
 import { WorkoutOpenerDraftService } from './workout-loop/workout-opener-draft.service';
+import { isLoopKind, type LoopKind } from './loop-agent/loop-agent.types';
 
 type CandidateActionOptions = {
   signal?: AbortSignal | null;
@@ -100,9 +101,7 @@ type LoopCandidateStage =
   | 'message_confirming'
   | 'messages_handoff';
 
-type WorkoutOpenerSendDecision =
-  | 'request_send_approval'
-  | 'send_after_approval';
+type LoopOpenerSendDecision = 'request_send_approval' | 'send_after_approval';
 
 @Injectable()
 export class SocialAgentCandidateActionService {
@@ -226,7 +225,7 @@ export class SocialAgentCandidateActionService {
           candidate.suggestedMessage,
         '',
       ).trim() || this.candidateMessageDraft(task);
-    const draft = await this.generateWorkoutOpenerDraft({
+    const draft = await this.generateLoopOpenerDraft({
       task,
       candidate,
       payload,
@@ -320,7 +319,7 @@ export class SocialAgentCandidateActionService {
     return result;
   }
 
-  private async generateWorkoutOpenerDraft(input: {
+  private async generateLoopOpenerDraft(input: {
     task: AgentTask;
     candidate: Record<string, unknown>;
     payload: Record<string, unknown>;
@@ -339,12 +338,14 @@ export class SocialAgentCandidateActionService {
     }
 
     let draft = input.fallbackDraft;
-    const toolName = 'workout_agent.generate_opener';
+    const loopKind = this.openerLoopKind(input);
+    const agentName = this.loopAgentName(loopKind);
+    const toolName = `${loopKind}_agent.generate_opener`;
     const runtime: AgentLoopBrainRuntime = {
       decide: ({ observations }) => {
         if (observations.length === 0) {
           return {
-            reason: 'select_workout_opener_draft',
+            reason: `select_${loopKind}_opener_draft`,
             critique:
               'Generate only a safe draft opener; sending remains behind approval.',
             tool: {
@@ -362,7 +363,7 @@ export class SocialAgentCandidateActionService {
         }
         return {
           done: true,
-          reason: 'workout_opener_draft_ready',
+          reason: `${loopKind}_opener_draft_ready`,
           finalObservation: {
             toolName,
             status: 'completed',
@@ -375,9 +376,9 @@ export class SocialAgentCandidateActionService {
 
     await this.agentLoop.execute({
       taskId: input.task.id,
-      goal: 'Workout agent drafts a safe opener before user send approval.',
+      goal: `${agentName} drafts a safe opener before user send approval.`,
       agent: 'Agent Brain',
-      plan: { reason: 'Workout opener brain runtime', tools: [] },
+      plan: { reason: `${agentName} opener brain runtime`, tools: [] },
       brain: runtime,
       maxToolCalls: 2,
       runner: async () => {
@@ -400,22 +401,24 @@ export class SocialAgentCandidateActionService {
     return draft;
   }
 
-  private async decideWorkoutOpenerSend(input: {
+  private async decideLoopOpenerSend(input: {
     task: AgentTask;
+    loopKind: LoopKind;
     targetUserId: number;
     candidateRecordId: number | null;
     socialRequestId: number | null;
     requestedApprovalId: number | null;
     hasPendingApproval: boolean;
     messageLength: number;
-  }): Promise<WorkoutOpenerSendDecision> {
-    const fallbackDecision: WorkoutOpenerSendDecision = input.hasPendingApproval
+  }): Promise<LoopOpenerSendDecision> {
+    const fallbackDecision: LoopOpenerSendDecision = input.hasPendingApproval
       ? 'send_after_approval'
       : 'request_send_approval';
     if (!this.agentLoop) return fallbackDecision;
 
     let decision = fallbackDecision;
-    const toolName = 'workout_agent.confirm_opener_send';
+    const agentName = this.loopAgentName(input.loopKind);
+    const toolName = `${input.loopKind}_agent.confirm_opener_send`;
     const runtime: AgentLoopBrainRuntime = {
       decide: ({ observations }) => {
         if (observations.length === 0) {
@@ -459,9 +462,12 @@ export class SocialAgentCandidateActionService {
 
     await this.agentLoop.execute({
       taskId: input.task.id,
-      goal: 'Workout agent decides the opener send confirmation boundary.',
+      goal: `${agentName} decides the opener send confirmation boundary.`,
       agent: 'Agent Brain',
-      plan: { reason: 'Workout opener send confirmation runtime', tools: [] },
+      plan: {
+        reason: `${agentName} opener send confirmation runtime`,
+        tools: [],
+      },
       brain: runtime,
       maxToolCalls: 2,
       runner: () => {
@@ -535,8 +541,9 @@ export class SocialAgentCandidateActionService {
         draft.socialRequestId ??
         candidate.socialRequestId,
     );
-    const sendDecision = await this.decideWorkoutOpenerSend({
+    const sendDecision = await this.decideLoopOpenerSend({
       task,
+      loopKind: this.openerLoopKind({ task, candidate, payload }),
       targetUserId,
       candidateRecordId: candidateRecordId ?? null,
       socialRequestId: socialRequestId ?? null,
@@ -2721,6 +2728,53 @@ export class SocialAgentCandidateActionService {
     const text = cleanDisplayText(value, '');
     if (text.length <= max) return text;
     return `${text.slice(0, Math.max(0, max - 1))}…`;
+  }
+
+  private openerLoopKind(input: {
+    task: AgentTask;
+    candidate?: Record<string, unknown>;
+    payload?: Record<string, unknown>;
+  }): LoopKind {
+    const fromPayload = this.loopKindText(input.payload);
+    if (fromPayload) return fromPayload;
+    const fromCandidate = this.loopKindText(input.candidate);
+    if (fromCandidate) return fromCandidate;
+    const fromDraft = this.loopKindText(this.cardActionDraft(input.task));
+    if (fromDraft) return fromDraft;
+
+    const memory = this.record(input.task.memory);
+    if (Object.keys(this.record(memory.friendLoop)).length > 0) return 'friend';
+    if (Object.keys(this.record(memory.travelLoop)).length > 0) return 'travel';
+    return 'workout';
+  }
+
+  private loopKindText(
+    value: Record<string, unknown> | undefined,
+  ): LoopKind | null {
+    if (!value) return null;
+    const metadata = this.record(value.metadata);
+    const socialRequest = this.record(value.socialRequest);
+    const raw = cleanDisplayText(
+      value.loopKind ??
+        value.loop ??
+        metadata.loopKind ??
+        metadata.loop ??
+        socialRequest.loopKind ??
+        socialRequest.loop,
+      '',
+    );
+    return isLoopKind(raw) ? raw : null;
+  }
+
+  private loopAgentName(loopKind: LoopKind): string {
+    switch (loopKind) {
+      case 'friend':
+        return 'Friend agent';
+      case 'travel':
+        return 'Travel agent';
+      case 'workout':
+        return 'Workout agent';
+    }
   }
 
   private isRecord(value: unknown): value is Record<string, unknown> {
