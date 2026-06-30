@@ -17,6 +17,8 @@
     "agent:replay": "ts-node -r tsconfig-paths/register scripts/agent-loop-replay.ts",
     "db:check-critical-tables:prod": "node dist/scripts/check-production-tables.js",
     "uploads:check:prod": "node dist/scripts/check-upload-dir.js",
+    "seed:workout-candidates": "ts-node -r tsconfig-paths/register src/scripts/seed-workout-candidates.ts",
+    "seed:workout-candidates:prod": "node dist/scripts/seed-workout-candidates.js",
     "migration:generate": "typeorm-ts-node-commonjs migration:generate src/database/migrations/GeneratedMigration -d src/database/data-source.ts",
     "migration:create": "typeorm migration:create src/database/migrations/ManualMigration",
     "check:prod-env": "ts-node -r tsconfig-paths/register scripts/check-production-env.ts",
