@@ -176,6 +176,58 @@ describe('AgentEntryOrchestratorService', () => {
     expect(legacy.handleFallback).not.toHaveBeenCalled();
   });
 
+  it('routes explicit profile edits to ProfileLoop before active WorkoutLoop ownership', async () => {
+    const task = makeTask({
+      memory: {
+        workoutLoop: {
+          stage: 'draft_ready',
+          slots: {
+            activityType: '篮球',
+            timePreference: '明天下午3点',
+            locationText: '北京大学',
+            city: '北京',
+          },
+        },
+      },
+    });
+    const { legacy, profileLoop, service, workoutLoop } = makeHarness();
+    profileLoop.tryHandleEntrance.mockResolvedValue({
+      task,
+      result: makeResult({
+        intent: 'profile_enrichment_request',
+        cards: [
+          {
+            id: 'profile_completion:101',
+            type: 'profile_completion',
+            schemaVersion: 'fitmeet.tool-ui.v1',
+            schemaType: 'profile.completion',
+            title: '补全资料',
+            data: {},
+            actions: [],
+          },
+        ],
+      }),
+    });
+
+    const result = await service.handle({
+      ownerUserId: 7,
+      task,
+      body: { message: '我想修改我的个人资料' },
+      message: '我想修改我的个人资料',
+      startedAt: 123,
+    });
+
+    expect(result.source).toBe('profile_loop_intent');
+    expect(profileLoop.tryHandleEntrance).toHaveBeenCalledWith({
+      ownerUserId: 7,
+      task,
+      message: '我想修改我的个人资料',
+    });
+    expect(workoutLoop.continueEntrance).not.toHaveBeenCalled();
+    expect(workoutLoop.tryHandleEntrance).not.toHaveBeenCalled();
+    expect(legacy.handleFallback).not.toHaveBeenCalled();
+  });
+
   it('routes active friend-owned follow-up turns back to FriendLoop', async () => {
     const task = makeTask({
       memory: {
