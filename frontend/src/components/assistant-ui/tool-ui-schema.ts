@@ -1299,6 +1299,11 @@ export function schemaTypeFromLegacyCardType(type: string): ToolUISchemaType {
   }
   if (type === 'public_intent_application_card') return 'public_intent.application';
   if (type === 'opener_approval' || type === 'safety_boundary') return 'safety.approval';
+  if (type === 'loop_choice') return 'loop.choice';
+  if (type === 'clarification_binary') return 'clarification.binary';
+  if (type === 'clarification_geo_candidates') return 'clarification.geo_candidates';
+  if (type === 'workout_intake') return 'workout.intake';
+  if (type === 'workout_draft') return 'workout.draft';
   if (type === 'friend_intake') return 'friend.intake';
   if (type === 'friend_draft') return 'friend.draft';
   if (type === 'travel_intake') return 'travel.intake';

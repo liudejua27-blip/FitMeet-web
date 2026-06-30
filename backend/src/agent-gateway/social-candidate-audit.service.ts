@@ -14,10 +14,11 @@ import {
   SocialCandidateSnapshot,
   type SocialCandidateSnapshotType,
 } from './entities/social-candidate-snapshot.entity';
+import { PublicSocialIntent } from './entities/public-social-intent.entity';
 
 type CandidateAuditRepository<T extends ObjectLiteral> = Pick<
   Repository<T>,
-  'create' | 'find' | 'findOne' | 'save'
+  'create' | 'find' | 'findOne' | 'save' | 'manager'
 >;
 
 type CandidateAuditManager = Pick<EntityManager, 'getRepository'>;
@@ -70,6 +71,10 @@ export class SocialCandidateAuditService {
     manager?: CandidateAuditManager | null,
   ): Promise<SocialCandidateSnapshot> {
     const repo = this.snapshotRepository(manager);
+    const publicIntentId = await this.safePublicIntentIdForSnapshot(
+      repo,
+      input.publicIntentId,
+    );
     const candidates = (
       Array.isArray(input.candidates) ? input.candidates : []
     ).map((candidate, index) => this.summarizeCandidate(candidate, index));
@@ -77,7 +82,7 @@ export class SocialCandidateAuditService {
       ownerUserId: input.ownerUserId,
       taskId: this.number(input.taskId),
       socialRequestId: this.number(input.socialRequestId),
-      publicIntentId: this.safeVarchar(input.publicIntentId, 80) || null,
+      publicIntentId,
       matchingJobId: this.number(input.matchingJobId),
       snapshotType: input.snapshotType,
       sourceVersion: this.safeVarchar(input.sourceVersion, 128),
@@ -90,6 +95,23 @@ export class SocialCandidateAuditService {
       metadata: this.sanitizeRecord(input.metadata ?? {}),
     });
     return repo.save(snapshot);
+  }
+
+  private async safePublicIntentIdForSnapshot(
+    repo: CandidateAuditRepository<SocialCandidateSnapshot>,
+    value: unknown,
+  ): Promise<string | null> {
+    const publicIntentId = this.safeVarchar(value, 80) || null;
+    if (!publicIntentId) return null;
+    const exists = await repo.manager
+      .getRepository(PublicSocialIntent)
+      .exist({ where: { id: publicIntentId } });
+    if (exists) return publicIntentId;
+    this.logger.warn({
+      event: 'social_candidate_audit.snapshot_public_intent_missing',
+      publicIntentId,
+    });
+    return null;
   }
 
   async recordEvent(

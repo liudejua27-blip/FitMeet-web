@@ -21,6 +21,9 @@ export function buildWorkoutIntakeCard(input: {
       '补齐本次约练需要的信息即可生成约练卡；资料不完整也可以继续。',
     status: 'waiting_confirmation',
     data: {
+      schemaName: 'WorkoutIntakeCard',
+      schemaVersion: 'fitmeet.tool-ui.v1',
+      schemaType: 'workout.intake',
       taskId: input.taskId,
       ...data,
     },
@@ -85,6 +88,9 @@ export function buildWorkoutDraftCard(input: {
     body: '确认后再发布；不会自动公开精确位置、联系方式或触达任何人。',
     status: 'waiting_confirmation',
     data: {
+      schemaName: 'WorkoutDraftCard',
+      schemaVersion: 'fitmeet.tool-ui.v1',
+      schemaType: 'workout.draft',
       taskId: input.taskId,
       socialRequestId: input.draft.socialRequestId,
       title,

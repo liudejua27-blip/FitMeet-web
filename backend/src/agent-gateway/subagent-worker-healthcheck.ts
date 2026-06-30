@@ -1,6 +1,10 @@
 import 'reflect-metadata';
 
 import dataSource from '../database/data-source';
+import {
+  FITMEET_SUBAGENT_WORKER_DEFAULT_QUEUE_CSV,
+  parseFitMeetSubagentWorkerQueueList,
+} from './fitmeet-subagent-worker-queues';
 
 const workerId =
   process.env.FITMEET_SUBAGENT_WORKER_ID ?? 'compose-subagent-worker';
@@ -8,13 +12,10 @@ const maxAgeMs = positiveInt(
   process.env.FITMEET_SUBAGENT_WORKER_HEALTH_MAX_AGE_MS,
   90_000,
 );
-const queues = (
+const queues = parseFitMeetSubagentWorkerQueueList(
   process.env.FITMEET_SUBAGENT_WORKER_QUEUE ??
-  'fitmeet.subagent.agent-brain,fitmeet.subagent.life-graph-agent,fitmeet.subagent.match-agent'
-)
-  .split(',')
-  .map((item) => item.trim())
-  .filter(Boolean);
+    FITMEET_SUBAGENT_WORKER_DEFAULT_QUEUE_CSV,
+);
 
 type HeartbeatRow = {
   queueName: string;

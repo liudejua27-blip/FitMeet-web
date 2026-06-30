@@ -162,6 +162,52 @@ describe('SocialAgentMatchingJobProcessorService', () => {
     );
   });
 
+  it('does not write synthetic private matching ids into the public intent snapshot foreign key', async () => {
+    const harness = makeHarness({
+      candidates: [makeCandidate()],
+      jobOverrides: {
+        publicIntentId: 'private:101:301',
+        sourceVersion: 'private-workout:101:301',
+        idempotencyKey: 'matching-job:private:101:301',
+        metadata: {
+          taskId: 101,
+          privateMatchMode: true,
+          publicDiscoverPublishSkipped: true,
+        },
+      },
+      socialRequest: {
+        visibility: SocialRequestVisibility.Private,
+        metadata: { privateMatchMode: true },
+      },
+    });
+
+    await expect(
+      harness.service.processClaimedJob(
+        makeJob({
+          publicIntentId: 'private:101:301',
+          sourceVersion: 'private-workout:101:301',
+          idempotencyKey: 'matching-job:private:101:301',
+          metadata: {
+            taskId: 101,
+            privateMatchMode: true,
+            publicDiscoverPublishSkipped: true,
+          },
+        }),
+      ),
+    ).resolves.toBe(MatchingJobStatus.CandidatesReady);
+
+    expect(harness.candidateAudit.createSnapshot).toHaveBeenCalledWith(
+      expect.objectContaining({
+        publicIntentId: null,
+        constraints: expect.objectContaining({
+          publicIntentId: 'private:101:301',
+          socialRequestId: 301,
+        }),
+      }),
+      harness.manager,
+    );
+  });
+
   it('writes friend loop candidate results back to friendLoop memory', async () => {
     const harness = makeHarness({
       candidates: [makeCandidate()],
@@ -856,7 +902,10 @@ function makeHarness(
             candidateCount: params?.[1] as number,
             result:
               typeof params?.[2] === 'string' ? JSON.parse(params[2]) : {},
-            completedAt: params?.[3] as Date,
+            completedAt:
+              typeof params?.[3] === 'string'
+                ? new Date(params[3])
+                : (params?.[3] as Date),
             leaseOwner: null,
             leaseExpiresAt: null,
             lastHeartbeatAt: null,

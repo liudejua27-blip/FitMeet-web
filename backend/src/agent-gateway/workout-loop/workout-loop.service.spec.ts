@@ -116,6 +116,47 @@ describe('WorkoutLoopService', () => {
     });
   });
 
+  it('opens workout intake for a direct workout command even when understanding is unavailable', async () => {
+    const understanding = {
+      shouldCall: jest.fn().mockReturnValue(true),
+      understand: jest.fn().mockResolvedValue({
+        intent: 'uncertain',
+        confidence: 0,
+        source: 'fallback',
+      }),
+      slotsFromUnderstanding: jest.fn().mockReturnValue({}),
+    };
+    const brain = new WorkoutAgentBrainService(understanding as never);
+    const { draftPublication, service, task } = makeService(
+      makeTask(),
+      understanding,
+      brain as never,
+    );
+
+    const result = await service.tryHandleEntrance({
+      ownerUserId: 7,
+      task,
+      message: '约练',
+    });
+
+    expect(draftPublication.stagePrivateDraftForPublish).not.toHaveBeenCalled();
+    expect(result?.result).toMatchObject({
+      action: 'clarify',
+      cards: [
+        expect.objectContaining({
+          schemaType: 'workout.intake',
+          data: expect.objectContaining({
+            missingFields: expect.arrayContaining([
+              'activityType',
+              'timePreference',
+              'locationText',
+            ]),
+          }),
+        }),
+      ],
+    });
+  });
+
   it('returns a prefilled intake card for complete workout wording instead of drafting immediately', async () => {
     const { draftPublication, service, task } = makeService();
 
@@ -143,6 +184,38 @@ describe('WorkoutLoopService', () => {
     expect((task.memory as Record<string, unknown>).workoutLoop).toMatchObject({
       stage: 'intake',
     });
+  });
+
+  it('uses task goal context when a later turn clarifies the workout partner request', async () => {
+    const task = makeTask({
+      goal: '附近有玩x的吗',
+    });
+    const { draftPublication, service } = makeService(task);
+
+    const result = await service.tryHandleEntrance({
+      ownerUserId: 7,
+      task,
+      message: '我想找跑步搭子，喜欢宠物的',
+    });
+
+    expect(result?.result.cards?.[0]).toMatchObject({
+      schemaType: 'workout.intake',
+      data: expect.objectContaining({
+        activityType: '跑步',
+        locationText: '附近',
+        candidatePreference: '喜欢宠物的',
+        missingFields: expect.arrayContaining(['timePreference']),
+      }),
+    });
+    expect((task.memory as Record<string, unknown>).workoutLoop).toMatchObject({
+      stage: 'intake',
+      slots: expect.objectContaining({
+        activityType: '跑步',
+        locationText: '附近',
+        candidatePreference: '喜欢宠物的',
+      }),
+    });
+    expect(draftPublication.stagePrivateDraftForPublish).not.toHaveBeenCalled();
   });
 
   it('returns intake for 青岛大学 健身 明天晚上 wording', async () => {
@@ -223,10 +296,9 @@ describe('WorkoutLoopService', () => {
         expect.objectContaining({
           schemaType: 'workout.intake',
           data: expect.objectContaining({
-            missingFields: expect.arrayContaining([
-              'activityType',
-              'locationText',
-            ]),
+            activityType: '跑步',
+            timePreference: '明天晚上',
+            missingFields: ['locationText'],
           }),
         }),
       ],
