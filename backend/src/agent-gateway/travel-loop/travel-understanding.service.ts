@@ -3,6 +3,7 @@ import { z } from 'zod';
 
 import { cleanDisplayText } from '../../common/display-text.util';
 import type { AgentTask } from '../entities/agent-task.entity';
+import { buildLoopLlmContext } from '../loop-agent/loop-llm-context';
 import type {
   LoopSlotMeta,
   LoopSlotSource,
@@ -435,6 +436,10 @@ export class TravelUnderstandingService {
         'clarificationQuestion',
       ],
       userMessage: cleanDisplayText(input.message, ''),
+      conversationContext: buildLoopLlmContext({
+        task: input.task ?? null,
+        message: input.message,
+      }),
       locationMentionContract: {
         rawText: 'exact place words used by user, e.g. 西湖边 or 太古里',
         normalizedText: 'clean query for map lookup, e.g. 西湖 or 太古里',
@@ -446,7 +451,6 @@ export class TravelUnderstandingService {
         needsGeoResolution: true,
       },
       ruleSlots: input.ruleSlots,
-      taskMemory: this.safeTaskMemory(input.task ?? null),
     });
   }
 
@@ -460,19 +464,6 @@ export class TravelUnderstandingService {
       assumptions: [],
       needsClarification: false,
       source: 'fallback',
-    };
-  }
-
-  private safeTaskMemory(task: AgentTask | null): Record<string, unknown> {
-    const memory =
-      typeof task?.memory === 'object' &&
-      task.memory !== null &&
-      !Array.isArray(task.memory)
-        ? (task.memory as Record<string, unknown>)
-        : {};
-    return {
-      travelLoop: memory.travelLoop ?? null,
-      taskSlots: memory.taskSlots ?? null,
     };
   }
 

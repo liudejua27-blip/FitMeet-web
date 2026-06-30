@@ -96,7 +96,30 @@ describe('WorkoutUnderstandingService', () => {
     const service = new WorkoutUnderstandingService(toolJson as never);
 
     await service.understand({
-      task: makeTask({ goal: '附近有玩x的吗' }),
+      task: makeTask({
+        goal: '附近有玩x的吗',
+        memory: {
+          socialAgentConversation: {
+            turns: [
+              {
+                role: 'user',
+                text: '附近有玩x的吗',
+                at: '2026-06-30T01:00:00.000Z',
+              },
+              {
+                role: 'assistant',
+                text: '你是想找运动、桌游还是其他活动搭子？',
+                at: '2026-06-30T01:00:01.000Z',
+              },
+              {
+                role: 'user',
+                text: '就是搭子',
+                at: '2026-06-30T01:00:02.000Z',
+              },
+            ],
+          },
+        },
+      }),
       message: '我想找跑步搭子，喜欢宠物的',
       ruleSlots: { activityType: '跑步', candidatePreference: '喜欢宠物的' },
       loopIntent: router.classify('我想找跑步搭子，喜欢宠物的'),
@@ -107,8 +130,26 @@ describe('WorkoutUnderstandingService', () => {
       userMessage: '我想找跑步搭子，喜欢宠物的',
       conversationContext: {
         taskGoal: '附近有玩x的吗',
+        recentUserMessages: [
+          '附近有玩x的吗',
+          '就是搭子',
+          '我想找跑步搭子，喜欢宠物的',
+        ],
       },
     });
+    expect(prompt.conversationContext.recentConversation).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ role: 'user', text: '附近有玩x的吗' }),
+        expect.objectContaining({ role: 'user', text: '就是搭子' }),
+        expect.objectContaining({
+          role: 'user',
+          text: '我想找跑步搭子，喜欢宠物的',
+        }),
+      ]),
+    );
+    expect(prompt.conversationContext.interpretationPolicy.join(' ')).toContain(
+      'recentConversation',
+    );
   });
 
   it('normalizes null optional DeepSeek fields instead of failing workout entrance', async () => {

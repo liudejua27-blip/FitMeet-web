@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { cleanDisplayText } from '../../common/display-text.util';
 import type { AgentTask } from '../entities/agent-task.entity';
 import type { FriendSlots } from '../friend-loop/friend-loop.types';
+import { buildLoopLlmContext } from '../loop-agent/loop-llm-context';
 import type { TravelSlots } from '../travel-loop/travel-loop.types';
 import type { WorkoutSlots } from '../workout-loop/workout-loop.types';
 import { SocialAgentToolJsonModelService } from '../social-agent-tool-json-model.service';
@@ -265,8 +266,10 @@ export class LoopClassifierService {
         'Return time text as raw user wording only.',
       ],
       taskContext: {
-        taskId: input.task.id,
-        goal: cleanDisplayText(input.task.goal, ''),
+        ...buildLoopLlmContext({
+          task: input.task,
+          message: input.message,
+        }),
         existingLoopMemory: this.loopMemorySnapshot(input.task),
       },
       ruleReason: input.ruleReason ?? null,

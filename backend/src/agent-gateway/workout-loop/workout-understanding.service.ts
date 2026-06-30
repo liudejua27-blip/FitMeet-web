@@ -3,6 +3,7 @@ import { z } from 'zod';
 
 import { cleanDisplayText } from '../../common/display-text.util';
 import type { AgentTask } from '../entities/agent-task.entity';
+import { buildLoopLlmContext } from '../loop-agent/loop-llm-context';
 import type { FitMeetLoopRouterResult } from '../loop-router/fitmeet-loop-router.types';
 import { SocialAgentToolJsonModelService } from '../social-agent-tool-json-model.service';
 import type { WorkoutSlots } from './workout-loop.types';
@@ -210,9 +211,10 @@ export class WorkoutUnderstandingService {
         'clarificationQuestion',
       ],
       userMessage: cleanDisplayText(input.message, ''),
-      conversationContext: {
-        taskGoal: cleanDisplayText(input.task.goal, ''),
-      },
+      conversationContext: buildLoopLlmContext({
+        task: input.task,
+        message: input.message,
+      }),
       locationMentionContract: {
         rawText: 'exact words used by user, e.g. 华师大附近',
         normalizedText: 'clean query for map lookup, e.g. 华师大',
@@ -225,7 +227,6 @@ export class WorkoutUnderstandingService {
       },
       ruleSlots: input.ruleSlots,
       loopIntent: input.loopIntent,
-      taskMemory: this.safeTaskMemory(input.task),
     });
   }
 
@@ -238,19 +239,6 @@ export class WorkoutUnderstandingService {
       assumptions: [],
       needsClarification: false,
       source: 'fallback',
-    };
-  }
-
-  private safeTaskMemory(task: AgentTask): Record<string, unknown> {
-    const memory =
-      typeof task.memory === 'object' &&
-      task.memory !== null &&
-      !Array.isArray(task.memory)
-        ? (task.memory as Record<string, unknown>)
-        : {};
-    return {
-      workoutLoop: memory.workoutLoop ?? null,
-      taskSlots: memory.taskSlots ?? null,
     };
   }
 
