@@ -78,6 +78,30 @@ describe('WorkoutAgentBrainService', () => {
     });
   });
 
+  it('does not let fallback uncertain understanding veto an explicit workout command', async () => {
+    const understanding = {
+      shouldCall: jest.fn().mockReturnValue(true),
+      understand: jest.fn().mockResolvedValue({
+        intent: 'uncertain',
+        confidence: 0,
+        source: 'fallback',
+      }),
+      slotsFromUnderstanding: jest.fn().mockReturnValue({}),
+    };
+    const brain = new WorkoutAgentBrainService(understanding as never);
+
+    await expect(
+      brain.decideEntrance({
+        task: makeTask(),
+        message: '约练',
+        loopIntent: router.classify('约练'),
+      }),
+    ).resolves.toMatchObject({
+      action: 'ASK_INTAKE',
+      reason: 'entrance_intake',
+    });
+  });
+
   it('asks for location confirmation when nationwide geo resolution is ambiguous', async () => {
     const geoResolver = {
       resolveAsync: jest.fn().mockResolvedValue({

@@ -195,7 +195,11 @@ export class WorkoutAgentBrainService {
     );
 
     const validation = validateWorkoutSlotsForDraft(slots);
-    if (understanding?.intent && understanding.intent !== 'workout') {
+    if (
+      understanding?.intent &&
+      understanding.intent !== 'workout' &&
+      this.shouldLetUnderstandingVetoWorkout(input, understanding)
+    ) {
       return {
         action: 'HANDOFF_LEGACY',
         reason: `${input.reasonPrefix}_understanding_${understanding.intent}`,
@@ -227,6 +231,19 @@ export class WorkoutAgentBrainService {
       understanding,
       geoResolution: slots.geoResolution ?? null,
     };
+  }
+
+  private shouldLetUnderstandingVetoWorkout(
+    input: {
+      loopIntent: FitMeetLoopRouterResult;
+      reasonPrefix: string;
+    },
+    understanding: WorkoutUnderstandingResult,
+  ): boolean {
+    if (input.loopIntent.disposition === 'accept_loop') return false;
+    if (input.reasonPrefix === 'continuation') return false;
+    if (understanding.source === 'fallback') return false;
+    return understanding.confidence >= 0.75;
   }
 
   private locationConfirmationDecision(input: {

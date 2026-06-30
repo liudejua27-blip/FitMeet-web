@@ -352,6 +352,52 @@ describe('AgentEntryOrchestratorService', () => {
     expect(legacy.handleFallback).not.toHaveBeenCalled();
   });
 
+  it('routes a direct workout command to WorkoutLoop even after profile context', async () => {
+    const task = makeTask({
+      memory: {
+        socialAgent: {
+          objective: 'profile_completion',
+          waitingFor: 'profile_completion_answers',
+        },
+      },
+    });
+    const { legacy, profileLoop, service, workoutLoop } = makeHarness();
+    workoutLoop.tryHandleEntrance.mockResolvedValue({
+      task,
+      result: makeResult({
+        action: 'clarify',
+        cards: [
+          {
+            id: 'workout_intake:101',
+            type: 'workout_intake',
+            schemaVersion: 'fitmeet.tool-ui.v1',
+            schemaType: 'workout.intake',
+            title: '补全约练信息',
+            data: {},
+            actions: [],
+          },
+        ],
+      }),
+    });
+
+    const result = await service.handle({
+      ownerUserId: 7,
+      task,
+      body: { message: '约练' },
+      message: '约练',
+      startedAt: 123,
+    });
+
+    expect(result.source).toBe('workout_loop_intent');
+    expect(workoutLoop.tryHandleEntrance).toHaveBeenCalledWith({
+      ownerUserId: 7,
+      task,
+      message: '约练',
+    });
+    expect(profileLoop.tryHandleEntrance).not.toHaveBeenCalled();
+    expect(legacy.handleFallback).not.toHaveBeenCalled();
+  });
+
   it('routes explicit activity partner requests to WorkoutLoop without legacy arbitration', async () => {
     const task = makeTask({
       goal: '附近有玩x的吗',

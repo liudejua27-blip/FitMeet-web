@@ -116,6 +116,47 @@ describe('WorkoutLoopService', () => {
     });
   });
 
+  it('opens workout intake for a direct workout command even when understanding is unavailable', async () => {
+    const understanding = {
+      shouldCall: jest.fn().mockReturnValue(true),
+      understand: jest.fn().mockResolvedValue({
+        intent: 'uncertain',
+        confidence: 0,
+        source: 'fallback',
+      }),
+      slotsFromUnderstanding: jest.fn().mockReturnValue({}),
+    };
+    const brain = new WorkoutAgentBrainService(understanding as never);
+    const { draftPublication, service, task } = makeService(
+      makeTask(),
+      understanding,
+      brain as never,
+    );
+
+    const result = await service.tryHandleEntrance({
+      ownerUserId: 7,
+      task,
+      message: '约练',
+    });
+
+    expect(draftPublication.stagePrivateDraftForPublish).not.toHaveBeenCalled();
+    expect(result?.result).toMatchObject({
+      action: 'clarify',
+      cards: [
+        expect.objectContaining({
+          schemaType: 'workout.intake',
+          data: expect.objectContaining({
+            missingFields: expect.arrayContaining([
+              'activityType',
+              'timePreference',
+              'locationText',
+            ]),
+          }),
+        }),
+      ],
+    });
+  });
+
   it('returns a prefilled intake card for complete workout wording instead of drafting immediately', async () => {
     const { draftPublication, service, task } = makeService();
 

@@ -15,6 +15,8 @@ const WORKOUT_CONTEXT =
   /(今天|今晚|明天|明晚|后天|周末|上午|中午|下午|晚上|附近|大学|公园|体育馆|健身房|球馆|操场|青岛|北京|上海|广州|深圳|杭州|成都|重庆|南京|苏州|武汉|西安|长沙|郑州|天津|济南|厦门|宁波|合肥)/i;
 const WORKOUT_DIRECT_CREATE =
   /((发布|创建|生成|新建|做|整理).{0,10}(约练|约练卡|运动卡|搭子卡)|(约练|约练卡).{0,10}(发布|创建|生成|新建))/i;
+const WORKOUT_DIRECT_LOOP_COMMAND =
+  /^(约练|开始约练|进入约练|我要约练|我想约练|打开约练|发起约练|约练闭环)[。.!！\s]*$/i;
 const WORKOUT_TIME =
   /(今天|今晚|明天|明晚|后天|本周末|这周末|下周末|周末|周[一二三四五六日天]|星期[一二三四五六日天]|上午|中午|下午|晚上|早上|夜间|下班后|工作日晚上|\d{1,2}\s*[点:：]\s*\d{0,2})/i;
 const WORKOUT_PLACE =
@@ -23,6 +25,8 @@ const WORKOUT_PARTNER =
   /(找|约|一起|一块|搭子|伙伴|朋友|有人|陪|组队|同去|同练)/i;
 const WORKOUT_ACTIVITY_PARTNER =
   /((跑步|夜跑|慢跑|健身|练肩|撸铁|羽毛球|篮球|网球|散步|徒步|骑行|瑜伽|游泳|训练|运动|city\s*walk|citywalk).{0,10}(搭子|伙伴|朋友|同伴|队友|陪练|同练|一起))|((找|约|想找|想约|一起|一块).{0,16}(跑步|夜跑|慢跑|健身|练肩|撸铁|羽毛球|篮球|网球|散步|徒步|骑行|瑜伽|游泳|训练|运动|city\s*walk|citywalk).{0,10}(搭子|伙伴|朋友|同伴|队友|陪练|同练)?)/i;
+const WORKOUT_ADVICE_OR_HELP =
+  /(适合|建议|什么样|哪类|哪种|怎么|如何|规则|说明|了解|问问|聊|聊天|计划|不要推荐人|不要找人|不推荐人|不找人|只想|只是)/i;
 
 const FRIEND =
   /(交友|认识朋友|找朋友|聊天搭子|同城朋友|低压力社交|扩列|搭话|认识新朋友)/i;
@@ -51,6 +55,15 @@ export class FitMeetLoopRouterService {
       );
     }
 
+    if (WORKOUT_DIRECT_LOOP_COMMAND.test(text)) {
+      return result(
+        'workout',
+        0.95,
+        'workout_direct_loop_command',
+        'accept_loop',
+      );
+    }
+
     if (WORKOUT_DIRECT_CREATE.test(text)) {
       return result(
         'workout',
@@ -60,7 +73,10 @@ export class FitMeetLoopRouterService {
       );
     }
 
-    if (WORKOUT_ACTIVITY_PARTNER.test(text)) {
+    if (
+      WORKOUT_ACTIVITY_PARTNER.test(text) &&
+      !this.isWorkoutAdviceOrFriendPreference(text)
+    ) {
       return result(
         'workout',
         0.9,
@@ -120,6 +136,13 @@ export class FitMeetLoopRouterService {
       WORKOUT_TIME.test(text) &&
       WORKOUT_PLACE.test(text) &&
       WORKOUT_PARTNER.test(text)
+    );
+  }
+
+  private isWorkoutAdviceOrFriendPreference(text: string): boolean {
+    if (WORKOUT_ADVICE_OR_HELP.test(text)) return true;
+    return /(认识|找).{0,8}(喜欢|爱好).{0,8}(健身|跑步|运动).{0,8}(朋友|新朋友)/i.test(
+      text,
     );
   }
 }
