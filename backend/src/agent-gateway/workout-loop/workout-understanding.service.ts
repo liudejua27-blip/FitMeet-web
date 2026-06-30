@@ -8,6 +8,28 @@ import { SocialAgentToolJsonModelService } from '../social-agent-tool-json-model
 import type { WorkoutSlots } from './workout-loop.types';
 import { validateWorkoutSlotsForDraft } from './workout-slot-extractor';
 
+const WORKOUT_LOCATION_RELATIONS = [
+  'near',
+  'inside',
+  'route',
+  'city_only',
+  'unknown',
+] as const;
+
+type WorkoutLocationRelation = (typeof WORKOUT_LOCATION_RELATIONS)[number];
+
+const WorkoutLocationRelationSchema = z.preprocess(
+  (value): WorkoutLocationRelation | undefined => {
+    if (value === null || value === undefined) return undefined;
+    const text = cleanDisplayText(value, '').trim().toLowerCase();
+    if (!text) return undefined;
+    return (WORKOUT_LOCATION_RELATIONS as readonly string[]).includes(text)
+      ? (text as WorkoutLocationRelation)
+      : 'unknown';
+  },
+  z.enum(WORKOUT_LOCATION_RELATIONS).optional().catch('unknown'),
+);
+
 const WorkoutLocationMentionSchema = z
   .object({
     rawText: z.string().optional(),
@@ -15,9 +37,7 @@ const WorkoutLocationMentionSchema = z
     cityHint: z.string().optional(),
     districtHint: z.string().optional(),
     poiHint: z.string().optional(),
-    relation: z
-      .enum(['near', 'inside', 'route', 'city_only', 'unknown'])
-      .optional(),
+    relation: WorkoutLocationRelationSchema,
     needsGeoResolution: z.boolean().catch(true),
   })
   .optional();
@@ -82,7 +102,14 @@ export class WorkoutUnderstandingService {
       prompt: this.prompt(input),
       fallback: () => fallback,
     });
-    return WorkoutUnderstandingSchema.parse(raw);
+    const parsed = WorkoutUnderstandingSchema.safeParse(raw);
+    if (!parsed.success) {
+      return {
+        ...fallback,
+        fallbackReason: 'invalid_llm_output',
+      };
+    }
+    return parsed.data;
   }
 
   slotsFromUnderstanding(

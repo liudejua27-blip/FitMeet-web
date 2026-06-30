@@ -74,6 +74,47 @@ describe('WorkoutUnderstandingService', () => {
     });
   });
 
+  it('normalizes unexpected location relation values instead of failing continuation', async () => {
+    const toolJson = {
+      callJson: jest.fn().mockResolvedValue({
+        intent: 'workout',
+        confidence: 0.82,
+        activityType: '篮球',
+        timePreference: '明天下午3点',
+        locationMention: {
+          rawText: '北京大学',
+          normalizedText: '北京大学',
+          cityHint: '北京',
+          districtHint: '海淀区',
+          poiHint: '北京大学',
+          relation: 'nearby_place',
+          needsGeoResolution: true,
+        },
+        missing: [],
+        assumptions: [],
+        needsClarification: false,
+      }),
+    };
+    const service = new WorkoutUnderstandingService(toolJson as never);
+
+    const result = await service.understand({
+      task: makeTask(),
+      message: '明天下午3点北京大学篮球',
+      ruleSlots: {},
+      loopIntent: router.classify('明天下午3点北京大学篮球'),
+    });
+
+    expect(result.locationMention?.relation).toBe('unknown');
+    expect(service.slotsFromUnderstanding(result)).toMatchObject({
+      activityType: '篮球',
+      timePreference: '明天下午3点',
+      locationText: '北京大学',
+      city: '北京',
+      district: '海淀区',
+      poiName: '北京大学',
+    });
+  });
+
   it('calls the model for arbitration candidates, incomplete draft slots, or uncertain locations', () => {
     const service = new WorkoutUnderstandingService();
 

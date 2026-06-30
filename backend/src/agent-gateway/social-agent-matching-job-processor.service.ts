@@ -706,13 +706,16 @@ export class SocialAgentMatchingJobProcessorService {
       const candidateRows = input.searchResult.candidates;
       const taskId = this.taskIdFromJob(lockedJob);
       const scoreVersion = this.scoreVersionFromCandidates(candidateRows);
+      const snapshotPublicIntentId = validation.privateMatchMode
+        ? null
+        : lockedJob.publicIntentId;
       const snapshot = this.candidateAudit
         ? await this.candidateAudit.createSnapshot(
             {
               ownerUserId: validation.ownerUserId,
               taskId,
               socialRequestId: validation.socialRequest.id,
-              publicIntentId: lockedJob.publicIntentId,
+              publicIntentId: snapshotPublicIntentId,
               matchingJobId: lockedJob.id,
               snapshotType: 'matching_job_result',
               sourceVersion: validation.sourceVersion,
@@ -874,8 +877,8 @@ export class SocialAgentMatchingJobProcessorService {
              "leaseOwner" = NULL,
              "leaseExpiresAt" = NULL,
              "lastHeartbeatAt" = NULL,
-             "completedAt" = $4,
-             "updatedAt" = $4
+             "completedAt" = $4::timestamptz,
+             "updatedAt" = $4::timestamptz
          WHERE "id" = $5
            AND "status" = $6
            AND "leaseOwner" = $7
@@ -884,7 +887,7 @@ export class SocialAgentMatchingJobProcessorService {
           status,
           candidateCount,
           JSON.stringify(resultPayload),
-          completedAt,
+          completedAt.toISOString(),
           lockedJob.id,
           MatchingJobStatus.Running,
           input.job.leaseOwner,
@@ -1486,7 +1489,9 @@ export class SocialAgentMatchingJobProcessorService {
     return (
       metadata.privateMatchMode === true ||
       metadata.publicDiscoverPublishSkipped === true ||
-      job.publicIntentId.startsWith('private:')
+      job.publicIntentId.startsWith('private:') ||
+      job.publicIntentId.startsWith('private-friend:') ||
+      job.publicIntentId.startsWith('private-travel:')
     );
   }
 

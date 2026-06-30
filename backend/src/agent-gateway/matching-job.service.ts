@@ -232,8 +232,8 @@ export class MatchingJobService {
              "leaseOwner" = NULL,
              "leaseExpiresAt" = NULL,
              "lastHeartbeatAt" = NULL,
-             "completedAt" = $4,
-             "updatedAt" = $4
+             "completedAt" = $4::timestamptz,
+             "updatedAt" = $4::timestamptz
          WHERE "id" = $5
            AND "status" = $6
            AND "leaseOwner" = $7
@@ -242,7 +242,7 @@ export class MatchingJobService {
           status,
           count,
           JSON.stringify(result),
-          completedAt,
+          completedAt.toISOString(),
           jobId,
           MatchingJobStatus.Running,
           leaseOwner,
@@ -284,12 +284,12 @@ export class MatchingJobService {
         `UPDATE "matching_jobs"
          SET "status" = $1,
              "errorMessage" = $2,
-             "nextRunAt" = $3,
+             "nextRunAt" = $3::timestamptz,
              "leaseOwner" = NULL,
              "leaseExpiresAt" = NULL,
              "lastHeartbeatAt" = NULL,
-             "completedAt" = CASE WHEN $4::boolean THEN NULL ELSE $5 END,
-             "updatedAt" = $5,
+             "completedAt" = CASE WHEN $4::boolean THEN NULL ELSE $5::timestamptz END,
+             "updatedAt" = $5::timestamptz,
              "metadata" = COALESCE("metadata", '{}'::jsonb) || $6::jsonb
          WHERE "id" = $7
            AND "status" = $8
@@ -298,9 +298,9 @@ export class MatchingJobService {
         [
           status,
           this.errorMessage(error),
-          retryAt,
+          retryAt ? retryAt.toISOString() : null,
           retryable,
-          now,
+          now.toISOString(),
           JSON.stringify({
             failedAt: now.toISOString(),
             retryable,
@@ -338,8 +338,8 @@ export class MatchingJobService {
            "leaseOwner" = NULL,
            "leaseExpiresAt" = NULL,
            "lastHeartbeatAt" = NULL,
-           "completedAt" = $3,
-           "updatedAt" = $3,
+           "completedAt" = $3::timestamptz,
+           "updatedAt" = $3::timestamptz,
            "metadata" = COALESCE("metadata", '{}'::jsonb) || $4::jsonb
        WHERE "id" = $5
          AND "status" = $6
@@ -348,7 +348,7 @@ export class MatchingJobService {
       [
         MatchingJobStatus.Cancelled,
         this.errorMessage(reason),
-        now,
+        now.toISOString(),
         JSON.stringify({
           cancelledAt: now.toISOString(),
           cancelReason: reason,
