@@ -78,6 +78,36 @@ function makeHarness() {
     continueEntrance: jest.fn(),
     tryHandleEntrance: jest.fn(),
   };
+  const loopClassifier = {
+    classify: jest.fn(),
+    workoutSlotsFromHints: jest.fn((hints: Record<string, unknown> = {}) => ({
+      activityType: hints.activityType,
+      timePreference: hints.timeText,
+      locationText: hints.locationText,
+      candidatePreference: hints.candidatePreference,
+      slotMeta: {
+        activityType: { source: 'llm', confidence: 0.9 },
+        timePreference: { source: 'llm', confidence: 0.9 },
+        locationText: { source: 'llm', confidence: 0.9 },
+      },
+    })),
+    friendSlotsFromHints: jest.fn((hints: Record<string, unknown> = {}) => ({
+      friendGoal: hints.friendGoal,
+      locationText: hints.locationText,
+      topicTags: hints.topicTags,
+      genderPreference: hints.genderPreference,
+      bodyPreference: hints.bodyPreference,
+      appearancePreference: hints.appearancePreference,
+    })),
+    travelSlotsFromHints: jest.fn((hints: Record<string, unknown> = {}) => ({
+      destination: hints.destination,
+      departureTime: hints.departureTime,
+      duration: hints.duration,
+      budgetRange: hints.budgetRange,
+      transportMode: hints.transportMode,
+      tags: hints.tags,
+    })),
+  };
   const service = new AgentEntryOrchestratorService(
     new FitMeetLoopRouterService(),
     workoutLoop as never,
@@ -86,10 +116,12 @@ function makeHarness() {
     workoutArbitration as never,
     friendLoop as never,
     travelLoop as never,
+    loopClassifier as never,
   );
   return {
     friendLoop,
     legacy,
+    loopClassifier,
     profileLoop,
     service,
     workoutArbitration,
@@ -459,6 +491,296 @@ describe('AgentEntryOrchestratorService', () => {
       ownerUserId: 7,
       task,
       message: '周末想找人结伴去成都旅游',
+    });
+    expect(legacy.handleFallback).not.toHaveBeenCalled();
+  });
+
+  it('uses DeepSeek loop classifier fallback for complex workout expressions that rules miss', async () => {
+    const task = makeTask();
+    const { legacy, loopClassifier, service, workoutLoop } = makeHarness();
+    loopClassifier.classify.mockResolvedValue({
+      intent: 'workout',
+      confidence: 0.91,
+      reason: 'semantic_workout_activity',
+      workoutHints: {
+        activityType: '羽毛球',
+        timeText: '明晚',
+        locationText: '华师大附近',
+        candidatePreference: '水平差不多的人',
+      },
+    });
+    workoutLoop.tryHandleEntrance.mockResolvedValue({
+      task,
+      result: makeResult({
+        cards: [
+          {
+            id: 'workout_intake:101',
+            type: 'workout_intake',
+            schemaVersion: 'fitmeet.tool-ui.v1',
+            schemaType: 'workout.intake',
+            title: '补全约练信息',
+            data: {},
+            actions: [],
+          },
+        ],
+      }),
+    });
+
+    const result = await service.handle({
+      ownerUserId: 7,
+      task,
+      body: { message: '明晚华师大附近活动一下，找水平差不多的人' },
+      message: '明晚华师大附近活动一下，找水平差不多的人',
+      startedAt: 123,
+    });
+
+    expect(result.source).toBe('workout_loop_intent');
+    expect(loopClassifier.classify).toHaveBeenCalledWith(
+      expect.objectContaining({
+        task,
+        message: '明晚华师大附近活动一下，找水平差不多的人',
+        ruleReason: 'no_loop_keyword',
+      }),
+    );
+    expect(workoutLoop.tryHandleEntrance).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ownerUserId: 7,
+        task,
+        message: '明晚华师大附近活动一下，找水平差不多的人',
+        bypassRouter: true,
+        prefilledSlots: expect.objectContaining({
+          activityType: '羽毛球',
+          timePreference: '明晚',
+          locationText: '华师大附近',
+          candidatePreference: '水平差不多的人',
+        }),
+      }),
+    );
+    expect(legacy.handleFallback).not.toHaveBeenCalled();
+  });
+
+  it('uses DeepSeek loop classifier fallback for venue/activity wording such as Aoti cycling', async () => {
+    const task = makeTask();
+    const { legacy, loopClassifier, service, workoutLoop } = makeHarness();
+    loopClassifier.classify.mockResolvedValue({
+      intent: 'workout',
+      confidence: 0.9,
+      reason: 'semantic_workout_cycling',
+      workoutHints: {
+        activityType: '骑行',
+        timeText: '周末',
+        locationText: '奥体附近',
+        venueType: 'stadium',
+      },
+    });
+    workoutLoop.tryHandleEntrance.mockResolvedValue({
+      task,
+      result: makeResult({
+        cards: [
+          {
+            id: 'workout_intake:101',
+            type: 'workout_intake',
+            schemaVersion: 'fitmeet.tool-ui.v1',
+            schemaType: 'workout.intake',
+            title: '补全约练信息',
+            data: {},
+            actions: [],
+          },
+        ],
+      }),
+    });
+
+    const result = await service.handle({
+      ownerUserId: 7,
+      task,
+      body: { message: '周末想找人一起在奥体附近骑车' },
+      message: '周末想找人一起在奥体附近骑车',
+      startedAt: 123,
+    });
+
+    expect(result.source).toBe('workout_loop_intent');
+    expect(workoutLoop.tryHandleEntrance).toHaveBeenCalledWith(
+      expect.objectContaining({
+        bypassRouter: true,
+        prefilledSlots: expect.objectContaining({
+          activityType: '骑行',
+          timePreference: '周末',
+          locationText: '奥体附近',
+        }),
+      }),
+    );
+    expect(legacy.handleFallback).not.toHaveBeenCalled();
+  });
+
+  it('uses DeepSeek loop classifier fallback for coffee friend-making wording', async () => {
+    const task = makeTask();
+    const { friendLoop, legacy, loopClassifier, service } = makeHarness();
+    loopClassifier.classify.mockResolvedValue({
+      intent: 'friend',
+      confidence: 0.86,
+      reason: 'semantic_friend_coffee',
+      friendHints: {
+        friendGoal: '认识同城朋友',
+        locationText: '同城',
+        topicTags: ['咖啡', '周末'],
+        genderPreference: '不限性别',
+      },
+    });
+    friendLoop.tryHandleEntrance.mockResolvedValue({
+      task,
+      result: makeResult({
+        cards: [
+          {
+            id: 'friend_intake:101',
+            type: 'friend_intake',
+            schemaVersion: 'fitmeet.tool-ui.v1',
+            schemaType: 'friend.intake',
+            title: '填写本次交友需求',
+            data: {},
+            actions: [],
+          },
+        ],
+      }),
+    });
+
+    const result = await service.handle({
+      ownerUserId: 7,
+      task,
+      body: { message: '想找个人周末一起喝咖啡' },
+      message: '想找个人周末一起喝咖啡',
+      startedAt: 123,
+    });
+
+    expect(result.source).toBe('friend_loop_intent');
+    expect(friendLoop.tryHandleEntrance).toHaveBeenCalledWith(
+      expect.objectContaining({
+        prefilledSlots: expect.objectContaining({
+          friendGoal: '认识同城朋友',
+          locationText: '同城',
+          topicTags: ['咖啡', '周末'],
+          genderPreference: '不限性别',
+        }),
+      }),
+    );
+    expect(legacy.handleFallback).not.toHaveBeenCalled();
+  });
+
+  it('uses DeepSeek loop classifier fallback for travel photo companion wording', async () => {
+    const task = makeTask();
+    const { legacy, loopClassifier, service, travelLoop } = makeHarness();
+    loopClassifier.classify.mockResolvedValue({
+      intent: 'travel',
+      confidence: 0.88,
+      reason: 'semantic_travel_photo_buddy',
+      travelHints: {
+        destination: '川西',
+        departureTime: '周末',
+        tags: ['拍照'],
+      },
+    });
+    travelLoop.tryHandleEntrance.mockResolvedValue({
+      task,
+      result: makeResult({
+        cards: [
+          {
+            id: 'travel_intake:101',
+            type: 'travel_intake',
+            schemaVersion: 'fitmeet.tool-ui.v1',
+            schemaType: 'travel.intake',
+            title: '填写本次结伴旅行需求',
+            data: {},
+            actions: [],
+          },
+        ],
+      }),
+    });
+
+    const result = await service.handle({
+      ownerUserId: 7,
+      task,
+      body: { message: '想找个拍照搭子去川西' },
+      message: '想找个拍照搭子去川西',
+      startedAt: 123,
+    });
+
+    expect(result.source).toBe('travel_loop_intent');
+    expect(travelLoop.tryHandleEntrance).toHaveBeenCalledWith(
+      expect.objectContaining({
+        prefilledSlots: expect.objectContaining({
+          destination: '川西',
+          departureTime: '周末',
+          tags: ['拍照'],
+        }),
+      }),
+    );
+    expect(legacy.handleFallback).not.toHaveBeenCalled();
+  });
+
+  it('falls through to legacy when DeepSeek loop classifier is uncertain with low confidence', async () => {
+    const task = makeTask();
+    const { legacy, loopClassifier, service, workoutLoop } = makeHarness();
+    loopClassifier.classify.mockResolvedValue({
+      intent: 'uncertain',
+      confidence: 0.3,
+      reason: 'not_enough_loop_evidence',
+    });
+    legacy.handleFallback.mockResolvedValue({ task, result: null });
+
+    const result = await service.handle({
+      ownerUserId: 7,
+      task,
+      body: { message: '这件事你怎么看' },
+      message: '这件事你怎么看',
+      startedAt: 123,
+    });
+
+    expect(result.source).toBe('legacy_fallback');
+    expect(workoutLoop.tryHandleEntrance).not.toHaveBeenCalled();
+    expect(legacy.handleFallback).toHaveBeenCalledWith(
+      expect.objectContaining({
+        fallbackReason: 'no_loop_keyword',
+      }),
+    );
+  });
+
+  it('keeps rule routing available when DeepSeek loop classifier is unavailable', async () => {
+    const task = makeTask();
+    const { friendLoop, legacy, loopClassifier, service } = makeHarness();
+    loopClassifier.classify.mockResolvedValue({
+      intent: 'uncertain',
+      confidence: 0,
+      reason: 'classifier_unavailable',
+    });
+    friendLoop.tryHandleEntrance.mockResolvedValue({
+      task,
+      result: makeResult({
+        cards: [
+          {
+            id: 'friend_intake:101',
+            type: 'friend_intake',
+            schemaVersion: 'fitmeet.tool-ui.v1',
+            schemaType: 'friend.intake',
+            title: '填写本次交友需求',
+            data: {},
+            actions: [],
+          },
+        ],
+      }),
+    });
+
+    const result = await service.handle({
+      ownerUserId: 7,
+      task,
+      body: { message: '想认识青岛同城朋友，咖啡聊天' },
+      message: '想认识青岛同城朋友，咖啡聊天',
+      startedAt: 123,
+    });
+
+    expect(result.source).toBe('friend_loop_intent');
+    expect(friendLoop.tryHandleEntrance).toHaveBeenCalledWith({
+      ownerUserId: 7,
+      task,
+      message: '想认识青岛同城朋友，咖啡聊天',
     });
     expect(legacy.handleFallback).not.toHaveBeenCalled();
   });

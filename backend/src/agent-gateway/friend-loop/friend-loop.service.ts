@@ -74,10 +74,14 @@ export class FriendLoopService {
     ownerUserId: number;
     task: AgentTask;
     message: string;
+    prefilledSlots?: FriendSlots;
   }): Promise<{ task: AgentTask; result: SocialAgentIntentRouteResult }> {
     const slots = extractFriendSlots({
       message: input.message,
-      previousSlots: this.readFriendSlots(input.task),
+      previousSlots: {
+        ...this.readFriendSlots(input.task),
+        ...(input.prefilledSlots ?? {}),
+      },
     });
     const decision = await this.decideWithAgentLoop({
       mode: 'entrance',

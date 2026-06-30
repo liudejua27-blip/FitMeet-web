@@ -249,6 +249,7 @@ import { FeatureFlagService } from '../common/feature-flag.service';
 import { AgentLoopRuntimeHealthService } from './agent-loop-runtime-health.service';
 import { AgentEntryOrchestratorService } from './agent-entry/agent-entry-orchestrator.service';
 import { LegacyAgentAdapterService } from './legacy-agent/legacy-agent-adapter.service';
+import { LoopClassifierService } from './loop-router/loop-classifier.service';
 import { FriendLoopService } from './friend-loop/friend-loop.service';
 import { FriendAgentBrainService } from './friend-loop/friend-agent-brain.service';
 import { FriendUnderstandingService } from './friend-loop/friend-understanding.service';
@@ -360,6 +361,7 @@ import { WorkoutUnderstandingService } from './workout-loop/workout-understandin
     AgentLoopRuntimeHealthService,
     AgentEntryOrchestratorService,
     LegacyAgentAdapterService,
+    LoopClassifierService,
     FriendAgentBrainService,
     FriendUnderstandingService,
     FriendLoopService,
@@ -547,6 +549,7 @@ import { WorkoutUnderstandingService } from './workout-loop/workout-understandin
     SocialIntentRateLimitService,
     SocialAgentDomainClassifierService,
     AgentLoopRuntimeHealthService,
+    LoopClassifierService,
     FitMeetLoopRouterService,
     ClarificationCardActionService,
     FriendAgentBrainService,

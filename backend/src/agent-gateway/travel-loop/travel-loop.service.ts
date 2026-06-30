@@ -74,10 +74,14 @@ export class TravelLoopService {
     ownerUserId: number;
     task: AgentTask;
     message: string;
+    prefilledSlots?: TravelSlots;
   }): Promise<{ task: AgentTask; result: SocialAgentIntentRouteResult }> {
     const slots = extractTravelSlots({
       message: input.message,
-      previousSlots: this.readTravelSlots(input.task),
+      previousSlots: {
+        ...this.readTravelSlots(input.task),
+        ...(input.prefilledSlots ?? {}),
+      },
     });
     const decision = await this.decideWithAgentLoop({
       mode: 'entrance',
