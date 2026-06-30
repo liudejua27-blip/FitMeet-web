@@ -648,8 +648,8 @@ describe('WorkoutLoopService', () => {
     expect(draftPublication.stagePrivateDraftForPublish).not.toHaveBeenCalled();
   });
 
-  it('creates a workout draft for 青岛大学 健身 明天晚上 wording', async () => {
-    const { service, task } = makeService();
+  it('returns intake for 青岛大学 健身 明天晚上 wording without direct drafting', async () => {
+    const { draftPublication, service, task } = makeService();
 
     const result = await service.tryHandleEntrance({
       ownerUserId: 7,
@@ -658,10 +658,10 @@ describe('WorkoutLoopService', () => {
     });
 
     expect(result?.result).toMatchObject({
-      action: 'await_confirmation',
+      action: 'clarify',
       cards: [
         expect.objectContaining({
-          schemaType: 'workout.draft',
+          schemaType: 'workout.intake',
           data: expect.objectContaining({
             activityType: '健身',
             timePreference: '明天晚上',
@@ -671,6 +671,7 @@ describe('WorkoutLoopService', () => {
         }),
       ],
     });
+    expect(draftPublication.stagePrivateDraftForPublish).not.toHaveBeenCalled();
   });
 
   it('turns intake submit payload into a staged draft', async () => {
