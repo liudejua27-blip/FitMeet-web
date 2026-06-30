@@ -111,6 +111,57 @@ describe('WorkoutUnderstandingService', () => {
     });
   });
 
+  it('normalizes null optional DeepSeek fields instead of failing workout entrance', async () => {
+    const toolJson = {
+      callJson: jest.fn().mockResolvedValue({
+        intent: 'workout',
+        confidence: 0.81,
+        activityType: '跑步',
+        timePreference: null,
+        locationMention: {
+          rawText: '附近',
+          normalizedText: '附近',
+          cityHint: null,
+          districtHint: null,
+          poiHint: null,
+          relation: 'near',
+          needsGeoResolution: null,
+        },
+        radiusKm: null,
+        intensity: null,
+        candidatePreference: '喜欢宠物的',
+        missing: ['timePreference'],
+        assumptions: [],
+        needsClarification: true,
+        clarificationQuestion: null,
+      }),
+    };
+    const service = new WorkoutUnderstandingService(toolJson as never);
+
+    const result = await service.understand({
+      task: makeTask({ goal: '附近有玩x的吗' }),
+      message: '我想找跑步搭子，喜欢宠物的',
+      ruleSlots: { activityType: '跑步', candidatePreference: '喜欢宠物的' },
+      loopIntent: router.classify('我想找跑步搭子，喜欢宠物的'),
+    });
+
+    expect(result.fallbackReason).toBeUndefined();
+    expect(result.timePreference).toBeUndefined();
+    expect(result.intensity).toBeUndefined();
+    expect(result.locationMention).toMatchObject({
+      rawText: '附近',
+      normalizedText: '附近',
+      relation: 'near',
+      needsGeoResolution: true,
+    });
+    expect(result.locationMention?.cityHint).toBeUndefined();
+    expect(service.slotsFromUnderstanding(result)).toMatchObject({
+      activityType: '跑步',
+      locationText: '附近',
+      candidatePreference: '喜欢宠物的',
+    });
+  });
+
   it('normalizes unexpected location relation values instead of failing continuation', async () => {
     const toolJson = {
       callJson: jest.fn().mockResolvedValue({

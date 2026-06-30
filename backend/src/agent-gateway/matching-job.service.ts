@@ -242,7 +242,7 @@ export class MatchingJobService {
           status,
           count,
           JSON.stringify(result),
-          completedAt.toISOString(),
+          completedAt,
           jobId,
           MatchingJobStatus.Running,
           leaseOwner,
@@ -298,9 +298,9 @@ export class MatchingJobService {
         [
           status,
           this.errorMessage(error),
-          retryAt ? retryAt.toISOString() : null,
+          retryAt,
           retryable,
-          now.toISOString(),
+          now,
           JSON.stringify({
             failedAt: now.toISOString(),
             retryable,
@@ -348,7 +348,7 @@ export class MatchingJobService {
       [
         MatchingJobStatus.Cancelled,
         this.errorMessage(reason),
-        now.toISOString(),
+        now,
         JSON.stringify({
           cancelledAt: now.toISOString(),
           cancelReason: reason,

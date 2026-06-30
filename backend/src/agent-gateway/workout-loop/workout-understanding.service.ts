@@ -18,6 +18,21 @@ const WORKOUT_LOCATION_RELATIONS = [
 
 type WorkoutLocationRelation = (typeof WORKOUT_LOCATION_RELATIONS)[number];
 
+const NullableStringSchema = z.preprocess(
+  (value) => (value === null ? undefined : value),
+  z.string().optional().catch(undefined),
+);
+
+const NullableNumberSchema = z.preprocess(
+  (value) => (value === null ? undefined : value),
+  z.number().positive().max(200).optional().catch(undefined),
+);
+
+const NullableBooleanSchema = z.preprocess(
+  (value) => (value === null ? undefined : value),
+  z.boolean().optional().catch(undefined),
+);
+
 const WorkoutLocationRelationSchema = z.preprocess(
   (value): WorkoutLocationRelation | undefined => {
     if (value === null || value === undefined) return undefined;
@@ -32,13 +47,13 @@ const WorkoutLocationRelationSchema = z.preprocess(
 
 const WorkoutLocationMentionSchema = z
   .object({
-    rawText: z.string().optional(),
-    normalizedText: z.string().optional(),
-    cityHint: z.string().optional(),
-    districtHint: z.string().optional(),
-    poiHint: z.string().optional(),
+    rawText: NullableStringSchema,
+    normalizedText: NullableStringSchema,
+    cityHint: NullableStringSchema,
+    districtHint: NullableStringSchema,
+    poiHint: NullableStringSchema,
     relation: WorkoutLocationRelationSchema,
-    needsGeoResolution: z.boolean().catch(true),
+    needsGeoResolution: NullableBooleanSchema.default(true),
   })
   .optional();
 
@@ -47,16 +62,16 @@ const WorkoutUnderstandingSchema = z.object({
     .enum(['workout', 'friend', 'travel', 'profile', 'casual', 'uncertain'])
     .catch('uncertain'),
   confidence: z.number().min(0).max(1).catch(0),
-  activityType: z.string().optional(),
-  timePreference: z.string().optional(),
+  activityType: NullableStringSchema,
+  timePreference: NullableStringSchema,
   locationMention: WorkoutLocationMentionSchema,
-  locationText: z.string().optional(),
-  city: z.string().optional(),
-  district: z.string().optional(),
-  poiName: z.string().optional(),
-  radiusKm: z.number().positive().max(200).optional(),
-  intensity: z.string().optional(),
-  candidatePreference: z.string().optional(),
+  locationText: NullableStringSchema,
+  city: NullableStringSchema,
+  district: NullableStringSchema,
+  poiName: NullableStringSchema,
+  radiusKm: NullableNumberSchema,
+  intensity: NullableStringSchema,
+  candidatePreference: NullableStringSchema,
   missing: z
     .array(
       z.enum([
@@ -70,9 +85,9 @@ const WorkoutUnderstandingSchema = z.object({
     .catch([]),
   assumptions: z.array(z.string()).catch([]),
   needsClarification: z.boolean().catch(false),
-  clarificationQuestion: z.string().optional(),
-  source: z.string().optional(),
-  fallbackReason: z.string().optional(),
+  clarificationQuestion: NullableStringSchema,
+  source: NullableStringSchema,
+  fallbackReason: NullableStringSchema,
 });
 
 export type WorkoutUnderstandingResult = z.infer<

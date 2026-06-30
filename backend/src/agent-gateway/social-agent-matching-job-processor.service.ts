@@ -887,7 +887,7 @@ export class SocialAgentMatchingJobProcessorService {
           status,
           candidateCount,
           JSON.stringify(resultPayload),
-          completedAt.toISOString(),
+          completedAt,
           lockedJob.id,
           MatchingJobStatus.Running,
           input.job.leaseOwner,
