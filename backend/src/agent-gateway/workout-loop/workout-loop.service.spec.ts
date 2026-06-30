@@ -648,6 +648,32 @@ describe('WorkoutLoopService', () => {
     expect(draftPublication.stagePrivateDraftForPublish).not.toHaveBeenCalled();
   });
 
+  it('returns intake for 青岛大学 健身 明天晚上 wording without direct drafting', async () => {
+    const { draftPublication, service, task } = makeService();
+
+    const result = await service.tryHandleEntrance({
+      ownerUserId: 7,
+      task,
+      message: '我想在青岛大学找个搭子，健身，明天晚上',
+    });
+
+    expect(result?.result).toMatchObject({
+      action: 'clarify',
+      cards: [
+        expect.objectContaining({
+          schemaType: 'workout.intake',
+          data: expect.objectContaining({
+            activityType: '健身',
+            timePreference: '明天晚上',
+            locationText: expect.stringContaining('青岛大学'),
+            city: '青岛',
+          }),
+        }),
+      ],
+    });
+    expect(draftPublication.stagePrivateDraftForPublish).not.toHaveBeenCalled();
+  });
+
   it('turns intake submit payload into a staged draft', async () => {
     const { draftPublication, service } = makeService();
 
