@@ -1,5 +1,14 @@
 export type LoopKind = 'workout' | 'friend' | 'travel';
 
+export const LOOP_KINDS = [
+  'workout',
+  'friend',
+  'travel',
+] as const satisfies readonly LoopKind[];
+
+export type LoopMemoryKey = `${LoopKind}Loop`;
+export type LoopStageMetadataKey = `${LoopKind}LoopStage`;
+
 export type LoopStage =
   | 'intake'
   | 'clarifying'
@@ -17,6 +26,11 @@ export type LoopStage =
   | 'cancelled'
   | 'dismissed'
   | 'done';
+
+export type LoopMatchingResultStage = Extract<
+  LoopStage,
+  'candidates_ready' | 'no_candidates' | 'no_candidates_final'
+>;
 
 export type LoopVisibilityPreference = 'public' | 'private';
 
@@ -70,3 +84,15 @@ export type LoopAgentDecisionBase<
   slots: Slots;
   missing: RequiredSlot[];
 };
+
+export function isLoopKind(value: string): value is LoopKind {
+  return (LOOP_KINDS as readonly string[]).includes(value);
+}
+
+export function loopMemoryKey(kind: LoopKind): LoopMemoryKey {
+  return `${kind}Loop`;
+}
+
+export function loopStageKey(kind: LoopKind): LoopStageMetadataKey {
+  return `${kind}LoopStage`;
+}

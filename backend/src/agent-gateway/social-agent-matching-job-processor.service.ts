@@ -59,6 +59,13 @@ import {
   WorkoutAgentBrainService,
   type WorkoutNoCandidatesDecision,
 } from './workout-loop/workout-agent-brain.service';
+import {
+  isLoopKind,
+  loopMemoryKey,
+  loopStageKey,
+  type LoopKind,
+  type LoopMatchingResultStage,
+} from './loop-agent/loop-agent.types';
 
 const SOCIAL_REQUEST_ADVISORY_LOCK_NAMESPACE = 1_782_160_006;
 
@@ -78,13 +85,6 @@ type JobValidationResult = {
   sourceVersion: string;
   privateMatchMode: boolean;
 };
-
-type MatchingLoopKind = 'workout' | 'friend' | 'travel';
-
-type MatchingLoopStage =
-  | 'candidates_ready'
-  | 'no_candidates'
-  | 'no_candidates_final';
 
 type CandidateIndexHints = {
   candidateUserIds: number[];
@@ -1539,7 +1539,7 @@ export class SocialAgentMatchingJobProcessorService {
     memory: Record<string, unknown>;
     job: MatchingJob;
     socialRequest: UserSocialRequest;
-    stage: MatchingLoopStage;
+    stage: LoopMatchingResultStage;
     socialRequestId: number;
     publicIntentId: string;
     matchingJobId: number;
@@ -1551,14 +1551,13 @@ export class SocialAgentMatchingJobProcessorService {
   }): Record<string, unknown> {
     const loopKind = this.loopKindForMatching(input);
     if (!loopKind) return {};
-    const memoryKey = this.loopMemoryKey(loopKind);
+    const memoryKey = loopMemoryKey(loopKind);
     const loopMemory = this.record(input.memory[memoryKey]);
-    const stageKey = this.loopStageKey(loopKind);
-    const stagePatch = stageKey ? { [stageKey]: input.stage } : {};
+    const stageKey = loopStageKey(loopKind);
     return {
       [memoryKey]: {
         ...loopMemory,
-        ...stagePatch,
+        [stageKey]: input.stage,
         stage: input.stage,
         socialRequestId: input.socialRequestId,
         publicIntentId: input.publicIntentId,
@@ -1576,10 +1575,10 @@ export class SocialAgentMatchingJobProcessorService {
     memory: Record<string, unknown>;
     job: MatchingJob;
     socialRequest: UserSocialRequest;
-  }): MatchingLoopKind | null {
+  }): LoopKind | null {
     const requestMetadata = this.record(input.socialRequest.metadata);
     const metadataLoop = this.text(requestMetadata.loop);
-    if (this.isMatchingLoopKind(metadataLoop)) return metadataLoop;
+    if (isLoopKind(metadataLoop)) return metadataLoop;
 
     const jobMetadata = this.record(input.job.metadata);
     const jobSource = this.text(jobMetadata.source);
@@ -1601,23 +1600,6 @@ export class SocialAgentMatchingJobProcessorService {
     if (Object.keys(this.record(input.memory.travelLoop)).length > 0) {
       return 'travel';
     }
-    return null;
-  }
-
-  private isMatchingLoopKind(value: string): value is MatchingLoopKind {
-    return value === 'workout' || value === 'friend' || value === 'travel';
-  }
-
-  private loopMemoryKey(kind: MatchingLoopKind) {
-    if (kind === 'friend') return 'friendLoop';
-    if (kind === 'travel') return 'travelLoop';
-    return 'workoutLoop';
-  }
-
-  private loopStageKey(kind: MatchingLoopKind) {
-    if (kind === 'friend') return 'friendLoopStage';
-    if (kind === 'travel') return 'travelLoopStage';
-    if (kind === 'workout') return 'workoutLoopStage';
     return null;
   }
 
