@@ -162,6 +162,53 @@ describe('SocialAgentMatchingJobProcessorService', () => {
     );
   });
 
+  it('writes friend loop candidate results back to friendLoop memory', async () => {
+    const harness = makeHarness({
+      candidates: [makeCandidate()],
+      socialRequest: {
+        metadata: { loop: 'friend' },
+      },
+      taskMemory: {
+        friendLoop: {
+          stage: 'matching_queued',
+          slots: {
+            friendGoal: '认识新朋友',
+            city: '青岛',
+            locationText: '青岛市南区',
+          },
+        },
+      },
+    });
+
+    await expect(harness.service.processClaimedJob(makeJob())).resolves.toBe(
+      MatchingJobStatus.CandidatesReady,
+    );
+
+    expect(harness.taskRepo.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: AgentTaskStatus.AwaitingConfirmation,
+        statusReason: 'matching_job_candidates_ready',
+        memory: expect.objectContaining({
+          friendLoop: expect.objectContaining({
+            friendLoopStage: 'candidates_ready',
+            stage: 'candidates_ready',
+            socialRequestId: 301,
+            publicIntentId: 'social_request_301',
+            matchingJobId: 9001,
+            matchingJobStatus: MatchingJobStatus.CandidatesReady,
+            candidateCount: 1,
+            candidateSnapshotId: 501,
+            noCandidatesFinal: false,
+            slots: expect.objectContaining({
+              friendGoal: '认识新朋友',
+              city: '青岛',
+            }),
+          }),
+        }),
+      }),
+    );
+  });
+
   it('marks a completed search with zero candidates as no_candidates', async () => {
     const harness = makeHarness({
       candidates: [],
@@ -222,6 +269,69 @@ describe('SocialAgentMatchingJobProcessorService', () => {
           socialRequestId: 301,
           candidateCount: 0,
           noCandidatesFinal: false,
+        }),
+      }),
+    );
+    expect(harness.realtime.emitAgentEvent).toHaveBeenCalledWith(
+      7,
+      'agent:candidates',
+      expect.objectContaining({
+        taskId: 101,
+        candidateCount: 0,
+        publicLoopStage: 'no_candidates',
+        cards: expect.arrayContaining([
+          expect.objectContaining({
+            schemaType: 'social_match.no_candidates',
+          }),
+        ]),
+      }),
+    );
+  });
+
+  it('writes travel loop no-candidate results back to travelLoop memory', async () => {
+    const harness = makeHarness({
+      candidates: [],
+      socialRequest: {
+        metadata: { loop: 'travel' },
+      },
+      taskMemory: {
+        travelLoop: {
+          stage: 'matching_queued',
+          slots: {
+            destination: '成都',
+            city: '成都',
+            departureTime: '周末',
+            budgetRange: '1000元',
+            transportMode: '高铁',
+          },
+        },
+      },
+    });
+
+    await expect(harness.service.processClaimedJob(makeJob())).resolves.toBe(
+      MatchingJobStatus.NoCandidates,
+    );
+
+    expect(harness.taskRepo.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: AgentTaskStatus.WaitingResult,
+        statusReason: 'matching_job_no_candidates',
+        memory: expect.objectContaining({
+          travelLoop: expect.objectContaining({
+            travelLoopStage: 'no_candidates',
+            stage: 'no_candidates',
+            socialRequestId: 301,
+            publicIntentId: 'social_request_301',
+            matchingJobId: 9001,
+            matchingJobStatus: MatchingJobStatus.NoCandidates,
+            candidateCount: 0,
+            candidateSnapshotId: 501,
+            noCandidatesFinal: false,
+            slots: expect.objectContaining({
+              destination: '成都',
+              city: '成都',
+            }),
+          }),
         }),
       }),
     );
