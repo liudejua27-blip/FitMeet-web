@@ -1,7 +1,16 @@
 import { Injectable, Logger, Optional } from '@nestjs/common';
 
 import { LegacyAgentAdapterService } from '../legacy-agent/legacy-agent-adapter.service';
+import {
+  LoopClassifierService,
+  type LoopClassifierResult,
+} from '../loop-router/loop-classifier.service';
 import { FitMeetLoopRouterService } from '../loop-router/fitmeet-loop-router.service';
+import type {
+  FitMeetLoopIntent,
+  FitMeetLoopRouterResult,
+} from '../loop-router/fitmeet-loop-router.types';
+import { AgentTaskPermissionMode } from '../entities/agent-task.entity';
 import {
   friendLoopOwnsTask,
   readFriendLoopStage,
@@ -20,6 +29,11 @@ import {
   workoutLoopOwnsTask,
 } from '../workout-loop/workout-loop-owner';
 import type { AgentEntryInput, AgentEntryResult } from './agent-entry.types';
+import type {
+  FitMeetAlphaCard,
+  FitMeetAlphaCardAction,
+} from '../fitmeet-alpha-agent.types';
+import type { SocialAgentIntentRouteResult } from '../social-agent-chat.types';
 
 @Injectable()
 export class AgentEntryOrchestratorService {
@@ -37,12 +51,12 @@ export class AgentEntryOrchestratorService {
     private readonly friendLoop?: FriendLoopService,
     @Optional()
     private readonly travelLoop?: TravelLoopService,
+    @Optional()
+    private readonly loopClassifier?: LoopClassifierService,
   ) {}
 
   async handle(input: AgentEntryInput): Promise<AgentEntryResult> {
     const workoutStage = readWorkoutLoopStage(input.task);
-    const friendStage = readFriendLoopStage(input.task);
-    const travelStage = readTravelLoopStage(input.task);
     if (workoutLoopOwnsTask(input.task, input.message)) {
       const workout = await this.workoutLoop.continueEntrance({
         ownerUserId: input.ownerUserId,
@@ -105,77 +119,41 @@ export class AgentEntryOrchestratorService {
 
     const loopIntent = this.loopRouter.classify(input.message);
 
-    if (
-      loopIntent.disposition === 'accept_loop' &&
-      loopIntent.intent === 'workout'
-    ) {
-      const workout = await this.workoutLoop.tryHandleEntrance({
-        ownerUserId: input.ownerUserId,
-        task: input.task,
-        message: input.message,
-      });
-      if (workout) {
-        this.logRoute(input, {
-          source: 'workout_loop_intent',
-          loopIntent: loopIntent.intent,
-          workoutStage: readWorkoutLoopStage(workout.task),
-          cards: this.cardSchemaTypes(workout.result.cards),
-          legacyBlocked: true,
-        });
-        return {
-          source: 'workout_loop_intent',
-          task: workout.task,
-          result: workout.result,
-        };
-      }
+    if (this.isRuleFastPath(loopIntent)) {
+      const routed = await this.tryRouteAcceptedLoop(input, loopIntent);
+      if (routed) return routed;
+    }
+
+    const classifier = await this.classifyLoopWithLlm(input, loopIntent);
+    if (classifier && classifier.confidence >= 0.72) {
+      const routed = await this.routeClassifierDecision(input, classifier);
+      if (routed) return routed;
     }
 
     if (
-      loopIntent.disposition === 'accept_loop' &&
-      loopIntent.intent === 'friend' &&
-      this.friendLoop
+      classifier &&
+      classifier.confidence >= 0.55 &&
+      this.isLoopChoiceIntent(classifier.intent)
     ) {
-      const friend = await this.friendLoop.tryHandleEntrance({
-        ownerUserId: input.ownerUserId,
-        task: input.task,
-        message: input.message,
-      });
+      const result = this.loopChoiceClarificationResult(input, classifier);
+      const source = this.loopSource(classifier.intent);
       this.logRoute(input, {
-        source: 'friend_loop_intent',
-        loopIntent: loopIntent.intent,
-        workoutStage: workoutStage ?? friendStage,
-        cards: this.cardSchemaTypes(friend.result.cards),
+        source,
+        loopIntent: classifier.intent,
+        workoutStage,
+        cards: this.cardSchemaTypes(result.cards),
         legacyBlocked: true,
       });
       return {
-        source: 'friend_loop_intent',
-        task: friend.task,
-        result: friend.result,
+        source,
+        task: input.task,
+        result,
       };
     }
 
-    if (
-      loopIntent.disposition === 'accept_loop' &&
-      loopIntent.intent === 'travel' &&
-      this.travelLoop
-    ) {
-      const travel = await this.travelLoop.tryHandleEntrance({
-        ownerUserId: input.ownerUserId,
-        task: input.task,
-        message: input.message,
-      });
-      this.logRoute(input, {
-        source: 'travel_loop_intent',
-        loopIntent: loopIntent.intent,
-        workoutStage: workoutStage ?? travelStage,
-        cards: this.cardSchemaTypes(travel.result.cards),
-        legacyBlocked: true,
-      });
-      return {
-        source: 'travel_loop_intent',
-        task: travel.task,
-        result: travel.result,
-      };
+    if (loopIntent.disposition === 'accept_loop') {
+      const routed = await this.tryRouteAcceptedLoop(input, loopIntent);
+      if (routed) return routed;
     }
 
     if (
@@ -280,6 +258,328 @@ export class AgentEntryOrchestratorService {
       task: fallback.task,
       result: fallback.result,
     };
+  }
+
+  private isRuleFastPath(loopIntent: FitMeetLoopRouterResult): boolean {
+    return (
+      loopIntent.disposition === 'accept_loop' && loopIntent.confidence >= 0.9
+    );
+  }
+
+  private async classifyLoopWithLlm(
+    input: AgentEntryInput,
+    loopIntent: FitMeetLoopRouterResult,
+  ): Promise<LoopClassifierResult | null> {
+    if (!this.loopClassifier) return null;
+    if (loopIntent.reason === 'workout_negative_intent') return null;
+    try {
+      return await this.loopClassifier.classify({
+        task: input.task,
+        message: input.message,
+        ruleReason: loopIntent.reason,
+        signal: input.signal ?? null,
+      });
+    } catch (error) {
+      this.logger.warn(
+        JSON.stringify({
+          event: 'agent_entry.loop_classifier_failed',
+          taskId: input.task.id,
+          ruleReason: loopIntent.reason,
+          message: error instanceof Error ? error.message : String(error),
+        }),
+      );
+      return null;
+    }
+  }
+
+  private async routeClassifierDecision(
+    input: AgentEntryInput,
+    classifier: LoopClassifierResult,
+  ): Promise<AgentEntryResult | null> {
+    if (classifier.intent === 'workout') {
+      const workout = await this.workoutLoop.tryHandleEntrance({
+        ownerUserId: input.ownerUserId,
+        task: input.task,
+        message: input.message,
+        bypassRouter: true,
+        prefilledSlots: this.loopClassifier?.workoutSlotsFromHints(
+          classifier.workoutHints,
+          classifier.confidence,
+        ),
+      });
+      if (!workout) return null;
+      this.logRoute(input, {
+        source: 'workout_loop_intent',
+        loopIntent: 'workout',
+        workoutStage: readWorkoutLoopStage(workout.task),
+        cards: this.cardSchemaTypes(workout.result.cards),
+        legacyBlocked: true,
+      });
+      return {
+        source: 'workout_loop_intent',
+        task: workout.task,
+        result: workout.result,
+      };
+    }
+
+    if (classifier.intent === 'friend' && this.friendLoop) {
+      const friend = await this.friendLoop.tryHandleEntrance({
+        ownerUserId: input.ownerUserId,
+        task: input.task,
+        message: input.message,
+        prefilledSlots: this.loopClassifier?.friendSlotsFromHints(
+          classifier.friendHints,
+          classifier.confidence,
+        ),
+      });
+      this.logRoute(input, {
+        source: 'friend_loop_intent',
+        loopIntent: 'friend',
+        workoutStage: readFriendLoopStage(friend.task),
+        cards: this.cardSchemaTypes(friend.result.cards),
+        legacyBlocked: true,
+      });
+      return {
+        source: 'friend_loop_intent',
+        task: friend.task,
+        result: friend.result,
+      };
+    }
+
+    if (classifier.intent === 'travel' && this.travelLoop) {
+      const travel = await this.travelLoop.tryHandleEntrance({
+        ownerUserId: input.ownerUserId,
+        task: input.task,
+        message: input.message,
+        prefilledSlots: this.loopClassifier?.travelSlotsFromHints(
+          classifier.travelHints,
+          classifier.confidence,
+        ),
+      });
+      this.logRoute(input, {
+        source: 'travel_loop_intent',
+        loopIntent: 'travel',
+        workoutStage: readTravelLoopStage(travel.task),
+        cards: this.cardSchemaTypes(travel.result.cards),
+        legacyBlocked: true,
+      });
+      return {
+        source: 'travel_loop_intent',
+        task: travel.task,
+        result: travel.result,
+      };
+    }
+
+    if (classifier.intent === 'profile' && this.profileLoop) {
+      const profile = await this.profileLoop.tryHandleEntrance({
+        ownerUserId: input.ownerUserId,
+        task: input.task,
+        message: input.message,
+      });
+      if (!profile) return null;
+      this.logRoute(input, {
+        source: 'profile_loop_intent',
+        loopIntent: 'profile',
+        workoutStage: readWorkoutLoopStage(profile.task),
+        cards: this.cardSchemaTypes(profile.result.cards),
+        legacyBlocked: false,
+      });
+      return {
+        source: 'profile_loop_intent',
+        task: profile.task,
+        result: profile.result,
+      };
+    }
+
+    return null;
+  }
+
+  private async tryRouteAcceptedLoop(
+    input: AgentEntryInput,
+    loopIntent: FitMeetLoopRouterResult,
+  ): Promise<AgentEntryResult | null> {
+    if (loopIntent.intent === 'workout') {
+      const workout = await this.workoutLoop.tryHandleEntrance({
+        ownerUserId: input.ownerUserId,
+        task: input.task,
+        message: input.message,
+      });
+      if (!workout) return null;
+      this.logRoute(input, {
+        source: 'workout_loop_intent',
+        loopIntent: loopIntent.intent,
+        workoutStage: readWorkoutLoopStage(workout.task),
+        cards: this.cardSchemaTypes(workout.result.cards),
+        legacyBlocked: true,
+      });
+      return {
+        source: 'workout_loop_intent',
+        task: workout.task,
+        result: workout.result,
+      };
+    }
+
+    if (loopIntent.intent === 'friend' && this.friendLoop) {
+      const friend = await this.friendLoop.tryHandleEntrance({
+        ownerUserId: input.ownerUserId,
+        task: input.task,
+        message: input.message,
+      });
+      this.logRoute(input, {
+        source: 'friend_loop_intent',
+        loopIntent: loopIntent.intent,
+        workoutStage: readFriendLoopStage(friend.task),
+        cards: this.cardSchemaTypes(friend.result.cards),
+        legacyBlocked: true,
+      });
+      return {
+        source: 'friend_loop_intent',
+        task: friend.task,
+        result: friend.result,
+      };
+    }
+
+    if (loopIntent.intent === 'travel' && this.travelLoop) {
+      const travel = await this.travelLoop.tryHandleEntrance({
+        ownerUserId: input.ownerUserId,
+        task: input.task,
+        message: input.message,
+      });
+      this.logRoute(input, {
+        source: 'travel_loop_intent',
+        loopIntent: loopIntent.intent,
+        workoutStage: readTravelLoopStage(travel.task),
+        cards: this.cardSchemaTypes(travel.result.cards),
+        legacyBlocked: true,
+      });
+      return {
+        source: 'travel_loop_intent',
+        task: travel.task,
+        result: travel.result,
+      };
+    }
+
+    return null;
+  }
+
+  private loopChoiceClarificationResult(
+    input: AgentEntryInput,
+    classifier: LoopClassifierResult,
+  ): SocialAgentIntentRouteResult {
+    const body =
+      classifier.clarificationQuestion ||
+      '我理解你可能想进入一个闭环。请选择要继续的方向，我会用卡片帮你整理。';
+    const card: FitMeetAlphaCard = {
+      id: `loop_choice:classifier:${input.task.id}`,
+      type: 'loop_choice',
+      schemaVersion: 'fitmeet.tool-ui.v1',
+      schemaType: 'loop.choice',
+      title: '确认要进入哪个闭环？',
+      body,
+      status: 'waiting_confirmation',
+      data: {
+        taskId: input.task.id,
+        schemaName: 'LoopChoiceCard',
+        schemaVersion: 'fitmeet.tool-ui.v1',
+        schemaType: 'loop.choice',
+        classifier: {
+          intent: classifier.intent,
+          confidence: classifier.confidence,
+          reason: classifier.reason,
+        },
+      },
+      actions: [
+        this.loopChoiceAction(input, 'workout', classifier),
+        this.loopChoiceAction(input, 'friend', classifier),
+        this.loopChoiceAction(input, 'travel', classifier),
+      ],
+    };
+    return {
+      intent: 'social_search',
+      confidence: classifier.confidence,
+      entities: {
+        city: '',
+        activityType: '',
+        targetGender: '',
+        timePreference: '',
+        locationPreference: '',
+      },
+      shouldSearch: false,
+      shouldReplan: false,
+      shouldUpdateProfile: false,
+      shouldExecuteAction: false,
+      replyStrategy: 'ask_clarifying_question',
+      source: 'rules',
+      action: 'clarify',
+      taskId: input.task.id,
+      assistantMessage: body,
+      assistantMessageSource: 'deterministic_route',
+      savedContext: true,
+      profileUpdated: false,
+      shouldQueueRun: false,
+      runMode: null,
+      queuedRun: null,
+      pendingApproval: null,
+      activityResults: [],
+      profileUpdateProposal: null,
+      cards: [card],
+      permissionMode:
+        input.task.permissionMode ?? AgentTaskPermissionMode.Confirm,
+      structuredIntent: {
+        schemaVersion: 'fitmeet.loop-classifier.v1',
+        intent: classifier.intent,
+        confidence: classifier.confidence,
+        reason: classifier.reason,
+      },
+    };
+  }
+
+  private loopChoiceAction(
+    input: AgentEntryInput,
+    intent: 'workout' | 'friend' | 'travel',
+    classifier: LoopClassifierResult,
+  ): FitMeetAlphaCardAction {
+    const payload =
+      intent === 'workout'
+        ? this.loopClassifier?.workoutSlotsFromHints(
+            classifier.workoutHints,
+            classifier.confidence,
+          )
+        : intent === 'friend'
+          ? this.loopClassifier?.friendSlotsFromHints(
+              classifier.friendHints,
+              classifier.confidence,
+            )
+          : this.loopClassifier?.travelSlotsFromHints(
+              classifier.travelHints,
+              classifier.confidence,
+            );
+    return {
+      id: intent,
+      label:
+        intent === 'workout' ? '约练' : intent === 'friend' ? '交友' : '旅游',
+      action: `loop_choice.${intent}`,
+      schemaAction: `loop_choice.${intent}`,
+      requiresConfirmation: false,
+      payload: {
+        taskId: input.task.id,
+        ...(payload ?? {}),
+      },
+    };
+  }
+
+  private isLoopChoiceIntent(
+    intent: LoopClassifierResult['intent'],
+  ): intent is 'workout' | 'friend' | 'travel' {
+    return intent === 'workout' || intent === 'friend' || intent === 'travel';
+  }
+
+  private loopSource(
+    intent: Extract<FitMeetLoopIntent, 'workout' | 'friend' | 'travel'>,
+  ): AgentEntryResult['source'] {
+    if (intent === 'friend') return 'friend_loop_intent';
+    if (intent === 'travel') return 'travel_loop_intent';
+    return 'workout_loop_intent';
   }
 
   private logRoute(
