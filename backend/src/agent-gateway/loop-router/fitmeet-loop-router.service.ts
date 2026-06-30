@@ -21,6 +21,8 @@ const WORKOUT_PLACE =
   /(附近|大学|学院|公园|广场|体育馆|健身房|球馆|操场|商场|校区|中心|海边|河边|湖|山|桥|陆家嘴|徐家汇|金鸡湖|五大道|岳麓山|观音桥|太古里|奥体中心|学校|公司|青岛|北京|上海|广州|深圳|杭州|成都|重庆|南京|苏州|武汉|西安|长沙|郑州|天津|济南|厦门|宁波|合肥)/i;
 const WORKOUT_PARTNER =
   /(找|约|一起|一块|搭子|伙伴|朋友|有人|陪|组队|同去|同练)/i;
+const WORKOUT_ACTIVITY_PARTNER =
+  /((跑步|夜跑|慢跑|健身|练肩|撸铁|羽毛球|篮球|网球|散步|徒步|骑行|瑜伽|游泳|训练|运动|city\s*walk|citywalk).{0,10}(搭子|伙伴|朋友|同伴|队友|陪练|同练|一起))|((找|约|想找|想约|一起|一块).{0,16}(跑步|夜跑|慢跑|健身|练肩|撸铁|羽毛球|篮球|网球|散步|徒步|骑行|瑜伽|游泳|训练|运动|city\s*walk|citywalk).{0,10}(搭子|伙伴|朋友|同伴|队友|陪练|同练)?)/i;
 
 const FRIEND =
   /(交友|认识朋友|找朋友|聊天搭子|同城朋友|低压力社交|扩列|搭话|认识新朋友)/i;
@@ -54,6 +56,15 @@ export class FitMeetLoopRouterService {
         'workout',
         0.96,
         'workout_direct_create_phrase',
+        'accept_loop',
+      );
+    }
+
+    if (WORKOUT_ACTIVITY_PARTNER.test(text)) {
+      return result(
+        'workout',
+        0.9,
+        'workout_activity_partner_phrase',
         'accept_loop',
       );
     }

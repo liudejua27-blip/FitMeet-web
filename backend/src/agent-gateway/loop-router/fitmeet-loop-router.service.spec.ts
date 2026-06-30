@@ -19,12 +19,23 @@ describe('FitMeetLoopRouterService', () => {
     });
   });
 
+  it('accepts explicit activity partner requests so intake can collect missing slots', () => {
+    expect(service.classify('我想找跑步搭子，喜欢宠物的')).toMatchObject({
+      intent: 'workout',
+      disposition: 'accept_loop',
+      reason: 'workout_activity_partner_phrase',
+    });
+    expect(service.classify('想找朋友一起健身')).toMatchObject({
+      intent: 'workout',
+      disposition: 'accept_loop',
+      reason: 'workout_activity_partner_phrase',
+    });
+  });
+
   it('marks keyword-only workout wording for arbitration instead of final routing', () => {
     for (const message of [
-      '想找个健身伙伴',
       '约个球',
       '附近有人一起练吗',
-      '想找朋友一起健身',
       '明晚陆家嘴健身',
       '苏州金鸡湖夜跑',
     ]) {

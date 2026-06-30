@@ -403,11 +403,13 @@ export class WorkoutLoopService {
     prefilledSlots?: WorkoutSlots;
     understanding?: WorkoutUnderstandingResult | null;
   }): Promise<WorkoutSlots> {
+    const previousSlots = this.readWorkoutSlots(input.task);
     const ruleSlots = input.prefilledSlots
       ? this.normalizeSlots(input.prefilledSlots)
-      : extractWorkoutSlots({
+      : this.extractSlotsWithTaskGoalFallback({
+          task: input.task,
           message: input.message,
-          previousSlots: this.readWorkoutSlots(input.task),
+          previousSlots,
         });
     let slots = this.applyGeoToSlots(ruleSlots, input.message);
     let understanding = input.understanding ?? null;
@@ -435,6 +437,31 @@ export class WorkoutLoopService {
       input.message,
     );
     return slots;
+  }
+
+  private extractSlotsWithTaskGoalFallback(input: {
+    task: AgentTask;
+    message: string;
+    previousSlots: WorkoutSlots;
+  }): WorkoutSlots {
+    const messageSlots = extractWorkoutSlots({
+      message: input.message,
+      previousSlots: input.previousSlots,
+    });
+    const goal = cleanDisplayText(input.task.goal, '').trim();
+    if (!goal || goal === input.message.trim()) return messageSlots;
+    const goalSlots = extractWorkoutSlots({
+      message: goal,
+      previousSlots: {},
+    });
+    return this.normalizeSlots({
+      ...this.compactSlots(goalSlots),
+      ...this.compactSlots(messageSlots),
+      slotMeta: {
+        ...(goalSlots.slotMeta ?? {}),
+        ...(messageSlots.slotMeta ?? {}),
+      },
+    });
   }
 
   private async resultForSlots(input: {

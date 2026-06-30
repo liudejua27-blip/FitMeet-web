@@ -203,6 +203,7 @@ function extractPlace(message: string): string | undefined {
         placeScore(right) - placeScore(left) || left.length - right.length,
     );
   if (candidates[0]) return candidates[0];
+  if (/(我)?附近|周边|离我近点|就近/.test(message)) return '附近';
   const around = message.match(
     /(?:在|去|到|地点在|位置在)\s*([\u4e00-\u9fa5A-Za-z0-9·•-]{2,24})/,
   );
@@ -331,6 +332,10 @@ function extractIntensity(message: string): string | undefined {
 }
 
 function extractCandidatePreference(message: string): string | undefined {
+  const petPreference = message.match(
+    /(喜欢|爱|养|有).{0,4}(宠物|猫|狗)(?:的|的人)?/,
+  );
+  if (petPreference?.[0]) return petPreference[0].trim();
   const explicit = message.match(
     /(最好|希望|想找|优先).{0,16}(男生|女生|男性|女性|同校|同学|朋友|新手|高手|轻松一点|水平相近)/,
   );

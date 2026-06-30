@@ -145,6 +145,38 @@ describe('WorkoutLoopService', () => {
     });
   });
 
+  it('uses task goal context when a later turn clarifies the workout partner request', async () => {
+    const task = makeTask({
+      goal: '附近有玩x的吗',
+    });
+    const { draftPublication, service } = makeService(task);
+
+    const result = await service.tryHandleEntrance({
+      ownerUserId: 7,
+      task,
+      message: '我想找跑步搭子，喜欢宠物的',
+    });
+
+    expect(result?.result.cards?.[0]).toMatchObject({
+      schemaType: 'workout.intake',
+      data: expect.objectContaining({
+        activityType: '跑步',
+        locationText: '附近',
+        candidatePreference: '喜欢宠物的',
+        missingFields: expect.arrayContaining(['timePreference']),
+      }),
+    });
+    expect((task.memory as Record<string, unknown>).workoutLoop).toMatchObject({
+      stage: 'intake',
+      slots: expect.objectContaining({
+        activityType: '跑步',
+        locationText: '附近',
+        candidatePreference: '喜欢宠物的',
+      }),
+    });
+    expect(draftPublication.stagePrivateDraftForPublish).not.toHaveBeenCalled();
+  });
+
   it('returns intake for 青岛大学 健身 明天晚上 wording', async () => {
     const { draftPublication, service, task } = makeService();
 
@@ -223,10 +255,9 @@ describe('WorkoutLoopService', () => {
         expect.objectContaining({
           schemaType: 'workout.intake',
           data: expect.objectContaining({
-            missingFields: expect.arrayContaining([
-              'activityType',
-              'locationText',
-            ]),
+            activityType: '跑步',
+            timePreference: '明天晚上',
+            missingFields: ['locationText'],
           }),
         }),
       ],

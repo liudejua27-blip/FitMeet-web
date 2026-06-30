@@ -352,6 +352,51 @@ describe('AgentEntryOrchestratorService', () => {
     expect(legacy.handleFallback).not.toHaveBeenCalled();
   });
 
+  it('routes explicit activity partner requests to WorkoutLoop without legacy arbitration', async () => {
+    const task = makeTask({
+      goal: '附近有玩x的吗',
+    });
+    const { legacy, service, workoutArbitration, workoutLoop } = makeHarness();
+    workoutLoop.tryHandleEntrance.mockResolvedValue({
+      task,
+      result: makeResult({
+        action: 'clarify',
+        cards: [
+          {
+            id: 'workout_intake:101',
+            type: 'workout_intake',
+            schemaVersion: 'fitmeet.tool-ui.v1',
+            schemaType: 'workout.intake',
+            title: '补全约练信息',
+            data: {
+              activityType: '跑步',
+              locationText: '附近',
+              candidatePreference: '喜欢宠物的',
+            },
+            actions: [],
+          },
+        ],
+      }),
+    });
+
+    const result = await service.handle({
+      ownerUserId: 7,
+      task,
+      body: { message: '我想找跑步搭子，喜欢宠物的' },
+      message: '我想找跑步搭子，喜欢宠物的',
+      startedAt: 123,
+    });
+
+    expect(result.source).toBe('workout_loop_intent');
+    expect(workoutLoop.tryHandleEntrance).toHaveBeenCalledWith({
+      ownerUserId: 7,
+      task,
+      message: '我想找跑步搭子，喜欢宠物的',
+    });
+    expect(workoutArbitration.arbitrate).not.toHaveBeenCalled();
+    expect(legacy.handleFallback).not.toHaveBeenCalled();
+  });
+
   it('uses arbitration for keyword-only workout candidates before legacy fallback', async () => {
     const task = makeTask();
     const { legacy, service, workoutArbitration, workoutLoop } = makeHarness();
@@ -412,7 +457,7 @@ describe('AgentEntryOrchestratorService', () => {
     workoutArbitration.arbitrate.mockResolvedValue({
       verdict: 'handoff_legacy',
       understanding: null,
-      slots: { activityType: '健身' },
+      slots: {},
       reason: 'workout_arbitration_not_confident',
     });
     legacy.handleFallback.mockResolvedValue({ task, result: null });
@@ -420,8 +465,8 @@ describe('AgentEntryOrchestratorService', () => {
     const result = await service.handle({
       ownerUserId: 7,
       task,
-      body: { message: '想找个健身伙伴' },
-      message: '想找个健身伙伴',
+      body: { message: '约个球' },
+      message: '约个球',
       startedAt: 123,
     });
 
