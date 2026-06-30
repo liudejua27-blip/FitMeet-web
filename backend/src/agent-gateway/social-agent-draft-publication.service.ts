@@ -49,6 +49,12 @@ import { MatchingJob, MatchingJobStatus } from './entities/matching-job.entity';
 import { PublicIntentPrivacyGuardService } from './public-intent-privacy-guard.service';
 import { SocialIntentRateLimitService } from './social-intent-rate-limit.service';
 import { SocialAgentLoopStateTransitionEventService } from './social-agent-loop-state-transition-event.service';
+import {
+  isLoopKind,
+  loopMemoryKey,
+  loopStageKey,
+  type LoopKind,
+} from './loop-agent/loop-agent.types';
 
 type DismissDraftContext = {
   action: string;
@@ -1193,6 +1199,20 @@ export class SocialAgentDraftPublicationService {
       socialAgentChat.socialRequestDraft,
     );
     const publishedAt = new Date().toISOString();
+    const loopPatch = this.loopPublishMemoryPatch({
+      memory,
+      draft,
+      socialRequestId: expectedSocialRequestId,
+      publicIntentId,
+      discoverHref,
+      publicIntentHref,
+      matchingJobId: matchingJob.id,
+      matchingJobStatus: matchingJob.status,
+      sourceVersion,
+      updatedAt: publishedAt,
+    });
+    const loopKind = this.publishedLoopKind(loopPatch);
+    const isLoopPublish = Boolean(loopKind);
     task.memory = {
       ...memory,
       socialAgentChat: {
@@ -1223,22 +1243,15 @@ export class SocialAgentDraftPublicationService {
         sourceVersion,
         updatedAt: publishedAt,
       },
-      ...this.workoutLoopPublishMemoryPatch({
-        memory,
-        draft,
-        socialRequestId: expectedSocialRequestId,
-        publicIntentId,
-        discoverHref,
-        publicIntentHref,
-        matchingJobId: matchingJob.id,
-        matchingJobStatus: matchingJob.status,
-        sourceVersion,
-        updatedAt: publishedAt,
-      }),
+      ...loopPatch,
     };
-    task.status = AgentTaskStatus.Succeeded;
-    task.statusReason = 'social_request_published_and_synced';
-    task.completedAt = new Date();
+    task.status = isLoopPublish
+      ? AgentTaskStatus.WaitingResult
+      : AgentTaskStatus.Succeeded;
+    task.statusReason = loopKind
+      ? `${loopKind}_matching_queued`
+      : 'social_request_published_and_synced';
+    task.completedAt = isLoopPublish ? null : new Date();
     task.result = {
       ...result,
       chatRun: {
@@ -1868,7 +1881,7 @@ export class SocialAgentDraftPublicationService {
     return this.isRecord(value) ? value : {};
   }
 
-  private workoutLoopPublishMemoryPatch(input: {
+  private loopPublishMemoryPatch(input: {
     memory: Record<string, unknown>;
     draft: CreateSocialRequestDto & { socialRequestId?: number | null };
     socialRequestId: number;
@@ -1880,15 +1893,15 @@ export class SocialAgentDraftPublicationService {
     sourceVersion: string;
     updatedAt: string;
   }): Record<string, unknown> {
-    const workoutLoop = this.record(input.memory.workoutLoop);
-    const draftMetadata = this.record(input.draft.metadata);
-    const isWorkoutLoop =
-      Object.keys(workoutLoop).length > 0 ||
-      this.text(draftMetadata.loop) === 'workout';
-    if (!isWorkoutLoop) return {};
+    const loopKind = this.loopKindForPublish(input.memory, input.draft);
+    if (!loopKind) return {};
+    const memoryKey = loopMemoryKey(loopKind);
+    const loopMemory = this.record(input.memory[memoryKey]);
+    const stageKey = loopStageKey(loopKind);
     return {
-      workoutLoop: {
-        ...workoutLoop,
+      [memoryKey]: {
+        ...loopMemory,
+        [stageKey]: 'matching_queued',
         stage: 'matching_queued',
         socialRequestId: input.socialRequestId,
         publicIntentId: input.publicIntentId,
@@ -1896,10 +1909,38 @@ export class SocialAgentDraftPublicationService {
         publicIntentHref: input.publicIntentHref,
         matchingJobId: input.matchingJobId,
         matchingJobStatus: input.matchingJobStatus,
+        waitingFor: 'matching_job',
         sourceVersion: input.sourceVersion,
         updatedAt: input.updatedAt,
       },
     };
+  }
+
+  private loopKindForPublish(
+    memory: Record<string, unknown>,
+    draft: CreateSocialRequestDto & { socialRequestId?: number | null },
+  ): LoopKind | null {
+    const draftMetadata = this.record(draft.metadata);
+    const metadataLoop = this.text(draftMetadata.loop);
+    if (isLoopKind(metadataLoop)) return metadataLoop;
+    if (Object.keys(this.record(memory.workoutLoop)).length > 0) {
+      return 'workout';
+    }
+    if (Object.keys(this.record(memory.friendLoop)).length > 0) {
+      return 'friend';
+    }
+    if (Object.keys(this.record(memory.travelLoop)).length > 0) {
+      return 'travel';
+    }
+    return null;
+  }
+
+  private publishedLoopKind(patch: Record<string, unknown>): LoopKind | null {
+    if (Object.keys(this.record(patch.workoutLoop)).length > 0)
+      return 'workout';
+    if (Object.keys(this.record(patch.friendLoop)).length > 0) return 'friend';
+    if (Object.keys(this.record(patch.travelLoop)).length > 0) return 'travel';
+    return null;
   }
 
   private firstNonEmptyRecord(...values: unknown[]): Record<string, unknown> {

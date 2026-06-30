@@ -25,7 +25,11 @@ function makeTask(overrides: Partial<AgentTask> = {}): AgentTask {
   } as AgentTask;
 }
 
-function makeHarness(initialTask = makeTask()) {
+function makeHarness(
+  initialTask = makeTask(),
+  workoutOpenerDrafts?: { draft: jest.Mock },
+  agentLoop?: { execute: jest.Mock },
+) {
   const savedEvents: Array<Record<string, unknown>> = [];
   let task = initialTask;
   const taskRepo = {
@@ -144,8 +148,11 @@ function makeHarness(initialTask = makeTask()) {
     undefined,
     undefined,
     loopStateEvents as never,
+    workoutOpenerDrafts as never,
+    agentLoop as never,
   );
   return {
+    agentLoop,
     approvals,
     eventRepo,
     executor,
@@ -155,9 +162,74 @@ function makeHarness(initialTask = makeTask()) {
     savedEvents,
     service,
     taskRepo,
+    workoutOpenerDrafts,
     get task() {
       return task;
     },
+  };
+}
+
+function makeAgentLoopRuntimeRecorder(
+  records: Array<Record<string, unknown>> = [],
+) {
+  return {
+    execute: jest.fn(async (input: Record<string, unknown>) => {
+      const brain = input.brain as {
+        decide: (decisionInput: Record<string, unknown>) => Promise<{
+          tool?: {
+            agent: string;
+            toolName: string;
+            input: Record<string, unknown>;
+          };
+          done?: boolean;
+          finalObservation?: Record<string, unknown>;
+        }>;
+      };
+      const observations: Record<string, unknown>[] = [];
+      const firstDecision = await brain.decide({
+        loop: {},
+        observations,
+        remainingToolCalls: 2,
+      });
+      records.push({
+        goal: input.goal,
+        toolName: firstDecision.tool?.toolName ?? null,
+        toolInput: firstDecision.tool?.input ?? null,
+      });
+      const runner = input.runner as (
+        runnerInput: Record<string, unknown>,
+      ) => Promise<Record<string, unknown>>;
+      observations.push(
+        await runner({
+          runId: 'run-1',
+          traceId: 'trace-1',
+          taskId: 101,
+          agent: firstDecision.tool?.agent,
+          toolName: firstDecision.tool?.toolName,
+          input: firstDecision.tool?.input ?? {},
+          attempt: 1,
+        }),
+      );
+      const finalDecision = await brain.decide({
+        loop: {},
+        observations,
+        remainingToolCalls: 1,
+      });
+      if (finalDecision.finalObservation) {
+        observations.push(finalDecision.finalObservation);
+        records.push({ finalObservation: finalDecision.finalObservation });
+      }
+      return {
+        loop: {},
+        observations,
+        answerBoundary: {
+          fromObservationsOnly: true,
+          requiresApproval: false,
+          canContinue: true,
+          status: 'ready',
+        },
+      };
+    }),
   };
 }
 
@@ -362,6 +434,604 @@ describe('SocialAgentCandidateActionService', () => {
         }),
       ]),
     );
+  });
+
+  it('updates friend loop stage when generating an opener from a friend candidate card', async () => {
+    const task = makeTask({
+      goal: '交友匹配',
+      memory: {
+        friendLoop: {
+          stage: 'candidates_ready',
+          matchingJobId: 7001,
+          candidateCount: 1,
+          slots: {
+            friendGoal: '认识同城朋友',
+            city: '上海',
+            topicTags: ['咖啡', '展览'],
+          },
+        },
+      },
+    });
+    const openerDrafts = {
+      draft: jest
+        .fn()
+        .mockResolvedValue('看到你也喜欢展览，可以先站内聊聊周末安排吗？'),
+    };
+    const { service } = makeHarness(task, openerDrafts);
+
+    const result = await service.createOpenerDraftFromCardAction(7, 101, {
+      action: 'candidate.generate_opener',
+      payload: {
+        taskId: 101,
+        targetUserId: 33,
+        socialRequestId: 701,
+        candidateRecordId: 703,
+        candidate: {
+          userId: 33,
+          candidateRecordId: 703,
+          displayName: '小周',
+          suggestedMessage: '你好，可以先站内聊聊兴趣吗？',
+          metadata: { loop: 'friend' },
+        },
+      },
+    });
+
+    expect(openerDrafts.draft).toHaveBeenCalledWith({
+      task,
+      candidate: expect.objectContaining({
+        displayName: '小周',
+      }),
+      payload: expect.objectContaining({
+        taskId: 101,
+        targetUserId: 33,
+      }),
+      fallbackDraft: '你好，可以先站内聊聊兴趣吗？',
+    });
+    expect(result.cards?.[0]).toMatchObject({
+      body: '看到你也喜欢展览，可以先站内聊聊周末安排吗？',
+    });
+    expect(task.memory).toMatchObject({
+      friendLoop: expect.objectContaining({
+        stage: 'opener_ready',
+        targetUserId: 33,
+        candidateRecordId: 703,
+        socialRequestId: 701,
+      }),
+    });
+  });
+
+  it('routes friend opener drafting through loop-aware AgentLoop runtime when available', async () => {
+    const task = makeTask({
+      goal: '交友匹配',
+      memory: {
+        friendLoop: {
+          stage: 'candidates_ready',
+          matchingJobId: 7001,
+          candidateCount: 1,
+          slots: {
+            friendGoal: '认识同城朋友',
+            city: '上海',
+            topicTags: ['咖啡', '展览'],
+          },
+        },
+      },
+    });
+    const openerDrafts = {
+      draft: jest
+        .fn()
+        .mockResolvedValue('看到你也喜欢展览，可以先站内聊聊周末安排吗？'),
+    };
+    const records: Array<Record<string, unknown>> = [];
+    const agentLoop = makeAgentLoopRuntimeRecorder(records);
+    const { service } = makeHarness(task, openerDrafts, agentLoop);
+
+    const result = await service.createOpenerDraftFromCardAction(7, 101, {
+      action: 'candidate.generate_opener',
+      payload: {
+        taskId: 101,
+        targetUserId: 33,
+        socialRequestId: 701,
+        candidateRecordId: 703,
+        candidate: {
+          userId: 33,
+          candidateRecordId: 703,
+          displayName: '小周',
+          suggestedMessage: '你好，可以先站内聊聊兴趣吗？',
+          metadata: { loop: 'friend' },
+        },
+      },
+    });
+
+    expect(records[0]).toMatchObject({
+      goal: 'Friend agent drafts a safe opener before user send approval.',
+      toolName: 'friend_agent.generate_opener',
+      toolInput: expect.objectContaining({
+        taskId: 101,
+        targetUserId: 33,
+        candidateRecordId: 703,
+      }),
+    });
+    expect(records[1]).toMatchObject({
+      finalObservation: expect.objectContaining({
+        toolName: 'friend_agent.generate_opener',
+        draftReady: true,
+      }),
+    });
+    expect(openerDrafts.draft).toHaveBeenCalledTimes(1);
+    expect(result.cards?.[0]).toMatchObject({
+      body: '看到你也喜欢展览，可以先站内聊聊周末安排吗？',
+    });
+  });
+
+  it('uses the workout opener draft service before falling back to the template draft', async () => {
+    const task = makeTask({
+      memory: {
+        workoutLoop: {
+          stage: 'candidates_ready',
+          socialRequestId: 301,
+          publicIntentId: 'public-intent:workout-501',
+          candidateCount: 1,
+        },
+      },
+    });
+    const workoutOpenerDrafts = {
+      draft: jest
+        .fn()
+        .mockResolvedValue('看到你也喜欢轻松跑，今晚可以先站内聊聊节奏吗？'),
+    };
+    const { service } = makeHarness(task, workoutOpenerDrafts);
+
+    const result = await service.createOpenerDraftFromCardAction(7, 101, {
+      action: 'candidate.generate_opener',
+      payload: {
+        taskId: 101,
+        targetUserId: 22,
+        candidate: {
+          userId: 22,
+          candidateRecordId: 501,
+          displayName: '小林',
+          suggestedMessage: '今晚先在青岛大学操场轻松跑一段吗？',
+        },
+      },
+    });
+
+    expect(workoutOpenerDrafts.draft).toHaveBeenCalledWith({
+      task,
+      candidate: expect.objectContaining({
+        displayName: '小林',
+      }),
+      payload: expect.objectContaining({
+        taskId: 101,
+        targetUserId: 22,
+      }),
+      fallbackDraft: '今晚先在青岛大学操场轻松跑一段吗？',
+    });
+    expect(result.cards?.[0]).toMatchObject({
+      body: '看到你也喜欢轻松跑，今晚可以先站内聊聊节奏吗？',
+      data: expect.objectContaining({
+        suggestedOpener: '看到你也喜欢轻松跑，今晚可以先站内聊聊节奏吗？',
+      }),
+    });
+    expect(task.result).toMatchObject({
+      cardActionDraft: expect.objectContaining({
+        message: '看到你也喜欢轻松跑，今晚可以先站内聊聊节奏吗？',
+      }),
+    });
+  });
+
+  it('routes workout opener drafting through AgentLoop brain runtime when available', async () => {
+    const task = makeTask({
+      memory: {
+        workoutLoop: {
+          stage: 'candidates_ready',
+          socialRequestId: 301,
+          publicIntentId: 'public-intent:workout-501',
+          candidateCount: 1,
+        },
+      },
+    });
+    const workoutOpenerDrafts = {
+      draft: jest
+        .fn()
+        .mockResolvedValue('看到你也想夜跑，可以先站内聊聊节奏吗？'),
+    };
+    const agentLoop = {
+      execute: jest.fn(async (input: Record<string, unknown>) => {
+        const brain = input.brain as {
+          decide: (decisionInput: Record<string, unknown>) => Promise<{
+            tool?: {
+              agent: string;
+              toolName: string;
+              input: Record<string, unknown>;
+            };
+            done?: boolean;
+            finalObservation?: Record<string, unknown>;
+          }>;
+        };
+        const observations: Record<string, unknown>[] = [];
+        const firstDecision = await brain.decide({
+          loop: {},
+          observations,
+          remainingToolCalls: 2,
+        });
+        const runner = input.runner as (
+          runnerInput: Record<string, unknown>,
+        ) => Promise<Record<string, unknown>>;
+        observations.push(
+          await runner({
+            runId: 'run-1',
+            traceId: 'trace-1',
+            taskId: task.id,
+            agent: firstDecision.tool?.agent,
+            toolName: firstDecision.tool?.toolName,
+            input: firstDecision.tool?.input ?? {},
+            attempt: 1,
+          }),
+        );
+        const finalDecision = await brain.decide({
+          loop: {},
+          observations,
+          remainingToolCalls: 1,
+        });
+        if (finalDecision.finalObservation) {
+          observations.push(finalDecision.finalObservation);
+        }
+        return {
+          loop: {},
+          observations,
+          answerBoundary: {
+            fromObservationsOnly: true,
+            requiresApproval: false,
+            canContinue: true,
+            status: 'ready',
+          },
+        };
+      }),
+    };
+    const { service } = makeHarness(task, workoutOpenerDrafts, agentLoop);
+
+    const result = await service.createOpenerDraftFromCardAction(7, 101, {
+      action: 'candidate.generate_opener',
+      payload: {
+        taskId: 101,
+        targetUserId: 22,
+        candidate: {
+          userId: 22,
+          candidateRecordId: 501,
+          displayName: '小林',
+          suggestedMessage: '今晚先在青岛大学操场轻松跑一段吗？',
+        },
+      },
+    });
+
+    expect(agentLoop.execute).toHaveBeenCalledWith(
+      expect.objectContaining({
+        taskId: 101,
+        goal: 'Workout agent drafts a safe opener before user send approval.',
+        brain: expect.any(Object),
+        maxToolCalls: 2,
+      }),
+    );
+    expect(workoutOpenerDrafts.draft).toHaveBeenCalledTimes(1);
+    expect(result.cards?.[0]).toMatchObject({
+      body: '看到你也想夜跑，可以先站内聊聊节奏吗？',
+      data: expect.objectContaining({
+        suggestedOpener: '看到你也想夜跑，可以先站内聊聊节奏吗？',
+      }),
+    });
+  });
+
+  it('routes opener send approval creation through AgentLoop brain runtime when available', async () => {
+    const task = makeTask({
+      result: {
+        cardActionDraft: {
+          action: 'candidate.generate_opener',
+          targetUserId: 22,
+          candidateRecordId: 501,
+          socialRequestId: 301,
+          candidate: {
+            userId: 22,
+            candidateUserId: 22,
+            candidateRecordId: 501,
+            socialRequestId: 301,
+            displayName: '小林',
+          },
+          message: '今晚先在青岛大学操场轻松跑一段吗？',
+          idempotencyKey: 'opener-confirm-1',
+        },
+      },
+      memory: {
+        workoutLoop: {
+          stage: 'opener_ready',
+          socialRequestId: 301,
+          publicIntentId: 'public-intent:workout-501',
+          candidateCount: 1,
+          targetUserId: 22,
+          candidateRecordId: 501,
+        },
+        taskMemory: {
+          pendingActions: [],
+          candidateState: {
+            recommendedIds: [],
+            rejectedIds: [],
+            savedIds: [],
+            contactedIds: [],
+          },
+          activityState: { recommendedIds: [], rejectedIds: [] },
+          activeEntities: {},
+          stableProfileFacts: {},
+          boundaries: [],
+          preferences: [],
+          misunderstandings: [],
+          lastUserMessages: [],
+          recentActions: [],
+          updatedAt: '2026-06-06T00:00:00.000Z',
+        },
+      },
+    });
+    const records: Array<Record<string, unknown>> = [];
+    const agentLoop = makeAgentLoopRuntimeRecorder(records);
+    const { approvals, executor, service } = makeHarness(
+      task,
+      undefined,
+      agentLoop,
+    );
+
+    const result = await service.confirmOpenerSendFromCardAction(7, 101, {
+      action: 'opener.confirm_send',
+      idempotencyKey: 'opener-confirm-1',
+      payload: {
+        taskId: 101,
+        targetUserId: 22,
+      },
+    });
+
+    expect(agentLoop.execute).toHaveBeenCalledWith(
+      expect.objectContaining({
+        taskId: 101,
+        goal: 'Workout agent decides the opener send confirmation boundary.',
+        brain: expect.any(Object),
+        maxToolCalls: 2,
+      }),
+    );
+    expect(records[0]).toMatchObject({
+      toolName: 'workout_agent.confirm_opener_send',
+      toolInput: expect.objectContaining({
+        taskId: 101,
+        targetUserId: 22,
+        candidateRecordId: 501,
+        socialRequestId: 301,
+        requestedApprovalId: null,
+        hasPendingApproval: false,
+        messageLength: 17,
+      }),
+    });
+    expect(records[0].toolInput).not.toHaveProperty('message');
+    expect(records[1]).toMatchObject({
+      finalObservation: expect.objectContaining({
+        decision: 'request_send_approval',
+        approvalRequired: true,
+        canSend: false,
+      }),
+    });
+    expect(executor.executeToolAction).not.toHaveBeenCalled();
+    expect(approvals.approve).not.toHaveBeenCalled();
+    expect(approvals.create).toHaveBeenCalledTimes(1);
+    expect(result).toMatchObject({
+      action: 'await_confirmation',
+      assistantMessage: '发送邀请前需要你确认。确认前不会触达对方。',
+    });
+  });
+
+  it('routes travel opener send approval through loop-aware AgentLoop runtime', async () => {
+    const task = makeTask({
+      result: {
+        cardActionDraft: {
+          action: 'candidate.generate_opener',
+          targetUserId: 44,
+          candidateRecordId: 804,
+          socialRequestId: 801,
+          candidate: {
+            userId: 44,
+            candidateUserId: 44,
+            candidateRecordId: 804,
+            socialRequestId: 801,
+            displayName: '阿宁',
+            metadata: { loop: 'travel' },
+          },
+          message: '看到你也想去成都，可以先站内聊聊时间和路线吗？',
+          idempotencyKey: 'travel-opener-confirm-1',
+        },
+      },
+      memory: {
+        travelLoop: {
+          stage: 'opener_ready',
+          matchingJobId: 8001,
+          candidateCount: 1,
+          targetUserId: 44,
+          candidateRecordId: 804,
+          socialRequestId: 801,
+        },
+        taskMemory: {
+          pendingActions: [],
+          candidateState: {
+            recommendedIds: [],
+            rejectedIds: [],
+            savedIds: [],
+            contactedIds: [],
+          },
+          activityState: { recommendedIds: [], rejectedIds: [] },
+          activeEntities: {},
+          stableProfileFacts: {},
+          boundaries: [],
+          preferences: [],
+          misunderstandings: [],
+          lastUserMessages: [],
+          recentActions: [],
+          updatedAt: '2026-06-06T00:00:00.000Z',
+        },
+      },
+    });
+    const records: Array<Record<string, unknown>> = [];
+    const agentLoop = makeAgentLoopRuntimeRecorder(records);
+    const { approvals, executor, service } = makeHarness(
+      task,
+      undefined,
+      agentLoop,
+    );
+
+    const result = await service.confirmOpenerSendFromCardAction(7, 101, {
+      action: 'opener.confirm_send',
+      idempotencyKey: 'travel-opener-confirm-1',
+      payload: {
+        taskId: 101,
+        targetUserId: 44,
+      },
+    });
+
+    expect(records[0]).toMatchObject({
+      goal: 'Travel agent decides the opener send confirmation boundary.',
+      toolName: 'travel_agent.confirm_opener_send',
+      toolInput: expect.objectContaining({
+        taskId: 101,
+        targetUserId: 44,
+        candidateRecordId: 804,
+        socialRequestId: 801,
+        hasPendingApproval: false,
+      }),
+    });
+    expect(records[1]).toMatchObject({
+      finalObservation: expect.objectContaining({
+        toolName: 'travel_agent.confirm_opener_send',
+        decision: 'request_send_approval',
+        approvalRequired: true,
+        canSend: false,
+      }),
+    });
+    expect(executor.executeToolAction).not.toHaveBeenCalled();
+    expect(approvals.create).toHaveBeenCalledTimes(1);
+    expect(result).toMatchObject({
+      action: 'await_confirmation',
+      assistantMessage: '发送邀请前需要你确认。确认前不会触达对方。',
+    });
+  });
+
+  it('routes approved opener sending through AgentLoop brain runtime before side effects', async () => {
+    const task = makeTask({
+      result: {
+        cardActionDraft: {
+          approvalId: 9001,
+          targetUserId: 22,
+          candidateRecordId: 501,
+          socialRequestId: 301,
+          candidate: {
+            userId: 22,
+            candidateUserId: 22,
+            candidateRecordId: 501,
+            socialRequestId: 301,
+            displayName: '小林',
+          },
+          message: '今晚先在青岛大学操场轻松跑一段吗？',
+          idempotencyKey: 'opener-confirm-1',
+        },
+      },
+      memory: {
+        workoutLoop: {
+          stage: 'message_confirming',
+          socialRequestId: 301,
+          publicIntentId: 'public-intent:workout-501',
+          candidateCount: 1,
+          targetUserId: 22,
+          candidateRecordId: 501,
+          approvalId: 9001,
+        },
+        taskMemory: {
+          pendingActions: [
+            {
+              id: 9001,
+              actionType: 'send_candidate_message',
+              type: 'send_message',
+              summary: '发送开场白',
+              riskLevel: 'high',
+              at: '2026-06-06T00:00:00.000Z',
+            },
+          ],
+          candidateState: {
+            recommendedIds: [],
+            rejectedIds: [],
+            savedIds: [],
+            contactedIds: [],
+          },
+          activityState: { recommendedIds: [], rejectedIds: [] },
+          activeEntities: {},
+          stableProfileFacts: {},
+          boundaries: [],
+          preferences: [],
+          misunderstandings: [],
+          lastUserMessages: [],
+          recentActions: [],
+          updatedAt: '2026-06-06T00:00:00.000Z',
+        },
+      },
+    });
+    const records: Array<Record<string, unknown>> = [];
+    const agentLoop = makeAgentLoopRuntimeRecorder(records);
+    const { approvals, executor, service } = makeHarness(
+      task,
+      undefined,
+      agentLoop,
+    );
+
+    const result = await service.confirmOpenerSendFromCardAction(7, 101, {
+      action: 'opener.confirm_send',
+      idempotencyKey: 'opener-confirm-1',
+      payload: {
+        taskId: 101,
+        approvalId: 9001,
+      },
+    });
+
+    expect(records[0]).toMatchObject({
+      toolName: 'workout_agent.confirm_opener_send',
+      toolInput: expect.objectContaining({
+        requestedApprovalId: 9001,
+        hasPendingApproval: true,
+      }),
+    });
+    expect(records[1]).toMatchObject({
+      finalObservation: expect.objectContaining({
+        decision: 'send_after_approval',
+        approvalRequired: false,
+        canSend: true,
+      }),
+    });
+    expect(approvals.approve).toHaveBeenCalledWith(9001, 7);
+    expect(approvals.approve.mock.invocationCallOrder[0]).toBeLessThan(
+      executor.executeToolAction.mock.invocationCallOrder[0],
+    );
+    expect(executor.executeToolAction).toHaveBeenCalledWith(
+      101,
+      SocialAgentToolName.SendMessageToCandidate,
+      expect.objectContaining({
+        candidateUserId: 22,
+        targetUserId: 22,
+        message: '今晚先在青岛大学操场轻松跑一段吗？',
+        metadata: expect.objectContaining({
+          pendingApprovalId: 9001,
+          checkpointRequired: true,
+        }),
+      }),
+      7,
+      { signal: null },
+    );
+    expect(result).toMatchObject({
+      assistantMessage: '已确认发送给小林：今晚先在青岛大学操场轻松跑一段吗？',
+      cards: [
+        expect.objectContaining({
+          schemaType: 'meet_loop.timeline',
+        }),
+      ],
+    });
   });
 
   it('creates a send approval when the user clicks send on a low-risk opener draft', async () => {

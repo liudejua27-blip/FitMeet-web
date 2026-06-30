@@ -26,6 +26,7 @@ import { SocialAgentFeedbackEventService } from './social-agent-feedback-event.s
 import { SocialAgentMetricsService } from './social-agent-metrics.service';
 import { SocialCandidateAuditService } from './social-candidate-audit.service';
 import { SocialAgentLoopObservabilityService } from './social-agent-loop-observability.service';
+import { AgentLoopRuntimeHealthService } from './agent-loop-runtime-health.service';
 
 type UserSatisfactionBody = {
   score?: number;
@@ -52,6 +53,7 @@ export class AgentL5RuntimeController {
     private readonly socialAgentMetrics: SocialAgentMetricsService,
     private readonly socialCandidateAudit: SocialCandidateAuditService,
     private readonly socialLoopObservability: SocialAgentLoopObservabilityService,
+    private readonly agentLoopRuntimeHealth: AgentLoopRuntimeHealthService,
   ) {}
 
   @Get('dashboard')
@@ -90,6 +92,7 @@ export class AgentL5RuntimeController {
     const socialLoopObservability = await this.socialLoopObservability.snapshot(
       Number(limit),
     );
+    const agentLoopRuntimeHealth = this.agentLoopRuntimeHealth.snapshot();
     return {
       ...dashboard,
       summary: {
@@ -123,6 +126,8 @@ export class AgentL5RuntimeController {
               item.missing.includes('publicIntentId') ||
               item.missing.includes('matchingJobId'),
           ).length,
+        agentLoopRuntimeHealthStatus: agentLoopRuntimeHealth.status,
+        agentLoopRuntimeHealthWarnings: agentLoopRuntimeHealth.warnings.length,
       },
       autoRuns,
       messageFeedback,
@@ -136,7 +141,14 @@ export class AgentL5RuntimeController {
       observability,
       socialAgentMetrics,
       socialLoopObservability,
+      agentLoopRuntimeHealth,
     };
+  }
+
+  @Get('runtime-health')
+  @RequireAdminPermission('agent:l5:read')
+  runtimeHealth() {
+    return this.agentLoopRuntimeHealth.snapshot();
   }
 
   @Get('feedback-events')

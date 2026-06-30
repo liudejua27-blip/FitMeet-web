@@ -619,6 +619,43 @@ describe('SocialCodexEventPipelineService', () => {
     expect(writes.map((item) => item.event)).toContain('tool.done');
   });
 
+  it('does not emit profile gate before direct workout card creation', async () => {
+    const writes: Array<{ event: string; data: unknown }> = [];
+    const profileGate = {
+      getMinimumProfileStatusWithTaskSlots: jest.fn(),
+      getMinimumProfileStatus: jest.fn(),
+    };
+    const pipeline = new SocialCodexEventPipelineService(
+      new SocialAgentEventV2Service(),
+      undefined,
+      new SocialAgentTaskMemoryStateMachineService(),
+      {
+        hydrateContext: jest.fn().mockResolvedValue({ taskSlots: {} }),
+      } as never,
+      profileGate as never,
+      new SocialCodexApprovalSchemaService(),
+    );
+    const writer = pipeline.createWriter({
+      write: (event, data) => writes.push({ event, data }),
+      userId: 7,
+      taskId: 42,
+      threadId: 'agent-task:42',
+      runId: 'run:test',
+    });
+
+    await pipeline.writeProfileGateIfNeeded(writer, 7, {
+      text: '我想发布约练，我明天在北京大学有一场篮球赛，想找个朋友一块，最好是男生，明天下午3点',
+      taskId: 42,
+      threadId: 'agent-task:42',
+    });
+
+    expect(
+      profileGate.getMinimumProfileStatusWithTaskSlots,
+    ).not.toHaveBeenCalled();
+    expect(profileGate.getMinimumProfileStatus).not.toHaveBeenCalled();
+    expect(writes).toHaveLength(0);
+  });
+
   it('emits product-language process display text even when callers pass internal labels', async () => {
     const writes: Array<{ event: string; data: unknown }> = [];
     const writer = makePipeline(writes);

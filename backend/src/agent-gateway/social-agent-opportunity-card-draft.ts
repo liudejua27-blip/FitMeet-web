@@ -14,6 +14,13 @@ import {
   rankingPreferenceLabels,
 } from './social-agent-ranking-preference';
 
+/**
+ * @deprecated Legacy opportunity draft helper.
+ *
+ * New loop draft cards are owned by their loop presenters, for example
+ * workout-card.presenter.ts. Keep this helper only for legacy fallback until
+ * old route search/action turns are removed.
+ */
 export type SocialAgentOpportunityDraft = CreateSocialRequestDto & {
   locationName: string;
   location: string;

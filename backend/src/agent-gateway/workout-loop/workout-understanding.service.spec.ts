@@ -1,0 +1,132 @@
+import {
+  AgentTask,
+  AgentTaskPermissionMode,
+  AgentTaskStatus,
+} from '../entities/agent-task.entity';
+import { FitMeetLoopRouterService } from '../loop-router/fitmeet-loop-router.service';
+import { WorkoutUnderstandingService } from './workout-understanding.service';
+
+function makeTask(): AgentTask {
+  return {
+    id: 101,
+    ownerUserId: 7,
+    goal: '约练',
+    memory: {},
+    result: {},
+    status: AgentTaskStatus.Pending,
+    permissionMode: AgentTaskPermissionMode.Confirm,
+  } as AgentTask;
+}
+
+describe('WorkoutUnderstandingService', () => {
+  const router = new FitMeetLoopRouterService();
+
+  it('falls back conservatively when no JSON model runtime is available', async () => {
+    const service = new WorkoutUnderstandingService();
+
+    await expect(
+      service.understand({
+        task: makeTask(),
+        message: '想找个健身伙伴',
+        ruleSlots: { activityType: '健身' },
+        loopIntent: router.classify('想找个健身伙伴'),
+      }),
+    ).resolves.toMatchObject({
+      intent: 'uncertain',
+      confidence: 0,
+      missing: expect.arrayContaining(['timePreference', 'locationText']),
+      source: 'fallback',
+    });
+  });
+
+  it('validates and normalizes JSON model output into workout slots', async () => {
+    const toolJson = {
+      callJson: jest.fn().mockResolvedValue({
+        intent: 'workout',
+        confidence: 0.86,
+        activityType: '跑步',
+        timePreference: '明晚',
+        locationText: '金鸡湖附近',
+        city: '苏州',
+        radiusKm: 5,
+        missing: [],
+        assumptions: [],
+        needsClarification: false,
+      }),
+    };
+    const service = new WorkoutUnderstandingService(toolJson as never);
+    const result = await service.understand({
+      task: makeTask(),
+      message: '苏州金鸡湖夜跑',
+      ruleSlots: {},
+      loopIntent: router.classify('苏州金鸡湖夜跑'),
+    });
+
+    expect(toolJson.callJson).toHaveBeenCalledWith(
+      expect.objectContaining({ purpose: 'workout_understanding' }),
+    );
+    expect(service.slotsFromUnderstanding(result)).toMatchObject({
+      activityType: '跑步',
+      timePreference: '明晚',
+      locationText: '金鸡湖附近',
+      city: '苏州',
+      radiusKm: 5,
+    });
+  });
+
+  it('calls the model for arbitration candidates, incomplete draft slots, or uncertain locations', () => {
+    const service = new WorkoutUnderstandingService();
+
+    expect(
+      service.shouldCall({
+        slots: {
+          activityType: '篮球',
+          timePreference: '明天下午3点',
+          locationText: '北京大学',
+          city: '北京',
+        },
+        loopIntent: router.classify(
+          '我想发布约练，我明天在北京大学有一场篮球赛，想找个朋友一块，最好是男生，明天下午3点',
+        ),
+      }),
+    ).toBe(false);
+
+    expect(
+      service.shouldCall({
+        slots: { activityType: '健身' },
+        loopIntent: router.classify('想找个健身伙伴'),
+      }),
+    ).toBe(true);
+
+    expect(
+      service.shouldCall({
+        slots: {
+          activityType: '跑步',
+          timePreference: '下班后',
+          locationText: '市北那边',
+        },
+        loopIntent: router.classify('下班后市北那边动一动'),
+      }),
+    ).toBe(true);
+
+    expect(
+      service.shouldCall({
+        slots: {
+          activityType: '健身',
+          timePreference: '明晚',
+          locationText: '陆家嘴',
+          city: '上海',
+          geoResolution: {
+            rawText: '陆家嘴',
+            locationText: '陆家嘴',
+            city: '上海',
+            source: 'poi_dictionary',
+            confidence: 0.8,
+            needsConfirmation: true,
+          },
+        },
+        loopIntent: router.classify('明晚陆家嘴健身'),
+      }),
+    ).toBe(true);
+  });
+});

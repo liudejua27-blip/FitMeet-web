@@ -43,6 +43,121 @@ describe('ClarificationCardActionService', () => {
     });
   });
 
+  it('routes friend geo selection and fallback to FriendLoopService', async () => {
+    const workoutLoop = {
+      applyConfirmedSlots: jest.fn(),
+      applySelectedSlots: jest.fn(),
+      openIntakeFromFallback: jest.fn(),
+    };
+    const friendLoop = {
+      applySelectedSlots: jest.fn().mockResolvedValue({ action: 'clarify' }),
+      openIntakeFromFallback: jest
+        .fn()
+        .mockResolvedValue({ action: 'clarify' }),
+    };
+    const service = new ClarificationCardActionService(
+      workoutLoop as never,
+      friendLoop as never,
+    );
+
+    await service.perform({
+      ownerUserId: 7,
+      taskId: 101,
+      body: {
+        action: 'clarification.select' as never,
+        payload: {
+          inferredIntent: 'friend',
+          selectedPatch: { city: '成都' },
+        },
+      },
+    });
+    await service.perform({
+      ownerUserId: 7,
+      taskId: 101,
+      body: {
+        action: 'clarification.no' as never,
+        payload: { noFallback: 'friend_intake' },
+      },
+    });
+
+    expect(friendLoop.applySelectedSlots).toHaveBeenCalledWith({
+      ownerUserId: 7,
+      taskId: 101,
+      payload: {
+        inferredIntent: 'friend',
+        selectedPatch: { city: '成都' },
+      },
+    });
+    expect(friendLoop.openIntakeFromFallback).toHaveBeenCalledWith({
+      ownerUserId: 7,
+      taskId: 101,
+      payload: { noFallback: 'friend_intake' },
+    });
+    expect(workoutLoop.applySelectedSlots).not.toHaveBeenCalled();
+    expect(workoutLoop.openIntakeFromFallback).not.toHaveBeenCalled();
+  });
+
+  it('routes travel geo selection and fallback to TravelLoopService', async () => {
+    const workoutLoop = {
+      applyConfirmedSlots: jest.fn(),
+      applySelectedSlots: jest.fn(),
+      openIntakeFromFallback: jest.fn(),
+    };
+    const friendLoop = {
+      applySelectedSlots: jest.fn(),
+      openIntakeFromFallback: jest.fn(),
+    };
+    const travelLoop = {
+      applySelectedSlots: jest.fn().mockResolvedValue({ action: 'clarify' }),
+      openIntakeFromFallback: jest
+        .fn()
+        .mockResolvedValue({ action: 'clarify' }),
+    };
+    const service = new ClarificationCardActionService(
+      workoutLoop as never,
+      friendLoop as never,
+      travelLoop as never,
+    );
+
+    await service.perform({
+      ownerUserId: 7,
+      taskId: 101,
+      body: {
+        action: 'clarification.select' as never,
+        payload: {
+          inferredIntent: 'travel',
+          selectedPatch: { city: '成都' },
+        },
+      },
+    });
+    await service.perform({
+      ownerUserId: 7,
+      taskId: 101,
+      body: {
+        action: 'clarification.no' as never,
+        payload: { noFallback: 'travel_intake' },
+      },
+    });
+
+    expect(travelLoop.applySelectedSlots).toHaveBeenCalledWith({
+      ownerUserId: 7,
+      taskId: 101,
+      payload: {
+        inferredIntent: 'travel',
+        selectedPatch: { city: '成都' },
+      },
+    });
+    expect(travelLoop.openIntakeFromFallback).toHaveBeenCalledWith({
+      ownerUserId: 7,
+      taskId: 101,
+      payload: { noFallback: 'travel_intake' },
+    });
+    expect(friendLoop.applySelectedSlots).not.toHaveBeenCalled();
+    expect(friendLoop.openIntakeFromFallback).not.toHaveBeenCalled();
+    expect(workoutLoop.applySelectedSlots).not.toHaveBeenCalled();
+    expect(workoutLoop.openIntakeFromFallback).not.toHaveBeenCalled();
+  });
+
   it('fails closed when workout runtime is unavailable', async () => {
     const service = new ClarificationCardActionService();
 

@@ -91,11 +91,28 @@ const LazyClarificationBinaryCard = lazy(() =>
     default: module.ClarificationBinaryCard,
   })),
 );
+const LazyClarificationGeoCandidatesCard = lazy(() =>
+  import('./tool-clarification-geo-candidates-card').then((module) => ({
+    default: module.ClarificationGeoCandidatesCard,
+  })),
+);
 const LazyWorkoutIntakeCard = lazy(() =>
   import('./tool-workout-intake-card').then((module) => ({ default: module.WorkoutIntakeCard })),
 );
 const LazyWorkoutDraftCard = lazy(() =>
   import('./tool-workout-draft-card').then((module) => ({ default: module.WorkoutDraftCard })),
+);
+const LazyFriendIntakeCard = lazy(() =>
+  import('./tool-friend-cards').then((module) => ({ default: module.FriendIntakeCard })),
+);
+const LazyFriendDraftCard = lazy(() =>
+  import('./tool-friend-cards').then((module) => ({ default: module.FriendDraftCard })),
+);
+const LazyTravelIntakeCard = lazy(() =>
+  import('./tool-travel-cards').then((module) => ({ default: module.TravelIntakeCard })),
+);
+const LazyTravelDraftCard = lazy(() =>
+  import('./tool-travel-cards').then((module) => ({ default: module.TravelDraftCard })),
 );
 
 const ASSISTANT_CARD_RENDERERS: Record<ToolUISchemaType, ToolUICardRenderer> = {
@@ -113,11 +130,13 @@ const ASSISTANT_CARD_RENDERERS: Record<ToolUISchemaType, ToolUICardRenderer> = {
   'safety.approval': SafetyResultCard,
   'loop.choice': LoopChoiceResultCard,
   'clarification.binary': ClarificationBinaryResultCard,
+  'clarification.geo_candidates': ClarificationGeoCandidatesResultCard,
   'workout.intake': WorkoutIntakeResultCard,
   'workout.draft': WorkoutDraftResultCard,
-  'friend.intake': GenericResultCard,
-  'travel.intake': GenericResultCard,
-  'travel.companion_draft': GenericResultCard,
+  'friend.intake': FriendIntakeResultCard,
+  'friend.draft': FriendDraftResultCard,
+  'travel.intake': TravelIntakeResultCard,
+  'travel.companion_draft': TravelDraftResultCard,
   'generic.card': GenericResultCard,
 };
 
@@ -389,6 +408,14 @@ function ClarificationBinaryResultCard({ card }: { card: SchemaDrivenAssistantCa
   );
 }
 
+function ClarificationGeoCandidatesResultCard({ card }: { card: SchemaDrivenAssistantCard }) {
+  return (
+    <Suspense fallback={<GenericResultCard card={card} />}>
+      <LazyClarificationGeoCandidatesCard card={card} />
+    </Suspense>
+  );
+}
+
 function WorkoutIntakeResultCard({ card }: { card: SchemaDrivenAssistantCard }) {
   return (
     <Suspense fallback={<GenericResultCard card={card} />}>
@@ -401,6 +428,38 @@ function WorkoutDraftResultCard({ card }: { card: SchemaDrivenAssistantCard }) {
   return (
     <Suspense fallback={<GenericResultCard card={card} />}>
       <LazyWorkoutDraftCard card={card} />
+    </Suspense>
+  );
+}
+
+function FriendIntakeResultCard({ card }: { card: SchemaDrivenAssistantCard }) {
+  return (
+    <Suspense fallback={<GenericResultCard card={card} />}>
+      <LazyFriendIntakeCard card={card} />
+    </Suspense>
+  );
+}
+
+function FriendDraftResultCard({ card }: { card: SchemaDrivenAssistantCard }) {
+  return (
+    <Suspense fallback={<GenericResultCard card={card} />}>
+      <LazyFriendDraftCard card={card} />
+    </Suspense>
+  );
+}
+
+function TravelIntakeResultCard({ card }: { card: SchemaDrivenAssistantCard }) {
+  return (
+    <Suspense fallback={<GenericResultCard card={card} />}>
+      <LazyTravelIntakeCard card={card} />
+    </Suspense>
+  );
+}
+
+function TravelDraftResultCard({ card }: { card: SchemaDrivenAssistantCard }) {
+  return (
+    <Suspense fallback={<GenericResultCard card={card} />}>
+      <LazyTravelDraftCard card={card} />
     </Suspense>
   );
 }

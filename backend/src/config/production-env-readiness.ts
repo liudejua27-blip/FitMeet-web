@@ -35,7 +35,19 @@ const OPTIONAL_BUT_LAUNCH_CRITICAL_KEYS = [
   'WECHAT_APP_SECRET',
   'WECHAT_MINI_APP_ID',
   'WECHAT_MINI_APP_SECRET',
-  'AMAP_WEB_SERVICE_KEY',
+];
+
+const WORKOUT_LOOP_FEATURE_FLAG_KEYS = [
+  'FITMEET_FEATURE_AGENT_PUBLISH_ENABLED',
+  'FITMEET_FEATURE_DISCOVER_PUBLIC_INTENT_ENABLED',
+  'FITMEET_FEATURE_MATCHING_WORKER_ENABLED',
+  'FITMEET_FEATURE_AUTOMATIC_CANDIDATE_SEARCH_ENABLED',
+  'FITMEET_FEATURE_MESSAGE_SEND_ENABLED',
+];
+
+const WORKOUT_LOOP_KILL_SWITCH_KEYS = [
+  'FITMEET_SOCIAL_LOOP_KILL_SWITCH',
+  'FITMEET_AGENT_KILL_SWITCH',
 ];
 
 const REQUIRED_DEEPSEEK_MODEL_KEYS = [
@@ -137,6 +149,7 @@ export function buildProductionEnvReport(env: EnvMap): ProductionEnvReport {
   checkAgentIntelligencePolicy(env, error);
   checkSubagentWorker(env, error, warning);
   checkObservabilityAlerts(env, error, warning);
+  checkWorkoutLoopReadiness(env, warning);
 
   for (const key of OPTIONAL_BUT_LAUNCH_CRITICAL_KEYS) {
     if (!hasConfiguredValue(env[key])) {
@@ -150,6 +163,60 @@ export function buildProductionEnvReport(env: EnvMap): ProductionEnvReport {
   const errors = issues.filter((issue) => issue.severity === 'error');
   const warnings = issues.filter((issue) => issue.severity === 'warning');
   return { ok: errors.length === 0, errors, warnings };
+}
+
+function checkWorkoutLoopReadiness(
+  env: EnvMap,
+  warning: (key: string, message: string) => void,
+): void {
+  if (
+    !hasConfiguredValue(env.FITMEET_AMAP_WEB_SERVICE_KEY) &&
+    !hasConfiguredValue(env.AMAP_WEB_SERVICE_KEY)
+  ) {
+    warning(
+      'FITMEET_AMAP_WEB_SERVICE_KEY',
+      'missing or placeholder; workout nationwide location resolution will fall back without AMap POI/geocode.',
+    );
+  }
+
+  for (const key of WORKOUT_LOOP_FEATURE_FLAG_KEYS) {
+    if (isFalseEnv(env[key])) {
+      warning(
+        key,
+        'is explicitly disabled; the Workout loop may stop at publish, matching, realtime candidate search, or message-send steps.',
+      );
+    }
+  }
+
+  for (const key of WORKOUT_LOOP_KILL_SWITCH_KEYS) {
+    if (isTrueEnv(env[key])) {
+      warning(
+        key,
+        'is enabled; loop-agent entry or social loop execution will be disabled.',
+      );
+    }
+  }
+
+  const processRole = `${env.FITMEET_PROCESS_ROLE ?? 'api'}`
+    .trim()
+    .toLowerCase();
+  const schedulerDisabled = isFalseEnv(env.ENABLE_SCHEDULER);
+  const matchingWorkerRole =
+    processRole === 'worker' ||
+    processRole === 'all' ||
+    processRole === 'worker-matching';
+  if (schedulerDisabled) {
+    warning(
+      'ENABLE_SCHEDULER',
+      'is disabled; matching-job cron workers will not run in this process.',
+    );
+  }
+  if (!matchingWorkerRole) {
+    warning(
+      'FITMEET_PROCESS_ROLE',
+      'does not run worker-matching; ensure at least one deployed process uses worker, all, or worker-matching for workout candidate matching.',
+    );
+  }
 }
 
 function checkAllowedOrigins(
@@ -706,6 +773,18 @@ function requireHttpsUrl(
 function hasConfiguredValue(value?: string): boolean {
   const text = `${value ?? ''}`.trim();
   return Boolean(text) && !PLACEHOLDER_PATTERN.test(text);
+}
+
+function isFalseEnv(value?: string): boolean {
+  return ['false', '0', 'off', 'no'].includes(
+    `${value ?? ''}`.trim().toLowerCase(),
+  );
+}
+
+function isTrueEnv(value?: string): boolean {
+  return ['true', '1', 'on', 'yes'].includes(
+    `${value ?? ''}`.trim().toLowerCase(),
+  );
 }
 
 function stripEnvQuotes(value: string): string {

@@ -1302,7 +1302,7 @@ describe('toUserFacingAgentResponse', () => {
     );
 
     expect(response.publicLoop).toEqual({
-      stage: 'candidates_recommended',
+      stage: 'candidates_ready',
       publicIntentId: 'intent_302',
       discoverHref: '/discover?publicIntentId=intent_302',
       publicIntentHref: '/public-intent/intent_302',
@@ -1371,7 +1371,7 @@ describe('validateUserFacingAgentResponse', () => {
       validateUserFacingAgentResponse(
         baseResponse({
           publicLoop: {
-            stage: 'candidates_recommended',
+            stage: 'candidates_ready',
             publicIntentId: null,
             discoverHref: null,
             publicIntentHref: null,
@@ -1426,7 +1426,7 @@ describe('validateUserFacingAgentResponse', () => {
         baseResponse({
           assistantMessage: '已发布到发现页，并找到候选。',
           publicLoop: {
-            stage: 'candidates_recommended',
+            stage: 'candidates_ready',
             publicIntentId: 'intent_1',
             discoverHref: '/discover?publicIntentId=intent_1',
             publicIntentHref: '/public-intent/intent_1',

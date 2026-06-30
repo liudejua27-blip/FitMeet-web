@@ -2977,7 +2977,7 @@ describe('AgentWorkspacePage', () => {
       assistantMessage: '已找到 2 个适合这次约练的候选。',
       workflow: mockWorkflow('agent-task:101', 'CANDIDATES_READY'),
       publicLoop: {
-        stage: 'candidates_recommended',
+        stage: 'candidates_ready',
         publicIntentId: 'public-intent:workout-501',
         discoverHref: '/discover?publicIntentId=public-intent%3Aworkout-501',
         publicIntentHref: '/public-intent/public-intent%3Aworkout-501',
@@ -2985,24 +2985,39 @@ describe('AgentWorkspacePage', () => {
         requiredConfirmation: true,
       },
     };
+    const realtimeCandidateCard = {
+      ...mockCandidateResponse().cards[0],
+      id: 'candidate-realtime-1',
+      title: '实时候选小林',
+      body: 'worker 实时推送的候选卡',
+    };
+    const restoredSession = {
+      ...emptySession(101),
+      hasSession: true,
+      activeTaskId: 101,
+      task: {
+        id: 101,
+        permissionMode: 'limited_auto' as const,
+        goal: '今晚青岛大学跑步约练',
+        status: 'awaiting_confirmation',
+      },
+      result: candidateResponse,
+    };
+    let resolveRestoreTask:
+      | ((
+          value: Awaited<ReturnType<typeof socialAgentApi.restoreSession>>,
+        ) => void)
+      | null = null;
     const restoreSpy = vi
       .spyOn(socialAgentApi, 'restoreSession')
-      .mockImplementation(async (taskId?: number | null) =>
-        taskId === 101
-          ? {
-              ...emptySession(101),
-              hasSession: true,
-              activeTaskId: 101,
-              task: {
-                id: 101,
-                permissionMode: 'limited_auto',
-                goal: '今晚青岛大学跑步约练',
-                status: 'awaiting_confirmation',
-              },
-              result: candidateResponse,
-            }
-          : emptySession(),
-      );
+      .mockImplementation(async (taskId?: number | null) => {
+        if (taskId !== 101) return emptySession();
+        return await new Promise<
+          Awaited<ReturnType<typeof socialAgentApi.restoreSession>>
+        >((resolve) => {
+          resolveRestoreTask = resolve;
+        });
+      });
     vi.spyOn(socialAgentApi, 'listThreads').mockResolvedValue({ threads: [] });
     vi.spyOn(socialAgentApi, 'updateThread').mockResolvedValue({
       thread: {
@@ -3037,6 +3052,10 @@ describe('AgentWorkspacePage', () => {
               taskId: 101,
               publicIntentId: 'public-intent:workout-501',
               socialRequestId: 501,
+              publicLoopStage: 'candidates_ready',
+              candidateCount: 1,
+              candidates: [{ candidateUserId: 22, displayName: '小林' }],
+              cards: [realtimeCandidateCard],
               matchingJobStatus: 'candidates_ready',
             },
           },
@@ -3044,7 +3063,19 @@ describe('AgentWorkspacePage', () => {
       );
     });
 
+    expect(
+      await screen.findByText('已找到 1 个适合这次约练的候选。'),
+    ).toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.getByTestId('assistant-ui-generative-cards')).toHaveAttribute(
+        'data-product-components',
+        expect.stringContaining('CandidateCards'),
+      ),
+    );
     await waitFor(() => expect(restoreSpy).toHaveBeenCalledWith(101));
+    await act(async () => {
+      resolveRestoreTask?.(restoredSession);
+    });
     expect(await screen.findByText('已找到 2 个适合这次约练的候选。')).toBeInTheDocument();
     expect(screen.queryByText('约练卡已发布，正在匹配公开可发现的人。')).not.toBeInTheDocument();
     expect(screen.getByTestId('assistant-ui-generative-cards')).toHaveAttribute(

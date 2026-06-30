@@ -32,6 +32,13 @@ import {
 } from './social-agent-opportunity-card-draft';
 import { rememberSocialAgentOpportunityDraft } from './social-agent-opportunity-draft-memory';
 
+/**
+ * @deprecated Legacy fallback search flow only.
+ *
+ * New Workout/Friend/Travel loop flows must route through
+ * AgentEntryOrchestratorService and their loop services. Do not add new
+ * loop-mainline behavior or profile-blocking gates here.
+ */
 type QueueInitialSearchForTask = (
   ownerUserId: number,
   task: AgentTask,

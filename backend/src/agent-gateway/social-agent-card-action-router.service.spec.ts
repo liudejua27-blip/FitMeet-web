@@ -87,6 +87,14 @@ function makeHarness(options: { runRunner?: boolean } = {}) {
     startWorkoutIntake: jest.fn(),
     performWorkoutAction: jest.fn(),
   };
+  const friendLoop = {
+    startFriendIntake: jest.fn(),
+    performFriendAction: jest.fn(),
+  };
+  const travelLoop = {
+    startTravelIntake: jest.fn(),
+    performTravelAction: jest.fn(),
+  };
   const clarificationActions = {
     perform: jest.fn(),
   };
@@ -103,6 +111,8 @@ function makeHarness(options: { runRunner?: boolean } = {}) {
     undefined as never,
     workoutLoop as never,
     clarificationActions as never,
+    friendLoop as never,
+    travelLoop as never,
   );
   const handleMessage = jest.fn().mockResolvedValue(
     routeResult({
@@ -119,6 +129,8 @@ function makeHarness(options: { runRunner?: boolean } = {}) {
     metrics,
     draftPublication,
     workoutLoop,
+    friendLoop,
+    travelLoop,
     clarificationActions,
     service,
   };
@@ -168,28 +180,118 @@ describe('SocialAgentCardActionRouterService', () => {
     );
   });
 
-  it('returns friend and travel loop choices as coming-soon generic cards', async () => {
-    const { handleMessage, service } = makeHarness();
+  it('dispatches loop choice friend directly to FriendLoop without re-entering chat LLM', async () => {
+    const { friendLoop, handleMessage, service } = makeHarness();
+    friendLoop.startFriendIntake.mockResolvedValue(
+      routeResult({
+        action: 'clarify',
+        assistantMessage: '好的，我们先进入交友流程。',
+        cards: [
+          {
+            id: 'friend_intake:101',
+            type: 'friend_intake',
+            schemaVersion: 'fitmeet.tool-ui.v1',
+            schemaType: 'friend.intake',
+            title: '填写本次交友需求',
+            data: { taskId: 101 },
+            actions: [],
+          },
+        ],
+      }),
+    );
+
+    const result = await service.perform({
+      ownerUserId: 7,
+      taskId: 101,
+      body: {
+        action: 'loop_choice.friend' as never,
+        payload: { source: 'bootstrap' },
+      },
+      handleMessage,
+    });
+
+    expect(handleMessage).not.toHaveBeenCalled();
+    expect(friendLoop.startFriendIntake).toHaveBeenCalledWith({
+      ownerUserId: 7,
+      taskId: 101,
+      payload: { source: 'bootstrap' },
+    });
+    expect(result.cards?.[0]).toMatchObject({ schemaType: 'friend.intake' });
+  });
+
+  it('dispatches loop choice travel directly to TravelLoop without re-entering chat LLM', async () => {
+    const { handleMessage, service, travelLoop } = makeHarness();
+    travelLoop.startTravelIntake.mockResolvedValue(
+      routeResult({
+        action: 'clarify',
+        assistantMessage: '好的，我们先进入旅游闭环。',
+        cards: [
+          {
+            id: 'travel_intake:101',
+            type: 'travel_intake',
+            schemaVersion: 'fitmeet.tool-ui.v1',
+            schemaType: 'travel.intake',
+            title: '填写本次结伴旅行需求',
+            data: { taskId: 101 },
+            actions: [],
+          },
+        ],
+      }),
+    );
 
     const result = await service.perform({
       ownerUserId: 7,
       taskId: 101,
       body: {
         action: 'loop_choice.travel' as never,
-        payload: {},
+        payload: { source: 'bootstrap' },
       },
       handleMessage,
     });
 
     expect(handleMessage).not.toHaveBeenCalled();
-    expect(result).toMatchObject({
-      assistantMessage: expect.stringContaining('旅游闭环即将支持'),
-      cards: [
-        expect.objectContaining({
-          schemaType: 'generic.card',
-          data: expect.objectContaining({ selectedLoop: 'travel' }),
-        }),
-      ],
+    expect(travelLoop.startTravelIntake).toHaveBeenCalledWith({
+      ownerUserId: 7,
+      taskId: 101,
+      payload: { source: 'bootstrap' },
+    });
+    expect(result.cards?.[0]).toMatchObject({ schemaType: 'travel.intake' });
+  });
+
+  it('dispatches travel card actions to TravelLoop', async () => {
+    const { handleMessage, service, travelLoop } = makeHarness();
+    travelLoop.performTravelAction.mockResolvedValue(
+      routeResult({
+        assistantMessage: '已进入私密旅行匹配。',
+        publicLoop: {
+          stage: 'matching_queued',
+          publicIntentId: null,
+          discoverHref: null,
+          publicIntentHref: null,
+          messagesHref: null,
+          requiredConfirmation: false,
+        },
+      }),
+    );
+
+    await service.perform({
+      ownerUserId: 7,
+      taskId: 101,
+      body: {
+        action: 'travel_draft.private_match' as never,
+        payload: { socialRequestId: 801 },
+      },
+      handleMessage,
+    });
+
+    expect(handleMessage).not.toHaveBeenCalled();
+    expect(travelLoop.performTravelAction).toHaveBeenCalledWith({
+      ownerUserId: 7,
+      taskId: 101,
+      body: expect.objectContaining({
+        action: 'travel_draft.private_match',
+        payload: { socialRequestId: 801 },
+      }),
     });
   });
 
@@ -218,9 +320,88 @@ describe('SocialAgentCardActionRouterService', () => {
       taskId: 101,
       body: expect.objectContaining({ action: 'clarification.yes' }),
     });
+
+    await service.perform({
+      ownerUserId: 7,
+      taskId: 101,
+      body: {
+        action: 'clarification.select' as never,
+        payload: { selectedPatch: { city: '成都' } },
+      },
+      handleMessage,
+    });
+
+    expect(handleMessage).not.toHaveBeenCalled();
+    expect(clarificationActions.perform).toHaveBeenLastCalledWith({
+      ownerUserId: 7,
+      taskId: 101,
+      body: expect.objectContaining({ action: 'clarification.select' }),
+    });
   });
 
   it('publishes workout drafts through the existing discover publish flow and marks matching queued', async () => {
+    const { draftPublication, handleMessage, service } = makeHarness();
+    draftPublication.publishDraft.mockResolvedValue({
+      success: true,
+      status: 'published',
+      synced: true,
+      socialRequestId: 501,
+      publicIntentId: 'public-intent:workout-501',
+      discoverHref: '/discover?publicIntentId=public-intent%3Aworkout-501',
+      publicIntentHref: '/public-intent/public-intent%3Aworkout-501',
+      sourceVersion: 'source-v1',
+      matchingJob: { id: 9001, status: 'queued' },
+    });
+
+    const result = await service.perform({
+      ownerUserId: 7,
+      taskId: 101,
+      body: {
+        action: 'workout_draft.publish' as never,
+        payload: {
+          confirmedPublish: true,
+          socialRequestId: 501,
+          slots: {
+            activityType: '跑步',
+            timePreference: '今晚',
+            locationText: '青岛大学附近',
+            city: '青岛',
+          },
+          socialRequestDraft: {
+            title: '今晚青岛大学跑步约练',
+            activityType: '跑步',
+            city: '青岛',
+            timePreference: '今晚',
+            locationName: '青岛大学附近',
+            metadata: {
+              loop: 'workout',
+              locationText: '青岛大学附近',
+              timePreference: '今晚',
+            },
+          },
+        },
+      },
+      handleMessage,
+    });
+
+    expect(handleMessage).not.toHaveBeenCalled();
+    expect(draftPublication.publishDraft).toHaveBeenCalledWith(
+      7,
+      101,
+      expect.objectContaining({
+        socialRequestId: 501,
+        title: '今晚青岛大学跑步约练',
+        visibility: expect.any(String),
+      }),
+    );
+    expect(result.publicLoop).toMatchObject({
+      stage: 'matching_queued',
+      publicIntentId: 'public-intent:workout-501',
+    });
+    expect(result.assistantMessage).toContain('进入约练匹配队列');
+  });
+
+  it('infers missing workout publish slots from staged draft text before blocking publish', async () => {
     const { draftPublication, handleMessage, service } = makeHarness();
     draftPublication.publishDraft.mockResolvedValue({
       success: true,
@@ -246,6 +427,8 @@ describe('SocialAgentCardActionRouterService', () => {
             title: '今晚青岛大学跑步约练',
             activityType: '跑步',
             city: '青岛',
+            visibility: 'public',
+            metadata: { loop: 'workout' },
           },
         },
       },
@@ -259,14 +442,381 @@ describe('SocialAgentCardActionRouterService', () => {
       expect.objectContaining({
         socialRequestId: 501,
         title: '今晚青岛大学跑步约练',
-        visibility: expect.any(String),
+        city: '青岛',
+        visibility: 'public',
       }),
     );
     expect(result.publicLoop).toMatchObject({
       stage: 'matching_queued',
       publicIntentId: 'public-intent:workout-501',
     });
-    expect(result.assistantMessage).toContain('进入约练匹配队列');
+  });
+
+  it('does not publish workout drafts with an empty city or default them to Qingdao', async () => {
+    const { draftPublication, handleMessage, service } = makeHarness();
+
+    const result = await service.perform({
+      ownerUserId: 7,
+      taskId: 101,
+      body: {
+        action: 'workout_draft.publish' as never,
+        payload: {
+          confirmedPublish: true,
+          socialRequestId: 501,
+          slots: {
+            activityType: '跑步',
+            timePreference: '明晚',
+            locationText: '学校附近',
+          },
+          socialRequestDraft: {
+            title: '明晚学校附近跑步约练',
+            activityType: '跑步',
+            metadata: { loop: 'workout' },
+          },
+        },
+      },
+      handleMessage,
+    });
+
+    expect(handleMessage).not.toHaveBeenCalled();
+    expect(draftPublication.publishDraft).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      action: 'reply',
+      publicLoop: expect.objectContaining({
+        stage: 'publish_confirmation_required',
+      }),
+      cards: [
+        expect.objectContaining({
+          schemaType: 'workout.intake',
+          data: expect.objectContaining({
+            city: null,
+            missingFields: expect.arrayContaining(['city']),
+          }),
+        }),
+      ],
+    });
+  });
+
+  it('publishes friend drafts through Discover and marks matching queued', async () => {
+    const { draftPublication, handleMessage, service } = makeHarness();
+    draftPublication.publishDraft.mockResolvedValue({
+      success: true,
+      status: 'published',
+      synced: true,
+      socialRequestId: 701,
+      publicIntentId: 'public-intent:friend-701',
+      discoverHref: '/discover?publicIntentId=public-intent%3Afriend-701',
+      publicIntentHref: '/public-intent/public-intent%3Afriend-701',
+      sourceVersion: 'friend-source-v1',
+      matchingJob: { id: 9701, status: 'queued' },
+    });
+
+    const result = await service.perform({
+      ownerUserId: 7,
+      taskId: 101,
+      body: {
+        action: 'friend_draft.publish',
+        payload: {
+          confirmedPublish: true,
+          socialRequestId: 701,
+          slots: {
+            friendGoal: '认识新朋友',
+            city: '上海',
+            locationText: '上海市区',
+            topicTags: ['咖啡'],
+            genderPreference: '不限性别',
+            bodyPreference: '身材不限',
+            appearancePreference: '外貌不限，看聊得来',
+          },
+          socialRequestDraft: {
+            socialRequestId: 701,
+            title: '上海认识新朋友',
+            description: '低压力认识新朋友。',
+            city: '上海',
+            activityType: '交友',
+            metadata: { loop: 'friend', source: 'friend_loop_mvp' },
+          },
+        },
+      },
+      handleMessage,
+    });
+
+    expect(handleMessage).not.toHaveBeenCalled();
+    expect(draftPublication.publishDraft).toHaveBeenCalledWith(
+      7,
+      101,
+      expect.objectContaining({
+        socialRequestId: 701,
+        title: '上海认识新朋友',
+        city: '上海',
+        activityType: '交友',
+        visibility: 'public',
+        status: 'matching',
+      }),
+    );
+    expect(result.publicLoop).toMatchObject({
+      stage: 'matching_queued',
+      publicIntentId: 'public-intent:friend-701',
+    });
+    expect(result.assistantMessage).toContain('进入交友匹配队列');
+  });
+
+  it('infers missing friend publish slots from staged draft text before blocking publish', async () => {
+    const { draftPublication, handleMessage, service } = makeHarness();
+    draftPublication.publishDraft.mockResolvedValue({
+      success: true,
+      status: 'published',
+      synced: true,
+      socialRequestId: 701,
+      publicIntentId: 'public-intent:friend-701',
+      discoverHref: '/discover?publicIntentId=public-intent%3Afriend-701',
+      publicIntentHref: '/public-intent/public-intent%3Afriend-701',
+      sourceVersion: 'friend-source-v1',
+      matchingJob: { id: 9701, status: 'queued' },
+    });
+
+    const result = await service.perform({
+      ownerUserId: 7,
+      taskId: 101,
+      body: {
+        action: 'friend_draft.publish',
+        payload: {
+          confirmedPublish: true,
+          socialRequestId: 701,
+          socialRequestDraft: {
+            socialRequestId: 701,
+            title: '上海认识新朋友咖啡搭子',
+            description:
+              '想找同城朋友，周末咖啡或低压力聊天，不限性别，身材不限，外貌不限，看聊得来。',
+            activityType: '交友',
+            metadata: { loop: 'friend', source: 'friend_loop_mvp' },
+          },
+        },
+      },
+      handleMessage,
+    });
+
+    expect(handleMessage).not.toHaveBeenCalled();
+    expect(draftPublication.publishDraft).toHaveBeenCalledWith(
+      7,
+      101,
+      expect.objectContaining({
+        socialRequestId: 701,
+        title: '上海认识新朋友咖啡搭子',
+        city: '上海',
+        activityType: '交友',
+        visibility: 'public',
+        status: 'matching',
+      }),
+    );
+    expect(result.publicLoop).toMatchObject({
+      stage: 'matching_queued',
+      publicIntentId: 'public-intent:friend-701',
+    });
+  });
+
+  it('does not publish friend drafts with an empty city or default them to Qingdao', async () => {
+    const { draftPublication, handleMessage, service } = makeHarness();
+
+    const result = await service.perform({
+      ownerUserId: 7,
+      taskId: 101,
+      body: {
+        action: 'friend_draft.publish',
+        payload: {
+          confirmedPublish: true,
+          socialRequestId: 701,
+          slots: {
+            friendGoal: '认识新朋友',
+          },
+          socialRequestDraft: {
+            socialRequestId: 701,
+            title: '认识新朋友',
+            activityType: '交友',
+            metadata: { loop: 'friend', source: 'friend_loop_mvp' },
+          },
+        },
+      },
+      handleMessage,
+    });
+
+    expect(handleMessage).not.toHaveBeenCalled();
+    expect(draftPublication.publishDraft).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      publicLoop: expect.objectContaining({
+        stage: 'publish_confirmation_required',
+      }),
+      cards: [
+        expect.objectContaining({
+          schemaType: 'friend.intake',
+          data: expect.objectContaining({
+            city: null,
+            missingFields: expect.arrayContaining(['city']),
+          }),
+        }),
+      ],
+    });
+  });
+
+  it('publishes travel drafts through Discover and marks matching queued', async () => {
+    const { draftPublication, handleMessage, service } = makeHarness();
+    draftPublication.publishDraft.mockResolvedValue({
+      success: true,
+      status: 'published',
+      synced: true,
+      socialRequestId: 801,
+      publicIntentId: 'public-intent:travel-801',
+      discoverHref: '/discover?publicIntentId=public-intent%3Atravel-801',
+      publicIntentHref: '/public-intent/public-intent%3Atravel-801',
+      sourceVersion: 'travel-source-v1',
+      matchingJob: { id: 9801, status: 'queued' },
+    });
+
+    const result = await service.perform({
+      ownerUserId: 7,
+      taskId: 101,
+      body: {
+        action: 'travel_draft.publish',
+        payload: {
+          confirmedPublish: true,
+          socialRequestId: 801,
+          slots: {
+            destination: '成都',
+            departureTime: '周末',
+            budgetRange: '人均1000元',
+            transportMode: '高铁',
+            tags: ['美食'],
+          },
+          socialRequestDraft: {
+            socialRequestId: 801,
+            title: '成都旅行寻伴',
+            description: '周末成都旅行寻伴。',
+            city: '成都',
+            activityType: '结伴旅行',
+            metadata: { loop: 'travel', source: 'travel_loop_mvp' },
+          },
+        },
+      },
+      handleMessage,
+    });
+
+    expect(handleMessage).not.toHaveBeenCalled();
+    expect(draftPublication.publishDraft).toHaveBeenCalledWith(
+      7,
+      101,
+      expect.objectContaining({
+        socialRequestId: 801,
+        title: '成都旅行寻伴',
+        city: '成都',
+        activityType: '结伴旅行',
+        visibility: 'public',
+        status: 'matching',
+      }),
+    );
+    expect(result.publicLoop).toMatchObject({
+      stage: 'matching_queued',
+      publicIntentId: 'public-intent:travel-801',
+    });
+    expect(result.assistantMessage).toContain('进入旅行寻伴匹配队列');
+  });
+
+  it('infers missing travel publish slots and city from staged draft text before blocking publish', async () => {
+    const { draftPublication, handleMessage, service } = makeHarness();
+    draftPublication.publishDraft.mockResolvedValue({
+      success: true,
+      status: 'published',
+      synced: true,
+      socialRequestId: 801,
+      publicIntentId: 'public-intent:travel-801',
+      discoverHref: '/discover?publicIntentId=public-intent%3Atravel-801',
+      publicIntentHref: '/public-intent/public-intent%3Atravel-801',
+      sourceVersion: 'travel-source-v1',
+      matchingJob: { id: 9801, status: 'queued' },
+    });
+
+    const result = await service.perform({
+      ownerUserId: 7,
+      taskId: 101,
+      body: {
+        action: 'travel_draft.publish',
+        payload: {
+          confirmedPublish: true,
+          socialRequestId: 801,
+          socialRequestDraft: {
+            socialRequestId: 801,
+            title: '周末成都高铁旅行寻伴',
+            description: '周末去成都，预算人均1000元，想找美食搭子。',
+            activityType: '结伴旅行',
+            metadata: { loop: 'travel', source: 'travel_loop_mvp' },
+          },
+        },
+      },
+      handleMessage,
+    });
+
+    expect(handleMessage).not.toHaveBeenCalled();
+    expect(draftPublication.publishDraft).toHaveBeenCalledWith(
+      7,
+      101,
+      expect.objectContaining({
+        socialRequestId: 801,
+        title: '周末成都高铁旅行寻伴',
+        city: '成都',
+        activityType: '结伴旅行',
+        visibility: 'public',
+        status: 'matching',
+      }),
+    );
+    expect(result.publicLoop).toMatchObject({
+      stage: 'matching_queued',
+      publicIntentId: 'public-intent:travel-801',
+    });
+  });
+
+  it('does not publish travel drafts with an empty city or default them to Qingdao', async () => {
+    const { draftPublication, handleMessage, service } = makeHarness();
+
+    const result = await service.perform({
+      ownerUserId: 7,
+      taskId: 101,
+      body: {
+        action: 'travel_draft.publish',
+        payload: {
+          confirmedPublish: true,
+          socialRequestId: 801,
+          slots: {
+            destination: '西湖',
+            departureTime: '周末',
+            budgetRange: '人均1000元',
+            transportMode: '高铁',
+          },
+          socialRequestDraft: {
+            socialRequestId: 801,
+            title: '西湖旅行寻伴',
+            activityType: '结伴旅行',
+            metadata: { loop: 'travel', source: 'travel_loop_mvp' },
+          },
+        },
+      },
+      handleMessage,
+    });
+
+    expect(handleMessage).not.toHaveBeenCalled();
+    expect(draftPublication.publishDraft).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      publicLoop: expect.objectContaining({
+        stage: 'publish_confirmation_required',
+      }),
+      cards: [
+        expect.objectContaining({
+          schemaType: 'travel.intake',
+          data: expect.objectContaining({
+            destination: '西湖',
+            missingFields: expect.arrayContaining(['city']),
+          }),
+        }),
+      ],
+    });
   });
 
   it('keeps low-risk candidate card actions approval-free while still dispatching through AgentLoop', async () => {

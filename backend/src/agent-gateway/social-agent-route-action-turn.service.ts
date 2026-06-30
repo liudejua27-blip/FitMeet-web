@@ -24,6 +24,13 @@ import {
   rememberSocialAgentOpportunityDraftClarification,
 } from './social-agent-opportunity-draft-memory';
 
+/**
+ * @deprecated Legacy fallback action flow only.
+ *
+ * New loop card actions should be owned by SocialAgentCardActionRouterService
+ * and the loop service/tool that owns the active task. Keep this class for old
+ * task compatibility until the legacy route-action path is removed.
+ */
 type HandleRouteActionTurnInput = {
   ownerUserId: number;
   task: AgentTask;

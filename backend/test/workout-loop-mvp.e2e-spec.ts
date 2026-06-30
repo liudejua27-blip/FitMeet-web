@@ -7,6 +7,7 @@ import {
   AgentTaskPermissionMode,
   AgentTaskStatus,
 } from '../src/agent-gateway/entities/agent-task.entity';
+import { AgentEntryOrchestratorService } from '../src/agent-gateway/agent-entry/agent-entry-orchestrator.service';
 import { FitMeetLoopRouterService } from '../src/agent-gateway/loop-router/fitmeet-loop-router.service';
 import { SocialAgentCardActionRouterService } from '../src/agent-gateway/social-agent-card-action-router.service';
 import type { SocialAgentIntentRouteResult } from '../src/agent-gateway/social-agent-chat.types';
@@ -107,6 +108,7 @@ describe('Workout Loop MVP E2E contract', () => {
     const task = makeTask();
     const taskRepo = {
       findOne: jest.fn().mockResolvedValue(task),
+      save: jest.fn(async (entity) => entity),
     };
     const messageLog = {
       recordUserMessage: jest.fn().mockResolvedValue(undefined),
@@ -146,19 +148,23 @@ describe('Workout Loop MVP E2E contract', () => {
     const taskLifecycle = {
       ensureConversationTask: jest.fn().mockResolvedValue(task),
     };
-    const mainAgentTurn = {
-      handleRouteTurn: jest.fn().mockResolvedValue({
+    const legacy = {
+      handleFallback: jest.fn().mockResolvedValue({
         task,
         result: makeRouteResult({
           assistantMessage: '旧链路不应处理约练 MVP。',
         }),
       }),
     };
+    const agentEntry = new AgentEntryOrchestratorService(
+      new FitMeetLoopRouterService(),
+      workoutLoop,
+      legacy as never,
+    );
     const routeEntrance = new SocialAgentRouteEntranceService(
       messageLog as never,
       taskLifecycle as never,
-      mainAgentTurn as never,
-      workoutLoop,
+      agentEntry,
     );
 
     const entranceResult = await routeEntrance.enter({
@@ -166,11 +172,34 @@ describe('Workout Loop MVP E2E contract', () => {
       body: { message: '今晚青岛大学附近轻松跑步，找同校的人一起' },
     });
 
-    expect(mainAgentTurn.handleRouteTurn).not.toHaveBeenCalled();
+    expect(legacy.handleFallback).not.toHaveBeenCalled();
     expect(messageLog.recordUserMessage).toHaveBeenCalledWith(
       task,
       '今晚青岛大学附近轻松跑步，找同校的人一起',
     );
+    expect(draftPublication.stagePrivateDraftForPublish).not.toHaveBeenCalled();
+    const intakeCard = entranceResult.earlyResult?.cards?.[0];
+    expect(intakeCard).toMatchObject({
+      schemaType: 'workout.intake',
+      data: expect.objectContaining({
+        activityType: '跑步',
+        timePreference: '今晚',
+        locationText: expect.stringContaining('青岛大学'),
+      }),
+    });
+    const submitAction = intakeCard?.actions.find(
+      (action) => action.schemaAction === 'workout_intake.submit',
+    );
+
+    const draftResult = await workoutLoop.performWorkoutAction({
+      ownerUserId: 7,
+      taskId: 101,
+      body: {
+        action: 'workout_intake.submit' as never,
+        payload: submitAction?.payload ?? {},
+      },
+    });
+
     expect(draftPublication.stagePrivateDraftForPublish).toHaveBeenCalledWith(
       7,
       101,
@@ -182,7 +211,7 @@ describe('Workout Loop MVP E2E contract', () => {
         }),
       }),
     );
-    const draftCard = entranceResult.earlyResult?.cards?.[0];
+    const draftCard = draftResult.cards?.[0];
     expect(draftCard).toMatchObject({
       schemaType: 'workout.draft',
       data: expect.objectContaining({ socialRequestId: 501 }),

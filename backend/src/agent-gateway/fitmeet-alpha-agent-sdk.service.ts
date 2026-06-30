@@ -35,6 +35,13 @@ type AlphaAgentBundle = {
 const MAX_VISIBLE_OPPORTUNITY_CARDS = 3;
 const MAX_VISIBLE_CARDS_WITH_ACTIVITY_DRAFT = MAX_VISIBLE_OPPORTUNITY_CARDS + 1;
 
+/**
+ * @deprecated Legacy alpha-agent adapter.
+ *
+ * Keep this adapter for old task compatibility and legacy fallback rendering.
+ * New loop-agent behavior should use loop-specific brain/services and shared
+ * tool presenters instead of extending this SDK.
+ */
 @Injectable()
 export class FitMeetAlphaAgentSdkService {
   private readonly logger = new Logger(FitMeetAlphaAgentSdkService.name);
@@ -920,9 +927,11 @@ export class FitMeetAlphaAgentSdkService {
         schemaType === 'meet_loop.timeline' ||
         schemaType === 'loop.choice' ||
         schemaType === 'clarification.binary' ||
+        schemaType === 'clarification.geo_candidates' ||
         schemaType === 'workout.intake' ||
         schemaType === 'workout.draft' ||
         schemaType === 'friend.intake' ||
+        schemaType === 'friend.draft' ||
         schemaType === 'travel.intake' ||
         schemaType === 'travel.companion_draft'
       );

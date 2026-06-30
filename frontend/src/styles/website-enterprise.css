@@ -3584,3 +3584,320 @@
     border-radius: 20px;
   }
 }
+
+/* Direction one: product-led Social World homepage, with code-native copy. */
+.fm-social-world-template .fm-enterprise-hero-system__subtitle {
+  display: block;
+  max-width: 620px;
+  color: var(--fm-sw-gold-strong);
+  font-size: clamp(1.82rem, 3.2vw, 3.15rem);
+  font-weight: 720;
+  line-height: 1.08;
+  letter-spacing: 0.02em;
+}
+
+.fm-social-world-template .fm-enterprise-hero-system--home {
+  width: 100%;
+  max-width: none;
+  min-height: clamp(720px, 88vh, 900px);
+  padding-top: clamp(112px, 12vh, 156px);
+  padding-bottom: clamp(56px, 8vh, 96px);
+}
+
+.fm-social-world-template .fm-enterprise-hero-system--home::before {
+  background:
+    radial-gradient(circle at 74% 52%, rgba(240, 217, 152, 0.16), transparent 34rem),
+    radial-gradient(circle at 18% 26%, rgba(36, 228, 214, 0.06), transparent 22rem),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.012), transparent 42%);
+}
+
+.fm-social-world-template .fm-enterprise-hero-system--home .fm-enterprise-hero-system__copy {
+  max-width: 720px;
+  gap: 20px;
+}
+
+.fm-social-world-template .fm-enterprise-hero-system--home .fm-enterprise-hero-system__copy h1 {
+  max-width: 980px;
+  background: linear-gradient(180deg, #fff4c9 0%, #e2bd67 58%, #b8872e 100%);
+  background-clip: text;
+  color: #f1d894;
+  -webkit-text-fill-color: transparent;
+  font-size: clamp(6.7rem, 13.6vw, 13.8rem);
+  font-weight: 870;
+  line-height: 0.78;
+  letter-spacing: -0.035em;
+  text-shadow: 0 24px 82px rgba(226, 189, 103, 0.12);
+}
+
+.fm-social-world-template .fm-enterprise-hero-system--home .fm-enterprise-hero-system__copy p {
+  max-width: 585px;
+  color: rgba(255, 248, 232, 0.7);
+  font-size: clamp(1.02rem, 1.2vw, 1.16rem);
+  line-height: 1.84;
+}
+
+.fm-social-world-template .fm-enterprise-hero-system--home .fm-actions {
+  margin-top: 6px;
+}
+
+.fm-social-world-template .fm-enterprise-hero-system--home .fm-actions .fm-button {
+  min-height: 58px;
+  padding-inline: 26px;
+  font-size: 1rem;
+}
+
+.fm-social-world-template .fm-enterprise-hero-system--home .fm-hero-proof-bar {
+  max-width: 620px;
+  gap: 12px 14px;
+  padding-top: 10px;
+}
+
+.fm-social-world-template .fm-enterprise-hero-system--home .fm-hero-proof-bar span {
+  border-color: rgba(245, 229, 183, 0.18);
+  background: rgba(0, 0, 0, 0.22);
+  color: rgba(255, 248, 232, 0.66);
+  padding: 9px 12px;
+}
+
+.fm-social-world-template .fm-product-proof-visual--home {
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.fm-social-world-template .fm-product-proof-visual--home .fm-product-proof-visual__caption,
+.fm-social-world-template .fm-product-proof-visual--home .fm-product-proof-visual__chips {
+  display: none;
+}
+
+@media (min-width: 981px) {
+  .fm-social-world-template .fm-enterprise-hero-system--home {
+    padding-inline: max(7vw, calc((100vw - var(--fm-sw-max)) / 2 + 28px));
+  }
+
+  .fm-social-world-template .fm-enterprise-hero-system--home .fm-enterprise-hero-system__copy {
+    z-index: 4;
+    width: min(58vw, 880px);
+    padding-top: clamp(50px, 7vh, 92px);
+  }
+
+  .fm-social-world-template .fm-enterprise-hero-system--home .fm-enterprise-hero-system__copy h1 {
+    white-space: nowrap;
+    font-size: clamp(5.4rem, 8.8vw, 9.4rem);
+    line-height: 0.88;
+  }
+
+  .fm-social-world-template .fm-enterprise-hero-system--home .fm-enterprise-hero-system__visual {
+    inset: clamp(82px, 10vh, 118px) 0 0 max(39vw, 560px);
+    z-index: 1;
+  }
+
+  .fm-social-world-template .fm-product-proof-visual--home > img {
+    object-position: right center;
+    opacity: 1;
+    filter: saturate(1.08) contrast(1.1) brightness(1.06);
+    -webkit-mask-image:
+      linear-gradient(90deg, transparent 0%, rgba(0, 0, 0, 0.08) 12%, rgba(0, 0, 0, 0.54) 28%, #000 48%, #000 100%),
+      linear-gradient(180deg, transparent 0%, #000 8%, #000 88%, transparent 100%);
+    mask-image:
+      linear-gradient(90deg, transparent 0%, rgba(0, 0, 0, 0.08) 12%, rgba(0, 0, 0, 0.54) 28%, #000 48%, #000 100%),
+      linear-gradient(180deg, transparent 0%, #000 8%, #000 88%, transparent 100%);
+    -webkit-mask-composite: source-in;
+    mask-composite: intersect;
+  }
+
+  .fm-social-world-template .fm-product-proof-visual--home::before {
+    background:
+      linear-gradient(90deg, #030303 0%, rgba(3, 3, 3, 0.94) 14%, rgba(3, 3, 3, 0.5) 36%, rgba(3, 3, 3, 0.04) 70%),
+      linear-gradient(180deg, rgba(3, 3, 3, 0.62), rgba(3, 3, 3, 0) 42%, rgba(3, 3, 3, 0.7));
+  }
+}
+
+@media (max-width: 980px) {
+  .fm-social-world-template .fm-enterprise-hero-system--home {
+    display: grid;
+    gap: 30px;
+    min-height: auto;
+    padding-top: 72px;
+  }
+
+  .fm-social-world-template .fm-enterprise-hero-system--home .fm-enterprise-hero-system__visual {
+    order: 1;
+    min-height: clamp(320px, 58vw, 560px);
+  }
+
+  .fm-social-world-template .fm-product-proof-visual--home {
+    min-height: inherit;
+    overflow: hidden;
+    border-radius: 26px;
+  }
+
+  .fm-social-world-template .fm-product-proof-visual--home > img {
+    object-position: 70% center;
+    -webkit-mask-image: linear-gradient(180deg, #000 0%, #000 76%, transparent 100%);
+    mask-image: linear-gradient(180deg, #000 0%, #000 76%, transparent 100%);
+  }
+}
+
+@media (max-width: 620px) {
+  .fm-social-world-template .fm-enterprise-hero-system--home .fm-enterprise-hero-system__copy h1 {
+    font-size: clamp(4.2rem, 19vw, 6rem);
+    white-space: normal;
+  }
+
+  .fm-social-world-template .fm-enterprise-hero-system__subtitle {
+    font-size: clamp(1.38rem, 7vw, 2rem);
+  }
+
+  .fm-social-world-template .fm-enterprise-hero-system--home .fm-actions .fm-button {
+    min-height: 52px;
+  }
+}
+
+/* Direction one site-wide polish: one premium product system, no repeated globe except About. */
+.fm-social-world-template .fm-enterprise-hero-system:not(.fm-enterprise-hero-system--home) {
+  min-height: clamp(620px, 78vh, 820px);
+  padding-top: clamp(118px, 14vh, 160px);
+  padding-bottom: clamp(58px, 8vh, 96px);
+}
+
+.fm-social-world-template .fm-enterprise-hero-system:not(.fm-enterprise-hero-system--home)::before {
+  background:
+    radial-gradient(circle at 74% 48%, rgba(237, 198, 111, 0.13), transparent 30rem),
+    radial-gradient(circle at 18% 18%, rgba(34, 225, 214, 0.05), transparent 20rem),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.015), transparent 52%);
+}
+
+.fm-social-world-template .fm-enterprise-hero-system:not(.fm-enterprise-hero-system--home) .fm-enterprise-hero-system__copy h1 {
+  max-width: 720px;
+  background: linear-gradient(180deg, #fff8df 0%, #f0d690 54%, #b98731 100%);
+  background-clip: text;
+  color: #f0d690;
+  -webkit-text-fill-color: transparent;
+  font-size: clamp(4.6rem, 8vw, 8.4rem);
+  line-height: 0.9;
+  letter-spacing: -0.032em;
+}
+
+.fm-social-world-template .fm-enterprise-hero-system:not(.fm-enterprise-hero-system--home) .fm-product-proof-visual {
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.fm-social-world-template .fm-product-proof-visual__caption,
+.fm-social-world-template .fm-product-proof-visual__chips {
+  display: none;
+}
+
+@media (min-width: 981px) {
+  .fm-social-world-template .fm-enterprise-hero-system:not(.fm-enterprise-hero-system--home) .fm-enterprise-hero-system__visual {
+    inset: clamp(92px, 11vh, 128px) 0 0 max(42vw, 590px);
+  }
+
+  .fm-social-world-template .fm-enterprise-hero-system:not(.fm-enterprise-hero-system--home) .fm-product-proof-visual > img {
+    opacity: 1;
+    filter: saturate(1.16) contrast(1.14) brightness(1.18);
+    -webkit-mask-image:
+      linear-gradient(90deg, transparent 0%, rgba(0, 0, 0, 0.24) 12%, rgba(0, 0, 0, 0.76) 27%, #000 44%, #000 100%),
+      linear-gradient(180deg, transparent 0%, #000 5%, #000 94%, transparent 100%);
+    mask-image:
+      linear-gradient(90deg, transparent 0%, rgba(0, 0, 0, 0.24) 12%, rgba(0, 0, 0, 0.76) 27%, #000 44%, #000 100%),
+      linear-gradient(180deg, transparent 0%, #000 5%, #000 94%, transparent 100%);
+    -webkit-mask-composite: source-in;
+    mask-composite: intersect;
+  }
+
+  .fm-social-world-template .fm-product-proof-visual--about > img {
+    object-position: right center;
+  }
+}
+
+.fm-social-world-template .fm-discover-product-visual {
+  margin: 0;
+  min-height: clamp(340px, 38vw, 560px);
+  overflow: hidden;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.fm-social-world-template .fm-discover-product-visual img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  min-height: inherit;
+  object-fit: cover;
+  object-position: center;
+  filter: saturate(1.08) contrast(1.08) brightness(1.06);
+  -webkit-mask-image:
+    linear-gradient(90deg, rgba(0, 0, 0, 0.88) 0%, #000 26%, #000 82%, transparent 100%),
+    linear-gradient(180deg, transparent 0%, #000 9%, #000 88%, transparent 100%);
+  mask-image:
+    linear-gradient(90deg, rgba(0, 0, 0, 0.88) 0%, #000 26%, #000 82%, transparent 100%),
+    linear-gradient(180deg, transparent 0%, #000 9%, #000 88%, transparent 100%);
+  -webkit-mask-composite: source-in;
+  mask-composite: intersect;
+}
+
+.fm-social-world-template .fm-download-stage {
+  align-items: center;
+}
+
+.fm-social-world-template .fm-download-stage__poster {
+  margin: 0;
+  overflow: hidden;
+  border: 0;
+  border-radius: 28px;
+  background: #050505;
+  box-shadow: 0 30px 110px rgba(0, 0, 0, 0.42);
+}
+
+.fm-social-world-template .fm-download-stage__poster img {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  height: auto;
+  object-fit: cover;
+  object-position: center;
+}
+
+.fm-social-world-template .fm-product-surface-card picture {
+  aspect-ratio: 16 / 9;
+}
+
+.fm-social-world-template .fm-product-surface-card img {
+  object-position: center;
+}
+
+@media (max-width: 980px) {
+  .fm-social-world-template .fm-enterprise-hero-system:not(.fm-enterprise-hero-system--home) {
+    min-height: auto;
+    padding-top: 78px;
+  }
+
+  .fm-social-world-template .fm-enterprise-hero-system:not(.fm-enterprise-hero-system--home) .fm-product-proof-visual {
+    border-radius: 26px;
+    overflow: hidden;
+  }
+
+  .fm-social-world-template .fm-enterprise-hero-system:not(.fm-enterprise-hero-system--home) .fm-product-proof-visual > img {
+    -webkit-mask-image: linear-gradient(180deg, #000 0%, #000 82%, transparent 100%);
+    mask-image: linear-gradient(180deg, #000 0%, #000 82%, transparent 100%);
+  }
+
+  .fm-social-world-template .fm-discover-product-visual {
+    border-radius: 26px;
+  }
+}
+
+@media (max-width: 620px) {
+  .fm-social-world-template .fm-enterprise-hero-system:not(.fm-enterprise-hero-system--home) .fm-enterprise-hero-system__copy h1 {
+    font-size: clamp(3.2rem, 16vw, 5.4rem);
+  }
+
+  .fm-social-world-template .fm-download-stage__poster {
+    border-radius: 22px;
+  }
+}

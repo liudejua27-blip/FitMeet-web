@@ -5,8 +5,8 @@ import type { SchemaDrivenAssistantCard } from './tool-ui-schema';
 
 const choices = [
   { key: 'workout', label: '约练', detail: '最快生成本次约练卡', icon: Dumbbell },
-  { key: 'friend', label: '交友', detail: '即将支持完整闭环', icon: UsersRound },
-  { key: 'travel', label: '旅游', detail: '即将支持结伴规划', icon: Plane },
+  { key: 'friend', label: '交友', detail: '生成交友卡并私密匹配', icon: UsersRound },
+  { key: 'travel', label: '旅游', detail: '生成旅行寻伴卡并私密匹配', icon: Plane },
 ];
 
 export function LoopChoiceCard({ card }: { card: SchemaDrivenAssistantCard }) {
@@ -25,7 +25,9 @@ export function LoopChoiceCard({ card }: { card: SchemaDrivenAssistantCard }) {
             <h3 className="text-lg font-semibold leading-7 text-slate-950">
               {card.title || '你今天想做什么？'}
             </h3>
-            {card.body ? <p className="mt-1 text-sm leading-6 text-slate-600">{card.body}</p> : null}
+            {card.body ? (
+              <p className="mt-1 text-sm leading-6 text-slate-600">{card.body}</p>
+            ) : null}
           </div>
         </div>
       </div>
@@ -35,7 +37,10 @@ export function LoopChoiceCard({ card }: { card: SchemaDrivenAssistantCard }) {
           {choices.map((choice) => {
             const Icon = choice.icon;
             return (
-              <div key={choice.key} className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3">
+              <div
+                key={choice.key}
+                className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3"
+              >
                 <Icon className="h-5 w-5 text-teal-700" aria-hidden="true" />
                 <p className="mt-2 text-sm font-semibold text-slate-950">{choice.label}</p>
                 <p className="mt-1 text-xs leading-5 text-slate-600">{choice.detail}</p>

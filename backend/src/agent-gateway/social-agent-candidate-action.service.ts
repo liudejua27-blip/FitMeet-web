@@ -15,6 +15,8 @@ import {
   sanitizeForDisplay,
 } from '../common/display-text.util';
 import { FeatureFlagService } from '../common/feature-flag.service';
+import type { AgentLoopBrainRuntime } from './agent-loop.types';
+import { AgentLoopService } from './agent-loop.service';
 import { AgentApprovalService } from './agent-approval.service';
 import {
   AgentApprovalRequest,
@@ -87,15 +89,19 @@ import { SocialAgentUserInterestEventService } from './social-agent-user-interes
 import { SocialCandidateAuditService } from './social-candidate-audit.service';
 import type { SocialCandidateEventType } from './entities/social-candidate-event.entity';
 import { SocialAgentLoopStateTransitionEventService } from './social-agent-loop-state-transition-event.service';
+import { WorkoutOpenerDraftService } from './workout-loop/workout-opener-draft.service';
+import { isLoopKind, type LoopKind } from './loop-agent/loop-agent.types';
 
 type CandidateActionOptions = {
   signal?: AbortSignal | null;
 };
 
-type WorkoutLoopCandidateStage =
+type LoopCandidateStage =
   | 'opener_ready'
   | 'message_confirming'
   | 'messages_handoff';
+
+type LoopOpenerSendDecision = 'request_send_approval' | 'send_after_approval';
 
 @Injectable()
 export class SocialAgentCandidateActionService {
@@ -124,6 +130,10 @@ export class SocialAgentCandidateActionService {
     private readonly featureFlags?: FeatureFlagService,
     @Optional()
     private readonly loopStateEvents?: SocialAgentLoopStateTransitionEventService,
+    @Optional()
+    private readonly workoutOpenerDrafts?: WorkoutOpenerDraftService,
+    @Optional()
+    private readonly agentLoop?: AgentLoopService,
   ) {}
 
   async createActionApproval(input: {
@@ -207,7 +217,7 @@ export class SocialAgentCandidateActionService {
       this.number(candidate.targetUserId) ??
       this.number(candidate.candidateUserId) ??
       this.number(candidate.userId);
-    const draft =
+    const fallbackDraft =
       cleanDisplayText(
         payload.message ??
           payload.suggestedOpener ??
@@ -215,6 +225,13 @@ export class SocialAgentCandidateActionService {
           candidate.suggestedMessage,
         '',
       ).trim() || this.candidateMessageDraft(task);
+    const draft = await this.generateLoopOpenerDraft({
+      task,
+      candidate,
+      payload,
+      fallbackDraft,
+      targetUserId,
+    });
 
     const openerDraft = this.buildOpenerDraftPreviewState({
       action: schemaAction,
@@ -233,7 +250,7 @@ export class SocialAgentCandidateActionService {
       'message_action',
       openerDraft.transitionPatch,
     );
-    this.rememberWorkoutLoopCandidateStage(task, 'opener_ready', {
+    this.rememberLoopCandidateStage(task, 'opener_ready', {
       targetUserId,
       candidateRecordId: this.number(
         payload.candidateRecordId ?? candidate.candidateRecordId,
@@ -302,6 +319,178 @@ export class SocialAgentCandidateActionService {
     return result;
   }
 
+  private async generateLoopOpenerDraft(input: {
+    task: AgentTask;
+    candidate: Record<string, unknown>;
+    payload: Record<string, unknown>;
+    fallbackDraft: string;
+    targetUserId?: number | null;
+  }): Promise<string> {
+    if (!this.agentLoop) {
+      return (
+        (await this.workoutOpenerDrafts?.draft({
+          task: input.task,
+          candidate: input.candidate,
+          payload: input.payload,
+          fallbackDraft: input.fallbackDraft,
+        })) ?? input.fallbackDraft
+      );
+    }
+
+    let draft = input.fallbackDraft;
+    const loopKind = this.openerLoopKind(input);
+    const agentName = this.loopAgentName(loopKind);
+    const toolName = `${loopKind}_agent.generate_opener`;
+    const runtime: AgentLoopBrainRuntime = {
+      decide: ({ observations }) => {
+        if (observations.length === 0) {
+          return {
+            reason: `select_${loopKind}_opener_draft`,
+            critique:
+              'Generate only a safe draft opener; sending remains behind approval.',
+            tool: {
+              agent: 'Agent Brain',
+              toolName,
+              input: {
+                taskId: input.task.id,
+                targetUserId: input.targetUserId ?? null,
+                candidateRecordId:
+                  this.number(input.payload.candidateRecordId) ??
+                  this.number(input.candidate.candidateRecordId),
+              },
+            },
+          };
+        }
+        return {
+          done: true,
+          reason: `${loopKind}_opener_draft_ready`,
+          finalObservation: {
+            toolName,
+            status: 'completed',
+            draftReady: true,
+            draftLength: Array.from(draft).length,
+          },
+        };
+      },
+    };
+
+    await this.agentLoop.execute({
+      taskId: input.task.id,
+      goal: `${agentName} drafts a safe opener before user send approval.`,
+      agent: 'Agent Brain',
+      plan: { reason: `${agentName} opener brain runtime`, tools: [] },
+      brain: runtime,
+      maxToolCalls: 2,
+      runner: async () => {
+        draft =
+          (await this.workoutOpenerDrafts?.draft({
+            task: input.task,
+            candidate: input.candidate,
+            payload: input.payload,
+            fallbackDraft: input.fallbackDraft,
+          })) ?? input.fallbackDraft;
+        return {
+          toolName,
+          status: 'observed',
+          draftReady: true,
+          draftLength: Array.from(draft).length,
+        };
+      },
+    });
+
+    return draft;
+  }
+
+  private async decideLoopOpenerSend(input: {
+    task: AgentTask;
+    loopKind: LoopKind;
+    targetUserId: number;
+    candidateRecordId: number | null;
+    socialRequestId: number | null;
+    requestedApprovalId: number | null;
+    hasPendingApproval: boolean;
+    messageLength: number;
+  }): Promise<LoopOpenerSendDecision> {
+    const fallbackDecision: LoopOpenerSendDecision = input.hasPendingApproval
+      ? 'send_after_approval'
+      : 'request_send_approval';
+    if (!this.agentLoop) return fallbackDecision;
+
+    let decision = fallbackDecision;
+    const agentName = this.loopAgentName(input.loopKind);
+    const toolName = `${input.loopKind}_agent.confirm_opener_send`;
+    const runtime: AgentLoopBrainRuntime = {
+      decide: ({ observations }) => {
+        if (observations.length === 0) {
+          return {
+            reason: input.hasPendingApproval
+              ? 'approval_exists_before_send'
+              : 'approval_required_before_send',
+            critique:
+              'Observe send-confirmation state only; message delivery remains behind approval.',
+            tool: {
+              agent: 'Agent Brain',
+              toolName,
+              input: {
+                taskId: input.task.id,
+                targetUserId: input.targetUserId,
+                candidateRecordId: input.candidateRecordId,
+                socialRequestId: input.socialRequestId,
+                requestedApprovalId: input.requestedApprovalId,
+                hasPendingApproval: input.hasPendingApproval,
+                messageLength: input.messageLength,
+              },
+            },
+          };
+        }
+        return {
+          done: true,
+          reason:
+            decision === 'send_after_approval'
+              ? 'continue_after_recorded_approval'
+              : 'request_user_send_approval',
+          finalObservation: {
+            toolName,
+            status: 'completed',
+            decision,
+            approvalRequired: decision === 'request_send_approval',
+            canSend: decision === 'send_after_approval',
+          },
+        };
+      },
+    };
+
+    await this.agentLoop.execute({
+      taskId: input.task.id,
+      goal: `${agentName} decides the opener send confirmation boundary.`,
+      agent: 'Agent Brain',
+      plan: {
+        reason: `${agentName} opener send confirmation runtime`,
+        tools: [],
+      },
+      brain: runtime,
+      maxToolCalls: 2,
+      runner: () => {
+        decision = input.hasPendingApproval
+          ? 'send_after_approval'
+          : 'request_send_approval';
+        return Promise.resolve({
+          toolName,
+          status: 'observed',
+          decision,
+          hasPendingApproval: input.hasPendingApproval,
+          requestedApprovalId: input.requestedApprovalId,
+          targetUserId: input.targetUserId,
+          candidateRecordId: input.candidateRecordId,
+          socialRequestId: input.socialRequestId,
+          messageLength: input.messageLength,
+        });
+      },
+    });
+
+    return decision;
+  }
+
   async confirmOpenerSendFromCardAction(
     ownerUserId: number,
     taskId: number,
@@ -342,53 +531,6 @@ export class SocialAgentCandidateActionService {
           return false;
         return requestedApprovalId ? action.id === requestedApprovalId : true;
       });
-    if (!pendingMessageAction) {
-      const repeated = this.duplicateConfirmedCandidateMessageResult({
-        task,
-        targetUserId,
-        candidate,
-        text,
-        candidateRecordId:
-          this.number(
-            payload.candidateRecordId ??
-              draft.candidateRecordId ??
-              candidate.candidateRecordId,
-          ) ?? null,
-        socialRequestId:
-          this.number(
-            payload.socialRequestId ??
-              draft.socialRequestId ??
-              candidate.socialRequestId,
-          ) ?? null,
-      });
-      if (repeated) return repeated;
-      return this.createOpenerSendApprovalFromDraft({
-        ownerUserId,
-        task,
-        body,
-        candidate,
-        targetUserId,
-        text,
-        candidateRecordId:
-          this.number(
-            payload.candidateRecordId ??
-              draft.candidateRecordId ??
-              candidate.candidateRecordId,
-          ) ?? null,
-        socialRequestId:
-          this.number(
-            payload.socialRequestId ??
-              draft.socialRequestId ??
-              candidate.socialRequestId,
-          ) ?? null,
-      });
-    }
-    await this.approveOpenerApprovalBeforeSend(
-      task,
-      ownerUserId,
-      pendingMessageAction.id,
-    );
-
     const candidateRecordId = this.number(
       payload.candidateRecordId ??
         draft.candidateRecordId ??
@@ -399,6 +541,45 @@ export class SocialAgentCandidateActionService {
         draft.socialRequestId ??
         candidate.socialRequestId,
     );
+    const sendDecision = await this.decideLoopOpenerSend({
+      task,
+      loopKind: this.openerLoopKind({ task, candidate, payload }),
+      targetUserId,
+      candidateRecordId: candidateRecordId ?? null,
+      socialRequestId: socialRequestId ?? null,
+      requestedApprovalId: requestedApprovalId ?? null,
+      hasPendingApproval: Boolean(pendingMessageAction),
+      messageLength: Array.from(text).length,
+    });
+    const canSendAfterApproval =
+      sendDecision === 'send_after_approval' && Boolean(pendingMessageAction);
+    if (!canSendAfterApproval || !pendingMessageAction) {
+      const repeated = this.duplicateConfirmedCandidateMessageResult({
+        task,
+        targetUserId,
+        candidate,
+        text,
+        candidateRecordId: candidateRecordId ?? null,
+        socialRequestId: socialRequestId ?? null,
+      });
+      if (repeated) return repeated;
+      return this.createOpenerSendApprovalFromDraft({
+        ownerUserId,
+        task,
+        body,
+        candidate,
+        targetUserId,
+        text,
+        candidateRecordId: candidateRecordId ?? null,
+        socialRequestId: socialRequestId ?? null,
+      });
+    }
+    await this.approveOpenerApprovalBeforeSend(
+      task,
+      ownerUserId,
+      pendingMessageAction.id,
+    );
+
     const action = await this.executor.executeToolAction(
       task.id,
       SocialAgentToolName.SendMessageToCandidate,
@@ -449,7 +630,7 @@ export class SocialAgentCandidateActionService {
       'message_action',
       confirmedMessage.transitionPatch,
     );
-    this.rememberWorkoutLoopCandidateStage(task, 'messages_handoff', {
+    this.rememberLoopCandidateStage(task, 'messages_handoff', {
       targetUserId,
       candidateRecordId,
       socialRequestId,
@@ -1860,7 +2041,7 @@ export class SocialAgentCandidateActionService {
       'confirmation_required',
       openerDraft.transitionPatch,
     );
-    this.rememberWorkoutLoopCandidateStage(input.task, 'message_confirming', {
+    this.rememberLoopCandidateStage(input.task, 'message_confirming', {
       targetUserId: input.targetUserId,
       candidateRecordId: input.candidateRecordId,
       socialRequestId: input.socialRequestId,
@@ -2376,14 +2557,15 @@ export class SocialAgentCandidateActionService {
     return this.isRecord(value) ? value : {};
   }
 
-  private rememberWorkoutLoopCandidateStage(
+  private rememberLoopCandidateStage(
     task: AgentTask,
-    stage: WorkoutLoopCandidateStage,
+    stage: LoopCandidateStage,
     patch: Record<string, unknown>,
   ): void {
     const memory = this.record(task.memory);
-    const workoutLoop = this.record(memory.workoutLoop);
-    if (Object.keys(workoutLoop).length === 0) return;
+    const loopKey = this.activeLoopMemoryKey(memory);
+    if (!loopKey) return;
+    const loopMemory = this.record(memory[loopKey]);
     const definedPatch = Object.fromEntries(
       Object.entries(patch).filter(([, value]) => {
         if (value === null || value === undefined) return false;
@@ -2394,13 +2576,22 @@ export class SocialAgentCandidateActionService {
     );
     task.memory = {
       ...memory,
-      workoutLoop: {
-        ...workoutLoop,
+      [loopKey]: {
+        ...loopMemory,
         stage,
         ...definedPatch,
         updatedAt: new Date().toISOString(),
       },
     };
+  }
+
+  private activeLoopMemoryKey(
+    memory: Record<string, unknown>,
+  ): 'workoutLoop' | 'friendLoop' | 'travelLoop' | null {
+    for (const key of ['workoutLoop', 'friendLoop', 'travelLoop'] as const) {
+      if (Object.keys(this.record(memory[key])).length > 0) return key;
+    }
+    return null;
   }
 
   private looksLikeMessageSendConfirmation(message: string): boolean {
@@ -2537,6 +2728,53 @@ export class SocialAgentCandidateActionService {
     const text = cleanDisplayText(value, '');
     if (text.length <= max) return text;
     return `${text.slice(0, Math.max(0, max - 1))}…`;
+  }
+
+  private openerLoopKind(input: {
+    task: AgentTask;
+    candidate?: Record<string, unknown>;
+    payload?: Record<string, unknown>;
+  }): LoopKind {
+    const fromPayload = this.loopKindText(input.payload);
+    if (fromPayload) return fromPayload;
+    const fromCandidate = this.loopKindText(input.candidate);
+    if (fromCandidate) return fromCandidate;
+    const fromDraft = this.loopKindText(this.cardActionDraft(input.task));
+    if (fromDraft) return fromDraft;
+
+    const memory = this.record(input.task.memory);
+    if (Object.keys(this.record(memory.friendLoop)).length > 0) return 'friend';
+    if (Object.keys(this.record(memory.travelLoop)).length > 0) return 'travel';
+    return 'workout';
+  }
+
+  private loopKindText(
+    value: Record<string, unknown> | undefined,
+  ): LoopKind | null {
+    if (!value) return null;
+    const metadata = this.record(value.metadata);
+    const socialRequest = this.record(value.socialRequest);
+    const raw = cleanDisplayText(
+      value.loopKind ??
+        value.loop ??
+        metadata.loopKind ??
+        metadata.loop ??
+        socialRequest.loopKind ??
+        socialRequest.loop,
+      '',
+    );
+    return isLoopKind(raw) ? raw : null;
+  }
+
+  private loopAgentName(loopKind: LoopKind): string {
+    switch (loopKind) {
+      case 'friend':
+        return 'Friend agent';
+      case 'travel':
+        return 'Travel agent';
+      case 'workout':
+        return 'Workout agent';
+    }
   }
 
   private isRecord(value: unknown): value is Record<string, unknown> {

@@ -62,6 +62,22 @@ export interface AgentLoopToolPlan {
   requiresApproval?: boolean;
 }
 
+export interface AgentLoopBrainDecision {
+  reason?: string | null;
+  critique?: string | null;
+  tool?: AgentLoopToolPlan | null;
+  done?: boolean;
+  finalObservation?: Record<string, unknown> | null;
+}
+
+export interface AgentLoopBrainRuntime {
+  decide(input: {
+    loop: AgentLoopRun;
+    observations: Array<Record<string, unknown>>;
+    remainingToolCalls: number;
+  }): Promise<AgentLoopBrainDecision> | AgentLoopBrainDecision;
+}
+
 export interface AgentLoopExecutionResult {
   loop: AgentLoopRun;
   observations: Array<Record<string, unknown>>;

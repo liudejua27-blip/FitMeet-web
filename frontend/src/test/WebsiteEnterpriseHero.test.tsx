@@ -90,7 +90,7 @@ describe('Website enterprise hero system', () => {
     );
   });
 
-  it('uses the generated black-gold Social World hero asset', () => {
+  it('uses the direction-one Social World product hero asset', () => {
     renderWebsite('home');
 
     expect(screen.getByRole('heading', { name: 'Social World' })).toBeInTheDocument();
@@ -102,18 +102,18 @@ describe('Website enterprise hero system', () => {
 
     expect(heroVisual).toHaveAttribute(
       'src',
-      '/images/fitmeet/website/social-world-hero-clean-v3.jpg',
+      '/images/fitmeet/website/social-world-direction-one-product.jpg',
     );
   });
 
-  it('uses the generated product suite asset outside the homepage and about globe', () => {
+  it('uses the direction-one product system asset outside the homepage and about globe', () => {
     renderWebsite('features', '/features');
 
     expect(
       screen.getByRole('img', {
         name: 'FitMeet Agent、Discover、Matching、Messages 和 Safety 产品能力图',
       }),
-    ).toHaveAttribute('src', '/images/fitmeet/website/social-world-product-suite-v4.jpg');
+    ).toHaveAttribute('src', '/images/fitmeet/website/social-world-features-system-v1.jpg');
   });
 
   it('keeps the globe visual exclusive to the About page hero', () => {

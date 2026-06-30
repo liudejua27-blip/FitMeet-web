@@ -246,7 +246,23 @@ import { SocialActivity } from '../activities/entities/activity.entity';
 import { RealtimeModule } from '../realtime/realtime.module';
 import { AdminRbacModule } from '../admin-rbac/admin-rbac.module';
 import { FeatureFlagService } from '../common/feature-flag.service';
+import { AgentLoopRuntimeHealthService } from './agent-loop-runtime-health.service';
+import { AgentEntryOrchestratorService } from './agent-entry/agent-entry-orchestrator.service';
+import { LegacyAgentAdapterService } from './legacy-agent/legacy-agent-adapter.service';
+import { FriendLoopService } from './friend-loop/friend-loop.service';
+import { FriendAgentBrainService } from './friend-loop/friend-agent-brain.service';
+import { FriendUnderstandingService } from './friend-loop/friend-understanding.service';
+import { ProfileLoopService } from './profile-loop/profile-loop.service';
+import { TravelLoopService } from './travel-loop/travel-loop.service';
+import { TravelAgentBrainService } from './travel-loop/travel-agent-brain.service';
+import { TravelUnderstandingService } from './travel-loop/travel-understanding.service';
+import { GeoResolverService } from './geo/geo-resolver.service';
+import { AmapChinaGeoProviderService } from './geo/amap-china-geo-provider.service';
+import { WorkoutEntryArbitrationService } from './workout-loop/workout-entry-arbitration.service';
 import { WorkoutLoopService } from './workout-loop/workout-loop.service';
+import { WorkoutAgentBrainService } from './workout-loop/workout-agent-brain.service';
+import { WorkoutOpenerDraftService } from './workout-loop/workout-opener-draft.service';
+import { WorkoutUnderstandingService } from './workout-loop/workout-understanding.service';
 
 @Module({
   imports: [
@@ -341,9 +357,25 @@ import { WorkoutLoopService } from './workout-loop/workout-loop.service';
     PublicIntentPrivacyGuardService,
     SocialIntentRateLimitService,
     SocialAgentDomainClassifierService,
+    AgentLoopRuntimeHealthService,
+    AgentEntryOrchestratorService,
+    LegacyAgentAdapterService,
+    FriendAgentBrainService,
+    FriendUnderstandingService,
+    FriendLoopService,
+    TravelAgentBrainService,
+    TravelUnderstandingService,
+    TravelLoopService,
     FitMeetLoopRouterService,
     ClarificationCardActionService,
+    ProfileLoopService,
+    AmapChinaGeoProviderService,
+    GeoResolverService,
+    WorkoutEntryArbitrationService,
+    WorkoutAgentBrainService,
     WorkoutLoopService,
+    WorkoutOpenerDraftService,
+    WorkoutUnderstandingService,
     FeatureFlagService,
     AgentApprovalDispatcherService,
     AgentSettingsService,
@@ -514,9 +546,22 @@ import { WorkoutLoopService } from './workout-loop/workout-loop.service';
     PublicIntentPrivacyGuardService,
     SocialIntentRateLimitService,
     SocialAgentDomainClassifierService,
+    AgentLoopRuntimeHealthService,
     FitMeetLoopRouterService,
     ClarificationCardActionService,
+    FriendAgentBrainService,
+    FriendUnderstandingService,
+    FriendLoopService,
+    TravelAgentBrainService,
+    TravelUnderstandingService,
+    TravelLoopService,
+    AmapChinaGeoProviderService,
+    GeoResolverService,
+    WorkoutEntryArbitrationService,
+    WorkoutAgentBrainService,
     WorkoutLoopService,
+    WorkoutOpenerDraftService,
+    WorkoutUnderstandingService,
     FeatureFlagService,
     AgentApprovalDispatcherService,
     AgentSettingsService,

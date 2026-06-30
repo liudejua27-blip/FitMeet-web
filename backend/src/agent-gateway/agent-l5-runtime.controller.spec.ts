@@ -17,6 +17,8 @@ describe('AgentL5RuntimeController', () => {
         candidateEvents: 0,
         socialLoopTraceLinks: 0,
         socialLoopMissingCriticalIds: 0,
+        agentLoopRuntimeHealthStatus: 'warning',
+        agentLoopRuntimeHealthWarnings: 1,
       }),
       messageFeedback: [],
       candidateSnapshots: [],
@@ -36,7 +38,27 @@ describe('AgentL5RuntimeController', () => {
         identifiers: expect.arrayContaining(['taskId', 'matchingJobId']),
         recentTraceLinks: [],
       }),
+      agentLoopRuntimeHealth: expect.objectContaining({
+        status: 'warning',
+        warnings: [expect.objectContaining({ code: 'amap_key_missing' })],
+      }),
     });
+  });
+
+  it('exposes agent loop runtime health for deployment verification', () => {
+    const controller = makeController();
+
+    expect(controller.runtimeHealth()).toEqual(
+      expect.objectContaining({
+        status: 'warning',
+        warnings: [expect.objectContaining({ code: 'amap_key_missing' })],
+        dependencies: expect.objectContaining({
+          deepseek: expect.objectContaining({ configured: true }),
+          amap: expect.objectContaining({ configured: false }),
+          matchingWorker: expect.objectContaining({ enabled: true }),
+        }),
+      }),
+    );
   });
 });
 
@@ -95,6 +117,26 @@ function makeController() {
       snapshot: jest.fn().mockResolvedValue({
         identifiers: ['taskId', 'matchingJobId'],
         recentTraceLinks: [],
+      }),
+    } as never,
+    {
+      snapshot: jest.fn().mockReturnValue({
+        status: 'warning',
+        warnings: [{ code: 'amap_key_missing' }],
+        dependencies: {
+          deepseek: { configured: true, envKey: 'DEEPSEEK_API_KEY' },
+          amap: {
+            configured: false,
+            envKeys: ['FITMEET_AMAP_WEB_SERVICE_KEY', 'AMAP_WEB_SERVICE_KEY'],
+          },
+          features: {},
+          matchingWorker: {
+            enabled: true,
+            processRole: 'worker-matching',
+            schedulerEnabled: true,
+            requiredRoles: ['worker', 'all', 'worker-matching'],
+          },
+        },
       }),
     } as never,
   );

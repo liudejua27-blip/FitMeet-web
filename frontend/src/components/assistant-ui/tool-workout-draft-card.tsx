@@ -13,7 +13,7 @@ export function WorkoutDraftCard({ card }: { card: SchemaDrivenAssistantCard }) 
   const preference = stringValue(card.data.candidatePreference);
   const safety = stringValue(card.data.safetyBoundary);
   const visibility =
-    stringValue(card.data.visibilityPreference) === 'private' ? '不公开，先保存' : '发布前确认';
+    stringValue(card.data.visibilityPreference) === 'private' ? '不公开，继续私密匹配' : '发布前确认';
 
   return (
     <article

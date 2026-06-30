@@ -709,6 +709,7 @@ export function isSocialSurfaceCard(card: { type?: string; schemaType?: string; 
     schemaType === 'workout.intake' ||
     schemaType === 'workout.draft' ||
     schemaType === 'friend.intake' ||
+    schemaType === 'friend.draft' ||
     schemaType === 'travel.intake' ||
     schemaType === 'travel.companion_draft' ||
     isApprovalCard(card)
