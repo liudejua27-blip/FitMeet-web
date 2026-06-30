@@ -48,12 +48,15 @@ describe('FitMeetLoopRouterService', () => {
     '我适合找什么样的健身搭子',
     '不要推荐人，只想问问怎么约练',
     '我想了解跑步搭子的规则',
-  ])('keeps workout advice or friend-preference "%s" out of direct workout intake', (message) => {
-    expect(service.classify(message)).not.toMatchObject({
-      intent: 'workout',
-      disposition: 'accept_loop',
-    });
-  });
+  ])(
+    'keeps workout advice or friend-preference "%s" out of direct workout intake',
+    (message) => {
+      expect(service.classify(message)).not.toMatchObject({
+        intent: 'workout',
+        disposition: 'accept_loop',
+      });
+    },
+  );
 
   it('marks keyword-only workout wording for arbitration instead of final routing', () => {
     for (const message of [

@@ -1,4 +1,8 @@
 import { getConfiguredAllowedOrigins } from '../common/cors/origin-allowlist';
+import {
+  FITMEET_SUBAGENT_WORKER_REQUIRED_QUEUES,
+  parseFitMeetSubagentWorkerQueueList,
+} from '../agent-gateway/fitmeet-subagent-worker-queues';
 
 export type EnvIssueSeverity = 'error' | 'warning';
 
@@ -147,7 +151,7 @@ export function buildProductionEnvReport(env: EnvMap): ProductionEnvReport {
   checkUploadTempDir(env, error);
   checkAgentModel(env, error);
   checkAgentIntelligencePolicy(env, error);
-  checkSubagentWorker(env, error, warning);
+  checkSubagentWorker(env, error);
   checkObservabilityAlerts(env, error, warning);
   checkWorkoutLoopReadiness(env, warning);
 
@@ -592,7 +596,6 @@ function isFastDeepSeekModel(value: string): boolean {
 function checkSubagentWorker(
   env: EnvMap,
   error: (key: string, message: string) => void,
-  warning: (key: string, message: string) => void,
 ): void {
   const mode = `${env.FITMEET_SUBAGENT_WORKER_MODE ?? ''}`.trim().toLowerCase();
   if (!hasConfiguredValue(mode)) {
@@ -613,14 +616,16 @@ function checkSubagentWorker(
   requirePositiveInt(env, 'FITMEET_SUBAGENT_WORKER_HEALTH_MAX_AGE_MS', error);
   checkSubagentWorkerModelOverrides(env, error);
 
-  const queues = `${env.FITMEET_SUBAGENT_WORKER_QUEUE ?? ''}`
-    .split(',')
-    .map((item) => item.trim())
-    .filter(Boolean);
-  if (queues.length > 0 && queues.length < 3) {
-    warning(
+  const queues = parseFitMeetSubagentWorkerQueueList(
+    env.FITMEET_SUBAGENT_WORKER_QUEUE,
+  );
+  const missingQueues = FITMEET_SUBAGENT_WORKER_REQUIRED_QUEUES.filter(
+    (queueName) => !queues.includes(queueName),
+  );
+  if (missingQueues.length > 0) {
+    error(
       'FITMEET_SUBAGENT_WORKER_QUEUE',
-      'custom queue list should include Agent Brain, Life Graph, and Match worker queues unless this is an intentional partial rollout.',
+      `must include release worker queues: ${FITMEET_SUBAGENT_WORKER_REQUIRED_QUEUES.join(', ')}.`,
     );
   }
 }

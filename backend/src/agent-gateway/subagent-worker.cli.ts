@@ -18,6 +18,10 @@ import {
 import type { SubagentWorkerJob } from './entities/agent-l5-runtime.entity';
 import { SubagentWorkerQueueService } from './subagent-worker-queue.service';
 import { workerRuntimeFromSubagentPayload } from './fitmeet-subagent-worker-command.contract';
+import {
+  FITMEET_SUBAGENT_WORKER_DEFAULT_QUEUE_CSV,
+  parseFitMeetSubagentWorkerQueueList,
+} from './fitmeet-subagent-worker-queues';
 
 async function main() {
   const app = await NestFactory.createApplicationContext(AppModule, {
@@ -41,13 +45,10 @@ async function main() {
     process.env.FITMEET_SUBAGENT_WORKER_CONCURRENCY,
     1,
   );
-  const queueNames = (
+  const queueNames = parseFitMeetSubagentWorkerQueueList(
     process.env.FITMEET_SUBAGENT_WORKER_QUEUE ??
-    'fitmeet.subagent.agent-brain,fitmeet.subagent.life-graph-agent,fitmeet.subagent.match-agent'
-  )
-    .split(',')
-    .map((item) => item.trim())
-    .filter(Boolean);
+      FITMEET_SUBAGENT_WORKER_DEFAULT_QUEUE_CSV,
+  );
 
   const heartbeat = async (status: 'idle' | 'running' = 'idle') => {
     await queue.reclaimTimedOutJobs();

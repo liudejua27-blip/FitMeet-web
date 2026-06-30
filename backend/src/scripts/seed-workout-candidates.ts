@@ -962,7 +962,7 @@ async function main(): Promise<void> {
     return;
   }
 
-  assertProductionIntent(options);
+  assertProductionIntent();
   const seedKey = sanitizeSeedKey(options.batch);
 
   await dataSource.initialize();
@@ -1592,16 +1592,20 @@ function sanitizeSeedKey(value: string): string {
   return seedKey;
 }
 
-function assertProductionIntent(options: SeedOptions): void {
+function assertProductionIntent(): void {
+  const seedTarget = `${process.env.FITMEET_SEED_TARGET ?? ''}`
+    .trim()
+    .toLowerCase();
+  if (seedTarget !== 'staging' && seedTarget !== 'development') {
+    throw new Error(
+      'Refusing to seed workout candidates unless FITMEET_SEED_TARGET=staging or FITMEET_SEED_TARGET=development.',
+    );
+  }
   const isProduction =
     process.env.NODE_ENV === 'production' ||
     process.env.FITMEET_ENV === 'production';
   if (!isProduction) return;
-  if (options.yes || process.env.FITMEET_ALLOW_PRODUCTION_SEED === 'true')
-    return;
-  throw new Error(
-    'Refusing to seed production without --yes or FITMEET_ALLOW_PRODUCTION_SEED=true.',
-  );
+  throw new Error('Refusing to seed workout candidates in production.');
 }
 
 function printHelp(): void {
@@ -1615,7 +1619,10 @@ Options:
   --count <n>     Number of candidates to upsert, default ${DEFAULT_COUNT}, max ${MAX_COUNT}
   --batch <name>  Stable cleanup/upsert key, default ${DEFAULT_BATCH}
   --cleanup       Delete rows created for the batch
-  --yes           Required when NODE_ENV=production
+  --yes           Accepted for old command lines, but production seeding is refused
+
+Environment:
+  FITMEET_SEED_TARGET must be staging or development
 `);
 }
 

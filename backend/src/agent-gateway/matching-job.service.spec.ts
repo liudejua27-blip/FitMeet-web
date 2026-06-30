@@ -171,4 +171,21 @@ describe('MatchingJobService', () => {
     expect(String(sql)).toContain('"updatedAt" = $4::timestamptz');
     expect(typeof params[3]).toBe('string');
   });
+
+  it('casts claimed failure and cancellation timestamps for postgres', async () => {
+    const { manager, repo } = makeRepo();
+    manager.query
+      .mockResolvedValueOnce([{ id: 1, status: MatchingJobStatus.FailedFinal }])
+      .mockResolvedValueOnce([{ id: 1, status: MatchingJobStatus.Cancelled }]);
+    const service = new MatchingJobService(repo as never);
+
+    await service.markFailed(1, new Error('boom'), false, 'worker-a');
+    await service.cancelClaimed(1, 'worker-a', 'cancelled');
+
+    const [, failedParams] = manager.query.mock.calls[0];
+    const [, cancelledParams] = manager.query.mock.calls[1];
+    expect(typeof failedParams[2]).toBe('object');
+    expect(typeof failedParams[4]).toBe('string');
+    expect(typeof cancelledParams[2]).toBe('string');
+  });
 });

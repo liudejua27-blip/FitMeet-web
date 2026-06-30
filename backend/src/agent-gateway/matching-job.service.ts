@@ -217,6 +217,7 @@ export class MatchingJobService {
     if (leaseOwner) {
       const count = Math.max(0, Math.floor(Number(candidateCount) || 0));
       const completedAt = new Date();
+      const completedAtIso = completedAt.toISOString();
       const status =
         count > 0
           ? MatchingJobStatus.CandidatesReady
@@ -242,7 +243,7 @@ export class MatchingJobService {
           status,
           count,
           JSON.stringify(result),
-          completedAt,
+          completedAtIso,
           jobId,
           MatchingJobStatus.Running,
           leaseOwner,
@@ -275,7 +276,9 @@ export class MatchingJobService {
   ) {
     if (leaseOwner) {
       const now = new Date();
+      const nowIso = now.toISOString();
       const retryAt = retryable ? new Date(Date.now() + 60_000) : null;
+      const retryAtIso = retryAt ? retryAt.toISOString() : null;
       const status = retryable
         ? MatchingJobStatus.FailedRetryable
         : MatchingJobStatus.FailedFinal;
@@ -298,9 +301,9 @@ export class MatchingJobService {
         [
           status,
           this.errorMessage(error),
-          retryAt,
+          retryAtIso,
           retryable,
-          now,
+          nowIso,
           JSON.stringify({
             failedAt: now.toISOString(),
             retryable,
@@ -329,6 +332,7 @@ export class MatchingJobService {
 
   async cancelClaimed(jobId: number, leaseOwner: string, reason: string) {
     const now = new Date();
+    const nowIso = now.toISOString();
     const rows = await this.queryRows<MatchingJob>(
       this.repo.manager,
       `UPDATE "matching_jobs"
@@ -348,7 +352,7 @@ export class MatchingJobService {
       [
         MatchingJobStatus.Cancelled,
         this.errorMessage(reason),
-        now,
+        nowIso,
         JSON.stringify({
           cancelledAt: now.toISOString(),
           cancelReason: reason,
