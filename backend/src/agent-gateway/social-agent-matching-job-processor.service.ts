@@ -79,6 +79,13 @@ type JobValidationResult = {
   privateMatchMode: boolean;
 };
 
+type MatchingLoopKind = 'workout' | 'friend' | 'travel';
+
+type MatchingLoopStage =
+  | 'candidates_ready'
+  | 'no_candidates'
+  | 'no_candidates_final';
+
 type CandidateIndexHints = {
   candidateUserIds: number[];
   publicIntentIds: string[];
@@ -1022,8 +1029,9 @@ export class SocialAgentMatchingJobProcessorService {
         },
         updatedAt: now,
       },
-      ...this.workoutLoopMatchingMemoryPatch({
+      ...this.loopMatchingMemoryPatch({
         memory,
+        job: input.job,
         socialRequest: input.validation.socialRequest,
         stage:
           candidateCount > 0
@@ -1527,10 +1535,11 @@ export class SocialAgentMatchingJobProcessorService {
       : {};
   }
 
-  private workoutLoopMatchingMemoryPatch(input: {
+  private loopMatchingMemoryPatch(input: {
     memory: Record<string, unknown>;
+    job: MatchingJob;
     socialRequest: UserSocialRequest;
-    stage: 'candidates_ready' | 'no_candidates' | 'no_candidates_final';
+    stage: MatchingLoopStage;
     socialRequestId: number;
     publicIntentId: string;
     matchingJobId: number;
@@ -1540,15 +1549,16 @@ export class SocialAgentMatchingJobProcessorService {
     noCandidatesFinal: boolean;
     updatedAt: string;
   }): Record<string, unknown> {
-    const workoutLoop = this.record(input.memory.workoutLoop);
-    const requestMetadata = this.record(input.socialRequest.metadata);
-    const isWorkoutLoop =
-      Object.keys(workoutLoop).length > 0 ||
-      this.text(requestMetadata.loop) === 'workout';
-    if (!isWorkoutLoop) return {};
+    const loopKind = this.loopKindForMatching(input);
+    if (!loopKind) return {};
+    const memoryKey = this.loopMemoryKey(loopKind);
+    const loopMemory = this.record(input.memory[memoryKey]);
+    const stageKey = this.loopStageKey(loopKind);
+    const stagePatch = stageKey ? { [stageKey]: input.stage } : {};
     return {
-      workoutLoop: {
-        ...workoutLoop,
+      [memoryKey]: {
+        ...loopMemory,
+        ...stagePatch,
         stage: input.stage,
         socialRequestId: input.socialRequestId,
         publicIntentId: input.publicIntentId,
@@ -1560,6 +1570,55 @@ export class SocialAgentMatchingJobProcessorService {
         updatedAt: input.updatedAt,
       },
     };
+  }
+
+  private loopKindForMatching(input: {
+    memory: Record<string, unknown>;
+    job: MatchingJob;
+    socialRequest: UserSocialRequest;
+  }): MatchingLoopKind | null {
+    const requestMetadata = this.record(input.socialRequest.metadata);
+    const metadataLoop = this.text(requestMetadata.loop);
+    if (this.isMatchingLoopKind(metadataLoop)) return metadataLoop;
+
+    const jobMetadata = this.record(input.job.metadata);
+    const jobSource = this.text(jobMetadata.source);
+    if (/^workout[_-]/.test(jobSource)) return 'workout';
+    if (/^friend[_-]/.test(jobSource)) return 'friend';
+    if (/^travel[_-]/.test(jobSource)) return 'travel';
+
+    const publicIntentId = this.text(input.job.publicIntentId);
+    if (publicIntentId.startsWith('private-friend:')) return 'friend';
+    if (publicIntentId.startsWith('private-travel:')) return 'travel';
+    if (publicIntentId.startsWith('private:')) return 'workout';
+
+    if (Object.keys(this.record(input.memory.workoutLoop)).length > 0) {
+      return 'workout';
+    }
+    if (Object.keys(this.record(input.memory.friendLoop)).length > 0) {
+      return 'friend';
+    }
+    if (Object.keys(this.record(input.memory.travelLoop)).length > 0) {
+      return 'travel';
+    }
+    return null;
+  }
+
+  private isMatchingLoopKind(value: string): value is MatchingLoopKind {
+    return value === 'workout' || value === 'friend' || value === 'travel';
+  }
+
+  private loopMemoryKey(kind: MatchingLoopKind) {
+    if (kind === 'friend') return 'friendLoop';
+    if (kind === 'travel') return 'travelLoop';
+    return 'workoutLoop';
+  }
+
+  private loopStageKey(kind: MatchingLoopKind) {
+    if (kind === 'friend') return 'friendLoopStage';
+    if (kind === 'travel') return 'travelLoopStage';
+    if (kind === 'workout') return 'workoutLoopStage';
+    return null;
   }
 
   private stringList(value: unknown): string[] {
