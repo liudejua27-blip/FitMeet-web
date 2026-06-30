@@ -6,7 +6,7 @@ import {
 import { FitMeetLoopRouterService } from '../loop-router/fitmeet-loop-router.service';
 import { WorkoutUnderstandingService } from './workout-understanding.service';
 
-function makeTask(): AgentTask {
+function makeTask(overrides: Partial<AgentTask> = {}): AgentTask {
   return {
     id: 101,
     ownerUserId: 7,
@@ -15,6 +15,7 @@ function makeTask(): AgentTask {
     result: {},
     status: AgentTaskStatus.Pending,
     permissionMode: AgentTaskPermissionMode.Confirm,
+    ...overrides,
   } as AgentTask;
 }
 
@@ -71,6 +72,42 @@ describe('WorkoutUnderstandingService', () => {
       locationText: '金鸡湖附近',
       city: '苏州',
       radiusKm: 5,
+    });
+  });
+
+  it('passes the task goal into DeepSeek context for multi-turn workout understanding', async () => {
+    const toolJson = {
+      callJson: jest.fn().mockResolvedValue({
+        intent: 'workout',
+        confidence: 0.82,
+        activityType: '跑步',
+        locationMention: {
+          rawText: '附近',
+          normalizedText: '附近',
+          relation: 'near',
+          needsGeoResolution: true,
+        },
+        candidatePreference: '喜欢宠物的',
+        missing: ['timePreference'],
+        assumptions: ['上一轮用户询问附近活动'],
+        needsClarification: true,
+      }),
+    };
+    const service = new WorkoutUnderstandingService(toolJson as never);
+
+    await service.understand({
+      task: makeTask({ goal: '附近有玩x的吗' }),
+      message: '我想找跑步搭子，喜欢宠物的',
+      ruleSlots: { activityType: '跑步', candidatePreference: '喜欢宠物的' },
+      loopIntent: router.classify('我想找跑步搭子，喜欢宠物的'),
+    });
+
+    const prompt = JSON.parse(toolJson.callJson.mock.calls[0][0].prompt);
+    expect(prompt).toMatchObject({
+      userMessage: '我想找跑步搭子，喜欢宠物的',
+      conversationContext: {
+        taskGoal: '附近有玩x的吗',
+      },
     });
   });
 

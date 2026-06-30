@@ -195,6 +195,9 @@ export class WorkoutUnderstandingService {
         'clarificationQuestion',
       ],
       userMessage: cleanDisplayText(input.message, ''),
+      conversationContext: {
+        taskGoal: cleanDisplayText(input.task.goal, ''),
+      },
       locationMentionContract: {
         rawText: 'exact words used by user, e.g. 华师大附近',
         normalizedText: 'clean query for map lookup, e.g. 华师大',
