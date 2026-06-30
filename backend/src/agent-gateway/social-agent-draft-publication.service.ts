@@ -49,6 +49,12 @@ import { MatchingJob, MatchingJobStatus } from './entities/matching-job.entity';
 import { PublicIntentPrivacyGuardService } from './public-intent-privacy-guard.service';
 import { SocialIntentRateLimitService } from './social-intent-rate-limit.service';
 import { SocialAgentLoopStateTransitionEventService } from './social-agent-loop-state-transition-event.service';
+import {
+  isLoopKind,
+  loopMemoryKey,
+  loopStageKey,
+  type LoopKind,
+} from './loop-agent/loop-agent.types';
 
 type DismissDraftContext = {
   action: string;
@@ -71,8 +77,6 @@ type StagedSocialRequestDraft = {
   socialRequestId: number;
   draft: CreateSocialRequestDto & { socialRequestId: number };
 };
-
-type PublishLoopKind = 'workout' | 'friend' | 'travel';
 
 const SOCIAL_REQUEST_ADVISORY_LOCK_NAMESPACE = 1_782_160_006;
 
@@ -1891,14 +1895,13 @@ export class SocialAgentDraftPublicationService {
   }): Record<string, unknown> {
     const loopKind = this.loopKindForPublish(input.memory, input.draft);
     if (!loopKind) return {};
-    const memoryKey = this.loopMemoryKey(loopKind);
+    const memoryKey = loopMemoryKey(loopKind);
     const loopMemory = this.record(input.memory[memoryKey]);
-    const stageKey = this.loopStageKey(loopKind);
-    const stagePatch = stageKey ? { [stageKey]: 'matching_queued' } : {};
+    const stageKey = loopStageKey(loopKind);
     return {
       [memoryKey]: {
         ...loopMemory,
-        ...stagePatch,
+        [stageKey]: 'matching_queued',
         stage: 'matching_queued',
         socialRequestId: input.socialRequestId,
         publicIntentId: input.publicIntentId,
@@ -1916,10 +1919,10 @@ export class SocialAgentDraftPublicationService {
   private loopKindForPublish(
     memory: Record<string, unknown>,
     draft: CreateSocialRequestDto & { socialRequestId?: number | null },
-  ): PublishLoopKind | null {
+  ): LoopKind | null {
     const draftMetadata = this.record(draft.metadata);
     const metadataLoop = this.text(draftMetadata.loop);
-    if (this.isPublishLoopKind(metadataLoop)) return metadataLoop;
+    if (isLoopKind(metadataLoop)) return metadataLoop;
     if (Object.keys(this.record(memory.workoutLoop)).length > 0) {
       return 'workout';
     }
@@ -1932,30 +1935,11 @@ export class SocialAgentDraftPublicationService {
     return null;
   }
 
-  private publishedLoopKind(
-    patch: Record<string, unknown>,
-  ): PublishLoopKind | null {
+  private publishedLoopKind(patch: Record<string, unknown>): LoopKind | null {
     if (Object.keys(this.record(patch.workoutLoop)).length > 0)
       return 'workout';
     if (Object.keys(this.record(patch.friendLoop)).length > 0) return 'friend';
     if (Object.keys(this.record(patch.travelLoop)).length > 0) return 'travel';
-    return null;
-  }
-
-  private isPublishLoopKind(value: string): value is PublishLoopKind {
-    return value === 'workout' || value === 'friend' || value === 'travel';
-  }
-
-  private loopMemoryKey(kind: PublishLoopKind) {
-    if (kind === 'friend') return 'friendLoop';
-    if (kind === 'travel') return 'travelLoop';
-    return 'workoutLoop';
-  }
-
-  private loopStageKey(kind: PublishLoopKind) {
-    if (kind === 'friend') return 'friendLoopStage';
-    if (kind === 'travel') return 'travelLoopStage';
-    if (kind === 'workout') return 'workoutLoopStage';
     return null;
   }
 
