@@ -17,6 +17,9 @@ describe('buildClarificationBinaryCard', () => {
       schemaType: 'clarification.binary',
       status: 'waiting_confirmation',
       data: {
+        schemaName: 'ClarificationBinaryCard',
+        schemaVersion: 'fitmeet.tool-ui.v1',
+        schemaType: 'clarification.binary',
         taskId: 101,
         questionKey: 'confirm_workout_intent',
         inferredIntent: 'workout',

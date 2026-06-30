@@ -30,6 +30,13 @@ describe('tool-ui-schema', () => {
     expect(schemaTypeFromLegacyCardType('profile_proposal')).toBe('life_graph.diff');
     expect(schemaTypeFromLegacyCardType('review_card')).toBe('meet_loop.timeline');
     expect(schemaTypeFromLegacyCardType('safety_boundary')).toBe('safety.approval');
+    expect(schemaTypeFromLegacyCardType('loop_choice')).toBe('loop.choice');
+    expect(schemaTypeFromLegacyCardType('clarification_binary')).toBe('clarification.binary');
+    expect(schemaTypeFromLegacyCardType('clarification_geo_candidates')).toBe(
+      'clarification.geo_candidates',
+    );
+    expect(schemaTypeFromLegacyCardType('workout_intake')).toBe('workout.intake');
+    expect(schemaTypeFromLegacyCardType('workout_draft')).toBe('workout.draft');
     expect(schemaTypeFromLegacyCardType('unknown')).toBe('generic.card');
   });
 
@@ -191,6 +198,42 @@ describe('tool-ui-schema', () => {
       components: ['WorkoutDraftCard'],
     });
     expect(summarizeToolUICardCollection(cards).detail).toContain('约练闭环');
+  });
+
+  it('keeps Workout Loop cards canonical when schema metadata is normalized into data', () => {
+    const [card] = extractCanonicalAssistantCards({
+      cards: [
+        {
+          id: 'workout_intake:39:ready',
+          type: 'workout_intake',
+          schemaVersion: FITMEET_TOOL_UI_SCHEMA_VERSION,
+          schemaType: 'workout.intake',
+          title: '填写本次约练需求',
+          data: {
+            taskId: 39,
+            schemaVersion: FITMEET_TOOL_UI_SCHEMA_VERSION,
+            schemaType: 'workout.intake',
+            activityType: '篮球',
+            timePreference: '明天下午3点',
+            locationText: '北京大学',
+          },
+          actions: [
+            {
+              schemaAction: 'workout_intake.submit',
+              label: '生成约练卡',
+              requiresConfirmation: false,
+            },
+          ],
+        },
+      ],
+    });
+
+    expect(card).toMatchObject({
+      id: 'workout_intake:39:ready',
+      type: 'workout_intake',
+      schemaType: 'workout.intake',
+      title: '填写本次约练需求',
+    });
   });
 
   it('keeps friend and travel loop schemas executable', () => {
