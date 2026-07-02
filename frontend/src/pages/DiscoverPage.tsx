@@ -67,6 +67,7 @@ export const DiscoverPage = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [joinedMeets, setJoinedMeets] = useState<number[]>([]);
+  const [viewMode, setViewMode] = useState<'scene' | 'map'>('scene');
   const [userLocation, setUserLocation] = useState<Coordinates | null>(null);
   const [isLocating, setIsLocating] = useState(false);
   const { isLoggedIn, openLogin } = useAuthStore();
@@ -390,7 +391,12 @@ export const DiscoverPage = () => {
             <div className="match-hall-location">
               <span />
               Social World · 实时更新
-              <button type="button" onClick={handleUseLocation} disabled={isLocating}>
+              <button
+                type="button"
+                className="match-inline-action"
+                onClick={handleUseLocation}
+                disabled={isLocating}
+              >
                 {isLocating ? '定位中' : '切换'}
               </button>
             </div>
@@ -411,7 +417,7 @@ export const DiscoverPage = () => {
                 <button
                   key={item.id}
                   type="button"
-                  className={activeSport === item.id ? 'is-active' : undefined}
+                  className={`match-sport-filter__button ${activeSport === item.id ? 'is-active' : ''}`}
                   onClick={() => setActiveSport(item.id)}
                 >
                   <span>{item.icon}</span>
@@ -433,7 +439,11 @@ export const DiscoverPage = () => {
         {error ? (
           <div className="match-hall-error">
             <span>{error}</span>
-            <button type="button" onClick={() => void loadDiscover()}>
+            <button
+              type="button"
+              className="match-inline-action match-inline-action--danger"
+              onClick={() => void loadDiscover()}
+            >
               重试
             </button>
           </div>
@@ -473,7 +483,7 @@ export const DiscoverPage = () => {
                     type="button"
                     role="tab"
                     aria-selected={activeTab === id}
-                    className={activeTab === id ? 'is-active' : undefined}
+                    className={`match-tab__button${activeTab === id ? ' is-active' : ''}`}
                     onClick={() => setActiveTab(id as typeof activeTab)}
                   >
                     {label}
@@ -482,10 +492,24 @@ export const DiscoverPage = () => {
                 ))}
               </div>
               <div className="match-view-toggle" aria-label="视图模式">
-                <button type="button" className="is-active">
+                <button
+                  type="button"
+                  className={`match-view-toggle__button${viewMode === 'scene' ? ' is-active' : ''}`}
+                  aria-pressed={viewMode === 'scene'}
+                  onClick={() => setViewMode('scene')}
+                >
                   ☷ 场景视图
                 </button>
-                <button type="button">⌖ 地图视图</button>
+                <button
+                  type="button"
+                  className="match-view-toggle__button"
+                  aria-pressed={viewMode === 'map'}
+                  disabled
+                  title="地图视图暂未开放，敬请期待"
+                  onClick={() => setViewMode('map')}
+                >
+                  ⌖ 地图视图
+                </button>
               </div>
             </div>
 
@@ -529,7 +553,11 @@ export const DiscoverPage = () => {
               <div className="match-empty-state" data-testid="discover-real-empty-state">
                 <strong>暂时还没有公开场景</strong>
                 <p>你可以让 Agent 根据你的城市、时间、活动兴趣和安全边界生成第一张约练卡。</p>
-                <button type="button" onClick={() => navigate('/agent/chat')}>
+                <button
+                  type="button"
+                  className="match-inline-action match-inline-action--primary"
+                  onClick={() => navigate('/agent/chat')}
+                >
                   让 Agent 帮我生成
                 </button>
               </div>
@@ -538,7 +566,9 @@ export const DiscoverPage = () => {
             <div className="match-hall-end">
               <span />
               没有更多了，可以继续让 Agent 根据你的偏好筛选
-              <Link to="/agent">打开 Agent</Link>
+              <Link to="/agent" className="match-hall-end__action">
+                打开 Agent
+              </Link>
               <span />
             </div>
           </section>
@@ -547,7 +577,9 @@ export const DiscoverPage = () => {
             <section className="match-side-panel">
               <header>
                 <h2>附近同频的人</h2>
-                <button type="button">查看更多 ›</button>
+                <button type="button" className="match-side-panel__action">
+                  查看更多 ›
+                </button>
               </header>
               <div className="match-people-list">
                 {activePeople.length > 0 ? (
@@ -555,6 +587,7 @@ export const DiscoverPage = () => {
                     <button
                       key={person.id}
                       type="button"
+                      className="match-person-item"
                       onClick={() => {
                         recordProfileInterest(person);
                         navigate(person.href);
@@ -583,7 +616,9 @@ export const DiscoverPage = () => {
             <section className="match-side-panel">
               <header>
                 <h2>安全提示</h2>
-                <button type="button">更多 ›</button>
+                <button type="button" className="match-side-panel__action">
+                  更多 ›
+                </button>
               </header>
               <ul className="match-safety-list">
                 <li>首次见面建议选择公共场所</li>
@@ -764,9 +799,9 @@ function MeetupMatchCard({
         <div className="match-card__tags">
           <button
             type="button"
-            className={
+            className={`match-card__tags-button ${
               joined || publicIntentApplication?.status === 'pending' ? 'is-muted' : 'is-open'
-            }
+            }`}
             onClick={handleJoinClick}
           >
             {statusLabel}

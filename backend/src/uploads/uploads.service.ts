@@ -49,6 +49,10 @@ export class UploadsService implements OnModuleInit {
     return !!value?.trim() && !PLACEHOLDER_PATTERN.test(value.trim());
   }
 
+  private isEnabled(value?: string | null): boolean {
+    return /^(1|true|yes|on)$/i.test(value?.trim() ?? '');
+  }
+
   onModuleInit() {
     if (this.initAliyunOss()) {
       return;
@@ -174,7 +178,7 @@ export class UploadsService implements OnModuleInit {
       if (!shouldModerateOssObject) {
         // Check the exact image bytes that will be stored.
         this.moderationService.checkImage(processedBuffer, file.originalname);
-        moderationStatus = this.mockApprovedImageModerationStatus();
+        moderationStatus = this.localImageModerationStatus();
       }
 
       // 3. Upload to configured object storage
@@ -303,12 +307,8 @@ export class UploadsService implements OnModuleInit {
     return 'pending';
   }
 
-  private mockApprovedImageModerationStatus(): MediaModerationStatus {
-    if (
-      this.configService.get<string>('MEDIA_MODERATION_MODE') ===
-        'mock-approved' &&
-      !this.isProduction
-    ) {
+  private localImageModerationStatus(): MediaModerationStatus {
+    if (!this.isProduction) {
       return 'approved';
     }
     return 'pending';
@@ -385,12 +385,21 @@ export class UploadsService implements OnModuleInit {
       throw new BadRequestException('Aliyun OSS client is not initialized');
     }
 
-    await this.ossClient.put(key, body, {
+    const options: Parameters<OSS['put']>[2] = {
       mime: contentType,
-      headers: {
+    };
+
+    if (
+      this.isEnabled(
+        this.configService.get<string>('ALIYUN_OSS_SET_PUBLIC_OBJECT_ACL'),
+      )
+    ) {
+      options.headers = {
         'x-oss-object-acl': 'public-read',
-      },
-    });
+      };
+    }
+
+    await this.ossClient.put(key, body, options);
   }
 
   private async deleteFromAliyunOss(key: string) {

@@ -2,8 +2,8 @@ import { Injectable, Logger, Optional } from '@nestjs/common';
 
 import { LegacyAgentAdapterService } from '../legacy-agent/legacy-agent-adapter.service';
 import {
-  LoopClassifierService,
-  type LoopClassifierResult,
+  LoopDecisionService,
+  type LoopDecisionResult,
 } from '../loop-router/loop-classifier.service';
 import { FitMeetLoopRouterService } from '../loop-router/fitmeet-loop-router.service';
 import type {
@@ -28,7 +28,6 @@ import {
   readWorkoutLoopStage,
   workoutLoopOwnsTask,
 } from '../workout-loop/workout-loop-owner';
-import { isProfileEnrichmentDominant } from '../social-agent-social-intent-gate';
 import type { AgentEntryInput, AgentEntryResult } from './agent-entry.types';
 import type {
   FitMeetAlphaCard,
@@ -53,15 +52,11 @@ export class AgentEntryOrchestratorService {
     @Optional()
     private readonly travelLoop?: TravelLoopService,
     @Optional()
-    private readonly loopClassifier?: LoopClassifierService,
+    private readonly loopDecision?: LoopDecisionService,
   ) {}
 
   async handle(input: AgentEntryInput): Promise<AgentEntryResult> {
     const workoutStage = readWorkoutLoopStage(input.task);
-    if (isProfileEnrichmentDominant(input.message)) {
-      const profile = await this.tryRouteProfileLoop(input, workoutStage);
-      if (profile) return profile;
-    }
 
     if (workoutLoopOwnsTask(input.task, input.message)) {
       const workout = await this.workoutLoop.continueEntrance({
@@ -130,22 +125,22 @@ export class AgentEntryOrchestratorService {
       if (routed) return routed;
     }
 
-    const classifier = await this.classifyLoopWithLlm(input, loopIntent);
-    if (classifier && classifier.confidence >= 0.72) {
-      const routed = await this.routeClassifierDecision(input, classifier);
+    const decision = await this.decideLoopWithLlm(input, loopIntent);
+    if (decision && this.shouldRouteDecision(decision)) {
+      const routed = await this.routeLoopDecision(input, decision);
       if (routed) return routed;
     }
 
     if (
-      classifier &&
-      classifier.confidence >= 0.55 &&
-      this.isLoopChoiceIntent(classifier.intent)
+      decision &&
+      decision.confidence >= 0.55 &&
+      this.isLoopChoiceIntent(decision.intent)
     ) {
-      const result = this.loopChoiceClarificationResult(input, classifier);
-      const source = this.loopSource(classifier.intent);
+      const result = this.loopChoiceClarificationResult(input, decision);
+      const source = this.loopSource(decision.intent);
       this.logRoute(input, {
         source,
-        loopIntent: classifier.intent,
+        loopIntent: decision.intent,
         workoutStage,
         cards: this.cardSchemaTypes(result.cards),
         legacyBlocked: true,
@@ -250,19 +245,23 @@ export class AgentEntryOrchestratorService {
   }
 
   private isRuleFastPath(loopIntent: FitMeetLoopRouterResult): boolean {
+    if (loopIntent.disposition !== 'accept_loop' || loopIntent.confidence < 0.9)
+      return false;
     return (
-      loopIntent.disposition === 'accept_loop' && loopIntent.confidence >= 0.9
+      loopIntent.reason === 'workout_direct_loop_command' ||
+      loopIntent.reason === 'workout_direct_create_phrase' ||
+      loopIntent.reason === 'profile_keyword'
     );
   }
 
-  private async classifyLoopWithLlm(
+  private async decideLoopWithLlm(
     input: AgentEntryInput,
     loopIntent: FitMeetLoopRouterResult,
-  ): Promise<LoopClassifierResult | null> {
-    if (!this.loopClassifier) return null;
+  ): Promise<LoopDecisionResult | null> {
+    if (!this.loopDecision) return null;
     if (loopIntent.reason === 'workout_negative_intent') return null;
     try {
-      return await this.loopClassifier.classify({
+      return await this.loopDecision.decide({
         task: input.task,
         message: input.message,
         ruleReason: loopIntent.reason,
@@ -271,7 +270,7 @@ export class AgentEntryOrchestratorService {
     } catch (error) {
       this.logger.warn(
         JSON.stringify({
-          event: 'agent_entry.loop_classifier_failed',
+          event: 'agent_entry.loop_decision_failed',
           taskId: input.task.id,
           ruleReason: loopIntent.reason,
           message: error instanceof Error ? error.message : String(error),
@@ -281,19 +280,30 @@ export class AgentEntryOrchestratorService {
     }
   }
 
-  private async routeClassifierDecision(
+  private shouldRouteDecision(decision: LoopDecisionResult): boolean {
+    if (!decision.shouldEnterLoop) return false;
+    if (decision.confidence < 0.72) return false;
+    return (
+      decision.intent === 'workout' ||
+      decision.intent === 'friend' ||
+      decision.intent === 'travel' ||
+      decision.intent === 'profile'
+    );
+  }
+
+  private async routeLoopDecision(
     input: AgentEntryInput,
-    classifier: LoopClassifierResult,
+    decision: LoopDecisionResult,
   ): Promise<AgentEntryResult | null> {
-    if (classifier.intent === 'workout') {
+    if (decision.intent === 'workout') {
       const workout = await this.workoutLoop.tryHandleEntrance({
         ownerUserId: input.ownerUserId,
         task: input.task,
         message: input.message,
         bypassRouter: true,
-        prefilledSlots: this.loopClassifier?.workoutSlotsFromHints(
-          classifier.workoutHints,
-          classifier.confidence,
+        prefilledSlots: this.loopDecision?.workoutSlotsFromHints(
+          decision.workoutHints,
+          decision.confidence,
         ),
       });
       if (!workout) return null;
@@ -311,14 +321,14 @@ export class AgentEntryOrchestratorService {
       };
     }
 
-    if (classifier.intent === 'friend' && this.friendLoop) {
+    if (decision.intent === 'friend' && this.friendLoop) {
       const friend = await this.friendLoop.tryHandleEntrance({
         ownerUserId: input.ownerUserId,
         task: input.task,
         message: input.message,
-        prefilledSlots: this.loopClassifier?.friendSlotsFromHints(
-          classifier.friendHints,
-          classifier.confidence,
+        prefilledSlots: this.loopDecision?.friendSlotsFromHints(
+          decision.friendHints,
+          decision.confidence,
         ),
       });
       this.logRoute(input, {
@@ -335,14 +345,14 @@ export class AgentEntryOrchestratorService {
       };
     }
 
-    if (classifier.intent === 'travel' && this.travelLoop) {
+    if (decision.intent === 'travel' && this.travelLoop) {
       const travel = await this.travelLoop.tryHandleEntrance({
         ownerUserId: input.ownerUserId,
         task: input.task,
         message: input.message,
-        prefilledSlots: this.loopClassifier?.travelSlotsFromHints(
-          classifier.travelHints,
-          classifier.confidence,
+        prefilledSlots: this.loopDecision?.travelSlotsFromHints(
+          decision.travelHints,
+          decision.confidence,
         ),
       });
       this.logRoute(input, {
@@ -359,7 +369,7 @@ export class AgentEntryOrchestratorService {
       };
     }
 
-    if (classifier.intent === 'profile' && this.profileLoop) {
+    if (decision.intent === 'profile' && this.profileLoop) {
       const profile = await this.profileLoop.tryHandleEntrance({
         ownerUserId: input.ownerUserId,
         task: input.task,
@@ -478,9 +488,10 @@ export class AgentEntryOrchestratorService {
 
   private loopChoiceClarificationResult(
     input: AgentEntryInput,
-    classifier: LoopClassifierResult,
+    classifier: LoopDecisionResult,
   ): SocialAgentIntentRouteResult {
     const body =
+      classifier.nextQuestion ||
       classifier.clarificationQuestion ||
       '我理解你可能想进入一个闭环。请选择要继续的方向，我会用卡片帮你整理。';
     const card: FitMeetAlphaCard = {
@@ -540,7 +551,7 @@ export class AgentEntryOrchestratorService {
       permissionMode:
         input.task.permissionMode ?? AgentTaskPermissionMode.Confirm,
       structuredIntent: {
-        schemaVersion: 'fitmeet.loop-classifier.v1',
+        schemaVersion: 'fitmeet.loop-decision.v1',
         intent: classifier.intent,
         confidence: classifier.confidence,
         reason: classifier.reason,
@@ -551,20 +562,20 @@ export class AgentEntryOrchestratorService {
   private loopChoiceAction(
     input: AgentEntryInput,
     intent: 'workout' | 'friend' | 'travel',
-    classifier: LoopClassifierResult,
+    classifier: LoopDecisionResult,
   ): FitMeetAlphaCardAction {
     const payload =
       intent === 'workout'
-        ? this.loopClassifier?.workoutSlotsFromHints(
+        ? this.loopDecision?.workoutSlotsFromHints(
             classifier.workoutHints,
             classifier.confidence,
           )
         : intent === 'friend'
-          ? this.loopClassifier?.friendSlotsFromHints(
+          ? this.loopDecision?.friendSlotsFromHints(
               classifier.friendHints,
               classifier.confidence,
             )
-          : this.loopClassifier?.travelSlotsFromHints(
+          : this.loopDecision?.travelSlotsFromHints(
               classifier.travelHints,
               classifier.confidence,
             );
@@ -583,7 +594,7 @@ export class AgentEntryOrchestratorService {
   }
 
   private isLoopChoiceIntent(
-    intent: LoopClassifierResult['intent'],
+    intent: LoopDecisionResult['intent'],
   ): intent is 'workout' | 'friend' | 'travel' {
     return intent === 'workout' || intent === 'friend' || intent === 'travel';
   }

@@ -118,10 +118,18 @@ export class DomainOutboxWorkerService {
     );
     const directKey = this.directConversationKey(ownerUserId, applicantUserId);
     const now = new Date();
-    const metadata = {
-      source: 'public_intent_application',
-      publicIntentId: this.text(row.payload.publicIntentId),
-      publicIntentApplicationId: this.number(row.payload.applicationId),
+      const metadata = {
+        source: row.aggregateType,
+        publicIntentId: this.text(row.payload.publicIntentId),
+        taskIntentId: this.text(row.payload.taskIntentId),
+        publicIntentApplicationId: this.number(row.payload.applicationId),
+        taskIntentApplicationId:
+          row.aggregateType === 'task_intent_application'
+            ? this.number(row.payload.applicationId)
+            : null,
+        demandInvitationId: this.number(row.payload.invitationId),
+        demandId: this.text(row.payload.demandId),
+      candidateRecordId: this.number(row.payload.candidateRecordId),
       meetId: this.number(row.payload.meetId),
       outboxEventId: row.id,
       outboxDedupeKey: row.dedupeKey,
@@ -140,7 +148,10 @@ export class DomainOutboxWorkerService {
           agentConnectionId: null,
           ownerUserId,
           actorUserId: ownerUserId,
-          labels: ['约练卡', '报名已接受'],
+          labels:
+            row.aggregateType === 'task_intent_application'
+              ? ['任务大厅', '接单已接受']
+              : ['约练卡', '报名已接受'],
           relatedSocialRequestId: null,
           relatedCandidateId: null,
           lastMessage: '',
@@ -155,7 +166,7 @@ export class DomainOutboxWorkerService {
           directKey,
           participantIds,
           metadata,
-          source: 'public_intent_application',
+          source: row.aggregateType,
           status: 'open',
           relatedPublicIntentId: this.text(row.payload.publicIntentId),
           lastActionAt: now,
@@ -168,6 +179,12 @@ export class DomainOutboxWorkerService {
       conversationId,
       status: 'open',
     });
+    if (row.aggregateType === 'demand_invitation') {
+      await this.dataSource.query(
+        `UPDATE "demand_invitations" SET "conversationId" = $1, "updatedAt" = now() WHERE "id" = $2`,
+        [conversationId, this.number(row.payload.invitationId)],
+      );
+    }
     await this.createWelcomeMessageOnce(
       new Types.ObjectId(conversationId),
       participantIds,
@@ -200,7 +217,10 @@ export class DomainOutboxWorkerService {
       ownerUserId: this.number(row.payload.ownerUserId),
       actorUserId: this.number(row.payload.ownerUserId),
       senderId: 0,
-      text: '约练报名已接受，聊天已开放，可以开始确认时间和地点。',
+      text:
+        row.aggregateType === 'task_intent_application'
+          ? '任务申请已接受，聊天已开放，可以开始确认服务细节。'
+          : '约练报名已接受，聊天已开放，可以开始确认时间和地点。',
       source: 'ai_delegate',
       card: null,
       metadata: {
@@ -218,7 +238,12 @@ export class DomainOutboxWorkerService {
       { _id: conversationId },
       {
         $set: {
-          lastMessage: '约练报名已接受，聊天已开放。',
+          lastMessage:
+            row.aggregateType === 'demand_invitation'
+              ? '邀请已接受，聊天已开放。'
+              : row.aggregateType === 'task_intent_application'
+                ? '任务申请已接受，聊天已开放。'
+                : '约练报名已接受，聊天已开放。',
           lastMessageTime: new Date(),
         },
         $inc: Object.fromEntries(
@@ -240,6 +265,8 @@ export class DomainOutboxWorkerService {
         eventType: 'conversation.ready',
         payload: {
           conversationId,
+          invitationId: row.payload.invitationId ?? null,
+          demandId: row.payload.demandId ?? null,
           applicationId: row.payload.applicationId ?? null,
           publicIntentId: row.payload.publicIntentId ?? null,
           meetId: row.payload.meetId ?? null,

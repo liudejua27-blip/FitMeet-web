@@ -63,8 +63,8 @@ describe('UploadsService', () => {
     expect(fs.existsSync(tempFile)).toBe(false);
   });
 
-  it('stores uploaded profile images as pending moderation by default', async () => {
-    const tempFile = writeTempImageUpload('pending-image.png');
+  it('auto-approves local image moderation outside production', async () => {
+    const tempFile = writeTempImageUpload('approved-image.png');
     const { service } = makeServiceWithDeps({
       NODE_ENV: 'development',
       BASE_URL: 'https://dev.fitmeet.test',
@@ -73,7 +73,7 @@ describe('UploadsService', () => {
     const result = await service.saveImage(fileFor(tempFile, 'image/png'), 7);
     uploadedFiles.push(uploadedPathFromUrl(result.url));
 
-    expect(result.moderationStatus).toBe('pending');
+    expect(result.moderationStatus).toBe('approved');
     expect(result.assetId).toBe(1);
     expect(fs.existsSync(tempFile)).toBe(false);
   });
@@ -120,6 +120,31 @@ describe('UploadsService', () => {
     await expect(service.saveFile(fileFor(tempFile))).rejects.toBeInstanceOf(
       BadRequestException,
     );
+    expect(fs.existsSync(tempFile)).toBe(false);
+  });
+
+  it('does not request Aliyun OSS public object ACL by default', async () => {
+    const tempFile = writeTempUpload('aliyun-no-acl.mp4');
+    const { service } = makeServiceWithDeps({
+      NODE_ENV: 'production',
+      ALIYUN_OSS_PUBLIC_BASE_URL:
+        'https://ourfitmeet-uploads.oss-cn-qingdao.aliyuncs.com',
+    });
+    const put = jest.fn().mockResolvedValue({});
+    Object.assign(service as unknown as Record<string, unknown>, {
+      storageProvider: 'aliyun-oss',
+      bucketName: 'fitmeet-test',
+      ossClient: { put },
+    });
+
+    const url = await service.saveFile(fileFor(tempFile));
+
+    expect(url).toMatch(
+      /^https:\/\/ourfitmeet-uploads\.oss-cn-qingdao\.aliyuncs\.com\/.+\.mp4$/,
+    );
+    expect(put).toHaveBeenCalledWith(expect.any(String), expect.any(Buffer), {
+      mime: 'video/mp4',
+    });
     expect(fs.existsSync(tempFile)).toBe(false);
   });
 

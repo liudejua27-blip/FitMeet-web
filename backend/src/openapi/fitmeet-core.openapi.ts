@@ -50,6 +50,7 @@ export const fitMeetCoreOpenApi = {
     { name: 'users' },
     { name: 'onboarding' },
     { name: 'social-profile' },
+    { name: 'demands' },
     { name: 'discover' },
     { name: 'messages' },
     { name: 'friends' },
@@ -264,6 +265,35 @@ export const fitMeetCoreOpenApi = {
       'getPublicSocialIntentMatches',
       { auth: false, responseSchema: ref('PublicSocialIntentMatchList') },
     ),
+    '/demands': path('post', 'demands', 'createDemand', {
+      requestSchema: ref('CreateDemandRequest'),
+      responseSchema: ref('DemandRecord'),
+      parameters: [idempotencyHeader()],
+    }),
+    '/users/me/demands': path('get', 'demands', 'listMyDemands', {
+      responseSchema: ref('DemandRecordPage'),
+    }),
+    '/demands/{id}': path('get', 'demands', 'getDemand', {
+      responseSchema: ref('DemandRecord'),
+    }),
+    '/demands/{id}/candidates': path('get', 'demands', 'getDemandCandidates', {
+      responseSchema: ref('DemandCandidatePage'),
+    }),
+    '/demands/{id}/publish': path('post', 'demands', 'publishDemand', {
+      requestSchema: ref('DemandVisibilityMutationRequest'),
+      responseSchema: ref('DemandRecord'),
+      parameters: [idempotencyHeader()],
+    }),
+    '/demands/{id}/hide': path('post', 'demands', 'hideDemand', {
+      requestSchema: ref('DemandVisibilityMutationRequest'),
+      responseSchema: ref('DemandRecord'),
+      parameters: [idempotencyHeader()],
+    }),
+    '/demands/{id}/cancel': path('post', 'demands', 'cancelDemand', {
+      requestSchema: ref('CancelDemandRequest'),
+      responseSchema: ref('DemandRecord'),
+      parameters: [idempotencyHeader()],
+    }),
     '/public/social-intents/{id}/applications': operations(
       operation('post', 'discover', 'createPublicIntentApplication', {
         requestSchema: ref('CreatePublicIntentApplicationRequest'),
@@ -736,6 +766,105 @@ export const fitMeetCoreOpenApi = {
           message: { type: 'string' },
         },
         ['targetUserId'],
+      ),
+      DemandCardField: objectSchema(
+        {
+          id: { type: 'string' },
+          title: { type: 'string' },
+          value: { type: 'string' },
+          systemName: { type: 'string' },
+          importance: { type: 'string' },
+          privacy: { type: 'string' },
+        },
+        ['title', 'value'],
+      ),
+      DemandMatchingPolicy: objectSchema({
+        city: { type: 'string' },
+        radiusKm: { type: 'number' },
+        hardFilters: arraySchema({ type: 'string' }),
+        softPreferences: arraySchema({ type: 'string' }),
+      }),
+      CreateDemandRequest: objectSchema(
+        {
+          type: {
+            type: 'string',
+            enum: [
+              'friends',
+              'dating',
+              'workout',
+              'buddy',
+              'travel',
+              'service',
+              'housing',
+              'activity',
+              'help',
+              'other',
+            ],
+          },
+          title: { type: 'string' },
+          summary: { type: 'string' },
+          fields: arraySchema(ref('DemandCardField')),
+          visibility: { type: 'string', enum: ['public', 'hidden'] },
+          sourceConversationId: { type: ['string', 'null'] },
+          matchingPolicy: ref('DemandMatchingPolicy'),
+          safetyFlags: arraySchema({ type: 'string' }),
+        },
+        ['type', 'title', 'summary', 'fields', 'visibility'],
+      ),
+      DemandVisibilityMutationRequest: objectSchema({
+        visibility: { type: 'string', enum: ['public', 'hidden'] },
+      }),
+      CancelDemandRequest: objectSchema({
+        reason: { type: 'string' },
+      }),
+      DemandRecord: objectSchema({
+        id: { type: 'string' },
+        type: { type: 'string' },
+        title: { type: 'string' },
+        summary: { type: 'string' },
+        fields: arraySchema(ref('DemandCardField')),
+        visibility: { type: 'string', enum: ['public', 'hidden'] },
+        status: {
+          type: 'string',
+          enum: [
+            'draft',
+            'confirmable',
+            'published',
+            'hidden',
+            'matching',
+            'candidatePool',
+            'hasCandidates',
+            'invited',
+            'matchedCommunicating',
+            'closed',
+            'canceled',
+          ],
+        },
+        ownerId: { type: ['string', 'null'] },
+        createdAt: { type: ['string', 'null'], format: 'date-time' },
+        updatedAt: { type: ['string', 'null'], format: 'date-time' },
+        sourceConversationId: { type: ['string', 'null'] },
+        matchingPolicy: ref('DemandMatchingPolicy'),
+        safetyFlags: arraySchema({ type: 'string' }),
+        publicIntentId: { type: ['string', 'null'] },
+        candidateCount: { type: 'number' },
+      }),
+      DemandRecordPage: objectSchema(
+        {
+          data: arraySchema(ref('DemandRecord')),
+        },
+        ['data'],
+      ),
+      DemandCandidatePage: objectSchema(
+        {
+          demand: ref('DemandRecord'),
+          candidates: arraySchema({
+            type: 'object',
+            additionalProperties: true,
+          }),
+          total: { type: 'number' },
+        },
+        ['candidates', 'total'],
       ),
       CreatePublicIntentApplicationRequest: objectSchema({
         message: { type: 'string' },

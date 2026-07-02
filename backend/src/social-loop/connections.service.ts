@@ -23,6 +23,8 @@ import {
 type ConnectionRequestBody = {
   targetUserId?: number;
   message?: string;
+  contextType?: string;
+  contextId?: string;
 };
 
 type ResolveConnectionRequestBody = {
@@ -54,12 +56,19 @@ export class ConnectionsService {
       requesterId,
       'connections.requests.create',
       idempotencyKey,
-      { targetUserId, message: body.message ?? '' },
+      {
+        targetUserId,
+        message: body.message ?? '',
+        contextType: body.contextType ?? '',
+        contextId: body.contextId ?? '',
+      },
       (manager) =>
         this.createRequestOnce(
           requesterId,
           targetUserId,
           body.message ?? '',
+          this.normalizeConnectionContext(body.contextType),
+          this.cleanContextId(body.contextId),
           manager,
         ),
     );
@@ -223,11 +232,16 @@ export class ConnectionsService {
     requesterId: number,
     targetUserId: number,
     message: string,
+    contextType: string | null,
+    contextId: string | null,
     manager: EntityManager,
   ) {
     this.assertTarget(requesterId, targetUserId);
-    await this.contactPolicy.assertSociallyEligible(requesterId);
-    await this.contactPolicy.assertSociallyEligible(targetUserId);
+    const isServiceConnection = contextType === 'service_connection';
+    if (!isServiceConnection) {
+      await this.contactPolicy.assertSociallyEligible(requesterId);
+      await this.contactPolicy.assertSociallyEligible(targetUserId);
+    }
     await this.contactPolicy.assertNotBlocked(requesterId, targetUserId);
     await this.assertUserExists(targetUserId, manager);
     const friendship = await manager
@@ -248,6 +262,8 @@ export class ConnectionsService {
         requesterId,
         targetUserId,
         message: message.trim().slice(0, 500),
+        contextType,
+        contextId,
         status: 'pending',
         resolvedAt: null,
       }),
@@ -276,8 +292,10 @@ export class ConnectionsService {
         SocialLoopErrorCode.ConnectionRequestAlreadyResolved,
       );
     }
-    await this.contactPolicy.assertSociallyEligible(request.requesterId);
-    await this.contactPolicy.assertSociallyEligible(request.targetUserId);
+    if (request.contextType !== 'service_connection') {
+      await this.contactPolicy.assertSociallyEligible(request.requesterId);
+      await this.contactPolicy.assertSociallyEligible(request.targetUserId);
+    }
     await this.contactPolicy.assertNotBlocked(
       request.requesterId,
       request.targetUserId,
@@ -400,6 +418,18 @@ export class ConnectionsService {
     return 'pending';
   }
 
+  private normalizeConnectionContext(value: string | undefined) {
+    const normalized = `${value ?? ''}`.trim();
+    if (!normalized) return null;
+    if (normalized === 'service_connection') return normalized;
+    return null;
+  }
+
+  private cleanContextId(value: string | undefined) {
+    const normalized = `${value ?? ''}`.trim();
+    return normalized ? normalized.slice(0, 120) : null;
+  }
+
   private presentConnectionRequest(request: ConnectionRequest) {
     return {
       id: request.id,
@@ -407,6 +437,8 @@ export class ConnectionsService {
       targetUserId: request.targetUserId,
       status: request.status,
       message: request.message,
+      contextType: request.contextType,
+      contextId: request.contextId,
       resolvedAt: request.resolvedAt,
       createdAt: request.createdAt,
       updatedAt: request.updatedAt,

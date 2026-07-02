@@ -79,6 +79,7 @@ function makeHarness() {
     tryHandleEntrance: jest.fn(),
   };
   const loopClassifier = {
+    decide: jest.fn(),
     classify: jest.fn(),
     workoutSlotsFromHints: jest.fn((hints: Record<string, unknown> = {}) => ({
       activityType: hints.activityType,
@@ -176,7 +177,7 @@ describe('AgentEntryOrchestratorService', () => {
     expect(legacy.handleFallback).not.toHaveBeenCalled();
   });
 
-  it('routes explicit profile edits to ProfileLoop before active WorkoutLoop ownership', async () => {
+  it('keeps active WorkoutLoop ownership before profile edits', async () => {
     const task = makeTask({
       memory: {
         workoutLoop: {
@@ -191,17 +192,16 @@ describe('AgentEntryOrchestratorService', () => {
       },
     });
     const { legacy, profileLoop, service, workoutLoop } = makeHarness();
-    profileLoop.tryHandleEntrance.mockResolvedValue({
+    workoutLoop.continueEntrance.mockResolvedValue({
       task,
       result: makeResult({
-        intent: 'profile_enrichment_request',
         cards: [
           {
-            id: 'profile_completion:101',
-            type: 'profile_completion',
+            id: 'workout_intake:101',
+            type: 'workout_intake',
             schemaVersion: 'fitmeet.tool-ui.v1',
-            schemaType: 'profile.completion',
-            title: '补全资料',
+            schemaType: 'workout.intake',
+            title: '继续约练流程',
             data: {},
             actions: [],
           },
@@ -217,13 +217,13 @@ describe('AgentEntryOrchestratorService', () => {
       startedAt: 123,
     });
 
-    expect(result.source).toBe('profile_loop_intent');
-    expect(profileLoop.tryHandleEntrance).toHaveBeenCalledWith({
+    expect(result.source).toBe('workout_loop_owner');
+    expect(workoutLoop.continueEntrance).toHaveBeenCalledWith({
       ownerUserId: 7,
       task,
       message: '我想修改我的个人资料',
     });
-    expect(workoutLoop.continueEntrance).not.toHaveBeenCalled();
+    expect(profileLoop.tryHandleEntrance).not.toHaveBeenCalled();
     expect(workoutLoop.tryHandleEntrance).not.toHaveBeenCalled();
     expect(legacy.handleFallback).not.toHaveBeenCalled();
   });
@@ -638,12 +638,13 @@ describe('AgentEntryOrchestratorService', () => {
     expect(legacy.handleFallback).not.toHaveBeenCalled();
   });
 
-  it('uses DeepSeek loop classifier fallback for complex workout expressions that rules miss', async () => {
+  it('uses DeepSeek loop decision for complex multi-turn workout expressions that rules miss', async () => {
     const task = makeTask();
     const { legacy, loopClassifier, service, workoutLoop } = makeHarness();
-    loopClassifier.classify.mockResolvedValue({
+    loopClassifier.decide.mockResolvedValue({
       intent: 'workout',
       confidence: 0.91,
+      shouldEnterLoop: true,
       reason: 'semantic_workout_activity',
       workoutHints: {
         activityType: '羽毛球',
@@ -678,7 +679,7 @@ describe('AgentEntryOrchestratorService', () => {
     });
 
     expect(result.source).toBe('workout_loop_intent');
-    expect(loopClassifier.classify).toHaveBeenCalledWith(
+    expect(loopClassifier.decide).toHaveBeenCalledWith(
       expect.objectContaining({
         task,
         message: '明晚华师大附近活动一下，找水平差不多的人',
@@ -702,12 +703,13 @@ describe('AgentEntryOrchestratorService', () => {
     expect(legacy.handleFallback).not.toHaveBeenCalled();
   });
 
-  it('uses DeepSeek loop classifier fallback for venue/activity wording such as Aoti cycling', async () => {
+  it('uses DeepSeek loop decision for venue/activity wording such as Aoti cycling', async () => {
     const task = makeTask();
     const { legacy, loopClassifier, service, workoutLoop } = makeHarness();
-    loopClassifier.classify.mockResolvedValue({
+    loopClassifier.decide.mockResolvedValue({
       intent: 'workout',
       confidence: 0.9,
+      shouldEnterLoop: true,
       reason: 'semantic_workout_cycling',
       workoutHints: {
         activityType: '骑行',
@@ -755,12 +757,13 @@ describe('AgentEntryOrchestratorService', () => {
     expect(legacy.handleFallback).not.toHaveBeenCalled();
   });
 
-  it('uses DeepSeek loop classifier fallback for coffee friend-making wording', async () => {
+  it('uses DeepSeek loop decision for coffee friend-making wording', async () => {
     const task = makeTask();
     const { friendLoop, legacy, loopClassifier, service } = makeHarness();
-    loopClassifier.classify.mockResolvedValue({
+    loopClassifier.decide.mockResolvedValue({
       intent: 'friend',
       confidence: 0.86,
+      shouldEnterLoop: true,
       reason: 'semantic_friend_coffee',
       friendHints: {
         friendGoal: '认识同城朋友',
@@ -808,12 +811,13 @@ describe('AgentEntryOrchestratorService', () => {
     expect(legacy.handleFallback).not.toHaveBeenCalled();
   });
 
-  it('uses DeepSeek loop classifier fallback for travel photo companion wording', async () => {
+  it('uses DeepSeek loop decision for travel photo companion wording', async () => {
     const task = makeTask();
     const { legacy, loopClassifier, service, travelLoop } = makeHarness();
-    loopClassifier.classify.mockResolvedValue({
+    loopClassifier.decide.mockResolvedValue({
       intent: 'travel',
       confidence: 0.88,
+      shouldEnterLoop: true,
       reason: 'semantic_travel_photo_buddy',
       travelHints: {
         destination: '川西',
@@ -859,12 +863,62 @@ describe('AgentEntryOrchestratorService', () => {
     expect(legacy.handleFallback).not.toHaveBeenCalled();
   });
 
-  it('falls through to legacy when DeepSeek loop classifier is uncertain with low confidence', async () => {
+  it('uses DeepSeek loop decision for profile completion wording', async () => {
+    const task = makeTask();
+    const { legacy, loopClassifier, profileLoop, service } = makeHarness();
+    loopClassifier.decide.mockResolvedValue({
+      intent: 'profile',
+      confidence: 0.87,
+      shouldEnterLoop: true,
+      reason: 'semantic_profile_completion',
+      profileHints: {
+        gender: '男',
+        height: '190',
+        interests: ['女'],
+      },
+    });
+    profileLoop.tryHandleEntrance.mockResolvedValue({
+      task,
+      result: makeResult({
+        intent: 'profile_enrichment_request',
+        cards: [
+          {
+            id: 'profile_completion:101',
+            type: 'profile_completion',
+            schemaVersion: 'fitmeet.tool-ui.v1',
+            schemaType: 'profile.completion',
+            title: '补全资料',
+            data: {},
+            actions: [],
+          },
+        ],
+      }),
+    });
+
+    const result = await service.handle({
+      ownerUserId: 7,
+      task,
+      body: { message: '性别男，爱好女，190身高' },
+      message: '性别男，爱好女，190身高',
+      startedAt: 123,
+    });
+
+    expect(result.source).toBe('profile_loop_intent');
+    expect(profileLoop.tryHandleEntrance).toHaveBeenCalledWith({
+      ownerUserId: 7,
+      task,
+      message: '性别男，爱好女，190身高',
+    });
+    expect(legacy.handleFallback).not.toHaveBeenCalled();
+  });
+
+  it('falls through to legacy when DeepSeek loop decision is uncertain with low confidence', async () => {
     const task = makeTask();
     const { legacy, loopClassifier, service, workoutLoop } = makeHarness();
-    loopClassifier.classify.mockResolvedValue({
+    loopClassifier.decide.mockResolvedValue({
       intent: 'uncertain',
       confidence: 0.3,
+      shouldEnterLoop: false,
       reason: 'not_enough_loop_evidence',
     });
     legacy.handleFallback.mockResolvedValue({ task, result: null });
@@ -886,13 +940,14 @@ describe('AgentEntryOrchestratorService', () => {
     );
   });
 
-  it('keeps rule routing available when DeepSeek loop classifier is unavailable', async () => {
+  it('keeps rule routing available when DeepSeek loop decision is unavailable', async () => {
     const task = makeTask();
     const { friendLoop, legacy, loopClassifier, service } = makeHarness();
-    loopClassifier.classify.mockResolvedValue({
+    loopClassifier.decide.mockResolvedValue({
       intent: 'uncertain',
       confidence: 0,
-      reason: 'classifier_unavailable',
+      shouldEnterLoop: false,
+      reason: 'loop_decision_unavailable',
     });
     friendLoop.tryHandleEntrance.mockResolvedValue({
       task,

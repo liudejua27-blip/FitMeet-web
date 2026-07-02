@@ -3,7 +3,7 @@ import {
   AgentTaskPermissionMode,
   AgentTaskStatus,
 } from '../entities/agent-task.entity';
-import { LoopClassifierService } from './loop-classifier.service';
+import { LoopDecisionService } from './loop-classifier.service';
 
 function makeTask(overrides: Partial<AgentTask> = {}): AgentTask {
   return {
@@ -18,8 +18,8 @@ function makeTask(overrides: Partial<AgentTask> = {}): AgentTask {
   } as AgentTask;
 }
 
-describe('LoopClassifierService', () => {
-  it('calls DeepSeek JSON runtime with the loop classifier purpose', async () => {
+describe('LoopDecisionService', () => {
+  it('calls DeepSeek JSON runtime with the loop decision purpose and multi-turn context', async () => {
     const toolJson = {
       callJson: jest.fn().mockResolvedValue({
         intent: 'workout',
@@ -34,9 +34,9 @@ describe('LoopClassifierService', () => {
         },
       }),
     };
-    const service = new LoopClassifierService(toolJson as never);
+    const service = new LoopDecisionService(toolJson as never);
 
-    const result = await service.classify({
+    const result = await service.decide({
       task: makeTask({
         memory: {
           socialAgentConversation: {
@@ -65,7 +65,7 @@ describe('LoopClassifierService', () => {
 
     expect(toolJson.callJson).toHaveBeenCalledWith(
       expect.objectContaining({
-        purpose: 'loop_classifier',
+        purpose: 'loop_decision',
         taskId: 101,
         fallback: expect.any(Function),
       }),
@@ -73,6 +73,7 @@ describe('LoopClassifierService', () => {
     expect(result).toMatchObject({
       intent: 'workout',
       confidence: 0.93,
+      shouldEnterLoop: true,
       workoutHints: expect.objectContaining({
         activityType: '羽毛球',
         timeText: '明晚',
@@ -80,6 +81,7 @@ describe('LoopClassifierService', () => {
       }),
     });
     const prompt = JSON.parse(toolJson.callJson.mock.calls[0][0].prompt);
+    expect(prompt.instruction).toContain('multi-turn LoopDecision brain');
     expect(prompt.instruction).toContain('Do not invent latitude');
     expect(prompt.routingPolicy.workout).toContain('sports');
     expect(prompt.taskContext).toMatchObject({
@@ -108,17 +110,18 @@ describe('LoopClassifierService', () => {
   });
 
   it('returns uncertain when the model runtime is unavailable', async () => {
-    const service = new LoopClassifierService();
+    const service = new LoopDecisionService();
 
     await expect(
-      service.classify({
+      service.decide({
         task: makeTask(),
         message: '想找人活动一下',
       }),
     ).resolves.toMatchObject({
       intent: 'uncertain',
       confidence: 0,
-      reason: 'classifier_unavailable',
+      reason: 'loop_decision_unavailable',
+      shouldEnterLoop: false,
     });
   });
 
@@ -129,22 +132,23 @@ describe('LoopClassifierService', () => {
         confidence: 5,
       }),
     };
-    const service = new LoopClassifierService(toolJson as never);
+    const service = new LoopDecisionService(toolJson as never);
 
     await expect(
-      service.classify({
+      service.decide({
         task: makeTask(),
         message: '明晚羽毛球',
       }),
     ).resolves.toMatchObject({
       intent: 'uncertain',
       confidence: 0,
-      reason: 'classifier_schema_invalid',
+      reason: 'loop_decision_schema_invalid',
+      shouldEnterLoop: false,
     });
   });
 
   it('maps loop hints into llm-sourced prefilled slots', () => {
-    const service = new LoopClassifierService();
+    const service = new LoopDecisionService();
 
     expect(
       service.workoutSlotsFromHints(

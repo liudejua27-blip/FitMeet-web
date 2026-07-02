@@ -892,6 +892,13 @@ export class AgentGatewayService {
       .skip(normalized.skip);
 
     query.andWhere('intent.mode = :mode', { mode: 'public' });
+    query.andWhere(
+      `(
+        COALESCE(intent.metadata ->> 'hallTarget', 'socialHall') = 'socialHall'
+        AND intent.requestType NOT IN (:...taskRequestTypes)
+      )`,
+      { taskRequestTypes: ['service', 'housing', 'help'] },
+    );
     this.excludeTombstonedPublicIntents(query);
     this.excludeInternalPublicIntentFixtures(query);
 
@@ -1034,6 +1041,64 @@ export class AgentGatewayService {
     const candidates = this.publicVisibleSocialCandidates(
       rawCandidates,
       intent.userId,
+    );
+    intent.candidateUserIds = candidates.map(
+      (candidate) => candidate.profile.id,
+    );
+    intent.matchedCount = candidates.length;
+    intent.status =
+      candidates.length > 0
+        ? SocialRequestStatus.Matched
+        : SocialRequestStatus.Searching;
+    intent.metadata = {
+      ...(intent.metadata ?? {}),
+      matchSignal: buildPublicIntentMatchSignal(intent, candidates),
+    };
+    await this.publicIntentRepo.save(intent);
+    return {
+      request: serializePublicSocialIntent(intent),
+      candidates: serializePublicSocialCandidates(candidates),
+    };
+  }
+
+  async getDemandSocialIntentMatches(
+    id: string,
+    ownerUserId: number,
+    limit = 5,
+  ) {
+    const intent = await this.publicIntentRepo.findOne({ where: { id } });
+    if (
+      !intent ||
+      intent.source !== 'demand' ||
+      intent.userId !== ownerUserId
+    ) {
+      throw new NotFoundException('Demand social intent not found');
+    }
+    const rawCandidates = await this.searchSocialCandidates(
+      ownerUserId,
+      {
+        requestType: intent.requestType,
+        title: intent.title,
+        description: intent.description,
+        city: intent.city,
+        loc: intent.loc,
+        lat: intent.lat ?? undefined,
+        lng: intent.lng ?? undefined,
+        radiusKm: intent.radiusKm,
+        timePreference: intent.timePreference,
+        verifiedOnly: Boolean(intent.filters?.verifiedOnly ?? true),
+        interests: Array.isArray(intent.filters?.interests)
+          ? (intent.filters.interests as string[])
+          : [],
+        limit: Math.min(Math.max(limit, 1), 20),
+      },
+      {
+        excludedUserIds: [ownerUserId],
+      },
+    );
+    const candidates = this.publicVisibleSocialCandidates(
+      rawCandidates,
+      ownerUserId,
     );
     intent.candidateUserIds = candidates.map(
       (candidate) => candidate.profile.id,

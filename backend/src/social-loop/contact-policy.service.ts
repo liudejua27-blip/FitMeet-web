@@ -22,6 +22,7 @@ export type ContactContextType =
   | 'agent_candidate'
   | 'connection_request'
   | 'public_intent_application'
+  | 'task_intent_application'
   | 'friendship'
   | 'meet';
 
