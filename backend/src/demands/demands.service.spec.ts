@@ -5,7 +5,6 @@ import {
   CandidateSearchIndexSourceType,
 } from '../agent-gateway/entities/candidate-search-index.entity';
 import { PublicSocialIntent } from '../agent-gateway/entities/public-social-intent.entity';
-import { SocialRequestStatus } from '../agent-gateway/entities/social-request.entity';
 import { UserBlock } from '../safety/user-block.entity';
 import { DemandCandidate } from './demand-candidate.entity';
 import { DemandInvitation } from './demand-invitation.entity';
@@ -17,6 +16,7 @@ import {
 } from './demand.entity';
 import { CreateDemandDto } from './demands.dto';
 import { DemandsService } from './demands.service';
+import { PublicTaskIntent } from './public-task-intent.entity';
 
 class MemoryRepository<T extends object> {
   manager?: EntityManager;
@@ -114,11 +114,13 @@ function compareValues(left: unknown, right: unknown) {
 describe('DemandsService', () => {
   let demandRows: Map<string, Demand>;
   let intentRows: Map<string, PublicSocialIntent>;
+  let taskRows: Map<string, PublicTaskIntent>;
   let candidateRows: Map<string, DemandCandidate>;
   let invitationRows: Map<string, DemandInvitation>;
   let blockRows: Map<string, UserBlock>;
   let demandRepo: MemoryRepository<Demand>;
   let intentRepo: MemoryRepository<PublicSocialIntent>;
+  let taskRepo: MemoryRepository<PublicTaskIntent>;
   let candidateRepo: MemoryRepository<DemandCandidate>;
   let invitationRepo: MemoryRepository<DemandInvitation>;
   let blockRepo: MemoryRepository<UserBlock>;
@@ -130,6 +132,7 @@ describe('DemandsService', () => {
   beforeEach(() => {
     demandRows = new Map();
     intentRows = new Map();
+    taskRows = new Map();
     candidateRows = new Map();
     invitationRows = new Map();
     blockRows = new Map();
@@ -138,6 +141,7 @@ describe('DemandsService', () => {
       () => new PublicSocialIntent(),
       intentRows,
     );
+    taskRepo = new MemoryRepository(() => new PublicTaskIntent(), taskRows);
     candidateRepo = new MemoryRepository(
       () => new DemandCandidate(),
       candidateRows,
@@ -152,6 +156,7 @@ describe('DemandsService', () => {
       getRepository: (entity: unknown) => {
         if (entity === Demand) return demandRepo;
         if (entity === PublicSocialIntent) return intentRepo;
+        if (entity === PublicTaskIntent) return taskRepo;
         if (entity === DemandCandidate) return candidateRepo;
         if (entity === DemandInvitation) return invitationRepo;
         if (entity === UserBlock) return blockRepo;
@@ -192,7 +197,7 @@ describe('DemandsService', () => {
     );
   });
 
-  it('creates a public demand and discoverable public intent projection', async () => {
+  it('creates a public service demand and discoverable task intent projection', async () => {
     const response = await service.createDemand(
       7,
       createDemandDto(DemandVisibility.Public),
@@ -201,17 +206,19 @@ describe('DemandsService', () => {
 
     expect(response.status).toBe(DemandStatus.Published);
     expect(response.visibility).toBe(DemandVisibility.Public);
-    expect(response.publicIntentId).toEqual(expect.stringMatching(/^public_/));
+    expect(response.taskIntentId).toEqual(expect.stringMatching(/^task_/));
+    expect(response.publicIntentId).toBeNull();
 
-    const intent = intentRows.get(String(response.publicIntentId));
-    expect(intent).toMatchObject({
+    const task = taskRows.get(String(response.taskIntentId));
+    expect(task).toMatchObject({
       userId: 7,
       source: 'demand',
       mode: 'public',
       requestType: 'service',
+      category: 'locksmith',
       title: '青岛大学泓园 524 开锁服务',
     });
-    expect(intent?.metadata).toMatchObject({
+    expect(task?.metadata).toMatchObject({
       source: 'demand',
       demandId: response.id,
       visibility: 'public',
@@ -226,10 +233,11 @@ describe('DemandsService', () => {
       'idem-hidden',
     );
 
-    const intent = intentRows.get(String(response.publicIntentId));
     expect(response.status).toBe(DemandStatus.Hidden);
-    expect(intent?.source).toBe('demand');
-    expect(intent?.mode).toBe('hidden');
+    expect(response.publicIntentId).toBeNull();
+    expect(response.taskIntentId).toBeNull();
+    expect(intentRows.size).toBe(0);
+    expect(taskRows.size).toBe(0);
   });
 
   it('hides and cancels demand projections without leaving public feed data active', async () => {
@@ -246,7 +254,13 @@ describe('DemandsService', () => {
       'idem-hide',
     );
     expect(hidden.status).toBe(DemandStatus.Hidden);
-    expect(intentRows.get(String(hidden.publicIntentId))?.mode).toBe('hidden');
+    expect(taskRows.get(String(created.taskIntentId))?.status).toBe(
+      'cancelled',
+    );
+    expect(taskRows.get(String(created.taskIntentId))?.metadata).toMatchObject({
+      tombstoned: true,
+      visibility: DemandVisibility.Hidden,
+    });
 
     const canceled = await service.cancelDemand(
       7,
@@ -254,10 +268,10 @@ describe('DemandsService', () => {
       { reason: 'user canceled' },
       'idem-cancel',
     );
-    const intent = intentRows.get(String(canceled.publicIntentId));
+    const task = taskRows.get(String(canceled.taskIntentId));
     expect(canceled.status).toBe(DemandStatus.Canceled);
-    expect(intent?.status).toBe(SocialRequestStatus.Cancelled);
-    expect(intent?.metadata).toMatchObject({
+    expect(task?.status).toBe('cancelled');
+    expect(task?.metadata).toMatchObject({
       tombstoned: true,
       demandStatus: DemandStatus.Canceled,
       cancelReason: 'user canceled',
@@ -318,7 +332,7 @@ describe('DemandsService', () => {
       userId: 12,
       candidateUserId: 12,
       displayName: '小林',
-      publicIntentId: created.publicIntentId,
+      publicIntentId: null,
       status: 'recommended',
     });
     expect(page.candidates).toHaveLength(1);

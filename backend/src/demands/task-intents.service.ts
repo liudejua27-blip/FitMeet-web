@@ -14,10 +14,7 @@ import {
   serializeTaskIntentApplication,
 } from './public-task-intent.presenter';
 import { PublicTaskIntent } from './public-task-intent.entity';
-import {
-  TaskIntentApplication,
-  TaskIntentApplicationStatus,
-} from './task-intent-application.entity';
+import { TaskIntentApplication } from './task-intent-application.entity';
 
 type TaskListFilters = {
   page?: number;
@@ -119,11 +116,7 @@ export class TaskIntentsService {
 
   async getPublicTaskIntent(id: string) {
     const task = await this.taskRepo.findOne({ where: { id } });
-    if (
-      !task ||
-      task.mode !== 'public' ||
-      task.metadata?.tombstoned === true
-    ) {
+    if (!task || task.mode !== 'public' || task.metadata?.tombstoned === true) {
       throw new NotFoundException('Task intent not found');
     }
     return serializePublicTaskIntent(task);
@@ -243,18 +236,16 @@ export class TaskIntentsService {
       throw new BadRequestException('Already applied to this task.');
     }
 
-    const application = await manager
-      .getRepository(TaskIntentApplication)
-      .save(
-        manager.getRepository(TaskIntentApplication).create({
-          taskIntentId,
-          ownerUserId: task.userId!,
-          applicantUserId,
-          status: 'pending',
-          message: message.trim().slice(0, 500),
-          resolvedAt: null,
-        }),
-      );
+    const application = await manager.getRepository(TaskIntentApplication).save(
+      manager.getRepository(TaskIntentApplication).create({
+        taskIntentId,
+        ownerUserId: task.userId!,
+        applicantUserId,
+        status: 'pending',
+        message: message.trim().slice(0, 500),
+        resolvedAt: null,
+      }),
+    );
     task.applicantCount += 1;
     await manager.getRepository(PublicTaskIntent).save(task);
     return serializeTaskIntentApplication(application);
@@ -421,7 +412,9 @@ export class TaskIntentsService {
       task.status !== 'open' ||
       task.metadata?.tombstoned === true
     ) {
-      throw new BadRequestException('Task intent is not accepting applications.');
+      throw new BadRequestException(
+        'Task intent is not accepting applications.',
+      );
     }
   }
 

@@ -1,5 +1,8 @@
 import { Demand } from './demand.entity';
-import { DemandInvitation } from './demand-invitation.entity';
+import {
+  DemandInvitation,
+  DemandInvitationStatus,
+} from './demand-invitation.entity';
 
 export function serializeDemand(demand: Demand) {
   return {
@@ -48,7 +51,7 @@ export function serializeDemandInvitation(invitation: DemandInvitation) {
     proposedMeetId: invitation.proposedMeetId ?? null,
     acceptedMeetId: invitation.acceptedMeetId ?? null,
     conversation:
-      invitation.status === 'accepted'
+      invitation.status === DemandInvitationStatus.Accepted
         ? {
             status: invitation.conversationId ? 'ready' : 'provisioning',
             conversationId: invitation.conversationId ?? null,

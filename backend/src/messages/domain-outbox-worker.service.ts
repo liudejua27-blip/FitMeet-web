@@ -118,17 +118,17 @@ export class DomainOutboxWorkerService {
     );
     const directKey = this.directConversationKey(ownerUserId, applicantUserId);
     const now = new Date();
-      const metadata = {
-        source: row.aggregateType,
-        publicIntentId: this.text(row.payload.publicIntentId),
-        taskIntentId: this.text(row.payload.taskIntentId),
-        publicIntentApplicationId: this.number(row.payload.applicationId),
-        taskIntentApplicationId:
-          row.aggregateType === 'task_intent_application'
-            ? this.number(row.payload.applicationId)
-            : null,
-        demandInvitationId: this.number(row.payload.invitationId),
-        demandId: this.text(row.payload.demandId),
+    const metadata = {
+      source: row.aggregateType,
+      publicIntentId: this.text(row.payload.publicIntentId),
+      taskIntentId: this.text(row.payload.taskIntentId),
+      publicIntentApplicationId: this.number(row.payload.applicationId),
+      taskIntentApplicationId:
+        row.aggregateType === 'task_intent_application'
+          ? this.number(row.payload.applicationId)
+          : null,
+      demandInvitationId: this.number(row.payload.invitationId),
+      demandId: this.text(row.payload.demandId),
       candidateRecordId: this.number(row.payload.candidateRecordId),
       meetId: this.number(row.payload.meetId),
       outboxEventId: row.id,

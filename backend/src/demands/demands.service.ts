@@ -326,7 +326,12 @@ export class DemandsService {
     const repo = manager.getRepository(Demand);
     const visibility = dto.visibility;
     const fields = this.normalizeFields(dto.fields);
-    const text = this.demandSourceText(dto.type, dto.title, dto.summary, fields);
+    const text = this.demandSourceText(
+      dto.type,
+      dto.title,
+      dto.summary,
+      fields,
+    );
     const hallTarget = this.normalizeHallTarget(
       dto.hallTarget,
       dto.type,
@@ -764,9 +769,7 @@ export class DemandsService {
     };
   }
 
-  private buildTaskIntentProjection(
-    demand: Demand,
-  ): Partial<PublicTaskIntent> {
+  private buildTaskIntentProjection(demand: Demand): Partial<PublicTaskIntent> {
     const fieldText = demand.fields
       .map((field) => `${field.title} ${field.value}`)
       .join(' ');
@@ -1549,7 +1552,13 @@ export class DemandsService {
   }
 
   private inferTaskCategory(type: DemandType, text: string) {
-    if (type === DemandType.Housing || text.includes('找房') || text.includes('租房') || text.includes('合租')) return 'housing';
+    if (
+      type === DemandType.Housing ||
+      text.includes('找房') ||
+      text.includes('租房') ||
+      text.includes('合租')
+    )
+      return 'housing';
     if (text.includes('开锁') || text.includes('锁')) return 'locksmith';
     if (text.includes('维修') || text.includes('修')) return 'repair';
     if (text.includes('搬家')) return 'moving';
@@ -1558,7 +1567,12 @@ export class DemandsService {
     if (text.includes('摄影') || text.includes('跟拍')) return 'photography';
     if (text.includes('课程') || text.includes('培训')) return 'course';
     if (text.includes('跑腿') || text.includes('代办')) return 'errand';
-    if (type === DemandType.Help || text.includes('求助') || text.includes('帮忙')) return 'help';
+    if (
+      type === DemandType.Help ||
+      text.includes('求助') ||
+      text.includes('帮忙')
+    )
+      return 'help';
     return 'service';
   }
 
@@ -1570,16 +1584,30 @@ export class DemandsService {
     if (text.includes('饭') || text.includes('吃')) return 'meal';
     if (text.includes('电影') || text.includes('影院')) return 'movie';
     if (text.includes('展') || text.includes('展览')) return 'exhibition';
-    if (text.includes('运动局') || text.includes('羽毛球') || text.includes('健身') || text.includes('跑步')) return 'sports';
+    if (
+      text.includes('运动局') ||
+      text.includes('羽毛球') ||
+      text.includes('健身') ||
+      text.includes('跑步')
+    )
+      return 'sports';
     if (type === DemandType.Buddy) return 'buddy';
     return 'social';
   }
 
   private taskRiskLevel(text: string) {
-    if (text.includes('开锁') || text.includes('上门') || text.includes('急需')) {
+    if (
+      text.includes('开锁') ||
+      text.includes('上门') ||
+      text.includes('急需')
+    ) {
       return 'high';
     }
-    if (text.includes('维修') || text.includes('搬家') || text.includes('家政')) {
+    if (
+      text.includes('维修') ||
+      text.includes('搬家') ||
+      text.includes('家政')
+    ) {
       return 'medium';
     }
     return 'low';

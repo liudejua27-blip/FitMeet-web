@@ -138,7 +138,9 @@ export class TaskHallProjection1783600000000 implements MigrationInterface {
       `DROP INDEX IF EXISTS "idx_task_intent_applications_intent_applicant_status"`,
     );
     await queryRunner.query(`DROP TABLE IF EXISTS "task_intent_applications"`);
-    await queryRunner.query(`DROP INDEX IF EXISTS "idx_public_task_intents_demand"`);
+    await queryRunner.query(
+      `DROP INDEX IF EXISTS "idx_public_task_intents_demand"`,
+    );
     await queryRunner.query(
       `DROP INDEX IF EXISTS "idx_public_task_intents_category_status"`,
     );
