@@ -930,15 +930,27 @@ function isInitialConversationThinking(
 }
 
 function toToolUICard(card: FitMeetAlphaCard): Record<string, unknown> {
+  const data = isRecord(card.data) ? card.data : {};
+  const schemaVersion =
+    primitiveStringFromUnknown(card.schemaVersion) ??
+    primitiveStringFromUnknown(data.schemaVersion) ??
+    FITMEET_ASSISTANT_TOOL_SCHEMA_VERSION;
+  const schemaType =
+    primitiveStringFromUnknown(card.schemaType) ??
+    primitiveStringFromUnknown(data.schemaType);
   return {
-    schemaVersion: FITMEET_ASSISTANT_TOOL_SCHEMA_VERSION,
+    schemaVersion,
     id: card.id,
     type: card.type,
-    schemaType: card.data.schemaType,
+    schemaType,
     title: card.title,
     body: card.body,
     status: card.status,
-    data: card.data,
+    data: {
+      ...data,
+      schemaVersion,
+      ...(schemaType ? { schemaType } : {}),
+    },
     actions: card.actions,
   };
 }

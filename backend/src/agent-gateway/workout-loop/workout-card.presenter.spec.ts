@@ -16,6 +16,9 @@ describe('workout card presenters', () => {
       type: 'workout_intake',
       schemaType: 'workout.intake',
       data: {
+        schemaName: 'WorkoutIntakeCard',
+        schemaVersion: 'fitmeet.tool-ui.v1',
+        schemaType: 'workout.intake',
         taskId: 101,
         activityType: '跑步',
         missingFields: ['timePreference', 'locationText'],
@@ -50,6 +53,9 @@ describe('workout card presenters', () => {
       type: 'workout_draft',
       schemaType: 'workout.draft',
       data: {
+        schemaName: 'WorkoutDraftCard',
+        schemaVersion: 'fitmeet.tool-ui.v1',
+        schemaType: 'workout.draft',
         taskId: 101,
         socialRequestId: 501,
       },

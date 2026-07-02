@@ -28,6 +28,7 @@ import {
   readWorkoutLoopStage,
   workoutLoopOwnsTask,
 } from '../workout-loop/workout-loop-owner';
+import { isProfileEnrichmentDominant } from '../social-agent-social-intent-gate';
 import type { AgentEntryInput, AgentEntryResult } from './agent-entry.types';
 import type {
   FitMeetAlphaCard,
@@ -57,6 +58,11 @@ export class AgentEntryOrchestratorService {
 
   async handle(input: AgentEntryInput): Promise<AgentEntryResult> {
     const workoutStage = readWorkoutLoopStage(input.task);
+    if (isProfileEnrichmentDominant(input.message)) {
+      const profile = await this.tryRouteProfileLoop(input, workoutStage);
+      if (profile) return profile;
+    }
+
     if (workoutLoopOwnsTask(input.task, input.message)) {
       const workout = await this.workoutLoop.continueEntrance({
         ownerUserId: input.ownerUserId,
@@ -215,25 +221,8 @@ export class AgentEntryOrchestratorService {
     }
 
     if (loopIntent.intent === 'profile' && this.profileLoop) {
-      const profile = await this.profileLoop.tryHandleEntrance({
-        ownerUserId: input.ownerUserId,
-        task: input.task,
-        message: input.message,
-      });
-      if (profile) {
-        this.logRoute(input, {
-          source: 'profile_loop_intent',
-          loopIntent: loopIntent.intent,
-          workoutStage,
-          cards: this.cardSchemaTypes(profile.result.cards),
-          legacyBlocked: false,
-        });
-        return {
-          source: 'profile_loop_intent',
-          task: profile.task,
-          result: profile.result,
-        };
-      }
+      const profile = await this.tryRouteProfileLoop(input, workoutStage);
+      if (profile) return profile;
     }
 
     const fallback = await this.legacy.handleFallback({
@@ -392,6 +381,31 @@ export class AgentEntryOrchestratorService {
     }
 
     return null;
+  }
+
+  private async tryRouteProfileLoop(
+    input: AgentEntryInput,
+    workoutStage: string | null,
+  ): Promise<AgentEntryResult | null> {
+    if (!this.profileLoop) return null;
+    const profile = await this.profileLoop.tryHandleEntrance({
+      ownerUserId: input.ownerUserId,
+      task: input.task,
+      message: input.message,
+    });
+    if (!profile) return null;
+    this.logRoute(input, {
+      source: 'profile_loop_intent',
+      loopIntent: 'profile',
+      workoutStage,
+      cards: this.cardSchemaTypes(profile.result.cards),
+      legacyBlocked: false,
+    });
+    return {
+      source: 'profile_loop_intent',
+      task: profile.task,
+      result: profile.result,
+    };
   }
 
   private async tryRouteAcceptedLoop(

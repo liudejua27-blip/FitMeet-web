@@ -32,6 +32,10 @@ import {
 } from './social-agent-context-window';
 import { sanitizeForDisplay } from '../common/display-text.util';
 import { buildSocialAgentKnownTaskSlotConstraints } from './social-agent-task-slot-constraints.presenter';
+import {
+  fitMeetSubagentQueueNameForAgent,
+  fitMeetSubagentQueueNameForWorkerTool,
+} from './fitmeet-subagent-worker-queues';
 
 type SubagentWorkerToolRunner = (input: {
   agent: FitMeetAlphaAgentName;
@@ -114,12 +118,14 @@ export class FitMeetSubagentWorkerService {
 
   async run(input: SubagentWorkerInput): Promise<SubagentWorkerRunOutput> {
     const runId = this.workerRunId(input);
+    const queueName = this.queueNameForInput(input);
     if (this.workerRuntime) {
       return this.workerRuntime.submit({
         agent: input.agent,
         runId,
+        queueName,
         signal: input.signal,
-        serializedPayload: this.serializedPayload(input, runId),
+        serializedPayload: this.serializedPayload(input, runId, queueName),
         job: (context) => this.executeInLoop(input, context),
       });
     }
@@ -128,7 +134,7 @@ export class FitMeetSubagentWorkerService {
       workerId: runId,
       agent: input.agent,
       mode: 'resident_in_process',
-      queueName: `fitmeet.subagent.${this.slug(input.agent)}`,
+      queueName,
       timeoutMs: input.timeoutMs ?? FITMEET_SUBAGENT_WORKER_DEFAULT_TIMEOUT_MS,
       crashIsolation: false,
       scalable: false,
@@ -589,8 +595,8 @@ export class FitMeetSubagentWorkerService {
   private serializedPayload(
     input: SubagentWorkerInput,
     runId: string,
+    queueName: string,
   ): Record<string, unknown> {
-    const queueName = `fitmeet.subagent.${this.slug(input.agent)}`;
     const modelUseCase = this.modelUseCaseFor(input.agent);
     const timeoutMs =
       input.timeoutMs ?? FITMEET_SUBAGENT_WORKER_DEFAULT_TIMEOUT_MS;
@@ -928,6 +934,28 @@ export class FitMeetSubagentWorkerService {
 
   private string(value: unknown): string | null {
     return typeof value === 'string' && value.trim() ? value : null;
+  }
+
+  private queueNameForInput(input: SubagentWorkerInput): string {
+    const override = this.configuredAgentQueue(input.agent);
+    if (override) return override;
+    const branchToolName =
+      this.string(input.plannerInput.branchToolName) ??
+      this.string(input.tools[0]?.toolName);
+    return (
+      fitMeetSubagentQueueNameForWorkerTool(branchToolName) ??
+      fitMeetSubagentQueueNameForAgent(input.agent)
+    );
+  }
+
+  private configuredAgentQueue(agent: FitMeetAlphaAgentName): string | null {
+    const key = `FITMEET_${this.slug(agent)
+      .replace(/-/g, '_')
+      .toUpperCase()}_WORKER_QUEUE`;
+    return (
+      this.string(this.config?.get<string>(key)) ??
+      this.string(process.env[key])
+    );
   }
 
   private slug(agent: FitMeetAlphaAgentName): string {

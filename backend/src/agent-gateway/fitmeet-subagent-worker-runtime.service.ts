@@ -14,6 +14,7 @@ import {
   isFitMeetSubagentWorkerCommand,
   isLegacySubagentRouteBranchPayload,
 } from './fitmeet-subagent-worker-command.contract';
+import { fitMeetSubagentQueueNameForAgent } from './fitmeet-subagent-worker-queues';
 
 export type FitMeetSubagentWorkerMode =
   | 'resident_in_process'
@@ -79,7 +80,7 @@ interface WorkerLane {
 
 @Injectable()
 export class FitMeetSubagentWorkerRuntimeService {
-  private readonly lanes = new Map<FitMeetAlphaAgentName, WorkerLane>();
+  private readonly lanes = new Map<string, WorkerLane>();
 
   constructor(
     @Optional()
@@ -93,11 +94,12 @@ export class FitMeetSubagentWorkerRuntimeService {
   async submit<T>(input: {
     agent: FitMeetAlphaAgentName;
     runId: string;
+    queueName?: string | null;
     signal?: AbortSignal | null;
     serializedPayload?: Record<string, unknown>;
     job: FitMeetSubagentWorkerJob<T>;
   }): Promise<T> {
-    const lane = this.laneFor(input.agent);
+    const lane = this.laneFor(input.agent, input.queueName);
     if (lane.mode === 'queue_worker_ready') {
       if (this.dbQueue) return this.submitViaDbQueue(input, lane);
       return this.rejectUnavailableOutOfProcessWorker(
@@ -189,9 +191,11 @@ export class FitMeetSubagentWorkerRuntimeService {
 
   snapshot(agent?: FitMeetAlphaAgentName): FitMeetSubagentWorkerLaneSnapshot[] {
     const lanes = agent
-      ? [this.laneFor(agent)]
+      ? Array.from(this.lanes.values()).filter((lane) => lane.agent === agent)
       : Array.from(this.lanes.values());
-    const snapshot = lanes.map((lane) => ({
+    const resolvedLanes =
+      agent && lanes.length === 0 ? [this.laneFor(agent)] : lanes;
+    const snapshot = resolvedLanes.map((lane) => ({
       workerId: lane.workerId,
       agent: lane.agent,
       mode: lane.mode,
@@ -212,8 +216,13 @@ export class FitMeetSubagentWorkerRuntimeService {
     return snapshot;
   }
 
-  private laneFor(agent: FitMeetAlphaAgentName): WorkerLane {
-    const existing = this.lanes.get(agent);
+  private laneFor(
+    agent: FitMeetAlphaAgentName,
+    requestedQueueName?: string | null,
+  ): WorkerLane {
+    const queueName = this.queueNameFor(agent, requestedQueueName);
+    const key = this.laneKey(agent, queueName);
+    const existing = this.lanes.get(key);
     if (existing) return existing;
     const modelUseCase = this.modelUseCaseFor(agent);
     const mode = this.modeFor(agent);
@@ -221,7 +230,7 @@ export class FitMeetSubagentWorkerRuntimeService {
       workerId: `subagent:${this.slug(agent)}:${Date.now().toString(36)}`,
       agent,
       mode,
-      queueName: this.queueNameFor(agent),
+      queueName,
       timeoutMs: this.timeoutMsFor(agent, modelUseCase),
       crashIsolation: mode !== 'resident_in_process',
       scalable: mode !== 'resident_in_process',
@@ -235,7 +244,7 @@ export class FitMeetSubagentWorkerRuntimeService {
       failedRuns: 0,
       tail: Promise.resolve(),
     };
-    this.lanes.set(agent, lane);
+    this.lanes.set(key, lane);
     return lane;
   }
 
@@ -299,11 +308,14 @@ export class FitMeetSubagentWorkerRuntimeService {
     return 'resident_in_process';
   }
 
-  private queueNameFor(agent: FitMeetAlphaAgentName): string {
+  private queueNameFor(
+    agent: FitMeetAlphaAgentName,
+    requestedQueueName?: string | null,
+  ): string {
     return (
+      this.cleanText(requestedQueueName) ??
       this.env(this.agentEnvKey(agent, 'QUEUE')) ??
-      this.env('FITMEET_SUBAGENT_WORKER_QUEUE') ??
-      `fitmeet.subagent.${this.slug(agent)}`
+      fitMeetSubagentQueueNameForAgent(agent)
     );
   }
 
@@ -408,6 +420,11 @@ export class FitMeetSubagentWorkerRuntimeService {
     return Math.trunc(parsed);
   }
 
+  private cleanText(value: string | null | undefined): string | null {
+    const text = `${value ?? ''}`.trim();
+    return text ? text : null;
+  }
+
   private slug(agent: FitMeetAlphaAgentName): string {
     return agent
       .toLowerCase()
@@ -417,6 +434,10 @@ export class FitMeetSubagentWorkerRuntimeService {
 
   private recordQueueSnapshot(): void {
     this.observability?.recordQueueSnapshot(this.snapshot());
+  }
+
+  private laneKey(agent: FitMeetAlphaAgentName, queueName: string): string {
+    return `${agent}\u0000${queueName}`;
   }
 
   private async submitViaDbQueue<T>(

@@ -20,6 +20,11 @@ function repo<T extends { id?: number }>() {
       );
     }),
     find: jest.fn(async () => rows.slice().reverse()),
+    manager: {
+      getRepository: jest.fn(() => ({
+        exist: jest.fn(async () => true),
+      })),
+    },
   };
 }
 

@@ -19,12 +19,49 @@ describe('FitMeetLoopRouterService', () => {
     });
   });
 
+  it('accepts direct workout loop commands without relying on arbitration', () => {
+    for (const message of ['约练', '开始约练', '进入约练']) {
+      expect(service.classify(message)).toMatchObject({
+        intent: 'workout',
+        disposition: 'accept_loop',
+        reason: 'workout_direct_loop_command',
+      });
+    }
+  });
+
+  it('accepts explicit activity partner requests so intake can collect missing slots', () => {
+    expect(service.classify('我想找跑步搭子，喜欢宠物的')).toMatchObject({
+      intent: 'workout',
+      disposition: 'accept_loop',
+      reason: 'workout_activity_partner_phrase',
+    });
+    expect(service.classify('想找一起健身的伙伴')).toMatchObject({
+      intent: 'workout',
+      disposition: 'accept_loop',
+      reason: 'workout_activity_partner_phrase',
+    });
+  });
+
+  it.each([
+    '我想认识喜欢健身的朋友',
+    '我想找朋友聊健身计划',
+    '我适合找什么样的健身搭子',
+    '不要推荐人，只想问问怎么约练',
+    '我想了解跑步搭子的规则',
+  ])(
+    'keeps workout advice or friend-preference "%s" out of direct workout intake',
+    (message) => {
+      expect(service.classify(message)).not.toMatchObject({
+        intent: 'workout',
+        disposition: 'accept_loop',
+      });
+    },
+  );
+
   it('marks keyword-only workout wording for arbitration instead of final routing', () => {
     for (const message of [
-      '想找个健身伙伴',
       '约个球',
       '附近有人一起练吗',
-      '想找朋友一起健身',
       '明晚陆家嘴健身',
       '苏州金鸡湖夜跑',
     ]) {

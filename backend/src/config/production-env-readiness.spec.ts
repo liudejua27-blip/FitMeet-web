@@ -59,6 +59,8 @@ const validEnv = {
   FITMEET_SUBAGENT_WORKER_TIMEOUT_MS: '30000',
   FITMEET_SUBAGENT_WORKER_HEARTBEAT_MS: '10000',
   FITMEET_SUBAGENT_WORKER_HEALTH_MAX_AGE_MS: '90000',
+  FITMEET_SUBAGENT_WORKER_QUEUE:
+    'fitmeet.subagent.life-graph-agent,fitmeet.subagent.social-match-agent,fitmeet.subagent.meet-loop-agent,fitmeet.subagent.math-agent',
   AGENT_OBSERVABILITY_ALERTS_ENABLED: 'false',
   AGENT_OBSERVABILITY_ALERT_WEBHOOK_URL: '',
   AGENT_OBSERVABILITY_ALERT_WEBHOOK_TOKEN: '',
@@ -510,6 +512,21 @@ describe('production-env-readiness', () => {
         expect.objectContaining({
           key: 'FITMEET_SUBAGENT_WORKER_HEALTH_MAX_AGE_MS',
         }),
+      ]),
+    );
+  });
+
+  it('rejects stale subagent worker queue names', () => {
+    const report = buildProductionEnvReport({
+      ...validEnv,
+      FITMEET_SUBAGENT_WORKER_QUEUE:
+        'fitmeet.subagent.agent-brain,fitmeet.subagent.life-graph-agent,fitmeet.subagent.match-agent',
+    });
+
+    expect(report.ok).toBe(false);
+    expect(report.errors).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ key: 'FITMEET_SUBAGENT_WORKER_QUEUE' }),
       ]),
     );
   });

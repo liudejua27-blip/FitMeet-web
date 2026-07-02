@@ -298,7 +298,7 @@ describe('FitMeetSubagentWorkerRuntimeService', () => {
     expect(dbQueue.enqueue).toHaveBeenCalledWith(
       expect.objectContaining({
         agentName: 'Match Agent',
-        queueName: 'fitmeet.subagent.match-agent',
+        queueName: 'fitmeet.subagent.social-match-agent',
         payload: expect.objectContaining({
           contract: 'fitmeet.subagent.worker.command',
           version: 1,
@@ -479,7 +479,7 @@ describe('FitMeetSubagentWorkerRuntimeService', () => {
       commandId: 'cmd-versioned-command',
       submittedAt: '2026-06-17T00:00:00.000Z',
       agentName: 'Match Agent',
-      queueName: 'fitmeet.subagent.match-agent',
+      queueName: 'fitmeet.subagent.social-match-agent',
       ownerUserId: 7,
       taskId: 101,
       threadId: 'agent-task:101',
@@ -513,7 +513,7 @@ describe('FitMeetSubagentWorkerRuntimeService', () => {
       route: { intent: 'find_partner' } as never,
       workerRuntime: {
         mode: 'queue_worker_ready',
-        queueName: 'fitmeet.subagent.match-agent',
+        queueName: 'fitmeet.subagent.social-match-agent',
         timeoutMs: 15000,
         crashIsolation: true,
         scalable: true,
@@ -550,7 +550,7 @@ describe('FitMeetSubagentWorkerRuntimeService', () => {
     expect(dbQueue.enqueue).toHaveBeenCalledWith(
       expect.objectContaining({
         agentName: 'Match Agent',
-        queueName: 'fitmeet.subagent.match-agent',
+        queueName: 'fitmeet.subagent.social-match-agent',
         payload: command,
         runId: 'run-versioned-command',
         traceId: 'run-versioned-command',

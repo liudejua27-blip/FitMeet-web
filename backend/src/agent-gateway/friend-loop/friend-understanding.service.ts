@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { sanitizeCity } from '../../common/city.util';
 import { cleanDisplayText } from '../../common/display-text.util';
 import type { AgentTask } from '../entities/agent-task.entity';
+import { buildLoopLlmContext } from '../loop-agent/loop-llm-context';
 import type {
   LoopSlotMeta,
   LoopSlotSource,
@@ -396,6 +397,10 @@ export class FriendUnderstandingService {
         'clarificationQuestion',
       ],
       userMessage: cleanDisplayText(input.message, ''),
+      conversationContext: buildLoopLlmContext({
+        task: input.task ?? null,
+        message: input.message,
+      }),
       locationMentionContract: {
         rawText: 'exact location words used by user, e.g. 华师大附近',
         normalizedText: 'clean query for map lookup, e.g. 华师大',
@@ -407,7 +412,6 @@ export class FriendUnderstandingService {
         needsGeoResolution: true,
       },
       ruleSlots: input.ruleSlots,
-      taskMemory: this.safeTaskMemory(input.task ?? null),
     });
   }
 
@@ -421,19 +425,6 @@ export class FriendUnderstandingService {
       assumptions: [],
       needsClarification: false,
       source: 'fallback',
-    };
-  }
-
-  private safeTaskMemory(task: AgentTask | null): Record<string, unknown> {
-    const memory =
-      typeof task?.memory === 'object' &&
-      task.memory !== null &&
-      !Array.isArray(task.memory)
-        ? (task.memory as Record<string, unknown>)
-        : {};
-    return {
-      friendLoop: memory.friendLoop ?? null,
-      taskSlots: memory.taskSlots ?? null,
     };
   }
 

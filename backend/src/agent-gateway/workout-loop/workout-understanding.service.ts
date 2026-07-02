@@ -3,22 +3,58 @@ import { z } from 'zod';
 
 import { cleanDisplayText } from '../../common/display-text.util';
 import type { AgentTask } from '../entities/agent-task.entity';
+import { buildLoopLlmContext } from '../loop-agent/loop-llm-context';
 import type { FitMeetLoopRouterResult } from '../loop-router/fitmeet-loop-router.types';
 import { SocialAgentToolJsonModelService } from '../social-agent-tool-json-model.service';
 import type { WorkoutSlots } from './workout-loop.types';
 import { validateWorkoutSlotsForDraft } from './workout-slot-extractor';
 
+const WORKOUT_LOCATION_RELATIONS = [
+  'near',
+  'inside',
+  'route',
+  'city_only',
+  'unknown',
+] as const;
+
+type WorkoutLocationRelation = (typeof WORKOUT_LOCATION_RELATIONS)[number];
+
+const NullableStringSchema = z.preprocess(
+  (value) => (value === null ? undefined : value),
+  z.string().optional().catch(undefined),
+);
+
+const NullableNumberSchema = z.preprocess(
+  (value) => (value === null ? undefined : value),
+  z.number().positive().max(200).optional().catch(undefined),
+);
+
+const NullableBooleanSchema = z.preprocess(
+  (value) => (value === null ? undefined : value),
+  z.boolean().optional().catch(undefined),
+);
+
+const WorkoutLocationRelationSchema = z.preprocess(
+  (value): WorkoutLocationRelation | undefined => {
+    if (value === null || value === undefined) return undefined;
+    const text = cleanDisplayText(value, '').trim().toLowerCase();
+    if (!text) return undefined;
+    return (WORKOUT_LOCATION_RELATIONS as readonly string[]).includes(text)
+      ? (text as WorkoutLocationRelation)
+      : 'unknown';
+  },
+  z.enum(WORKOUT_LOCATION_RELATIONS).optional().catch('unknown'),
+);
+
 const WorkoutLocationMentionSchema = z
   .object({
-    rawText: z.string().optional(),
-    normalizedText: z.string().optional(),
-    cityHint: z.string().optional(),
-    districtHint: z.string().optional(),
-    poiHint: z.string().optional(),
-    relation: z
-      .enum(['near', 'inside', 'route', 'city_only', 'unknown'])
-      .optional(),
-    needsGeoResolution: z.boolean().catch(true),
+    rawText: NullableStringSchema,
+    normalizedText: NullableStringSchema,
+    cityHint: NullableStringSchema,
+    districtHint: NullableStringSchema,
+    poiHint: NullableStringSchema,
+    relation: WorkoutLocationRelationSchema,
+    needsGeoResolution: NullableBooleanSchema.default(true),
   })
   .optional();
 
@@ -27,16 +63,16 @@ const WorkoutUnderstandingSchema = z.object({
     .enum(['workout', 'friend', 'travel', 'profile', 'casual', 'uncertain'])
     .catch('uncertain'),
   confidence: z.number().min(0).max(1).catch(0),
-  activityType: z.string().optional(),
-  timePreference: z.string().optional(),
+  activityType: NullableStringSchema,
+  timePreference: NullableStringSchema,
   locationMention: WorkoutLocationMentionSchema,
-  locationText: z.string().optional(),
-  city: z.string().optional(),
-  district: z.string().optional(),
-  poiName: z.string().optional(),
-  radiusKm: z.number().positive().max(200).optional(),
-  intensity: z.string().optional(),
-  candidatePreference: z.string().optional(),
+  locationText: NullableStringSchema,
+  city: NullableStringSchema,
+  district: NullableStringSchema,
+  poiName: NullableStringSchema,
+  radiusKm: NullableNumberSchema,
+  intensity: NullableStringSchema,
+  candidatePreference: NullableStringSchema,
   missing: z
     .array(
       z.enum([
@@ -50,9 +86,9 @@ const WorkoutUnderstandingSchema = z.object({
     .catch([]),
   assumptions: z.array(z.string()).catch([]),
   needsClarification: z.boolean().catch(false),
-  clarificationQuestion: z.string().optional(),
-  source: z.string().optional(),
-  fallbackReason: z.string().optional(),
+  clarificationQuestion: NullableStringSchema,
+  source: NullableStringSchema,
+  fallbackReason: NullableStringSchema,
 });
 
 export type WorkoutUnderstandingResult = z.infer<
@@ -82,7 +118,14 @@ export class WorkoutUnderstandingService {
       prompt: this.prompt(input),
       fallback: () => fallback,
     });
-    return WorkoutUnderstandingSchema.parse(raw);
+    const parsed = WorkoutUnderstandingSchema.safeParse(raw);
+    if (!parsed.success) {
+      return {
+        ...fallback,
+        fallbackReason: 'invalid_llm_output',
+      };
+    }
+    return parsed.data;
   }
 
   slotsFromUnderstanding(
@@ -168,6 +211,10 @@ export class WorkoutUnderstandingService {
         'clarificationQuestion',
       ],
       userMessage: cleanDisplayText(input.message, ''),
+      conversationContext: buildLoopLlmContext({
+        task: input.task,
+        message: input.message,
+      }),
       locationMentionContract: {
         rawText: 'exact words used by user, e.g. 华师大附近',
         normalizedText: 'clean query for map lookup, e.g. 华师大',
@@ -180,7 +227,6 @@ export class WorkoutUnderstandingService {
       },
       ruleSlots: input.ruleSlots,
       loopIntent: input.loopIntent,
-      taskMemory: this.safeTaskMemory(input.task),
     });
   }
 
@@ -193,19 +239,6 @@ export class WorkoutUnderstandingService {
       assumptions: [],
       needsClarification: false,
       source: 'fallback',
-    };
-  }
-
-  private safeTaskMemory(task: AgentTask): Record<string, unknown> {
-    const memory =
-      typeof task.memory === 'object' &&
-      task.memory !== null &&
-      !Array.isArray(task.memory)
-        ? (task.memory as Record<string, unknown>)
-        : {};
-    return {
-      workoutLoop: memory.workoutLoop ?? null,
-      taskSlots: memory.taskSlots ?? null,
     };
   }
 

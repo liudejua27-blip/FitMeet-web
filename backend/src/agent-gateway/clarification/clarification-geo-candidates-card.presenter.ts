@@ -66,6 +66,9 @@ export function buildClarificationGeoCandidatesCard(input: {
     body: input.body,
     status: 'waiting_confirmation',
     data: {
+      schemaName: 'ClarificationGeoCandidatesCard',
+      schemaVersion: 'fitmeet.tool-ui.v1',
+      schemaType: 'clarification.geo_candidates',
       taskId: input.taskId,
       questionKey: input.questionKey,
       questionText: input.body,

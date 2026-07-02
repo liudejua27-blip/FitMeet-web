@@ -38,6 +38,9 @@ export function buildClarificationBinaryCard(input: {
     body: input.body,
     status: 'waiting_confirmation',
     data: {
+      schemaName: 'ClarificationBinaryCard',
+      schemaVersion: 'fitmeet.tool-ui.v1',
+      schemaType: 'clarification.binary',
       taskId: input.taskId,
       questionKey: input.questionKey,
       questionText: input.body,

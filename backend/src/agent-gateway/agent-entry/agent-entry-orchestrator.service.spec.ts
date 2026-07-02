@@ -176,6 +176,58 @@ describe('AgentEntryOrchestratorService', () => {
     expect(legacy.handleFallback).not.toHaveBeenCalled();
   });
 
+  it('routes explicit profile edits to ProfileLoop before active WorkoutLoop ownership', async () => {
+    const task = makeTask({
+      memory: {
+        workoutLoop: {
+          stage: 'draft_ready',
+          slots: {
+            activityType: '篮球',
+            timePreference: '明天下午3点',
+            locationText: '北京大学',
+            city: '北京',
+          },
+        },
+      },
+    });
+    const { legacy, profileLoop, service, workoutLoop } = makeHarness();
+    profileLoop.tryHandleEntrance.mockResolvedValue({
+      task,
+      result: makeResult({
+        intent: 'profile_enrichment_request',
+        cards: [
+          {
+            id: 'profile_completion:101',
+            type: 'profile_completion',
+            schemaVersion: 'fitmeet.tool-ui.v1',
+            schemaType: 'profile.completion',
+            title: '补全资料',
+            data: {},
+            actions: [],
+          },
+        ],
+      }),
+    });
+
+    const result = await service.handle({
+      ownerUserId: 7,
+      task,
+      body: { message: '我想修改我的个人资料' },
+      message: '我想修改我的个人资料',
+      startedAt: 123,
+    });
+
+    expect(result.source).toBe('profile_loop_intent');
+    expect(profileLoop.tryHandleEntrance).toHaveBeenCalledWith({
+      ownerUserId: 7,
+      task,
+      message: '我想修改我的个人资料',
+    });
+    expect(workoutLoop.continueEntrance).not.toHaveBeenCalled();
+    expect(workoutLoop.tryHandleEntrance).not.toHaveBeenCalled();
+    expect(legacy.handleFallback).not.toHaveBeenCalled();
+  });
+
   it('routes active friend-owned follow-up turns back to FriendLoop', async () => {
     const task = makeTask({
       memory: {
@@ -300,6 +352,97 @@ describe('AgentEntryOrchestratorService', () => {
     expect(legacy.handleFallback).not.toHaveBeenCalled();
   });
 
+  it('routes a direct workout command to WorkoutLoop even after profile context', async () => {
+    const task = makeTask({
+      memory: {
+        socialAgent: {
+          objective: 'profile_completion',
+          waitingFor: 'profile_completion_answers',
+        },
+      },
+    });
+    const { legacy, profileLoop, service, workoutLoop } = makeHarness();
+    workoutLoop.tryHandleEntrance.mockResolvedValue({
+      task,
+      result: makeResult({
+        action: 'clarify',
+        cards: [
+          {
+            id: 'workout_intake:101',
+            type: 'workout_intake',
+            schemaVersion: 'fitmeet.tool-ui.v1',
+            schemaType: 'workout.intake',
+            title: '补全约练信息',
+            data: {},
+            actions: [],
+          },
+        ],
+      }),
+    });
+
+    const result = await service.handle({
+      ownerUserId: 7,
+      task,
+      body: { message: '约练' },
+      message: '约练',
+      startedAt: 123,
+    });
+
+    expect(result.source).toBe('workout_loop_intent');
+    expect(workoutLoop.tryHandleEntrance).toHaveBeenCalledWith({
+      ownerUserId: 7,
+      task,
+      message: '约练',
+    });
+    expect(profileLoop.tryHandleEntrance).not.toHaveBeenCalled();
+    expect(legacy.handleFallback).not.toHaveBeenCalled();
+  });
+
+  it('routes explicit activity partner requests to WorkoutLoop without legacy arbitration', async () => {
+    const task = makeTask({
+      goal: '附近有玩x的吗',
+    });
+    const { legacy, service, workoutArbitration, workoutLoop } = makeHarness();
+    workoutLoop.tryHandleEntrance.mockResolvedValue({
+      task,
+      result: makeResult({
+        action: 'clarify',
+        cards: [
+          {
+            id: 'workout_intake:101',
+            type: 'workout_intake',
+            schemaVersion: 'fitmeet.tool-ui.v1',
+            schemaType: 'workout.intake',
+            title: '补全约练信息',
+            data: {
+              activityType: '跑步',
+              locationText: '附近',
+              candidatePreference: '喜欢宠物的',
+            },
+            actions: [],
+          },
+        ],
+      }),
+    });
+
+    const result = await service.handle({
+      ownerUserId: 7,
+      task,
+      body: { message: '我想找跑步搭子，喜欢宠物的' },
+      message: '我想找跑步搭子，喜欢宠物的',
+      startedAt: 123,
+    });
+
+    expect(result.source).toBe('workout_loop_intent');
+    expect(workoutLoop.tryHandleEntrance).toHaveBeenCalledWith({
+      ownerUserId: 7,
+      task,
+      message: '我想找跑步搭子，喜欢宠物的',
+    });
+    expect(workoutArbitration.arbitrate).not.toHaveBeenCalled();
+    expect(legacy.handleFallback).not.toHaveBeenCalled();
+  });
+
   it('uses arbitration for keyword-only workout candidates before legacy fallback', async () => {
     const task = makeTask();
     const { legacy, service, workoutArbitration, workoutLoop } = makeHarness();
@@ -360,7 +503,7 @@ describe('AgentEntryOrchestratorService', () => {
     workoutArbitration.arbitrate.mockResolvedValue({
       verdict: 'handoff_legacy',
       understanding: null,
-      slots: { activityType: '健身' },
+      slots: {},
       reason: 'workout_arbitration_not_confident',
     });
     legacy.handleFallback.mockResolvedValue({ task, result: null });
@@ -368,8 +511,8 @@ describe('AgentEntryOrchestratorService', () => {
     const result = await service.handle({
       ownerUserId: 7,
       task,
-      body: { message: '想找个健身伙伴' },
-      message: '想找个健身伙伴',
+      body: { message: '约个球' },
+      message: '约个球',
       startedAt: 123,
     });
 

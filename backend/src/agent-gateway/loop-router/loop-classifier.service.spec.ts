@@ -37,7 +37,28 @@ describe('LoopClassifierService', () => {
     const service = new LoopClassifierService(toolJson as never);
 
     const result = await service.classify({
-      task: makeTask(),
+      task: makeTask({
+        memory: {
+          socialAgentConversation: {
+            turns: [
+              {
+                role: 'user',
+                text: '附近有玩x的吗',
+                at: '2026-06-30T01:00:00.000Z',
+              },
+              {
+                role: 'assistant',
+                text: '你想找哪类搭子？',
+                at: '2026-06-30T01:00:01.000Z',
+              },
+            ],
+          },
+          workoutLoop: {
+            stage: 'intake',
+            slots: { locationText: '附近' },
+          },
+        },
+      }),
       message: '明晚华师大附近活动一下，找水平差不多的人',
       ruleReason: 'no_loop_keyword',
     });
@@ -61,6 +82,29 @@ describe('LoopClassifierService', () => {
     const prompt = JSON.parse(toolJson.callJson.mock.calls[0][0].prompt);
     expect(prompt.instruction).toContain('Do not invent latitude');
     expect(prompt.routingPolicy.workout).toContain('sports');
+    expect(prompt.taskContext).toMatchObject({
+      taskGoal: '找搭子',
+      currentMessage: '明晚华师大附近活动一下，找水平差不多的人',
+      recentUserMessages: [
+        '附近有玩x的吗',
+        '明晚华师大附近活动一下，找水平差不多的人',
+      ],
+      loopMemory: {
+        workoutLoop: {
+          stage: 'intake',
+          slots: { locationText: '附近' },
+        },
+      },
+    });
+    expect(prompt.taskContext.recentConversation).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ role: 'user', text: '附近有玩x的吗' }),
+        expect.objectContaining({
+          role: 'user',
+          text: '明晚华师大附近活动一下，找水平差不多的人',
+        }),
+      ]),
+    );
   });
 
   it('returns uncertain when the model runtime is unavailable', async () => {
