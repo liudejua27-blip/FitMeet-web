@@ -6,7 +6,7 @@ import { WebsiteSection } from '../../components/website/sections/WebsiteSection
 const principles = [
   ['需求先行', '用户先表达约练、交友或搭子需求，再进入匹配和发现。'],
   ['安全可信', '公共场所优先、站内先聊、确认后执行是默认原则。'],
-  ['Agent 可控', 'AI 可以帮用户整理需求、完善画像和筛选候选，但不替用户越过关键边界。'],
+  ['Agent 可控', 'AI 可以整理需求、完善画像和筛选候选，但不替用户越过关键边界。'],
 ];
 
 const stageItems = [
@@ -21,6 +21,12 @@ const stageItems = [
   ['品牌使命', '让社交更简单：从随机刷人变成由具体需求驱动的真实连接。'],
 ];
 
+const companySignals = [
+  ['Product', '需求、发现、匹配、消息保持同一条路径。'],
+  ['Safety', '公开、联系、资料保存都必须让用户确认。'],
+  ['Beta', '优先打磨真实城市生活里的约练、交友和搭子场景。'],
+] as const;
+
 export function AboutWebsitePage() {
   return (
     <>
@@ -28,7 +34,7 @@ export function AboutWebsitePage() {
       <WebsiteSection
         id="stage"
         label="Company"
-        title="FitMeet 还在早期，但 Social World 的产品边界必须从第一天清楚。"
+        title="FitMeet 还在早期，但产品边界必须从第一天清楚。"
       >
         <figure className="fm-about-visual">
           <img
@@ -46,10 +52,18 @@ export function AboutWebsitePage() {
             </article>
           ))}
         </div>
+        <div className="fm-company-signal-strip" aria-label="FitMeet 公司阶段信号">
+          {companySignals.map(([title, body]) => (
+            <article key={title}>
+              <span>{title}</span>
+              <p>{body}</p>
+            </article>
+          ))}
+        </div>
       </WebsiteSection>
       <WebsiteSection
         label="Principles"
-        title="不是让用户停留更久，而是让合适的人更自然见面。"
+        title="不追求更长停留，而是追求更清楚的开始。"
         tone="deep"
       >
         <div className="fm-about-principles">
@@ -62,7 +76,7 @@ export function AboutWebsitePage() {
           ))}
         </div>
       </WebsiteSection>
-      <WebsiteSection id="contact" label="Contact" title="商务合作、媒体沟通和安全反馈。">
+      <WebsiteSection id="contact" label="Contact" title="商务合作、媒体沟通与安全反馈。">
         <div className="fm-contact-grid">
           {[
             ['商务合作', contactChannels.business, '品牌合作、城市活动、线下场景合作。'],
@@ -86,8 +100,8 @@ export function AboutWebsitePage() {
       </section>
       <FinalCTA
         label="Social World"
-        title="准备好从 Social World 的一个真实需求开始认识人。"
-        body="先体验 Agent 生成需求卡，或者进入发现页看附近已经公开的约练、交友和搭子场景。"
+        title="从一个真实需求开始认识人。"
+        body="先体验 Agent 生成需求卡，或者进入发现页看看附近已经公开的约练、交友和搭子场景。"
         primary={{ label: '体验 Agent', to: '/agent' }}
         secondary={{ label: '进入发现', to: '/discover', siteLink: true }}
       />

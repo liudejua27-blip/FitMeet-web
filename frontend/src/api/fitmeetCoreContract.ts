@@ -67,6 +67,19 @@ export const fitMeetCoreEndpoints = {
     cancelPublicIntentApplication: (id: number | string) =>
       `/public-intent-applications/${encodeURIComponent(String(id))}/cancel` as const,
   },
+  demands: {
+    create: '/demands',
+    mine: '/users/me/demands',
+    detail: (id: number | string) => `/demands/${encodeURIComponent(String(id))}` as const,
+    candidates: (id: number | string) =>
+      `/demands/${encodeURIComponent(String(id))}/candidates` as const,
+    publish: (id: number | string) =>
+      `/demands/${encodeURIComponent(String(id))}/publish` as const,
+    hide: (id: number | string) =>
+      `/demands/${encodeURIComponent(String(id))}/hide` as const,
+    cancel: (id: number | string) =>
+      `/demands/${encodeURIComponent(String(id))}/cancel` as const,
+  },
   friends: {
     list: '/friends',
     deleteFriend: (id: number | string) => `/friends/${encodeURIComponent(String(id))}` as const,
@@ -299,6 +312,15 @@ export const fitMeetCoreEndpointTemplates = {
     rejectPublicIntentApplication: '/public-intent-applications/{id}/reject',
     cancelPublicIntentApplication: '/public-intent-applications/{id}/cancel',
   },
+  demands: {
+    create: '/demands',
+    mine: '/users/me/demands',
+    detail: '/demands/{id}',
+    candidates: '/demands/{id}/candidates',
+    publish: '/demands/{id}/publish',
+    hide: '/demands/{id}/hide',
+    cancel: '/demands/{id}/cancel',
+  },
   messages: {
     startConversation: '/messages/start',
     getConversations: '/messages/conversations',
@@ -464,6 +486,13 @@ export const fitMeetCoreEndpointMethods = {
   '/public-intent-applications/{id}/accept': ['post'],
   '/public-intent-applications/{id}/reject': ['post'],
   '/public-intent-applications/{id}/cancel': ['post'],
+  '/demands': ['post'],
+  '/users/me/demands': ['get'],
+  '/demands/{id}': ['get'],
+  '/demands/{id}/candidates': ['get'],
+  '/demands/{id}/publish': ['post'],
+  '/demands/{id}/hide': ['post'],
+  '/demands/{id}/cancel': ['post'],
   '/meets': ['get', 'post'],
   '/meets/{id}': ['get'],
   '/meets/{id}/join': ['post'],
@@ -532,6 +561,8 @@ export type FitMeetCoreStaticEndpoint =
   | (typeof fitMeetCoreEndpoints.onboarding)['profilePhotos']
   | (typeof fitMeetCoreEndpoints.socialProfile)[keyof typeof fitMeetCoreEndpoints.socialProfile]
   | (typeof fitMeetCoreEndpoints.discover)['publicSocialIntents']
+  | (typeof fitMeetCoreEndpoints.demands)['create']
+  | (typeof fitMeetCoreEndpoints.demands)['mine']
   | (typeof fitMeetCoreEndpoints.messages)['startConversation']
   | (typeof fitMeetCoreEndpoints.messages)['getConversations']
   | (typeof fitMeetCoreEndpoints.messages)['getUnreadCount']

@@ -9,7 +9,7 @@ import type { TravelSlots } from '../travel-loop/travel-loop.types';
 import type { WorkoutSlots } from '../workout-loop/workout-loop.types';
 import { SocialAgentToolJsonModelService } from '../social-agent-tool-json-model.service';
 
-const LoopClassifierIntentSchema = z.enum([
+const LoopDecisionIntentSchema = z.enum([
   'workout',
   'friend',
   'travel',
@@ -62,64 +62,97 @@ const TravelHintsSchema = z
   })
   .optional();
 
-const LoopClassifierSchema = z.object({
-  intent: LoopClassifierIntentSchema,
+const ProfileHintsSchema = z
+  .object({
+    goal: z.string().optional(),
+    interactionStyle: z.string().optional(),
+    timePlace: z.string().optional(),
+    activityPreference: z.string().optional(),
+    safetyBoundary: z.string().optional(),
+    gender: z.string().optional(),
+    height: z.string().optional(),
+    interests: z.array(z.string()).optional(),
+  })
+  .optional();
+
+const LoopDecisionSchema = z.object({
+  intent: LoopDecisionIntentSchema,
   confidence: z.number().min(0).max(1),
   reason: z.string().optional(),
+  shouldEnterLoop: z.boolean().optional(),
   workoutHints: WorkoutHintsSchema,
   friendHints: FriendHintsSchema,
   travelHints: TravelHintsSchema,
+  profileHints: ProfileHintsSchema,
+  missing: z.array(z.string()).optional(),
   needsClarification: z.boolean().optional(),
   clarificationQuestion: z.string().optional(),
+  nextQuestion: z.string().optional(),
 });
 
-export type LoopClassifierIntent = z.infer<typeof LoopClassifierIntentSchema>;
-export type LoopClassifierResult = z.infer<typeof LoopClassifierSchema>;
+export type LoopDecisionIntent = z.infer<typeof LoopDecisionIntentSchema>;
+export type LoopDecisionResult = z.infer<typeof LoopDecisionSchema>;
 export type WorkoutClassifierHints = NonNullable<
-  LoopClassifierResult['workoutHints']
+  LoopDecisionResult['workoutHints']
 >;
 export type FriendClassifierHints = NonNullable<
-  LoopClassifierResult['friendHints']
+  LoopDecisionResult['friendHints']
 >;
 export type TravelClassifierHints = NonNullable<
-  LoopClassifierResult['travelHints']
+  LoopDecisionResult['travelHints']
+>;
+export type ProfileDecisionHints = NonNullable<
+  LoopDecisionResult['profileHints']
 >;
 
-const UNCERTAIN_RESULT: LoopClassifierResult = {
+export type LoopClassifierIntent = LoopDecisionIntent;
+export type LoopClassifierResult = LoopDecisionResult;
+
+const UNCERTAIN_RESULT: LoopDecisionResult = {
   intent: 'uncertain',
   confidence: 0,
-  reason: 'classifier_unavailable',
+  reason: 'loop_decision_unavailable',
+  shouldEnterLoop: false,
 };
 
 @Injectable()
-export class LoopClassifierService {
+export class LoopDecisionService {
   constructor(
     @Optional()
     private readonly toolJson?: SocialAgentToolJsonModelService,
   ) {}
+
+  async decide(input: {
+    task: AgentTask;
+    message: string;
+    ruleReason?: string | null;
+    signal?: AbortSignal | null;
+  }): Promise<LoopDecisionResult> {
+    if (!this.toolJson) return UNCERTAIN_RESULT;
+    const raw = await this.toolJson.callJson({
+      purpose: 'loop_decision',
+      taskId: input.task.id,
+      signal: input.signal ?? null,
+      prompt: this.prompt(input),
+      fallback: () => UNCERTAIN_RESULT,
+    });
+    const parsed = LoopDecisionSchema.safeParse(raw);
+    if (!parsed.success) {
+      return {
+        ...UNCERTAIN_RESULT,
+        reason: 'loop_decision_schema_invalid',
+      };
+    }
+    return this.normalizeResult(parsed.data);
+  }
 
   async classify(input: {
     task: AgentTask;
     message: string;
     ruleReason?: string | null;
     signal?: AbortSignal | null;
-  }): Promise<LoopClassifierResult> {
-    if (!this.toolJson) return UNCERTAIN_RESULT;
-    const raw = await this.toolJson.callJson({
-      purpose: 'loop_classifier',
-      taskId: input.task.id,
-      signal: input.signal ?? null,
-      prompt: this.prompt(input),
-      fallback: () => UNCERTAIN_RESULT,
-    });
-    const parsed = LoopClassifierSchema.safeParse(raw);
-    if (!parsed.success) {
-      return {
-        ...UNCERTAIN_RESULT,
-        reason: 'classifier_schema_invalid',
-      };
-    }
-    return this.normalizeResult(parsed.data);
+  }): Promise<LoopDecisionResult> {
+    return this.decide(input);
   }
 
   workoutSlotsFromHints(
@@ -235,19 +268,25 @@ export class LoopClassifierService {
   }): string {
     return JSON.stringify({
       instruction:
-        'You are FitMeet loop classifier. Return only JSON. Do not execute actions, publish, send messages, add friends, or create cards. Classify the user message into workout, friend, travel, profile, casual, or uncertain and extract only textual clues. Do not invent latitude, longitude, exact dates, or final city truth.',
+        'You are FitMeet multi-turn LoopDecision brain. Return only JSON. Use the full task context and recent conversation to decide whether the user is ready to enter profile completion, workout, friend, travel, casual chat, or remain uncertain. Do not execute actions, publish, match, send messages, add friends, save profile, or create cards. Extract only structured textual slots for the selected loop. Do not invent latitude, longitude, exact dates, or final city truth.',
       outputSchema: {
         intent: 'workout | friend | travel | profile | casual | uncertain',
         confidence: 'number 0..1',
         reason: 'short string',
+        shouldEnterLoop:
+          'boolean: true only when enough context exists to open a product loop card',
         workoutHints:
           'optional: activityType, timeText, locationText, venueType, candidatePreference',
         friendHints:
           'optional: friendGoal, genderPreference, locationText, topicTags, bodyPreference, appearancePreference',
         travelHints:
           'optional: destination, departureTime, duration, budgetRange, transportMode, tags',
+        profileHints:
+          'optional: goal, interactionStyle, timePlace, activityPreference, safetyBoundary, gender, height, interests',
+        missing: 'optional array of missing slot names',
         needsClarification: 'optional boolean',
         clarificationQuestion: 'optional string',
+        nextQuestion: 'optional user-facing short follow-up question',
       },
       routingPolicy: {
         workout:
@@ -264,6 +303,8 @@ export class LoopClassifierService {
         'Return location text exactly or normalized as a text clue only.',
         'Maps/geocoding will decide real POI, city, and coordinates.',
         'Return time text as raw user wording only.',
+        'If the user answered a prior question with a fragment, combine it with recent conversation and task goal.',
+        'Low confidence or unrelated input should return casual or uncertain with shouldEnterLoop=false.',
       ],
       taskContext: {
         ...buildLoopLlmContext({
@@ -277,15 +318,28 @@ export class LoopClassifierService {
     });
   }
 
-  private normalizeResult(result: LoopClassifierResult): LoopClassifierResult {
+  private normalizeResult(result: LoopDecisionResult): LoopDecisionResult {
+    const confidence = this.safeConfidence(result.confidence);
+    const shouldEnterLoop =
+      result.shouldEnterLoop ??
+      (confidence >= 0.75 &&
+        (result.intent === 'workout' ||
+          result.intent === 'friend' ||
+          result.intent === 'travel' ||
+          result.intent === 'profile'));
     return {
       ...result,
-      reason: cleanDisplayText(result.reason, '') || 'loop_classifier',
+      confidence,
+      shouldEnterLoop,
+      reason: cleanDisplayText(result.reason, '') || 'loop_decision',
       clarificationQuestion:
         cleanDisplayText(result.clarificationQuestion, '') || undefined,
+      nextQuestion: cleanDisplayText(result.nextQuestion, '') || undefined,
       workoutHints: this.cleanRecord(result.workoutHints),
       friendHints: this.cleanRecord(result.friendHints),
       travelHints: this.cleanRecord(result.travelHints),
+      profileHints: this.cleanRecord(result.profileHints),
+      missing: this.cleanList(result.missing),
     };
   }
 
@@ -346,3 +400,5 @@ export class LoopClassifierService {
     return Number.isFinite(value) ? Math.max(0, Math.min(value, 1)) : 0.78;
   }
 }
+
+export { LoopDecisionService as LoopClassifierService };

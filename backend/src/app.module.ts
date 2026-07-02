@@ -21,6 +21,7 @@ import { SocialRequestsModule } from './social-requests/social-requests.module';
 import { SocialLoopModule } from './social-loop/social-loop.module';
 import { MatchModule } from './match/match.module';
 import { ActivitiesModule } from './activities/activities.module';
+import { DemandsModule } from './demands/demands.module';
 import { UploadsModule } from './uploads/uploads.module';
 import { UsersModule } from './users/users.module';
 import { LifeGraphModule } from './life-graph/life-graph.module';
@@ -163,6 +164,7 @@ const parsePositiveInteger = (
     AgentGatewayModule,
     SocialRequestsModule,
     SocialLoopModule,
+    DemandsModule,
     MatchModule,
     ActivitiesModule,
   ],

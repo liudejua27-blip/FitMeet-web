@@ -17,7 +17,7 @@ export const websiteHeroConfig = {
     title: 'Social World',
     subtitle: '让社交更简单',
     description:
-      '只需说出需求，FitMeet Agent 为你生成约练卡片，确认后进入发现页，匹配合适的人，再用消息把真实连接继续推进。',
+      '从一句当前需求开始。FitMeet Agent 把想认识谁、何时方便、怎样开始整理成可确认卡片，再接入发现、匹配和消息。',
     actions: [
       { label: '让 Agent 帮我匹配', to: '/agent', variant: 'primary' },
       { label: '查看发现页', to: '/discover' },
@@ -29,7 +29,7 @@ export const websiteHeroConfig = {
     eyebrow: 'Social World Primitives',
     title: '产品能力。',
     description:
-      '让社交更简单，不是把聊天做得更热闹，而是把需求、卡片、发现、匹配和消息做成一条可执行路径。',
+      'FitMeet 不把社交做成更热闹的信息流，而是把需求、卡片、发现、匹配和消息做成一条稳定路径。',
     actions: [
       { label: '进入发现', to: '/discover', variant: 'primary' },
       { label: '体验 Agent', to: '/agent' },
@@ -41,7 +41,7 @@ export const websiteHeroConfig = {
     eyebrow: 'Social World Safety',
     title: '安全边界。',
     description:
-      'Social World 需要可信的默认机制：隐私、确认、审计、撤回、举报和数据删除，先保护人，再推进连接。',
+      '每一次公开、联系和资料更新都需要清楚边界。FitMeet 把隐私、确认、撤回和审计放在关键动作旁边。',
     actions: [
       { label: '体验免登录 Demo', to: '/demo', variant: 'primary' },
       { label: '预约 App Beta', to: '/download#waitlist' },
@@ -53,7 +53,7 @@ export const websiteHeroConfig = {
     eyebrow: 'FitMeet App',
     title: '把 Social World 带在身边。',
     description:
-      '让社交更简单的完整闭环在 App 里继续：Agent 发起需求、确认发布、发现页匹配、消息推进、个人信息和安全边界管理。',
+      '在 App 里继续完整闭环：Agent 发起需求，发现页匹配合适的人，消息页承接后续，个人中心管理边界。',
     actions: [
       { label: '预约 Beta', to: '#waitlist', variant: 'primary' },
       { label: '先体验 Agent', to: '/agent' },
@@ -65,7 +65,7 @@ export const websiteHeroConfig = {
     eyebrow: 'About FitMeet',
     title: 'Social World，回到真实生活。',
     description:
-      'FitMeet 的理念是 Social World：让社交更简单，让用户从刷信息流回到真实生活中的需求、确认、发现和消息。',
+      'FitMeet 希望把社交从随机刷人带回真实生活。先有明确需求，再有确认、发现、匹配和后续沟通。',
     actions: [
       { label: '联系合作', to: '#contact', variant: 'primary' },
       { label: '下载 App', to: '/download' },
@@ -77,7 +77,7 @@ export const websiteHeroConfig = {
     eyebrow: '30 秒 Demo',
     title: '30 秒理解 FitMeet。',
     description:
-      '不用登录。走完一次需求输入、Agent 生成卡片、用户确认、发现页匹配和安全边界，就能理解 FitMeet 的产品核心。',
+      '不用登录，走完一次需求输入、Agent 生成卡片、用户确认、发现匹配和安全边界。',
     actions: [
       { label: '开始 Demo', to: '#demo-flow', variant: 'primary' },
       { label: '进入 Agent', to: '/agent' },

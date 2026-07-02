@@ -22,7 +22,13 @@ export class ConnectionsController {
   @Post('connections/requests')
   createRequest(
     @CurrentUser() user: User,
-    @Body() body: { targetUserId?: number; message?: string },
+    @Body()
+    body: {
+      targetUserId?: number;
+      message?: string;
+      contextType?: string;
+      contextId?: string;
+    },
     @Headers('idempotency-key') idempotencyKey?: string,
   ) {
     return this.connections.createRequest(user.id, body, idempotencyKey);

@@ -9,45 +9,48 @@ import {
   UpdateDateColumn,
 } from 'typeorm';
 import { User } from '../users/user.entity';
+import { PublicTaskIntent } from './public-task-intent.entity';
 
-export type ConnectionRequestStatus =
+export type TaskIntentApplicationStatus =
   | 'pending'
   | 'accepted'
   | 'rejected'
   | 'cancelled';
 
-@Entity('connection_requests')
-@Index(['requesterId', 'targetUserId', 'status'])
-@Index(['targetUserId', 'status'])
-export class ConnectionRequest {
+@Entity('task_intent_applications')
+@Index(['taskIntentId', 'applicantUserId', 'status'])
+@Index(['ownerUserId', 'status'])
+@Index(['applicantUserId', 'status'])
+export class TaskIntentApplication {
   @PrimaryGeneratedColumn()
   id: number;
 
+  @ManyToOne(() => PublicTaskIntent, { onDelete: 'CASCADE' })
+  @JoinColumn({ name: 'taskIntentId' })
+  taskIntent: PublicTaskIntent;
+
+  @Column({ type: 'varchar', length: 80 })
+  taskIntentId: string;
+
   @ManyToOne(() => User, { onDelete: 'CASCADE' })
-  @JoinColumn({ name: 'requesterId' })
-  requester: User;
+  @JoinColumn({ name: 'ownerUserId' })
+  owner: User;
 
   @Column()
-  requesterId: number;
+  ownerUserId: number;
 
   @ManyToOne(() => User, { onDelete: 'CASCADE' })
-  @JoinColumn({ name: 'targetUserId' })
-  target: User;
+  @JoinColumn({ name: 'applicantUserId' })
+  applicant: User;
 
   @Column()
-  targetUserId: number;
+  applicantUserId: number;
 
   @Column({ type: 'varchar', length: 24, default: 'pending' })
-  status: ConnectionRequestStatus;
+  status: TaskIntentApplicationStatus;
 
   @Column({ type: 'text', default: '' })
   message: string;
-
-  @Column({ type: 'varchar', length: 40, nullable: true })
-  contextType: string | null;
-
-  @Column({ type: 'varchar', length: 120, nullable: true })
-  contextId: string | null;
 
   @Column({ type: 'timestamptz', nullable: true })
   resolvedAt: Date | null;

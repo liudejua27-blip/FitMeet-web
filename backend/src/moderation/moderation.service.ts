@@ -27,6 +27,7 @@ type AliyunImageModerationResponse = {
 export class ModerationService {
   private readonly logger = new Logger(ModerationService.name);
   private readonly aliyunImageService: string;
+  private readonly aliyunImageModerationEnabled: boolean;
   private readonly aliyunImageClient?: RPCClient;
   private readonly bannedWords = [
     'badword1',
@@ -40,6 +41,9 @@ export class ModerationService {
   ];
 
   constructor(private readonly configService: ConfigService) {
+    this.aliyunImageModerationEnabled = this.isEnabled(
+      this.configService.get<string>('ALIYUN_IMAGE_MODERATION_ENABLED'),
+    );
     this.aliyunImageService =
       this.configService.get<string>('ALIYUN_IMAGE_MODERATION_SERVICE') ||
       'baselineCheck_global';
@@ -53,7 +57,12 @@ export class ModerationService {
         'green-cip.ap-southeast-1.aliyuncs.com',
     );
 
-    if (accessKeyId && accessKeySecret && this.aliyunImageService) {
+    if (
+      this.aliyunImageModerationEnabled &&
+      accessKeyId &&
+      accessKeySecret &&
+      this.aliyunImageService
+    ) {
       this.aliyunImageClient = new RPCClient({
         accessKeyId,
         accessKeySecret,
@@ -67,7 +76,11 @@ export class ModerationService {
   }
 
   isAliyunImageModerationEnabled() {
-    return Boolean(this.aliyunImageClient && this.aliyunImageService);
+    return Boolean(
+      this.aliyunImageModerationEnabled &&
+      this.aliyunImageClient &&
+      this.aliyunImageService,
+    );
   }
 
   checkForSensitiveWords(content: string) {
@@ -195,5 +208,9 @@ export class ModerationService {
 
   private normalizeOssRegionId(regionId: string) {
     return regionId.startsWith('oss-') ? regionId.slice(4) : regionId;
+  }
+
+  private isEnabled(value?: string | null): boolean {
+    return /^(1|true|yes|on)$/i.test(value?.trim() ?? '');
   }
 }
