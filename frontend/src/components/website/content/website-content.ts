@@ -32,35 +32,35 @@ export const seo: Record<WebsitePage, WebsiteSeo> = {
   home: {
     title: 'FitMeet | Social World 让社交更简单',
     description:
-      'FitMeet 是面向真实生活连接的 Social World。用户说出需求，Agent 生成可确认的社交卡片，再把发现、匹配、消息和安全边界接成一条清晰路径。',
+      'FitMeet 是面向真实生活连接的 Social World。用户先说出需求，再由 Agent 生成可确认卡片，并接入发现、匹配、消息和安全边界。',
     path: '/',
   },
   features: {
     title: 'FitMeet 产品功能 | Social World 怎么帮助用户社交',
     description:
-      '了解 FitMeet Social World 如何用兴趣场景、附近机会、站内聊天、Agent 推荐和确认机制帮助用户自然认识真正聊得来的人。',
+      '了解 FitMeet 如何把需求、卡片、发现、匹配和消息做成一条稳定路径，让真实生活连接更容易开始。',
     path: '/features',
   },
   download: {
     title: '下载 FitMeet App | Social World Beta',
     description:
-      '下载或预约 FitMeet App Beta。iOS 与 Android 入口、二维码占位、Beta 预约和 Agent 体验入口。',
+      '预约 FitMeet App Beta，在移动端继续 Agent、发现、消息、个人中心和安全边界的完整闭环。',
     path: '/download',
   },
   safety: {
     title: 'FitMeet Safety Center | 隐私、确认、审计与撤回',
     description:
-      'FitMeet Safety Center 说明隐私、用户确认、审计、撤回、举报、数据删除和敏感数据保护机制。',
+      'FitMeet Safety Center 说明公开、联系、资料更新和数据处理中的隐私、确认、撤回、审计与举报机制。',
     path: '/safety',
   },
   about: {
     title: '关于 FitMeet | Social World',
-    description: 'FitMeet 希望让社交回到真实生活，从刷信息流转向由用户需求驱动的真实连接。',
+    description: 'FitMeet 希望把社交从随机刷人带回真实生活，从明确需求开始，走向可确认、可继续的真实连接。',
     path: '/about',
   },
   demo: {
     title: 'FitMeet 30 秒 Demo | 免登录理解产品',
-    description: '不用登录，30 秒看懂 FitMeet：用户场景、Agent 完成、用户确认和安全边界。',
+    description: '不用登录，30 秒看懂 FitMeet：需求输入、卡片生成、用户确认、发现匹配和安全边界。',
     path: '/demo',
   },
 };
@@ -75,11 +75,11 @@ export const safetyItems = [
 ] as const;
 
 export const enterpriseLoopCopy = [
-  ['表达需求', '先说想找谁、做什么、什么时候方便，而不是先刷一堆陌生人。'],
-  ['生成卡片', 'Agent 把自然语言整理成可确认的约练、交友或搭子卡片。'],
-  ['进入发现', '确认后同步到发现页，详情页、候选搜索和消息使用同一条记录。'],
-  ['匹配推进', '兴趣、地点、时间、风格和安全边界共同决定推荐顺序。'],
-  ['回到消息', '邀请、私信、加好友和后续确认进入统一 conversation。'],
+  ['表达需求', '先说明想找谁、做什么、何时方便，而不是先刷一堆陌生人。'],
+  ['生成卡片', 'Agent 把自然语言整理成用户能检查的约练、交友或搭子卡片。'],
+  ['进入发现', '确认后同步到发现页，详情、候选搜索和消息读取同一条记录。'],
+  ['匹配推进', '兴趣、地点、时间、互动风格和安全边界共同影响推荐。'],
+  ['回到消息', '邀请、私信、加好友和后续确认回到同一个会话。'],
 ] as const;
 
 export const socialWorldPrimitives = [
@@ -91,10 +91,10 @@ export const socialWorldPrimitives = [
 ] as const;
 
 export const featurePillars = [
-  ['Agent 卡片化', '把一句“想找人”变成含目标、时间、地点、兴趣和边界的可执行社交卡片。'],
-  ['Discover 可读回', '公开卡片、详情页和候选搜索指向同一条记录，用户知道自己的需求真的可见。'],
-  ['Matching 有解释', '每个候选都给出距离、时间、兴趣和互动风格上的推荐理由，不再只看头像。'],
-  ['Messages 承接', '邀请、私信、加好友和后续约练确认统一进入消息页，从匹配走向真实沟通。'],
+  ['Agent 卡片化', '把一句“想找人”整理成含目标、时间、地点、兴趣和边界的社交卡片。'],
+  ['Discover 可读回', '公开卡片、详情页和候选搜索指向同一条记录，让需求真的可见。'],
+  ['Matching 有解释', '候选推荐带上距离、时间、兴趣和互动风格理由，不只看头像。'],
+  ['Messages 承接', '邀请、私信、加好友和后续确认进入消息页，从匹配走向沟通。'],
 ] as const;
 
 export const agentCapabilities = [

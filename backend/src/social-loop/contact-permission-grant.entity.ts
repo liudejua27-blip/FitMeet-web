@@ -14,6 +14,7 @@ export type ContactPermissionGrantSource =
   | 'connection_request'
   | 'friendship'
   | 'public_intent_application'
+  | 'task_intent_application'
   | 'agent_candidate'
   | 'meet'
   | 'block';
